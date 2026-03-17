@@ -18,6 +18,32 @@ I want a tool I control completely, on a domain I own, that does exactly what I 
 
 Videos live at `v.danny.is`. A video's URL might be `v.danny.is/welcome-to-the-team` (public) or `v.danny.is/ef0de89916f0...` (unlisted with a long hash). These URLs are permanent.
 
+### How I Use Video
+
+These are the real-world situations this tool needs to serve:
+
+- **Quick Slack replacements** — One-off talking-head videos or quick screenshares shared in Slack in place of a text message. "Hey, here's how you do this." These are fast, often throwaway once the other person has watched them. Speed of recording and sharing is everything.
+- **Async announcements and briefings** — Videos that go out in public Slack channels or get embedded in Google Docs and Notion pages. "Pre-brief for the senior leadership meeting" or "Welcoming Sarah to the company." These have a wider audience and a longer shelf life.
+- **Document intros** — Short talking-head videos at the top of longer documents, whether internal or external (like client proposals). A personal way of introducing what's in the document below.
+- **Evergreen learning content** — Screen shares and talking-head videos embedded in Notion, Google Docs, GitHub docs, and internal knowledge bases. Tutorials, process explanations, "why we do things this way" content. These are permanent — they'll still be in those knowledge bases years from now. Some of these I've historically exported and uploaded to YouTube just to ensure they remain publicly available long-term.
+- **Longer assembled videos** — Product demos, detailed tutorials, help documents. These often involve recording multiple segments and assembling them into a single video. With good pause and mode-switching in the desktop app, the need for post-recording assembly is reduced — but it remains a use case for more polished content down the line.
+
+### Where The Hard Problem Is
+
+Reliably managing, hosting, and distributing video is a well-solved problem. There are established services and open-source projects that handle encoding, storage, CDN delivery, and adaptive streaming. We should lean heavily on these.
+
+The less-solved problem is the recording side: easily recording on a Mac with the flexibility I want (mode switching, high-quality capture, instant streaming upload) and having that video immediately available at a URL. Only Loom and Cap are close to this, and both have significant drawbacks. This is where the novelty and risk lie, and where most of the development effort will go.
+
+The desktop app should be a proper native macOS application (Swift), not an Electron or Tauri wrapper. I've built Tauri apps before, but this needs direct access to OS-level screen capture, camera, and audio APIs for performance and reliability — and it needs to feel like a lightweight native menu bar app, not a web app pretending to be one. Loom's Electron-based desktop app frequently feels janky, which is part of the motivation for building this.
+
+### Constraints
+
+- **Single user**: Only I record and manage videos. No team or social features.
+- **macOS only**: The desktop app only needs to work on macOS.
+- **Traffic profile**: Most videos get 1-2 views (quick Slack messages). Some get 30-100 views/day for a while (docs, announcements). Occasionally something might get a few thousand views if shared publicly. Not YouTube scale, but needs to handle moderate spikes gracefully.
+- **Cost**: This is a personal project. Infrastructure costs should be proportional to actual usage — ideally under $20-30/month at expected volumes (~75 videos/month, ~3 minutes average, modest viewership).
+- **Existing video library**: I have hundreds of videos on Loom and some on Cap. The ability to import MP4 exports of these is important for migrating off those platforms over time.
+
 ---
 
 ## The Workflow
@@ -185,6 +211,7 @@ For each video:
   - **Public** — Short, readable slug. Indexable by search engines. Appropriate meta tags.
   - **Unlisted** — Long hash-based URL. Not indexable (`noindex` meta tag, excluded from sitemap). Accessible to anyone with the link.
   - **Private** — No public URL at all. Only visible in admin. Can be changed to public or unlisted later.
+  - New videos default to **Unlisted** — they get a working URL immediately (for the instant-share workflow) but aren't indexed until explicitly made public.
 
 #### Actions
 
@@ -262,16 +289,6 @@ This is where the "delivery" layer earns its keep:
 
 ---
 
-## Constraints & Context
-
-- **Single user**: This is a personal tool. Only I record and manage videos. No auth system beyond protecting the admin interface.
-- **macOS only**: The desktop app only needs to work on macOS.
-- **Traffic profile**: Most videos get 1-2 views (quick Slack messages). Some get 30-100 views/day for a while (docs, announcements). Occasionally something might get a few thousand views if shared publicly. Not YouTube scale, but needs to handle moderate spikes gracefully.
-- **Cost**: This is a personal project. Infrastructure costs should be proportional to actual usage — ideally under $20-30/month at expected volumes (~75 videos/month, ~3 minutes average, modest viewership).
-- **Existing video library**: I have hundreds of videos on Loom and some on Cap. The ability to import MP4 exports of these is important for migrating off those platforms over time.
-
----
-
 ## Future Directions
 
 These are explicitly out of scope for an initial version, but worth noting because they may influence architectural decisions:
@@ -279,4 +296,3 @@ These are explicitly out of scope for an initial version, but worth noting becau
 - **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. This could enable more polished "considered" content without leaving the tool.
 - **Cap codebase analysis**: Cap has implemented some of what we want here (instant mode, local editor, own-domain hosting). A detailed analysis of their codebase — particularly their recording pipeline, HLS streaming, and local editing — could inform our approach. This should be its own dedicated research task.
 - **On-device AI**: Apple Intelligence and local models for transcription, title generation, and content summarisation — done on the Mac before or during upload rather than on the server.
-- **Audio-only mode**: Quick voice-note-style recordings that produce a URL with an audio player rather than a video player.

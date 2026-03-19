@@ -292,7 +292,7 @@ This is where the "delivery" layer earns its keep:
 ## Inspiration
 
 - **[Cap.so](https://github.com/CapSoftware/Cap)**: Cap has implemented some of what we want here (instant mode, local editor, own-domain hosting). Its open source. A detailed analysis of their codebase — particularly their recording pipeline, HLS streaming, and local editing — could inform our approach. This should be its own dedicated research task.
-- **Loom**: Fairly industry-standard. See `loom-research.md` for an initial analysis.
+- **Loom**: Fairly industry-standard. See `docs/research/loom-research.md` for an initial analysis.
 - **[Remotion Recorder](https://www.remotion.dev/docs/recorder)**: a video recording tool built entirely in JavaScript. This is unlikely to suit our purpose for the desktop app, but is an interesting project nonetheless. 
 
 ---

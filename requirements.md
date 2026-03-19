@@ -41,7 +41,7 @@ The desktop app should be a proper native macOS application (Swift), not an Elec
 - **Single user**: Only I record and manage videos. No team or social features.
 - **macOS only**: The desktop app only needs to work on macOS.
 - **Traffic profile**: Most videos get 1-2 views (quick Slack messages). Some get 30-100 views/day for a while (docs, announcements). Occasionally something might get a few thousand views if shared publicly. Not YouTube scale, but needs to handle moderate spikes gracefully.
-- **Cost**: This is a personal project. Infrastructure costs should be proportional to actual usage — ideally under $20-30/month at expected volumes (~75 videos/month, ~3 minutes average, modest viewership).
+- **Cost**: This is a personal project. Infrastructure costs should be proportional to actual usage — ideally under $5-10/month at expected volumes (~75 videos/month, ~3 minutes average, modest viewership).
 - **Existing video library**: I have hundreds of videos on Loom and some on Cap. The ability to import MP4 exports of these is important for migrating off those platforms over time.
 
 ---
@@ -56,7 +56,7 @@ Every video follows the same path, regardless of whether it took 30 seconds or 3
 
 3. **Share** — Paste the URL into Slack, Notion, a Google Doc, an email, wherever. The recipient sees a clean video page or an embedded preview.
 
-4. **Manage** (optional) — Log into the web admin to edit the title, slug, description, tags, or visibility. Or do nothing — the defaults should be good enough for quick-fire sharing.
+4. **Manage** — Log into the web admin to edit the title, slug, description, tags, or visibility. Or do nothing — the defaults should be good enough for quick-fire sharing.
 
 5. **It lives there** — The video remains available at its URL indefinitely. It's backed up. It's served from a CDN. It doesn't depend on my server being up at the moment someone clicks the link.
 
@@ -80,7 +80,7 @@ This principle also extends to the server side: processed videos should be backe
 
 ### 3. Own My URLs
 
-Every video lives on `v.danny.is`, a domain I control. No `loom.com`, no `cloudflarestream.com`, no third-party domain in the URL the viewer sees. The underlying infrastructure can use whatever services make sense, but the public-facing URL is mine.
+Every video lives on `v.danny.is`, a domain I control. The underlying infrastructure can use whatever services make sense, but the public-facing URL is mine.
 
 ### 4. Permanent URLs
 
@@ -133,11 +133,12 @@ When recording in Screen + Camera + Mic mode:
 
 - **Pause / Resume**: I must be able to pause and resume recording without creating a new file or losing context.
 - **Stop**: Stops recording. The URL should be available on my clipboard within seconds.
+- **Trash**: Cancels the current recording and trashes any recorded footage.
 
 ### Quality
 
 - Camera, microphone, and screen capture should all be captured at full or near-full native resolution and quality.
-- High-quality local capture is the priority. What gets streamed up during recording can be at a lower quality/resolution if needed, as long as the full-quality version is uploaded afterward.
+- High-quality local capture is the priority. What gets streamed up during recording can be at a lower quality/resolution if needed, as long as the full-quality version is uploaded afterward to "replace" it.
 
 ### Local Safety Net
 
@@ -161,9 +162,9 @@ These are not required for an initial version but are worth keeping in mind:
 
 - **Quick metadata editing**: After recording, a small UI to edit the video's title and slug and see/copy the URL — without opening a browser.
 - **Basic trimming**: Trim the start and end of a recording before or after upload. Remove dead air, false starts, etc.
-- **Audio enhancement**: Basic noise reduction, gating, and pop reduction — either applied during recording or as a processing step before upload. Should be configurable and toggleable.
+- **Audio enhancement**: Basic noise reduction, gating, and pop reduction — either applied during recording or as a processing step before upload. Should be configurable and toggleable. If this proves difficult locally, we could choose to do this on the server instead after upload.
 - **Camera adjustments**: Simple white balance and exposure tweaks directly in the app, for quick corrections before hitting record depending on lighting conditions.
-- **On-device transcription**: Use Apple's on-device speech recognition (or a local model) to generate a transcript and suggested title, and send them to the server alongside the video.
+- **On-device transcription**: Use Apple's on-device AI (or a local transcription model) to generate a transcript and suggested title, and send them to the server alongside the video.
 
 ---
 
@@ -192,7 +193,7 @@ A web app for managing videos. Simple and functional — not a product in itself
 
 #### Video Library
 
-- See all videos in a list or grid view.
+- See all videos in a list and/or grid view.
 - Each video shows a thumbnail, title, duration, date, and visibility status.
 - Sort by date (newest first by default), title, or duration.
 - Filter by tags and/or visibility status.
@@ -205,7 +206,6 @@ For each video:
 - **Title**: Editable. Used as the page heading on the public video page.
 - **Slug**: Editable. Determines the URL path (e.g. `v.danny.is/my-video`). When changed, the old slug becomes a 301 redirect.
 - **Description**: Editable. Shown on the public video page. Optional.
-- **Private Notes**: Editable. Visible only in admin. For my own reference.
 - **Tags**: Add/remove tags for organisation.
 - **Visibility**: One of three states:
   - **Public** — Short, readable slug. Indexable by search engines. Appropriate meta tags.
@@ -241,15 +241,18 @@ When someone visits a video URL in a browser (e.g. `v.danny.is/welcome-to-the-te
 - A clean, minimal page with the video player front and centre.
 - The video title below (or above) the player.
 - The description, if one exists.
+- The transcript, if one exists.
 - Nothing else. No comments, no likes, no sign-up prompts, no related videos, no branding beyond what's appropriate for a personal tool.
 
 The page should feel fast and intentional — like it was made by someone who cares about the viewer's experience.
+
+The page should have appropriate SEO metadata etc.
 
 ### Embedding
 
 When someone embeds the URL in an iframe, they should get just the video player with no surrounding page chrome. This makes embedding in documentation, blog posts, and other tools straightforward.
 
-An explicit embed URL (e.g. `v.danny.is/embed/welcome-to-the-team`) should be available for this purpose.
+An explicit embed URL (e.g. `v.danny.is/embed/welcome-to-the-team`) should be available for this purpose, but if possible we should try to detect when requests are coming from this kinda context and server this instead of the video page.
 
 ### Unfurling & Link Previews
 
@@ -260,11 +263,9 @@ When the URL is shared in tools like Slack, Notion, Discord, iMessage, LinkedIn,
 - **oEmbed endpoint**: A `/oembed` endpoint that returns standard oEmbed JSON. This enables discovery-based embedding in platforms that support it.
 - **oEmbed discovery tag**: A `<link rel="alternate" type="application/json+oembed" ...>` tag in the video page's HTML head.
 
-**Known reality**: Slack only shows inline video players for whitelisted domains (YouTube, Vimeo, etc.). For my domain, Slack will show a rich link preview (thumbnail + title + description) but not an inline player — unless I build a Slack app that uses the Video Block API to provide custom unfurls. This is worth doing eventually but is not a launch requirement.
+**Known reality**: Slack only shows inline video players for whitelisted domains (YouTube, Vimeo, Loom, etc.). For my domain, Slack will show a rich link preview (thumbnail + title + description) but not an inline player. Similarly, Notion auto-embeds videos from known providers (via Iframely). My domain won't be auto-embedded initially — users would need to use `/embed` manually. Getting listed with Iframely is a possible future step.
 
-Similarly, Notion auto-embeds videos from known providers (via Iframely). My domain won't be auto-embedded initially — users would need to use `/embed` manually. Getting listed with Iframely is a possible future step.
-
-The baseline goal is: **a good-looking link preview with thumbnail, title, and description everywhere**. Inline playback in specific platforms is a bonus.
+The baseline goal is: **a good-looking link preview with thumbnail, title, and description everywhere**. Inline playback in specific platforms should be supported *wherever possible*, and especially in Slack & Notion.
 
 ### Performance & Reliability
 
@@ -285,14 +286,19 @@ This is where the "delivery" layer earns its keep:
 
 - **Adaptive quality**: The player automatically adjusts quality based on the viewer's connection speed. (If we're using HLS with multiple renditions, this comes naturally.)
 - **Format suffixes**: `v.danny.is/{slug}.mp4` returns the raw MP4 file. `v.danny.is/{slug}.json` returns metadata (URL, raw video URL, transcript, duration, etc.). `v.danny.is/{slug}.md` returns similar in Markdown format.
-- **Slack app**: A Slack app that listens for `v.danny.is` links shared in workspaces I'm in and unfurls them with a Video Block for inline playback.
 
 ---
 
-## Future Directions
+## Inspiration
 
-These are explicitly out of scope for an initial version, but worth noting because they may influence architectural decisions:
+- **[Cap.so](https://github.com/CapSoftware/Cap)**: Cap has implemented some of what we want here (instant mode, local editor, own-domain hosting). Its open source. A detailed analysis of their codebase — particularly their recording pipeline, HLS streaming, and local editing — could inform our approach. This should be its own dedicated research task.
+- **Loom**: Fairly industry-standard. See `loom-research.md` for an initial analysis.
+- **[Remotion Recorder](https://www.remotion.dev/docs/recorder)**: a video recording tool built entirely in JavaScript. This is unlikely to suit our purpose for the desktop app, but is an interesting project nonetheless. 
 
-- **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. This could enable more polished "considered" content without leaving the tool.
-- **Cap codebase analysis**: Cap has implemented some of what we want here (instant mode, local editor, own-domain hosting). A detailed analysis of their codebase — particularly their recording pipeline, HLS streaming, and local editing — could inform our approach. This should be its own dedicated research task.
+---
+
+## Future Possibilities
+
 - **On-device AI**: Apple Intelligence and local models for transcription, title generation, and content summarisation — done on the Mac before or during upload rather than on the server.
+- **Watermarking**: Optional subtle watermark in the bottom corner, toggleable.
+- **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. This could enable more polished "considered" content without leaving the tool. [Remotion Editor Starter](https://www.remotion.dev/docs/editor-starter) ($600) is a viable starting point, at least for inspiration here.

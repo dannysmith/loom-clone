@@ -49,7 +49,7 @@ The Cap codebase is available locally at `~/dev/Cap/`.
 
 - What's the overall architecture? How do desktop app, server, and viewer connect?
 - Where does the codebase feel solid and well-engineered?
-- Where does it feel hacky, broken, or incomplete? (The requirements doc notes Cap "feels half-baked" — what specifically causes that impression?)
+- Where does it feel hacky, incomplete, or like it could be improved?
 - What are the most significant technical debts or limitations?
 - Are there any clever solutions or patterns worth adopting?
 

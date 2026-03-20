@@ -8,7 +8,7 @@ Tier 1 — Product research that runs in parallel with the technical feasibility
 
 We're building a personal video recording and sharing tool. Loom is the most direct comparison, but there are many other tools in this space — each with different strengths, tradeoffs, and design choices. Read `requirements.md` for full project context. Our existing Loom research is at `docs/research/loom-research.md`.
 
-This is the CPO's research task. We're not just listing features — we're studying how these tools feel to use, what UX patterns work, what's annoying, and what we'd want to steal or avoid.
+We already know Loom and Cap well. The primary value here is surveying what *else* exists — other tools and approaches we might not be aware of — and studying the publicly visible aspects of all these tools: feature sets, video page designs, embedding, link previews. This is a practical survey to inform our own design, not formal market research.
 
 ## Products to Evaluate
 
@@ -75,11 +75,11 @@ This is the CPO's research task. We're not just listing features — we're study
 
 ## Research Approach
 
-- For primary products: sign up (free trials where possible), record a video, share it, study the full flow.
-- For all products: visit their marketing sites and documentation to understand features and positioning.
-- For video pages: find publicly shared examples and inspect them (view source, dev tools, check meta tags).
-- For recording UX: look for product demos, review videos, or walkthrough content that shows the recording interface.
-- Take screenshots or notes on specific UX patterns worth referencing.
+- For all products: study their marketing sites, feature pages, documentation, and pricing to understand capabilities and positioning.
+- For video pages: find publicly shared video URLs and inspect them — page structure, meta tags (OG, Twitter Card), embed behaviour, player features.
+- For recording UX: study product documentation, feature comparison pages, review articles, and product walkthrough videos to understand recording capabilities and UI patterns.
+- For open-source tools (Cap, etc.): check their GitHub repos for architecture context, feature completeness, and community activity.
+- Look for comparison articles, reviews, and "best screen recorder" roundups to surface tools not on our list.
 
 ## Expected Output
 

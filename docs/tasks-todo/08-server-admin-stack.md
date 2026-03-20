@@ -80,5 +80,5 @@ A research document that:
 ## Related Tasks
 
 - Task 04 (Build vs Buy) — directly determines the server's scope and complexity.
-- Task 05 (Video Processing & Encoding) — if self-hosting, the server needs to run FFmpeg and manage a processing pipeline.
-- Task 08 (Viewer Experience) — the server likely serves (or generates) the public-facing video pages.
+- Task 06 (Video Processing & Encoding) — if self-hosting, the server needs to run FFmpeg and manage a processing pipeline.
+- Task 09 (Viewer Experience) — the server likely serves (or generates) the public-facing video pages.

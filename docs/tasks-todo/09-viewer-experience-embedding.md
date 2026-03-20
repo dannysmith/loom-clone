@@ -82,6 +82,6 @@ A research document that:
 ## Related Tasks
 
 - Task 04 (Build vs Buy) — some managed services provide player SDKs and handle delivery.
-- Task 06 (Storage, CDN & Cost Modelling) — delivery architecture affects CDN choices and costs.
-- Task 07 (Server & Admin Stack) — the server may generate or serve these pages.
-- Task 09 (Competitive Landscape) — studying competitor video pages informs this.
+- Task 07 (Storage, CDN & Cost Modelling) — delivery architecture affects CDN choices and costs.
+- Task 08 (Server & Admin Stack) — the server may generate or serve these pages.
+- Task 05 (Competitive Landscape) — studying competitor video pages informs this.

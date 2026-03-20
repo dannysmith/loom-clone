@@ -89,4 +89,4 @@ A research document structured around the key areas above, with:
 - Task 01 (macOS Recording APIs) — Cap's native capture code is directly relevant, even though it's Rust rather than Swift.
 - Task 02 (Streaming Upload Architecture) — Cap's upload approach is a key comparison point.
 - Task 04 (Video Hosting: Self-Hosted vs Managed) — Cap's server infrastructure choices are relevant context.
-- Task 07 (Server & Admin Stack) — Cap's server stack is one data point.
+- Task 08 (Server & Admin Stack) — Cap's server stack is one data point.

@@ -76,6 +76,6 @@ A research document that:
 
 ## Related Tasks
 
-- Task 05 (Video Processing & Encoding) — open-source encoding pipelines are directly relevant.
-- Task 07 (Server & Admin Stack) — an open-source platform could shortcut server development.
-- Task 08 (Viewer Experience) — video player choice is a key part of the viewer experience.
+- Task 06 (Video Processing & Encoding) — open-source encoding pipelines are directly relevant.
+- Task 08 (Server & Admin Stack) — an open-source platform could shortcut server development.
+- Task 09 (Viewer Experience) — video player choice is a key part of the viewer experience.

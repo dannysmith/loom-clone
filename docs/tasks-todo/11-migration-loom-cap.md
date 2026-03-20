@@ -64,6 +64,6 @@ A research document that:
 
 ## Related Tasks
 
-- Task 05 (Video Processing & Encoding) — imported MP4s need to go through the encoding pipeline.
-- Task 06 (Storage, CDN & Cost Modelling) — the existing library affects storage cost estimates.
-- Task 07 (Server & Admin Stack) — the server needs an upload/import endpoint.
+- Task 06 (Video Processing & Encoding) — imported MP4s need to go through the encoding pipeline.
+- Task 07 (Storage, CDN & Cost Modelling) — the existing library affects storage cost estimates.
+- Task 08 (Server & Admin Stack) — the server needs an upload/import endpoint.

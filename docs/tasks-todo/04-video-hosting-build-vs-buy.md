@@ -83,6 +83,6 @@ A research document that:
 ## Related Tasks
 
 - Task 02 (Streaming Upload Architecture) — the upload destination depends on this decision.
-- Task 05 (Video Processing & Encoding) — scope depends heavily on whether we self-host.
-- Task 06 (Storage, CDN & Cost Modelling) — cost analysis overlaps; this task focuses on the build-vs-buy decision while Task 06 goes deeper on infrastructure specifics.
-- Task 07 (Server & Admin Stack) — server complexity depends directly on this decision.
+- Task 06 (Video Processing & Encoding) — scope depends heavily on whether we self-host.
+- Task 07 (Storage, CDN & Cost Modelling) — cost analysis overlaps; this task focuses on the build-vs-buy decision while Task 07 goes deeper on infrastructure specifics.
+- Task 08 (Server & Admin Stack) — server complexity depends directly on this decision.

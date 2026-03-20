@@ -72,5 +72,5 @@ A research document that:
 ## Related Tasks
 
 - Task 04 (Build vs Buy) — the cost comparison is a major input to the build-vs-buy decision.
-- Task 05 (Video Processing & Encoding) — encoding settings affect storage sizes and bandwidth.
-- Task 07 (Server & Admin Stack) — compute costs depend on what the server needs to do.
+- Task 06 (Video Processing & Encoding) — encoding settings affect storage sizes and bandwidth.
+- Task 08 (Server & Admin Stack) — compute costs depend on what the server needs to do.

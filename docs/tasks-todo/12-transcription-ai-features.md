@@ -74,4 +74,4 @@ A research document that:
 ## Related Tasks
 
 - Task 01 (macOS Recording APIs) — on-device transcription adds to the desktop app's responsibilities.
-- Task 07 (Server & Admin Stack) — server-side transcription affects the processing pipeline and database schema.
+- Task 08 (Server & Admin Stack) — server-side transcription affects the processing pipeline and database schema.

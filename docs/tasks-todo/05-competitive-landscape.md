@@ -2,7 +2,7 @@
 
 ## Priority
 
-Tier 2 — This is product research. It won't block technical decisions, but it will inform product direction and help us avoid reinventing things that others have already figured out (or identify patterns we definitely don't want to copy).
+Tier 1 — Product research that runs in parallel with the technical feasibility work. Understanding the competitive landscape and UX patterns is as foundational as understanding the APIs — the whole reason we're building this is UX dissatisfaction with existing tools, so studying what works and what doesn't should inform technical decisions from the start, not follow them.
 
 ## Context
 
@@ -94,5 +94,5 @@ A research document that:
 
 ## Related Tasks
 
-- Task 08 (Viewer Experience) — competitive video pages directly inform our viewer experience design.
+- Task 09 (Viewer Experience) — competitive video pages directly inform our viewer experience design.
 - Task 10 (Open Source Video Platforms) — some of these tools may have open-source components.

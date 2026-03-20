@@ -79,4 +79,4 @@ A research document that:
 - Task 01 (macOS Recording APIs) — the capture pipeline's output feeds into this.
 - Task 02 (Streaming Upload Architecture) — the streaming segments need specific encoding settings.
 - Task 04 (Build vs Buy) — if we use a managed service, most server-side processing is handled for us.
-- Task 06 (Storage, CDN & Cost Modelling) — encoding settings affect file sizes, which affect storage and bandwidth costs.
+- Task 07 (Storage, CDN & Cost Modelling) — encoding settings affect file sizes, which affect storage and bandwidth costs.

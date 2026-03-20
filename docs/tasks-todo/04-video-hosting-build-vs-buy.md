@@ -43,6 +43,7 @@ The key tension: managed services could eliminate a huge amount of complexity (e
 - Does it support custom metadata, webhooks for processing events, etc.?
 - Can we export/migrate our videos out if we want to leave?
 - What's the reliability and track record?
+- Does it include transcription/captioning as part of the package? (Minor tiebreaker, not a driving factor — but worth noting if it's included.)
 
 ### For the Self-Hosted Approach
 

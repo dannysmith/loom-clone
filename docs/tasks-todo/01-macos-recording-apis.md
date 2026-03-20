@@ -50,6 +50,10 @@ This is the most novel part of the project. Server-side video hosting is well-tr
 - What are the distribution options? Direct distribution (DMG/ZIP + notarisation) vs Mac App Store? Are there sandbox restrictions that affect screen recording or camera access?
 - What macOS permissions are required (Screen Recording, Camera, Microphone) and how does the permission UX flow work?
 
+### On-Device Transcription (side note)
+
+While researching macOS media APIs, note what's available for on-device speech recognition and transcription. Apple's Speech framework and any Apple Intelligence transcription capabilities are worth documenting as a side consideration — we may want on-device transcription later and it's efficient to capture what's available while we're already in these APIs. This is not a key research question for this task, just "note what's there."
+
 ## Research Approach
 
 - Start with Apple's official documentation for ScreenCaptureKit, AVFoundation, AVCaptureSession, and AVAssetWriter.

@@ -60,6 +60,7 @@ When someone receives a video URL (`v.danny.is/some-video`), the experience need
 
 - Study the Open Graph protocol specification and video-specific extensions.
 - Study the oEmbed specification.
+- Read the existing Loom research at `docs/research/loom-research.md` for context on how Loom handles delivery and embedding.
 - Examine how Loom, Vimeo, and YouTube implement their video pages, OG tags, oEmbed endpoints, and embed pages. Use browser dev tools to inspect their meta tags and oEmbed responses.
 - Test how various platforms (Slack, Notion, Discord, Twitter) handle links from Loom and Vimeo — what tags do they actually use?
 - Research Iframely and how to get a domain listed.

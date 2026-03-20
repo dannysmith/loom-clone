@@ -55,6 +55,7 @@ Regardless of whether we use a managed video service or self-host, we need to un
 
 ## Research Approach
 
+- Start by reading the existing research: `docs/research/video-hosting-research.md` (prior research on encoding and hosting).
 - Study FFmpeg documentation for HLS output, encoding presets, and hardware acceleration.
 - Look at what encoding settings Loom, Cap, and YouTube recommend or use.
 - Research current browser codec support tables (caniuse.com or similar).

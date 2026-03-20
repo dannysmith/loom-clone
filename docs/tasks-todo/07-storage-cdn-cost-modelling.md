@@ -52,6 +52,7 @@ We need concrete numbers, not hand-waving. This task should produce actual cost 
 
 ## Research Approach
 
+- Start by reading the existing research: `docs/research/video-hosting-research.md` (prior research on hosting options and costs).
 - Visit pricing pages for each service and calculate actual costs at our volumes.
 - Estimate per-video storage sizes based on typical encoding outputs (source file + 3-4 HLS renditions + thumbnails).
 - Model bandwidth based on expected viewership patterns.

@@ -63,6 +63,7 @@ The key tension: managed services could eliminate a huge amount of complexity (e
 
 ## Research Approach
 
+- Start by reading the existing research: `docs/research/loom-research.md` (how Loom handles hosting/delivery) and `docs/research/video-hosting-research.md` (prior research on video hosting options).
 - Visit each service's documentation and pricing pages. Calculate actual costs at our expected volumes.
 - Look for developer experience reports, blog posts, and comparisons.
 - Check if any of these services support receiving HLS segments during recording (streaming ingest) vs only accepting completed files — this is critical for the instant-URL requirement.

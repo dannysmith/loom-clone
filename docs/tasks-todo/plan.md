@@ -6,7 +6,21 @@ Read @../requirements.md for context.
 
 10 research tasks, organised into 3 waves. Each wave can be run as parallel independent Claude Code sessions. Later waves benefit from reading the findings of earlier waves.
 
-The goal of this research phase is to put us in the best possible position to make good architectural and product decisions before we start building.
+The goal of this research phase is to explore options, identify tradeoffs, and surface risks — not to design the final system. We're building informed optionality so we can converge on a good architecture afterward. Each task should map out the landscape and flag what's feasible, what's risky, and what's unknown, rather than committing to specific solutions.
+
+## Existing Research
+
+Prior research that tasks should read where relevant:
+
+- `docs/research/loom-research.md` — Analysis of how Loom works (recording pipeline, streaming upload, architecture). Relevant to Tasks 02, 04, 05, 09.
+- `docs/research/video-hosting-research.md` — Research on video hosting, encoding, and delivery. Relevant to Tasks 04, 06, 07, 10.
+
+## Instructions for Research Sessions
+
+- **Read first**: Each session should read `requirements.md`, this plan, and its task document.
+- **Prior findings**: Wave 2 and 3 tasks should also read the completed research from earlier waves. Prior research output will be in `docs/research/`, named to match the task number (e.g. `docs/research/03-cap-codebase-analysis.md`).
+- **Output**: Save your research document to `docs/research/`, named to match the task (e.g. `docs/research/03-cap-codebase-analysis.md`). The corresponding task file in `docs/tasks-todo/` can then be moved to `docs/tasks-done/`.
+- **Scope**: This is research, not architecture. Explore options and identify tradeoffs. Flag unknowns that need prototyping. Don't over-commit to specific solutions — that happens in the synthesis phase after all research is complete.
 
 ## Tasks
 
@@ -110,4 +124,4 @@ This synthesis is a separate task, not one of the 10 research tasks.
 
 - **Collapsing waves**: If speed matters more than research quality, Waves 1 and 2 can be merged into a single wave of 6 parallel tasks. Tasks 01, 02, and 04 will still produce useful research without Cap analysis — they just won't benefit from Cap's lessons. The biggest loss is Task 04 making the build-vs-buy recommendation without seeing what self-hosting looks like in Cap's codebase.
 - **Task 04 ↔ Task 07 circular dependency**: Task 04 needs rough cost estimates to make its recommendation. Task 07 needs Task 04's recommendation to know what to model in detail. Resolution: Task 04 does rough cost comparison as part of its analysis. Task 07 then validates with detailed numbers and flags if the economics don't hold up.
-- **Research output location**: Each completed task should produce a document in `docs/research/`, named to match the task (e.g. `docs/research/01-macos-recording-apis.md`). The corresponding task file in `docs/tasks-todo/` can then be moved to `docs/tasks-done/`.
+- **Research output location**: Covered in "Instructions for Research Sessions" above.

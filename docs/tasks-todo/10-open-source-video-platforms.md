@@ -60,6 +60,7 @@ Before building our server and delivery infrastructure from scratch, we should u
 
 ## Research Approach
 
+- Start by reading the existing research: `docs/research/video-hosting-research.md` (prior research on hosting and delivery options).
 - For platforms: review their GitHub repos, architecture docs, and feature lists. Focus on the parts relevant to us (encoding pipeline, HLS, delivery, API).
 - For players: look at demos, documentation, bundle sizes, and GitHub activity. The player is a smaller decision but affects the viewer experience directly.
 - Don't spend too much time here — this is context-gathering, not deep analysis. Flag anything that's clearly worth a deeper look.

@@ -2,13 +2,14 @@
 
 ## About This Project
 
-Research and experimentation towards building a personal Loom replacement — a native macOS recording app, backend server, and CDN-backed video delivery system. See `requirements.md` for full context.
+Building a personal Loom replacement — a native macOS recording app, backend server, and CDN-backed video delivery system. Self-hosted on Hetzner + Cloudflare R2. See `requirements.md` for full context.
 
 ## Important Files
 
-- `requirements.md` — The current product requirements. Read this at the start of every session for project context.
-- `docs/research/` — Research documents (Loom analysis, video hosting research).
-- `docs/archive/initial-requirements.md` — The original requirements doc before refinement. Kept for reference only.
+- `requirements.md` — Product requirements. Read at the start of every session.
+- `docs/plan.md` — Architecture, technology choices, and phased implementation plan. The authoritative technical reference.
+- `docs/research/` — 10 research documents from the research phase, plus the architecture synthesis.
+- `docs/archive/initial-requirements.md` — Original requirements before refinement. Reference only.
 
 ## Skills
 

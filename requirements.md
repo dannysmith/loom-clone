@@ -149,7 +149,7 @@ When recording in Screen + Camera + Mic mode:
 ### Streaming Upload
 
 - The recording should be streamed to the server during recording, not uploaded as a single file after stopping. This is what enables the "instant URL" requirement.
-- The approach Loom uses — client-side conversion to HLS segments uploaded progressively — is the proven model here. The final segment uploads on stop, the playlist is finalised, and the video is immediately playable.
+- The desktop app uses AVAssetWriter's native fMP4 HLS segment output (`.mpeg4AppleHLS` profile) to produce segments during recording, uploaded individually via HTTPS PUT. The server stores segments in R2 and assembles the HLS playlist. When recording stops, the final segment is flushed and uploaded, the playlist is finalised, and the video is immediately playable. No FFmpeg or RTMP is needed client-side.
 
 ### Resource Behaviour
 
@@ -289,17 +289,32 @@ This is where the "delivery" layer earns its keep:
 
 ---
 
-## Inspiration
+## Inspiration & Prior Art
 
-- **[Cap.so](https://github.com/CapSoftware/Cap)**: Cap has implemented some of what we want here (instant mode, local editor, own-domain hosting). Its open source. A detailed analysis of their codebase — particularly their recording pipeline, HLS streaming, and local editing — could inform our approach. This should be its own dedicated research task.
-- **Loom**: Fairly industry-standard. See `docs/research/loom-research.md` for an initial analysis.
-- **[Remotion Recorder](https://www.remotion.dev/docs/recorder)**: a video recording tool built entirely in JavaScript. This is unlikely to suit our purpose for the desktop app, but is an interesting project nonetheless. 
+- **Loom**: The industry standard for async video. Their HLS segment-during-recording architecture (client-side FFmpeg to .ts segments) proved the "instant URL on stop" concept. Our approach achieves the same result using native macOS APIs (AVAssetWriter fMP4 segments) instead of bundling FFmpeg. See `docs/research/loom-research.md`.
+- **[Cap.so](https://github.com/CapSoftware/Cap)**: Open-source screen recorder, analysed in depth. Key lessons: their use of ScreenCaptureKit via Rust bindings validates native capture APIs; their progressive MP4 upload approach (not HLS) cannot achieve instant playback and is an anti-pattern we avoid; their dual Studio/Instant mode split informed our decision to build a single unified pipeline. See `docs/research/03-cap-codebase-analysis.md`.
+- **[Screen Studio](https://www.screen.studio/)**: Mac-native recorder with automatic zoom and cursor smoothing. The benchmark for polished screen recording output. Not a sharing platform, but worth studying for future post-processing features.
+- **[Remotion](https://www.remotion.dev/)**: Programmatic video in React. Not relevant for recording, but potentially interesting for future web-based editing.
 
 ---
 
 ## Future Possibilities
 
-- **On-device AI**: Apple Intelligence and local models for transcription, title generation, and content summarisation — done on the Mac before or during upload rather than on the server.
+- **On-device transcription**: WhisperKit (open-source Swift Whisper) for on-device transcription in the near term. Apple's SpeechAnalyzer framework (macOS 26) as the long-term native solution. Transcripts enable AI-generated titles, summaries, and searchable video content. Planned for Phase 2.
 - **Watermarking**: Optional subtle watermark in the bottom corner, toggleable.
-- **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. This could enable more polished "considered" content without leaving the tool. [Remotion Editor Starter](https://www.remotion.dev/docs/editor-starter) ($600) is a viable starting point, at least for inspiration here.
-- **Basic view analytics**: Simple per-video view counts and "watched to completion" metrics. Not a dashboards-and-funnels analytics product — just enough to know which videos are being watched and whether people finish them. Useful for understanding which content is landing.
+- **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. Tella's text-based editing (edit the transcript to edit the video) is a compelling pattern to study.
+- **Basic view analytics**: Simple per-video view counts. Not a dashboards-and-funnels analytics product — just enough to know which videos are being watched. Planned for Phase 3.
+- **Automatic zoom and cursor effects**: Screen Studio-style post-processing (auto-zoom into click targets, cursor smoothing). Aspirational for polished content.
+
+---
+
+## Technical Direction
+
+Architecture decisions have been made based on the research phase. The full architecture is documented in `docs/architecture-synthesis.md`. In summary:
+
+- **Desktop app**: Native Swift, macOS 14+. ScreenCaptureKit + AVCaptureSession + Core Image compositing + AVAssetWriter (fMP4 HLS segments).
+- **Server**: Hono + Bun + SQLite + React admin SPA, deployed on Hetzner. FFmpeg for multi-bitrate transcoding.
+- **Storage**: Cloudflare R2 (zero egress).
+- **Viewer layer**: Cloudflare Workers + KV for backend-independent video pages. Vidstack player.
+- **Self-hosted throughout**: No managed video services. FFmpeg + R2 + Cloudflare CDN. ~$6-8/mo.
+- **Research**: 10 research documents in `docs/research/`, covering macOS APIs, streaming upload architecture, Cap codebase analysis, competitive landscape, video processing, cost modelling, server stack, viewer experience, and open-source tools.

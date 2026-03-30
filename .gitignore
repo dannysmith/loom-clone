@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Runtime data
+server/data/
+
+# Bun
+server/bun.lock
+
+# Build output
+server/dist/
+app/LoomClone.xcodeproj/
+app/build/
+
+# Xcode
+*.xcuserdata/
+DerivedData/
+*.xcworkspace/
+
+# macOS
+.DS_Store

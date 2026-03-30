@@ -8,8 +8,11 @@ struct MenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Display picker
-            if !coordinator.availableDisplays.isEmpty {
+
+            // Screen permission banner (shown instead of display picker when denied)
+            if coordinator.screenPermissionDenied {
+                screenPermissionBanner
+            } else if !coordinator.availableDisplays.isEmpty {
                 LabeledContent("Display") {
                     Picker("", selection: displayBinding) {
                         ForEach(coordinator.availableDisplays, id: \.displayID) { display in
@@ -59,7 +62,11 @@ struct MenuView: View {
             }
             .pickerStyle(.segmented)
 
-            // Record button
+            // Record button — disabled if no display available
+            let canRecord = coordinator.state == .idle
+                && !coordinator.screenPermissionDenied
+                && coordinator.selectedDisplay != nil
+
             Button(action: onRecord) {
                 Label("Record", systemImage: "record.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -67,9 +74,9 @@ struct MenuView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .controlSize(.large)
-            .disabled(coordinator.state != .idle)
+            .disabled(!canRecord)
 
-            // Show last video URL if available
+            // Last video URL
             if let url = coordinator.lastVideoURL {
                 HStack {
                     Text(url)
@@ -97,6 +104,39 @@ struct MenuView: View {
         }
         .padding(12)
         .frame(width: 300)
+    }
+
+    // MARK: - Permission Banner
+
+    private var screenPermissionBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Screen Recording Required", systemImage: "exclamationmark.shield")
+                .font(.caption.bold())
+                .foregroundStyle(.orange)
+
+            Text("Grant permission in System Settings, then click Retry.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Button("Open Settings") {
+                    coordinator.openScreenRecordingSettings()
+                }
+                .controlSize(.small)
+
+                Button("Retry") {
+                    Task { await coordinator.retryScreenPermission() }
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
+        )
     }
 
     // MARK: - Bindings

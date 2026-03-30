@@ -123,8 +123,8 @@ actor WriterActor {
     func pause(at time: CMTime) {
         isPaused = true
         timestampAdjuster.markPause(at: time)
-        // Flush current segment for clean boundaries
-        writer?.flushSegment()
+        // Note: flushSegment() is only allowed when preferredOutputSegmentInterval is .indefinite.
+        // With automatic segmentation (4s), AVAssetWriter handles segment boundaries itself.
         print("[writer] Paused")
     }
 
@@ -138,7 +138,8 @@ actor WriterActor {
 
     func finish() async {
         guard let writer else { return }
-        writer.flushSegment()
+        // No manual flushSegment() — only valid when preferredOutputSegmentInterval is .indefinite.
+        // finishWriting() automatically flushes any remaining data as a final segment.
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writer.finishWriting {
@@ -176,8 +177,15 @@ actor WriterActor {
             print("[writer] Init segment: \(data.count) bytes")
 
         case .separable:
-            segmentIndex += 1
             let duration = extractDuration(from: report) ?? 4.0
+
+            // finishWriting() emits empty trailing segments with 0 duration — skip them
+            if duration < 0.01 {
+                print("[writer] Skipping empty segment (\(data.count) bytes, \(String(format: "%.3f", duration))s)")
+                return
+            }
+
+            segmentIndex += 1
             let filename = String(format: "seg_%03d.m4s", segmentIndex - 1)
             segment = VideoSegment(
                 index: segmentIndex,

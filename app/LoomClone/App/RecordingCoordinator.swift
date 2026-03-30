@@ -29,6 +29,10 @@ final class RecordingCoordinator {
     var selectedCamera: AVCaptureDevice?
     var selectedMicrophone: AVCaptureDevice?
 
+    // MARK: - Permissions
+
+    private(set) var screenPermissionDenied = false
+
     // MARK: - Timer
 
     private(set) var elapsedSeconds: TimeInterval = 0
@@ -49,7 +53,7 @@ final class RecordingCoordinator {
     func startRecording() {
         guard state == .idle else { return }
         guard let display = selectedDisplay else {
-            print("[coordinator] No display selected")
+            print("[coordinator] No display selected — screen permission may be missing")
             return
         }
 
@@ -63,7 +67,6 @@ final class RecordingCoordinator {
         let actor = RecordingActor()
         recordingActor = actor
 
-        // Pass identifiers (Sendable) instead of framework objects across actor boundary
         let displayID = display.displayID
         let cameraID = selectedCamera?.uniqueID
         let micID = selectedMicrophone?.uniqueID
@@ -95,7 +98,6 @@ final class RecordingCoordinator {
             self.lastVideoURL = url
             self.recordingActor = nil
 
-            // Reset to idle after showing the result
             try? await Task.sleep(for: .seconds(8))
             if self.state == .stopped {
                 self.state = .idle
@@ -132,17 +134,24 @@ final class RecordingCoordinator {
     // MARK: - Device Enumeration
 
     func refreshDevices() async {
-        // Screens
+        // Screens — may fail if screen recording permission not granted
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: true
             )
+            screenPermissionDenied = false
             availableDisplays = content.displays
             if selectedDisplay == nil {
                 selectedDisplay = availableDisplays.first
             }
-        } catch {
-            print("[devices] Failed to enumerate displays: \(error)")
+        } catch let error as NSError {
+            // TCC denial: Code -3801
+            if error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && error.code == -3801 {
+                screenPermissionDenied = true
+                print("[devices] Screen recording permission denied — user must grant in System Settings")
+            } else {
+                print("[devices] Failed to enumerate displays: \(error)")
+            }
         }
 
         // Cameras
@@ -166,6 +175,18 @@ final class RecordingCoordinator {
         if selectedMicrophone == nil {
             selectedMicrophone = availableMicrophones.first
         }
+    }
+
+    func openScreenRecordingSettings() {
+        // Works on macOS 13+: opens directly to Screen Recording pane
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func retryScreenPermission() async {
+        screenPermissionDenied = false
+        await refreshDevices()
     }
 
     // MARK: - Timer

@@ -23,9 +23,21 @@ actor RecordingActor {
     private var isRecording = false
     private var localSavePath: URL?
 
+    // MARK: - Timing
+
+    /// Host clock time when recording started. All video PTS are relative to this.
+    /// Using a single clock source avoids timestamp discontinuities when switching
+    /// between screen-driven and camera-driven modes.
+    private var recordingStartTime: CMTime?
+
+    /// Last video PTS appended to the writer. Used to ensure strict monotonicity.
+    private var lastVideoPTS: CMTime = .zero
+
+    /// Fixed frame duration for 30fps video.
+    private let frameDuration = CMTime(value: 1, timescale: 30)
+
     // MARK: - Start Recording
 
-    /// Start recording using device identifiers (avoids sending non-Sendable types across actors).
     func startRecording(
         displayID: CGDirectDisplayID,
         cameraID: String?,
@@ -34,6 +46,8 @@ actor RecordingActor {
     ) async throws -> (id: String, slug: String) {
         self.mode = mode
         isRecording = true
+        recordingStartTime = CMClockGetTime(CMClockGetHostTimeClock())
+        lastVideoPTS = .zero
 
         // Resolve devices from identifiers
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -143,12 +157,26 @@ actor RecordingActor {
 
     // MARK: - Frame Handling
 
+    /// Compute a monotonically increasing PTS for video frames using the host clock.
+    /// This avoids timestamp discontinuities when switching between screen and camera sources.
+    private func nextVideoPTS() -> CMTime {
+        guard let start = recordingStartTime else { return .zero }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        var pts = now - start
+
+        // Ensure strict monotonicity
+        if pts <= lastVideoPTS {
+            pts = lastVideoPTS + CMTime(value: 1, timescale: 600) // tiny increment
+        }
+        lastVideoPTS = pts
+        return pts
+    }
+
     private func handleScreenFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard isRecording else { return }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // Update camera if applicable, then composite
         let output: CVPixelBuffer?
 
         switch mode {
@@ -157,16 +185,13 @@ actor RecordingActor {
         case .screenAndCamera:
             output = await composition.compositeFrame(screenBuffer: pixelBuffer, mode: .screenAndCamera)
         case .cameraOnly:
-            // In cameraOnly mode, screen frames are ignored — camera drives the pipeline
             return
         }
 
         guard let output else { return }
 
-        // Create a new CMSampleBuffer wrapping the output pixel buffer with original timing
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let duration = CMSampleBufferGetDuration(sampleBuffer)
-        let outputSample = createSampleBuffer(from: output, pts: pts, duration: duration)
+        let pts = nextVideoPTS()
+        let outputSample = createSampleBuffer(from: output, pts: pts, duration: frameDuration)
 
         guard let outputSample else { return }
         await writer.appendVideo(outputSample)
@@ -185,9 +210,8 @@ actor RecordingActor {
             let output = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
             guard let output else { return }
 
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            let duration = CMSampleBufferGetDuration(sampleBuffer)
-            let outputSample = createSampleBuffer(from: output, pts: pts, duration: duration)
+            let pts = nextVideoPTS()
+            let outputSample = createSampleBuffer(from: output, pts: pts, duration: frameDuration)
 
             guard let outputSample else { return }
             await writer.appendVideo(outputSample)

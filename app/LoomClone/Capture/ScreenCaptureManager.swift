@@ -9,8 +9,14 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     private var stream: SCStream?
     private let captureQueue = DispatchQueue(label: "com.loomclone.screen-capture", qos: .userInteractive)
 
-    func startCapture(display: SCDisplay) async throws {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+    func startCapture(display: SCDisplay, excludingApp: SCRunningApplication? = nil) async throws {
+        let filter: SCContentFilter
+        if let app = excludingApp {
+            filter = SCContentFilter(display: display, excludingApplications: [app], exceptingWindows: [])
+            print("[screen] Excluding app windows from capture (pid: \(app.processID))")
+        } else {
+            filter = SCContentFilter(display: display, excludingWindows: [])
+        }
 
         let config = SCStreamConfiguration()
         config.width = 1920

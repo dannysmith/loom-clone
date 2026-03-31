@@ -14,8 +14,10 @@ final class RecordingCoordinator {
     private(set) var state: RecordingState = .idle
     var mode: RecordingMode = .screenAndCamera {
         didSet {
-            guard state == .recording || state == .paused else { return }
-            Task { await recordingActor?.switchMode(to: mode) }
+            if state == .recording || state == .paused {
+                Task { await recordingActor?.switchMode(to: mode) }
+                updateCameraOverlayVisibility()
+            }
         }
     }
 
@@ -26,8 +28,21 @@ final class RecordingCoordinator {
     var availableMicrophones: [AVCaptureDevice] = []
 
     var selectedDisplay: SCDisplay?
-    var selectedCamera: AVCaptureDevice?
+    var selectedCamera: AVCaptureDevice? {
+        didSet {
+            if let camera = selectedCamera {
+                cameraPreview.start(device: camera)
+            } else {
+                cameraPreview.stop()
+            }
+        }
+    }
     var selectedMicrophone: AVCaptureDevice?
+
+    // MARK: - Camera Preview & Overlay
+
+    let cameraPreview = CameraPreviewManager()
+    private var cameraOverlay: CameraOverlayWindow?
 
     // MARK: - Permissions
 
@@ -64,6 +79,10 @@ final class RecordingCoordinator {
         lastVideoURL = nil
         startTimer()
 
+        // Stop preview session to avoid dual-session CMIO conflicts with the recording camera
+        cameraPreview.stop()
+        updateCameraOverlayVisibility()
+
         let actor = RecordingActor()
         recordingActor = actor
 
@@ -73,6 +92,13 @@ final class RecordingCoordinator {
         let currentMode = mode
 
         Task {
+            // Wire overlay frame callback before starting capture
+            await actor.setOverlayCallback { [weak self] pixelBuffer in
+                DispatchQueue.main.async {
+                    self?.cameraOverlay?.updateFrame(pixelBuffer)
+                }
+            }
+
             do {
                 let _ = try await actor.startRecording(
                     displayID: displayID,
@@ -92,6 +118,12 @@ final class RecordingCoordinator {
         guard state == .recording || state == .paused else { return }
         state = .stopped
         stopTimer()
+        cameraOverlay?.hide()
+
+        // Restart camera preview now that recording is done
+        if let camera = selectedCamera {
+            cameraPreview.start(device: camera)
+        }
 
         Task {
             let url = await recordingActor?.stopRecording()
@@ -187,6 +219,24 @@ final class RecordingCoordinator {
     func retryScreenPermission() async {
         screenPermissionDenied = false
         await refreshDevices()
+    }
+
+    // MARK: - Camera Overlay
+
+    private func updateCameraOverlayVisibility() {
+        guard state == .recording || state == .paused else {
+            cameraOverlay?.hide()
+            return
+        }
+
+        if mode != .screenOnly {
+            if cameraOverlay == nil {
+                cameraOverlay = CameraOverlayWindow()
+            }
+            cameraOverlay?.show(on: nil)
+        } else {
+            cameraOverlay?.hide()
+        }
     }
 
     // MARK: - Timer

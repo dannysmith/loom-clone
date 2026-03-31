@@ -31,7 +31,8 @@ final class RecordingPanel {
             backing: .buffered,
             defer: true
         )
-        panel.level = .floating
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.titlebarAppearsTransparent = true

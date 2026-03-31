@@ -23,6 +23,14 @@ actor RecordingActor {
     private var isRecording = false
     private var localSavePath: URL?
 
+    // MARK: - Overlay Frame Callback
+
+    private var onCameraFrameForOverlay: (@Sendable (CVPixelBuffer) -> Void)?
+
+    func setOverlayCallback(_ callback: @escaping @Sendable (CVPixelBuffer) -> Void) {
+        onCameraFrameForOverlay = callback
+    }
+
     // MARK: - Timing
 
     /// Host clock time when recording started. All video PTS are relative to this.
@@ -53,6 +61,11 @@ actor RecordingActor {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw RecordingError.displayNotFound
+        }
+
+        // Find our own application to exclude our windows (recording panel, camera overlay) from capture
+        let ourApp = content.applications.first {
+            $0.processID == ProcessInfo.processInfo.processIdentifier
         }
 
         let camera: AVCaptureDevice? = cameraID.flatMap { AVCaptureDevice(uniqueID: $0) }
@@ -95,8 +108,8 @@ actor RecordingActor {
             }
         }
 
-        // 5. Start captures
-        try await screenCapture.startCapture(display: display)
+        // 5. Start captures (exclude our app's windows from screen recording)
+        try await screenCapture.startCapture(display: display, excludingApp: ourApp)
         if let camera {
             await cameraCapture.startCapture(device: camera)
         }
@@ -205,6 +218,9 @@ actor RecordingActor {
         // Always update the latest camera frame for the compositor
         await composition.updateCameraFrame(pixelBuffer)
 
+        // Send to UI overlay at full framerate
+        onCameraFrameForOverlay?(pixelBuffer)
+
         // In cameraOnly mode, the camera drives the encoding pipeline
         if mode == .cameraOnly {
             let output = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
@@ -220,7 +236,32 @@ actor RecordingActor {
 
     private func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
         guard isRecording else { return }
-        await writer.appendAudio(sampleBuffer)
+        guard let startTime = recordingStartTime else { return }
+
+        // Normalize audio timestamps relative to recording start, same as video.
+        // Without this, audio PTS is absolute host clock (~123456s) while video
+        // PTS is relative (~0s), causing a massive A/V desync.
+        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let relativePTS = originalPTS - startTime
+        let duration = CMSampleBufferGetDuration(sampleBuffer)
+
+        var timing = CMSampleTimingInfo(
+            duration: duration,
+            presentationTimeStamp: relativePTS,
+            decodeTimeStamp: .invalid
+        )
+
+        var retimed: CMSampleBuffer?
+        CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &retimed
+        )
+
+        guard let retimed else { return }
+        await writer.appendAudio(retimed)
     }
 
     // MARK: - Segment Handling

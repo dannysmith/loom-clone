@@ -51,6 +51,24 @@ struct MenuView: View {
                 }
             }
 
+            // Camera preview (shown when idle and camera is available)
+            if coordinator.cameraPreview.session != nil && coordinator.state == .idle {
+                ZStack {
+                    CameraPreviewView(session: coordinator.cameraPreview.session)
+
+                    // Circle indicator showing the visible area in Screen+Camera mode
+                    if coordinator.mode == .screenAndCamera {
+                        Circle()
+                            .strokeBorder(.white.opacity(0.6), lineWidth: 2)
+                            .background(Circle().fill(.white.opacity(0.08)))
+                            .frame(width: 80, height: 80)
+                    }
+                }
+                .frame(height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: .infinity)
+            }
+
             Divider()
 
             // Mode picker

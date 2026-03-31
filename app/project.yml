@@ -27,4 +27,4 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: XT349SJG9U

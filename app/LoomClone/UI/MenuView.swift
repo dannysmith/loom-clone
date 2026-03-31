@@ -61,7 +61,7 @@ struct MenuView: View {
                         Circle()
                             .strokeBorder(.white.opacity(0.6), lineWidth: 2)
                             .background(Circle().fill(.white.opacity(0.08)))
-                            .frame(width: 80, height: 80)
+                            .frame(width: 120, height: 120)
                     }
                 }
                 .frame(height: 160)

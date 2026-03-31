@@ -15,7 +15,9 @@ Read `requirements.md` for product context and `docs/plan.md` for the full archi
 **Desktop App** (`app/`):
 - Menu bar app with NSPopover UI (device pickers, mode selector, record button)
 - Floating NSPanel for recording controls (stop, pause/resume, mode switch, timer)
+- Recording panel and camera overlay visible above fullscreen apps and across all Spaces (`.statusBar` window level + `canJoinAllSpaces` + `fullScreenAuxiliary`)
 - Screen capture via ScreenCaptureKit (1920x1080 @ 30fps)
+- Own app windows excluded from screen capture via SCContentFilter
 - Camera capture via AVCaptureSession (independent session)
 - Microphone capture via AVCaptureSession (independent session)
 - Core Image + Metal compositing (all three modes: screen-only, camera-only, screen+camera with circle overlay)
@@ -27,6 +29,9 @@ Read `requirements.md` for product context and `docs/plan.md` for the full archi
 - Global keyboard shortcuts (Cmd+Shift+R/P/M)
 - Pause/resume working
 - Multiple recordings in same session working
+- Live camera preview in popover (shows feed before recording, with circle crop indicator for Screen+Camera mode)
+- On-screen camera overlay during recording (240px draggable circle, frame-based rendering via CIContext + CALayer)
+- Stable TCC permissions via Apple Development certificate signing (no re-granting on rebuild)
 
 **Local Server** (`server/`):
 - Hono + Bun on localhost:3000
@@ -52,6 +57,14 @@ Read `requirements.md` for product context and `docs/plan.md` for the full archi
 7. **Swift 6 strict concurrency is aggressive with framework types**: CVPixelBuffer, CMSampleBuffer, SCDisplay, AVCaptureDevice are all non-Sendable in Swift 6. Region-based isolation catches passing them across actor boundaries even with @unchecked Sendable extensions. Using Swift 5 language mode with targeted concurrency checking is pragmatic for a prototype.
 
 8. **ScreenCaptureKit TCC handling**: SCShareableContent fails with error -3801 when screen recording permission is denied. Need to detect this, show a clear UI prompt, and provide a deep link to System Settings (`x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`).
+
+9. **TCC permissions reset on every rebuild**: macOS ties TCC grants (screen recording, camera, mic) to the code signing identity. Ad-hoc signing generates a new identity each build, forcing re-grant. Setting `DEVELOPMENT_TEAM` in project.yml to use an Apple Development certificate gives a stable identity — permissions persist across rebuilds.
+
+10. **Dual AVCaptureSession conflicts (CMIO)**: Two AVCaptureSessions accessing the same camera device cause CoreMediaIO graph errors (`AVCaptureInputPort` and `AVCaptureSession` runtime errors). The camera overlay can't use its own AVCaptureVideoPreviewLayer — it must receive frames from the single recording session. Solution: frame-based rendering via RecordingActor callback → CIContext.createCGImage → CALayer.contents. This runs at full 30fps with no perceptible overhead on Apple Silicon.
+
+11. **AVAssetWriter init segment race condition**: If `startWriting()` is called before audio hardware is active, the init segment (ftyp + moov) may contain only a video track (674 bytes vs 1134 bytes with both tracks). This causes audio to be silently dropped for the entire recording. Solution: start all capture sessions first, wait for the first audio sample to arrive (polling with actor suspension points), then call `startWriting()`. The `audioHasArrived` flag is set in `handleAudioSample` and checked via a polling loop that yields the actor on each iteration.
+
+12. **Window exclusion from screen capture**: Use `SCContentFilter(display:excludingApplications:exceptingWindows:)` with our own `SCRunningApplication` (matched by `ProcessInfo.processInfo.processIdentifier`) to exclude all app windows (recording panel, camera overlay, popover) from the captured video.
 
 ---
 
@@ -276,16 +289,17 @@ The prototype is successful when all of the following work:
 
 Things to build and test before moving to Phase 1. Roughly prioritized.
 
-### Camera overlay and preview
+### ~~Camera overlay and preview~~ ✅
 
-- **Live camera preview** in the popover before recording — show the camera feed so the user can check framing. Use AVCaptureVideoPreviewLayer or render camera frames into a SwiftUI view.
-- **On-screen camera overlay during recording** — a separate transparent NSPanel showing the live camera feed as a circle. This is the visual feedback for the user, separate from the composited video. Should be draggable/resizable.
-- **Exclude our windows from screen capture** — pass the recording panel and camera overlay windows to SCContentFilter's `excludingWindows:` parameter so they don't appear in the captured video.
+Done. Camera preview in popover uses a lightweight AVCaptureSession (CameraPreviewManager) that stops during recording to avoid CMIO conflicts. Camera overlay during recording uses frame-based rendering fed by RecordingActor callback. Own app windows excluded from capture via SCContentFilter.
 
-### Recording overlay on all Spaces and fullscreen
+### ~~Recording overlay on all Spaces and fullscreen~~ ✅
 
-- The recording control panel must appear above fullscreen apps and follow Space switches. Standard `.floating` level (3) is below fullscreen apps (level 25+). Need NSPanel with `.statusBar` level or higher, plus `canJoinAllSpaces` and `fullScreenAuxiliary` collection behaviors. See [Handy PR #361](https://github.com/cjpais/Handy/pull/361) for reference.
-- The camera overlay window needs the same treatment.
+Done. Both recording panel and camera overlay use `.statusBar` window level with `canJoinAllSpaces` and `fullScreenAuxiliary` collection behaviors.
+
+### Segment duration irregularity / janky playback
+
+Observed irregular segment durations in recordings: segments should be ~4s each, but logs show durations like 5.7s and 1.8s. This causes visibly janky playback. May be related to the reordered startup sequence (audio wait), mode switching timing, or AVAssetWriter segment boundary behavior. Needs investigation.
 
 ### Audio verification
 

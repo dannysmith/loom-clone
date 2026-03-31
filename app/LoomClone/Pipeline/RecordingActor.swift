@@ -23,6 +23,11 @@ actor RecordingActor {
     private var isRecording = false
     private var localSavePath: URL?
 
+    /// Set when the first audio sample arrives from the mic.
+    /// Used to ensure audio hardware is active before starting the writer,
+    /// so the init segment includes both video and audio tracks.
+    private var audioHasArrived = false
+
     // MARK: - Overlay Frame Callback
 
     private var onCameraFrameForOverlay: (@Sendable (CVPixelBuffer) -> Void)?
@@ -80,15 +85,15 @@ actor RecordingActor {
         try FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
         localSavePath = localDir
 
-        // 3. Configure and start writer
+        // 3. Configure writer (but don't start yet — need audio hardware active first)
         try await writer.configure()
         await writer.setOnSegmentReady { [weak self] segment in
             guard let self else { return }
             Task { await self.handleSegment(segment) }
         }
-        await writer.startWriting()
 
         // 4. Wire capture callbacks
+        // Samples will arrive but be dropped until writer starts (hasStartedSession = false)
         screenCapture.onScreenFrame = { [weak self] buffer in
             guard let self else { return }
             Task { await self.handleScreenFrame(buffer) }
@@ -108,7 +113,10 @@ actor RecordingActor {
             }
         }
 
-        // 5. Start captures (exclude our app's windows from screen recording)
+        // 5. Start captures BEFORE the writer.
+        // Audio hardware needs time to initialize — if the writer starts first,
+        // AVAssetWriter may emit an init segment missing the audio track.
+        audioHasArrived = false
         try await screenCapture.startCapture(display: display, excludingApp: ourApp)
         if let camera {
             await cameraCapture.startCapture(device: camera)
@@ -116,6 +124,19 @@ actor RecordingActor {
         if let microphone {
             await micCapture.startCapture(device: microphone)
         }
+
+        // Wait for first audio sample so the audio subsystem is fully active.
+        // Each sleep suspends the actor, allowing handleAudioSample to execute and set the flag.
+        if microphone != nil {
+            for _ in 0..<50 {
+                if audioHasArrived { break }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            print("[recording] Audio \(audioHasArrived ? "ready" : "timeout, proceeding anyway")")
+        }
+
+        // 6. NOW start the writer — both tracks will be in the init segment
+        await writer.startWriting()
 
         print("[recording] Started: mode=\(mode), id=\(session.id)")
         return session
@@ -235,6 +256,7 @@ actor RecordingActor {
     }
 
     private func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
+        audioHasArrived = true
         guard isRecording else { return }
         guard let startTime = recordingStartTime else { return }
 

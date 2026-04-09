@@ -1,8 +1,14 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import AppKit
 
 final class ScreenCaptureManager: NSObject, @unchecked Sendable {
+
+    /// Native pixel dimensions of the display currently being captured.
+    /// Set by `startCapture` after resolving the backing scale factor.
+    /// Used by the coordinator for preset-availability gating.
+    private(set) var nativePixelSize: CGSize = .zero
 
     var onScreenFrame: (@Sendable (CMSampleBuffer) -> Void)?
 
@@ -18,9 +24,19 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
             filter = SCContentFilter(display: display, excludingWindows: [])
         }
 
+        // Capture at the display's native pixel resolution. SCDisplay's
+        // width/height are in points; multiply by the matching NSScreen's
+        // backingScaleFactor to get real pixels. This gives a higher-quality
+        // source that the compositor can downscale cleanly — visibly sharper
+        // than asking SCK to pre-scale for us.
+        let scale = Self.backingScaleFactor(for: display.displayID)
+        let pixelWidth = Int(CGFloat(display.width) * scale)
+        let pixelHeight = Int(CGFloat(display.height) * scale)
+        nativePixelSize = CGSize(width: pixelWidth, height: pixelHeight)
+
         let config = SCStreamConfiguration()
-        config.width = 1920
-        config.height = 1080
+        config.width = pixelWidth
+        config.height = pixelHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
@@ -31,7 +47,30 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
         try await stream.startCapture()
         self.stream = stream
 
-        print("[screen] Capture started: \(display.width)x\(display.height) -> 1920x1080 @ 30fps")
+        print("[screen] Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ 30fps")
+    }
+
+    /// Look up the backing scale factor for a CGDirectDisplayID. Falls back
+    /// to 1.0 if no matching NSScreen is found (shouldn't happen in practice).
+    static func backingScaleFactor(for displayID: CGDirectDisplayID) -> CGFloat {
+        for screen in NSScreen.screens {
+            if let id = screen.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")
+            ] as? CGDirectDisplayID, id == displayID {
+                return screen.backingScaleFactor
+            }
+        }
+        return 1.0
+    }
+
+    /// Native pixel dimensions of a given display. Used by the coordinator
+    /// to decide whether the 4K preset is offered, before recording starts.
+    static func nativePixelSize(for display: SCDisplay) -> CGSize {
+        let scale = backingScaleFactor(for: display.displayID)
+        return CGSize(
+            width: CGFloat(display.width) * scale,
+            height: CGFloat(display.height) * scale
+        )
     }
 
     func stopCapture() async {

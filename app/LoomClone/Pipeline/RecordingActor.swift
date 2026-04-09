@@ -20,6 +20,7 @@ actor RecordingActor {
     // MARK: - State
 
     private var mode: RecordingMode = .screenAndCamera
+    private var preset: OutputPreset = .default
     private var isRecording = false
     private var localSavePath: URL?
 
@@ -118,9 +119,11 @@ actor RecordingActor {
         displayID: CGDirectDisplayID,
         cameraID: String?,
         microphoneID: String?,
-        mode: RecordingMode
+        mode: RecordingMode,
+        preset: OutputPreset
     ) async throws -> (id: String, slug: String) {
         self.mode = mode
+        self.preset = preset
         isRecording = false  // not recording yet — set true in commit
         recordingStartTime = nil
         pauseAccumulator = .zero
@@ -150,6 +153,7 @@ actor RecordingActor {
 
         // Populate timeline session + inputs now that we've resolved devices.
         timeline.setSession(id: session.id, slug: session.slug, initialMode: mode)
+        timeline.setPreset(preset)
         timeline.setInputs(
             display: .init(
                 id: UInt32(display.displayID),
@@ -177,8 +181,9 @@ actor RecordingActor {
         try FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
         localSavePath = localDir
 
-        // 3. Configure writer (but don't start yet — commit() does that)
-        try await writer.configure()
+        // 3. Configure writer and compositor for this preset.
+        await composition.configure(preset: preset)
+        try await writer.configure(preset: preset)
         // Await the downstream handling synchronously so that
         // `writer.finish()` can wait for every trailing segment to be
         // fully recorded in the timeline and enqueued for upload before
@@ -222,7 +227,9 @@ actor RecordingActor {
         audioHasArrived = false
         try await screenCapture.startCapture(display: display, excludingApp: ourApp)
         if let camera {
-            await cameraCapture.startCapture(device: camera)
+            // Cap camera capture at the preset height. No point decoding a 4K
+            // camera stream just to downscale to 1080p in the compositor.
+            await cameraCapture.startCapture(device: camera, maxHeight: preset.height)
         }
         if let microphone {
             await micCapture.startCapture(device: microphone)

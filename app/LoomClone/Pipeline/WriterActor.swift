@@ -56,7 +56,12 @@ actor WriterActor {
 
     // MARK: - Setup
 
-    func configure() throws {
+    /// The output preset in use for the current recording. Captured at
+    /// configure() time so the timeline snapshot can include it.
+    private(set) var preset: OutputPreset = .default
+
+    func configure(preset: OutputPreset) throws {
+        self.preset = preset
         let writer = AVAssetWriter(contentType: UTType.mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(seconds: 4, preferredTimescale: 600)
@@ -105,10 +110,10 @@ actor WriterActor {
         // boundaries since AVAssetWriter closes segments at keyframes.
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: CompositionActor.outputWidth,
-            AVVideoHeightKey: CompositionActor.outputHeight,
+            AVVideoWidthKey: preset.width,
+            AVVideoHeightKey: preset.height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 6_000_000,
+                AVVideoAverageBitRateKey: preset.bitrate,
                 AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoExpectedSourceFrameRateKey: 30,

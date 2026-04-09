@@ -95,6 +95,11 @@ struct MenuView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
 
+            // Output preset picker. 4K is greyed out when the source can't
+            // actually deliver it (screen < 2160 in screen-bearing modes,
+            // camera < 2160 in camera-only mode).
+            qualityPicker
+
             // Record button — disabled if any prerequisite isn't satisfied
             let canRecord = coordinator.state == .idle
                 && !coordinator.screenPermissionDenied
@@ -202,6 +207,40 @@ struct MenuView: View {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Quality Picker
+
+    @ViewBuilder
+    private var qualityPicker: some View {
+        // SwiftUI's segmented Picker has no per-option disabled state, so 4K
+        // is simply omitted when the current source can't feed it. The
+        // downgrade hooks below catch the case where the user had 4K
+        // selected and the source becomes unavailable.
+        let presets = OutputPreset.all.filter {
+            $0 != .p4k || coordinator.is4KAvailable
+        }
+        Picker("Quality", selection: $coordinator.outputPreset) {
+            ForEach(presets) { preset in
+                Text(preset.label)
+                    .tag(preset)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        // 4K availability depends on display and camera (not mode — see
+        // is4KAvailable). Re-check whenever either changes.
+        .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in downgradeIf4KUnavailable() }
+        .onChange(of: coordinator.selectedCamera?.uniqueID) { _, _ in downgradeIf4KUnavailable() }
+    }
+
+    /// If the user had 4K selected and the active source can no longer feed
+    /// it (e.g. they switched from a 4K display to 1080p, or to cameraOnly
+    /// with a 720p webcam), fall back to 1080p silently.
+    private func downgradeIf4KUnavailable() {
+        if coordinator.outputPreset == .p4k && !coordinator.is4KAvailable {
+            coordinator.outputPreset = .p1080
+        }
     }
 
     // MARK: - Server Banner

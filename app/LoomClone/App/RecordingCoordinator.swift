@@ -63,6 +63,36 @@ final class RecordingCoordinator {
     }
     var selectedMicrophone: AVCaptureDevice?
 
+    // MARK: - Output Preset
+
+    /// Resolution + bitrate of the encoded HLS stream. Capture happens at
+    /// native resolution regardless; this controls what the compositor
+    /// renders into and what the encoder produces.
+    private static let outputPresetDefaultsKey = "outputPresetID"
+    var outputPreset: OutputPreset = OutputPreset.fromID(
+        UserDefaults.standard.string(forKey: "outputPresetID") ?? OutputPreset.default.id
+    ) {
+        didSet {
+            UserDefaults.standard.set(outputPreset.id, forKey: Self.outputPresetDefaultsKey)
+        }
+    }
+
+    /// True if 4K is meaningful for *any* mode the user could switch into
+    /// during this recording. Devices can't change mid-recording, but mode
+    /// can — so 4K is offered whenever EITHER the selected display or the
+    /// selected camera can natively feed it.
+    var is4KAvailable: Bool {
+        let displayOK: Bool = {
+            guard let display = selectedDisplay else { return false }
+            return Int(ScreenCaptureManager.nativePixelSize(for: display).height) >= 2160
+        }()
+        let cameraOK: Bool = {
+            guard let cam = selectedCamera else { return false }
+            return CameraCaptureManager.maxNativeHeight(for: cam) >= 2160
+        }()
+        return displayOK || cameraOK
+    }
+
     // MARK: - Camera Preview & Overlay
 
     let cameraPreview = CameraPreviewManager()
@@ -240,6 +270,7 @@ final class RecordingCoordinator {
         let cameraID = selectedCamera?.uniqueID
         let micID = selectedMicrophone?.uniqueID
         let currentMode = mode
+        let currentPreset = outputPreset
 
         startupTask = Task { @MainActor in
             // 1. Stop the previews. Camera preview must be AWAITED — the
@@ -268,7 +299,8 @@ final class RecordingCoordinator {
                         displayID: displayID,
                         cameraID: cameraID,
                         microphoneID: micID,
-                        mode: currentMode
+                        mode: currentMode,
+                        preset: currentPreset
                     )
                 } catch {
                     print("[coordinator] prepareRecording failed: \(error)")

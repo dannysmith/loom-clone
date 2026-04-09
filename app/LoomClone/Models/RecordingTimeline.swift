@@ -22,9 +22,18 @@ struct RecordingTimeline: Encodable {
     var app: AppInfo
     var hardware: HardwareInfo
     var inputs: Inputs
+    var preset: PresetInfo
     var encoder: EncoderInfo
     var segments: [SegmentEntry]
     var events: [Event]
+
+    struct PresetInfo: Encodable {
+        let id: String
+        let label: String
+        let width: Int
+        let height: Int
+        let bitrate: Int
+    }
 
     // MARK: - Nested types
 
@@ -133,6 +142,7 @@ final class RecordingTimelineBuilder {
     private var endedAt: Date?
     private var durationSeconds: Double?
     private var inputs: RecordingTimeline.Inputs = .init(display: nil, camera: nil, microphone: nil)
+    private var preset: OutputPreset = .default
     private var segments: [RecordingTimeline.SegmentEntry] = []
     private var events: [RecordingTimeline.Event] = []
 
@@ -150,6 +160,10 @@ final class RecordingTimelineBuilder {
         self.sessionId = id
         self.slug = slug
         self.initialMode = initialMode
+    }
+
+    func setPreset(_ preset: OutputPreset) {
+        self.preset = preset
     }
 
     func setInputs(
@@ -282,7 +296,14 @@ final class RecordingTimelineBuilder {
             app: Self.currentAppInfo(),
             hardware: Self.currentHardware(),
             inputs: inputs,
-            encoder: Self.currentEncoder(),
+            preset: .init(
+                id: preset.id,
+                label: preset.label,
+                width: preset.width,
+                height: preset.height,
+                bitrate: preset.bitrate
+            ),
+            encoder: Self.currentEncoder(preset: preset),
             segments: segments,
             events: sortedEvents
         )
@@ -333,16 +354,16 @@ final class RecordingTimelineBuilder {
         return .init(model: modelName, arch: arch)
     }
 
-    private static func currentEncoder() -> RecordingTimeline.EncoderInfo {
+    private static func currentEncoder(preset: OutputPreset) -> RecordingTimeline.EncoderInfo {
         .init(
             videoCodec: "h264",
             videoProfile: "High",
-            videoBitrate: 6_000_000,
+            videoBitrate: preset.bitrate,
             audioCodec: "aac-lc",
             audioBitrate: 128_000,
             targetFPS: 30,
-            outputWidth: CompositionActor.outputWidth,
-            outputHeight: CompositionActor.outputHeight,
+            outputWidth: preset.width,
+            outputHeight: preset.height,
             segmentIntervalSeconds: 4.0
         )
     }

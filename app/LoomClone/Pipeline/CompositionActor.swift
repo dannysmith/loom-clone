@@ -6,8 +6,8 @@ actor CompositionActor {
 
     // MARK: - Configuration
 
-    static let outputWidth = 1920
-    static let outputHeight = 1080
+    private(set) var outputWidth: Int = OutputPreset.default.width
+    private(set) var outputHeight: Int = OutputPreset.default.height
 
     var overlayDiameter: CGFloat = 240
     var overlayPadding: CGFloat = 20
@@ -15,8 +15,8 @@ actor CompositionActor {
     // MARK: - Core Image Pipeline
 
     private let ciContext: CIContext
-    private let outputPool: PixelBufferPool
-    private let outputBounds: CGRect
+    private var outputPool: PixelBufferPool
+    private var outputBounds: CGRect
 
     // MARK: - Camera State
 
@@ -35,17 +35,36 @@ actor CompositionActor {
         )
 
         outputPool = PixelBufferPool(
-            width: Self.outputWidth,
-            height: Self.outputHeight
+            width: outputWidth,
+            height: outputHeight
         )
 
         outputBounds = CGRect(
             x: 0, y: 0,
-            width: Self.outputWidth,
-            height: Self.outputHeight
+            width: outputWidth,
+            height: outputHeight
         )
 
         circleMask = CircleMaskGenerator.mask(diameter: 240)
+    }
+
+    /// Configure the output canvas for the current recording. Must be called
+    /// before any compositeFrame() calls. The PiP overlay diameter scales with
+    /// the output height so it looks proportionally the same across presets.
+    func configure(preset: OutputPreset) {
+        outputWidth = preset.width
+        outputHeight = preset.height
+        outputBounds = CGRect(x: 0, y: 0, width: preset.width, height: preset.height)
+        outputPool = PixelBufferPool(width: preset.width, height: preset.height)
+
+        // PiP diameter: 240 at 1080p → scale proportionally. Keeps the circle
+        // visually the same size at any output preset.
+        let ratio = CGFloat(preset.height) / 1080.0
+        overlayDiameter = (240.0 * ratio).rounded()
+        overlayPadding = (20.0 * ratio).rounded()
+        circleMask = CircleMaskGenerator.mask(diameter: Int(overlayDiameter))
+
+        print("[composition] Configured: \(preset.width)x\(preset.height), PiP=\(Int(overlayDiameter))px")
     }
 
     // MARK: - Camera Frame Update
@@ -98,26 +117,38 @@ actor CompositionActor {
 
     // MARK: - Private Helpers
 
-    /// Scale an image to fill the 1920x1080 output, maintaining aspect ratio.
+    /// Scale an image to fill the output, maintaining aspect ratio.
+    /// Uses Lanczos for big downscales (e.g. native 4K screen → 1080p) —
+    /// visibly sharper than affine scaling for text-heavy content.
     private func scaledToFill(_ image: CIImage) -> CIImage {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return image }
 
-        let scaleX = CGFloat(Self.outputWidth) / extent.width
-        let scaleY = CGFloat(Self.outputHeight) / extent.height
+        let scaleX = CGFloat(outputWidth) / extent.width
+        let scaleY = CGFloat(outputHeight) / extent.height
         let scale = max(scaleX, scaleY)
 
-        let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let scaled: CIImage
+        if scale < 0.95 {
+            // Downscale: use Lanczos for quality (sharper text).
+            scaled = image.applyingFilter("CILanczosScaleTransform", parameters: [
+                kCIInputScaleKey: scale,
+                kCIInputAspectRatioKey: 1.0,
+            ])
+        } else {
+            // Upscale or near-identity: cheap affine.
+            scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
 
         // Center crop to output size
         let scaledExtent = scaled.extent
-        let cropX = (scaledExtent.width - CGFloat(Self.outputWidth)) / 2
-        let cropY = (scaledExtent.height - CGFloat(Self.outputHeight)) / 2
+        let cropX = (scaledExtent.width - CGFloat(outputWidth)) / 2
+        let cropY = (scaledExtent.height - CGFloat(outputHeight)) / 2
         let cropRect = CGRect(
             x: scaledExtent.minX + cropX,
             y: scaledExtent.minY + cropY,
-            width: CGFloat(Self.outputWidth),
-            height: CGFloat(Self.outputHeight)
+            width: CGFloat(outputWidth),
+            height: CGFloat(outputHeight)
         )
 
         return scaled.cropped(to: cropRect)
@@ -164,7 +195,7 @@ actor CompositionActor {
         ])
 
         // Position in bottom-right corner (CIImage origin is bottom-left)
-        let posX = CGFloat(Self.outputWidth) - diameter - padding
+        let posX = CGFloat(outputWidth) - diameter - padding
         let posY = padding
         return masked.transformed(by: CGAffineTransform(translationX: posX, y: posY))
     }

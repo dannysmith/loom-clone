@@ -6,7 +6,7 @@
 - [x] Make it behave properly if the server isn't running when the app opens and disable recording if server is unreachable.
 - [x] Add a cancel button to the recording overlay which abandons the recording after a confirmation. This will also have to send a message to the server to delete the in-progress recording on the server end.
 - [x] Write out a JSON file which contains some representation of the data being recorded with timestamps, what changed (change mode, pause, resume etc), chunks recorded with size etc. All with timestamps. If we write this out to the local files on disk, then we can send that up to the server when the video is finished recording. I figure that might be useful if we have to do some server side stuff to rebuild videos or debug videos or whatever that is, you know. When we get around to also saving the raw high-quality video feeds locally, we could also use the data in here if we ever build some kinda local video editor which lets us use the raw data to change when we switch modes etc.
-- [ ] Recording resolution for both screen and video - maybe this should be selectable in the popover UI before recording?
+- [x] Recording resolution for both screen and video - maybe this should be selectable in the popover UI before recording?
   - Currently hardcoded to 1920x1080. Test with high-res monitors (Retina, external 4K) and high-quality camera inputs (DSLR via USB/capture card).
   - Capture at native display resolution instead of forcing 1080p. Scale down only for the composited HLS output if needed.
   - Bitrate should scale with resolution — 6 Mbps is fine for 1080p but needs ~15-20 Mbps for 4K.

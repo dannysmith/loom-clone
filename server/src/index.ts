@@ -5,6 +5,10 @@ import playback from "./routes/playback";
 
 const app = new Hono();
 
+// Health check — used by the desktop app to gate the Record button on
+// server reachability. Cheap, no dependencies.
+app.get("/api/health", (c) => c.json({ ok: true }));
+
 // API routes
 app.route("/api/videos", videos);
 

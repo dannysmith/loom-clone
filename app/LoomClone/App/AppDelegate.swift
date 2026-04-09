@@ -21,9 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onStop: { [weak self] in self?.handleStop() }
         )
 
-        Task {
-            await coordinator.refreshDevices()
-        }
+        // Device enumeration + camera preview lifecycle are owned by
+        // `popoverDidOpen()` / `popoverWillClose()`, so the camera hardware
+        // (and the macOS green indicator) is only active when the popover is
+        // visible or a recording is in progress.
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 300, height: 420)
         popover.behavior = .transient
         popover.animates = true
+        popover.delegate = self
 
         let content = MenuView(coordinator: coordinator, onRecord: { [weak self] in
             self?.handleRecord()
@@ -124,6 +126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recordingPanel?.show()
     }
 
+    // MARK: - Popover Delegate
+
+    // See the `NSPopoverDelegate` extension below for the lifecycle hooks
+    // that start and stop the camera preview.
+
     func handleStop() {
         // If we're cancelling a countdown, just stop and hide — no URL to copy.
         let wasCountingDown = coordinator.state == .countingDown
@@ -142,5 +149,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[app] URL copied to clipboard: \(url)")
             }
         }
+    }
+}
+
+// MARK: - NSPopoverDelegate
+
+extension AppDelegate: NSPopoverDelegate {
+    func popoverWillShow(_ notification: Notification) {
+        coordinator.popoverDidOpen()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        coordinator.popoverWillClose()
     }
 }

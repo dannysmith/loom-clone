@@ -27,10 +27,32 @@ struct NativePopUpPicker<ID: Hashable>: NSViewRepresentable {
 
     let selection: ID?
     let options: [Option]
+    /// When true, prepend a "None" item to the menu. Choosing it calls
+    /// `onSelectNone`. The picker shows the None item as selected when
+    /// `selection == nil`.
+    let includeNone: Bool
+    let noneLabel: String
     let onSelect: (ID) -> Void
+    let onSelectNone: () -> Void
+
+    init(
+        selection: ID?,
+        options: [Option],
+        includeNone: Bool = false,
+        noneLabel: String = "None",
+        onSelect: @escaping (ID) -> Void,
+        onSelectNone: @escaping () -> Void = {}
+    ) {
+        self.selection = selection
+        self.options = options
+        self.includeNone = includeNone
+        self.noneLabel = noneLabel
+        self.onSelect = onSelect
+        self.onSelectNone = onSelectNone
+    }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelect: onSelect)
+        Coordinator(onSelect: onSelect, onSelectNone: onSelectNone)
     }
 
     func makeNSView(context: Context) -> NSPopUpButton {
@@ -51,11 +73,17 @@ struct NativePopUpPicker<ID: Hashable>: NSViewRepresentable {
         // Rebuild the menu in place. `removeAllItems()` + `addItems(withTitles:)`
         // is cheap enough for the tiny device-list cases this is used for.
         button.removeAllItems()
+        if includeNone {
+            button.addItem(withTitle: noneLabel)
+        }
         button.addItems(withTitles: options.map(\.label))
 
         if let selection,
            let index = options.firstIndex(where: { $0.id == selection }) {
-            button.selectItem(at: index)
+            button.selectItem(at: index + (includeNone ? 1 : 0))
+        } else if includeNone {
+            // selection == nil → None row is at index 0
+            button.selectItem(at: 0)
         } else if button.numberOfItems > 0 {
             button.selectItem(at: 0)
         }
@@ -63,22 +91,37 @@ struct NativePopUpPicker<ID: Hashable>: NSViewRepresentable {
         // Keep the coordinator's view of the option list current so action
         // callbacks can map index → ID.
         context.coordinator.ids = options.map(\.id)
+        context.coordinator.includeNone = includeNone
         context.coordinator.onSelect = onSelect
+        context.coordinator.onSelectNone = onSelectNone
     }
 
     @MainActor
     final class Coordinator: NSObject {
         var ids: [ID] = []
+        var includeNone: Bool = false
         var onSelect: (ID) -> Void
+        var onSelectNone: () -> Void
 
-        init(onSelect: @escaping (ID) -> Void) {
+        init(onSelect: @escaping (ID) -> Void, onSelectNone: @escaping () -> Void) {
             self.onSelect = onSelect
+            self.onSelectNone = onSelectNone
         }
 
         @objc func handleAction(_ sender: NSPopUpButton) {
             let index = sender.indexOfSelectedItem
-            guard index >= 0, index < ids.count else { return }
-            onSelect(ids[index])
+            if includeNone {
+                if index == 0 {
+                    onSelectNone()
+                    return
+                }
+                let realIndex = index - 1
+                guard realIndex >= 0, realIndex < ids.count else { return }
+                onSelect(ids[realIndex])
+            } else {
+                guard index >= 0, index < ids.count else { return }
+                onSelect(ids[index])
+            }
         }
     }
 }

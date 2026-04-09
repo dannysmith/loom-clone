@@ -31,26 +31,38 @@ final class RecordingCoordinator {
     var availableCameras: [AVCaptureDevice] = []
     var availableMicrophones: [AVCaptureDevice] = []
 
+    /// Modes that are reachable given the currently-selected sources.
+    /// Used to gate the mode picker (and to filter the recording panel's
+    /// mode strip during recording, since devices can't change mid-session).
+    var availableModes: [RecordingMode] {
+        let hasScreen = selectedDisplay != nil
+        let hasCamera = selectedCamera != nil
+        var modes: [RecordingMode] = []
+        if hasScreen { modes.append(.screenOnly) }
+        if hasCamera { modes.append(.cameraOnly) }
+        if hasScreen && hasCamera { modes.append(.screenAndCamera) }
+        return modes
+    }
+
     var selectedDisplay: SCDisplay? {
         didSet {
-            // If the screen preview is active, re-capture for the new
-            // display. `ScreenPreviewManager.start` no-ops if already on the
-            // same display, so the refresh-polling path can call it freely.
-            guard isPopoverOpen, state == .idle, mode != .cameraOnly else { return }
-            if let display = selectedDisplay {
-                screenPreview.start(display: display)
+            // Source change: ensure the current mode is still reachable.
+            demoteModeIfUnavailable()
+            // Refresh idle-state previews for the new selection.
+            if isPopoverOpen, state == .idle {
+                updatePreviewsForCurrentState()
             }
         }
     }
     var selectedCamera: AVCaptureDevice? {
         didSet {
-            // Only act on the selection change if the preview is actually
-            // running right now. Starting the preview is owned by
-            // `updatePreviewsForCurrentState()` — not by the selection itself —
-            // so that the camera hardware (and the macOS green indicator) is
-            // only active while the popover is open and a camera-bearing mode
-            // is selected.
-            guard cameraPreview.isActive else { return }
+            demoteModeIfUnavailable()
+            // Only act on the preview if it's actually running right now.
+            // Starting the preview is owned by `updatePreviewsForCurrentState()`
+            // — not by the selection itself — so that the camera hardware
+            // (and the macOS green indicator) is only active while the popover
+            // is open and a camera-bearing mode is selected.
+            guard cameraPreview.isActive || selectedCamera == nil else { return }
             let camera = selectedCamera
             Task { @MainActor in
                 if let camera {
@@ -62,6 +74,17 @@ final class RecordingCoordinator {
         }
     }
     var selectedMicrophone: AVCaptureDevice?
+
+    /// If `mode` is no longer in `availableModes` (because a source went
+    /// away), pick the first available mode. If none are available, leave
+    /// `mode` alone — the record button is disabled separately.
+    private func demoteModeIfUnavailable() {
+        let modes = availableModes
+        guard !modes.isEmpty else { return }
+        if !modes.contains(mode) {
+            mode = modes.first!
+        }
+    }
 
     // MARK: - Output Preset
 
@@ -226,16 +249,18 @@ final class RecordingCoordinator {
     private func updatePreviewsForCurrentState() {
         let idleInPopover = isPopoverOpen && state == .idle
 
-        // Camera preview: needed whenever camera is part of the output.
-        let wantsCamera = idleInPopover && mode != .screenOnly
+        // Camera preview: needed whenever a camera is selected AND the
+        // current mode includes camera.
+        let wantsCamera = idleInPopover && selectedCamera != nil && mode != .screenOnly
         if wantsCamera, let camera = selectedCamera {
             Task { @MainActor in await cameraPreview.start(device: camera) }
         } else {
             Task { @MainActor in await cameraPreview.stop() }
         }
 
-        // Screen preview: needed whenever screen is part of the output.
-        let wantsScreen = idleInPopover && mode != .cameraOnly
+        // Screen preview: needed whenever a display is selected AND the
+        // current mode includes screen.
+        let wantsScreen = idleInPopover && selectedDisplay != nil && mode != .cameraOnly
         if wantsScreen, let display = selectedDisplay {
             screenPreview.start(display: display)
         } else {
@@ -247,9 +272,15 @@ final class RecordingCoordinator {
 
     func startRecording() {
         guard state == .idle else { return }
-        guard let display = selectedDisplay else {
-            print("[coordinator] No display selected — screen permission may be missing")
+        guard !availableModes.isEmpty else {
+            print("[coordinator] No sources selected — record button should be disabled")
             return
+        }
+        // Make sure the mode the user is about to record in is actually
+        // valid for the current source set. demoteModeIfUnavailable normally
+        // catches this, but be defensive.
+        if !availableModes.contains(mode), let first = availableModes.first {
+            mode = first
         }
 
         // Reset run state
@@ -266,7 +297,7 @@ final class RecordingCoordinator {
         let actor = RecordingActor()
         recordingActor = actor
 
-        let displayID = display.displayID
+        let displayID = selectedDisplay?.displayID
         let cameraID = selectedCamera?.uniqueID
         let micID = selectedMicrophone?.uniqueID
         let currentMode = mode
@@ -466,6 +497,12 @@ final class RecordingCoordinator {
 
     // MARK: - Device Enumeration
 
+    /// True after the first successful `refreshDevices` call has populated
+    /// initial source selections. Once set, subsequent refreshes don't
+    /// override `nil` selections — that lets the user explicitly choose
+    /// "None" without it being clobbered by the next device-poll tick.
+    private var didApplyInitialDefaults = false
+
     func refreshDevices() async {
         // Screens — may fail if screen recording permission not granted
         do {
@@ -474,12 +511,10 @@ final class RecordingCoordinator {
             )
             screenPermissionDenied = false
             availableDisplays = content.displays
-            // If the previously-selected display is no longer available,
-            // fall back to the first one.
+            // If the previously-selected display has gone away, fall back
+            // to the first available one.
             if let current = selectedDisplay,
                !availableDisplays.contains(where: { $0.displayID == current.displayID }) {
-                selectedDisplay = availableDisplays.first
-            } else if selectedDisplay == nil {
                 selectedDisplay = availableDisplays.first
             }
         } catch let error as NSError {
@@ -502,8 +537,6 @@ final class RecordingCoordinator {
         if let current = selectedCamera,
            !availableCameras.contains(where: { $0.uniqueID == current.uniqueID }) {
             selectedCamera = availableCameras.first
-        } else if selectedCamera == nil {
-            selectedCamera = availableCameras.first
         }
 
         // Microphones
@@ -516,8 +549,20 @@ final class RecordingCoordinator {
         if let current = selectedMicrophone,
            !availableMicrophones.contains(where: { $0.uniqueID == current.uniqueID }) {
             selectedMicrophone = availableMicrophones.first
-        } else if selectedMicrophone == nil {
-            selectedMicrophone = availableMicrophones.first
+        }
+
+        // First-time defaults: pick the first display, first camera, and the
+        // *system default* microphone. Subsequent refreshes don't auto-fill
+        // nil selections — that's what the user is asking for when they pick
+        // "None."
+        if !didApplyInitialDefaults {
+            if selectedDisplay == nil { selectedDisplay = availableDisplays.first }
+            if selectedCamera == nil { selectedCamera = availableCameras.first }
+            if selectedMicrophone == nil {
+                selectedMicrophone = AVCaptureDevice.default(for: .audio)
+                    ?? availableMicrophones.first
+            }
+            didApplyInitialDefaults = true
         }
     }
 
@@ -538,6 +583,14 @@ final class RecordingCoordinator {
     private func updateCameraOverlayVisibility() {
         let activeStates: Set<RecordingState> = [.countingDown, .recording, .paused]
         guard activeStates.contains(state) else {
+            cameraOverlay?.hide()
+            return
+        }
+
+        // No camera selected → never show the on-screen camera overlay,
+        // regardless of mode. (Mode wouldn't be a camera-bearing mode in
+        // that case anyway, but be explicit.)
+        guard selectedCamera != nil else {
             cameraOverlay?.hide()
             return
         }

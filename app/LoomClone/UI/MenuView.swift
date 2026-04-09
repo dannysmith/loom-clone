@@ -34,10 +34,14 @@ struct MenuView: View {
                             options: coordinator.availableDisplays.map {
                                 .init(id: $0.displayID, label: displayName(for: $0))
                             },
+                            includeNone: true,
                             onSelect: { id in
                                 coordinator.selectedDisplay = coordinator.availableDisplays.first {
                                     $0.displayID == id
                                 }
+                            },
+                            onSelectNone: {
+                                coordinator.selectedDisplay = nil
                             }
                         )
                         .frame(maxWidth: .infinity)
@@ -50,10 +54,14 @@ struct MenuView: View {
                             options: coordinator.availableCameras.map {
                                 .init(id: $0.uniqueID, label: $0.localizedName)
                             },
+                            includeNone: true,
                             onSelect: { id in
                                 coordinator.selectedCamera = coordinator.availableCameras.first {
                                     $0.uniqueID == id
                                 }
+                            },
+                            onSelectNone: {
+                                coordinator.selectedCamera = nil
                             }
                         )
                         .frame(maxWidth: .infinity)
@@ -66,10 +74,14 @@ struct MenuView: View {
                             options: coordinator.availableMicrophones.map {
                                 .init(id: $0.uniqueID, label: $0.localizedName)
                             },
+                            includeNone: true,
                             onSelect: { id in
                                 coordinator.selectedMicrophone = coordinator.availableMicrophones.first {
                                     $0.uniqueID == id
                                 }
+                            },
+                            onSelectNone: {
+                                coordinator.selectedMicrophone = nil
                             }
                         )
                         .frame(maxWidth: .infinity)
@@ -85,25 +97,27 @@ struct MenuView: View {
 
             Divider()
 
-            // Mode picker
-            Picker("Mode", selection: $coordinator.mode) {
-                ForEach(RecordingMode.allCases, id: \.self) { mode in
-                    Label(mode.displayName, systemImage: mode.systemImage)
-                        .tag(mode)
+            // Mode picker — only shown when more than one mode is reachable.
+            // With one source selected, the mode is implicit.
+            if coordinator.availableModes.count > 1 {
+                Picker("Mode", selection: $coordinator.mode) {
+                    ForEach(coordinator.availableModes, id: \.self) { mode in
+                        Label(mode.displayName, systemImage: mode.systemImage)
+                            .tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
 
-            // Output preset picker. 4K is greyed out when the source can't
-            // actually deliver it (screen < 2160 in screen-bearing modes,
-            // camera < 2160 in camera-only mode).
+            // Output preset picker. 4K is hidden when no selected source can
+            // natively feed it.
             qualityPicker
 
             // Record button — disabled if any prerequisite isn't satisfied
             let canRecord = coordinator.state == .idle
                 && !coordinator.screenPermissionDenied
-                && coordinator.selectedDisplay != nil
+                && !coordinator.availableModes.isEmpty
                 && coordinator.serverReachable
 
             Button(action: onRecord) {
@@ -152,8 +166,30 @@ struct MenuView: View {
     ///   - cameraOnly      → live camera feed (full frame)
     ///   - screenOnly      → periodic screenshot of the selected display
     ///   - screenAndCamera → screenshot as background + camera PiP circle
+    ///   - no sources      → "Select an input above" placeholder
     @ViewBuilder
     private var previewArea: some View {
+        if coordinator.availableModes.isEmpty {
+            ZStack {
+                Color.black.opacity(0.3)
+                VStack(spacing: 4) {
+                    Image(systemName: "video.slash")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("Select an input above")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            previewContent
+        }
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
         ZStack(alignment: .bottomTrailing) {
             // Invisible flexible base layer. The ZStack's width is the max
             // of its children's returned widths, and the set of children

@@ -116,7 +116,7 @@ actor RecordingActor {
     /// caches — but no PTS values have been assigned yet and the writer
     /// session is not yet open.
     func prepareRecording(
-        displayID: CGDirectDisplayID,
+        displayID: CGDirectDisplayID?,
         cameraID: String?,
         microphoneID: String?,
         mode: RecordingMode,
@@ -134,15 +134,22 @@ actor RecordingActor {
         metronomeTickIdx = 0
         timeline = RecordingTimelineBuilder()
 
-        // Resolve devices from identifiers
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
-            throw RecordingError.displayNotFound
-        }
-
-        // Find our own application to exclude our windows (recording panel, camera overlay) from capture
-        let ourApp = content.applications.first {
-            $0.processID == ProcessInfo.processInfo.processIdentifier
+        // Resolve devices from identifiers. SCShareableContent is only needed
+        // when there's actually a display to capture — fetching it requires
+        // screen recording permission, which the user shouldn't need to grant
+        // for a camera-only recording.
+        var display: SCDisplay?
+        var ourApp: SCRunningApplication?
+        if let displayID {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let resolved = content.displays.first(where: { $0.displayID == displayID }) else {
+                throw RecordingError.displayNotFound
+            }
+            display = resolved
+            // Find our own application to exclude our windows (recording panel, camera overlay) from capture
+            ourApp = content.applications.first {
+                $0.processID == ProcessInfo.processInfo.processIdentifier
+            }
         }
 
         let camera: AVCaptureDevice? = cameraID.flatMap { AVCaptureDevice(uniqueID: $0) }
@@ -155,11 +162,13 @@ actor RecordingActor {
         timeline.setSession(id: session.id, slug: session.slug, initialMode: mode)
         timeline.setPreset(preset)
         timeline.setInputs(
-            display: .init(
-                id: UInt32(display.displayID),
-                width: display.width,
-                height: display.height
-            ),
+            display: display.map {
+                .init(
+                    id: UInt32($0.displayID),
+                    width: $0.width,
+                    height: $0.height
+                )
+            },
             camera: camera.map {
                 .init(uniqueID: $0.uniqueID, name: $0.localizedName)
             },
@@ -195,9 +204,11 @@ actor RecordingActor {
         // 4. Wire capture callbacks. Frames that arrive now will populate the
         // caches but won't be encoded — the metronome only starts in commit()
         // and `recordingStartTime` is still nil so audio samples are dropped.
-        screenCapture.onScreenFrame = { [weak self] buffer in
-            guard let self else { return }
-            Task { await self.handleScreenFrame(buffer) }
+        if display != nil {
+            screenCapture.onScreenFrame = { [weak self] buffer in
+                guard let self else { return }
+                Task { await self.handleScreenFrame(buffer) }
+            }
         }
 
         if camera != nil {
@@ -225,7 +236,9 @@ actor RecordingActor {
         // complete before returning, so by the time these awaits resolve every
         // source is genuinely live.
         audioHasArrived = false
-        try await screenCapture.startCapture(display: display, excludingApp: ourApp)
+        if let display {
+            try await screenCapture.startCapture(display: display, excludingApp: ourApp)
+        }
         if let camera {
             // Cap camera capture at the preset height. No point decoding a 4K
             // camera stream just to downscale to 1080p in the compositor.

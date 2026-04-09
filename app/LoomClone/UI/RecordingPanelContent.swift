@@ -76,18 +76,23 @@ struct RecordingPanelContent: View {
             .buttonStyle(.plain)
             .help("Discard Recording")
 
-            Divider()
-                .frame(height: 24)
+            // Mode buttons — only the modes valid for this recording's
+            // source set. Devices can't change mid-recording, so the set
+            // is fixed at start. When only one mode is available the strip
+            // and its surrounding dividers collapse entirely.
+            if coordinator.availableModes.count > 1 {
+                Divider()
+                    .frame(height: 24)
 
-            // Mode buttons
-            ForEach(RecordingMode.allCases, id: \.self) { mode in
-                Button(action: { coordinator.switchMode(to: mode) }) {
-                    Image(systemName: mode.systemImage)
-                        .font(.body)
-                        .foregroundStyle(coordinator.mode == mode ? .primary : .secondary)
+                ForEach(coordinator.availableModes, id: \.self) { mode in
+                    Button(action: { coordinator.switchMode(to: mode) }) {
+                        Image(systemName: mode.systemImage)
+                            .font(.body)
+                            .foregroundStyle(coordinator.mode == mode ? .primary : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(mode.displayName)
                 }
-                .buttonStyle(.plain)
-                .help(mode.displayName)
             }
 
             Divider()

@@ -8,6 +8,17 @@ actor UploadActor {
     private var pendingSegments: [VideoSegment] = []
     private var isUploading = false
 
+    /// Fired after each segment upload attempt finishes (success or final
+    /// failure). Used by RecordingActor to fold results into the timeline.
+    /// `error` is nil on success.
+    private var onUploadResult: (@Sendable (_ filename: String, _ success: Bool, _ error: String?) -> Void)?
+
+    func setOnUploadResult(
+        _ handler: @escaping @Sendable (_ filename: String, _ success: Bool, _ error: String?) -> Void
+    ) {
+        self.onUploadResult = handler
+    }
+
     init(serverBaseURL: String = "http://localhost:3000") {
         self.serverBaseURL = serverBaseURL
     }
@@ -57,6 +68,7 @@ actor UploadActor {
     private func uploadSegment(_ segment: VideoSegment, attempt: Int = 1) async {
         guard let videoId else {
             print("[upload] No video session — dropping segment \(segment.filename)")
+            onUploadResult?(segment.filename, false, "no session")
             return
         }
 
@@ -72,6 +84,7 @@ actor UploadActor {
                 throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
             }
             print("[upload] Uploaded \(segment.filename) (\(segment.data.count) bytes)")
+            onUploadResult?(segment.filename, true, nil)
         } catch {
             if attempt < 3 {
                 print("[upload] Retry \(attempt) for \(segment.filename): \(error)")
@@ -79,14 +92,17 @@ actor UploadActor {
                 await uploadSegment(segment, attempt: attempt + 1)
             } else {
                 print("[upload] Failed to upload \(segment.filename) after 3 attempts: \(error)")
+                onUploadResult?(segment.filename, false, "\(error)")
             }
         }
     }
 
     // MARK: - Complete
 
-    /// Signal recording complete. Waits for pending uploads, then calls the server.
-    func complete() async throws -> String {
+    /// Signal recording complete. Waits for pending uploads, then calls the
+    /// server. If `timeline` is non-nil it's sent as the JSON body under a
+    /// `timeline` key — the server persists it alongside the segments.
+    func complete(timeline: Data? = nil) async throws -> String {
         // Wait for queue to drain
         while isUploading || !pendingSegments.isEmpty {
             try await Task.sleep(for: .milliseconds(100))
@@ -98,6 +114,17 @@ actor UploadActor {
 
         var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)/complete")!)
         request.httpMethod = "POST"
+
+        if let timeline {
+            // Wrap the already-encoded timeline bytes inside `{ "timeline": ... }`.
+            // Doing it as raw byte concatenation avoids a decode+re-encode round trip.
+            var body = Data()
+            body.append(Data("{\"timeline\":".utf8))
+            body.append(timeline)
+            body.append(Data("}".utf8))
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {

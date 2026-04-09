@@ -23,6 +23,11 @@ actor RecordingActor {
     private var isRecording = false
     private var localSavePath: URL?
 
+    /// Structured account of the recording — metadata + events + segments.
+    /// Written to `recording.json` alongside the segments and uploaded to the
+    /// server as part of the complete payload.
+    private var timeline = RecordingTimelineBuilder()
+
     /// Set when the first audio sample arrives from the mic.
     /// Used to ensure audio hardware is active before starting the writer,
     /// so the init segment includes both video and audio tracks.
@@ -124,6 +129,7 @@ actor RecordingActor {
         latestScreenFrame = nil
         latestCameraFrame = nil
         metronomeTickIdx = 0
+        timeline = RecordingTimelineBuilder()
 
         // Resolve devices from identifiers
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -141,6 +147,29 @@ actor RecordingActor {
 
         // 1. Create server session
         let session = try await upload.createSession()
+
+        // Populate timeline session + inputs now that we've resolved devices.
+        timeline.setSession(id: session.id, slug: session.slug, initialMode: mode)
+        timeline.setInputs(
+            display: .init(
+                id: UInt32(display.displayID),
+                width: display.width,
+                height: display.height
+            ),
+            camera: camera.map {
+                .init(uniqueID: $0.uniqueID, name: $0.localizedName)
+            },
+            microphone: microphone.map {
+                .init(uniqueID: $0.uniqueID, name: $0.localizedName)
+            }
+        )
+
+        // Wire upload-result callback into the timeline. This fires on the
+        // upload actor and hops back into us to record the result.
+        await upload.setOnUploadResult { [weak self] filename, success, error in
+            guard let self else { return }
+            Task { await self.recordUploadResult(filename: filename, success: success, error: error) }
+        }
 
         // 2. Set up local safety net directory
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -222,6 +251,9 @@ actor RecordingActor {
         lastEmittedVideoPTS = .invalid
         isRecording = true
 
+        // Anchor the timeline at the same moment.
+        timeline.markStarted()
+
         // Open the writer session
         await writer.startWriting()
 
@@ -243,6 +275,12 @@ actor RecordingActor {
     func stopRecording() async -> String? {
         isRecording = false
 
+        // Finalise the timeline BEFORE finishing the writer so the stop event
+        // is timestamped at the user-visible stop moment, not after the
+        // (potentially slow) finishWriting completion.
+        let logicalDuration = logicalElapsedSeconds()
+        timeline.markStopped(logicalDuration: logicalDuration)
+
         // Stop the metronome first so no more frames get appended
         await cancelMetronome()
 
@@ -251,16 +289,41 @@ actor RecordingActor {
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
 
-        // Finish writer
+        // Finish writer (may emit final segments which go through handleSegment
+        // and append to the timeline).
         await writer.finish()
 
-        // Complete upload
+        // Build and persist the timeline file locally, next to the segments.
+        let builtTimeline = timeline.build()
+        let timelineData = encodeTimeline(builtTimeline)
+
+        if let localDir = localSavePath, let data = timelineData {
+            let path = localDir.appendingPathComponent("recording.json")
+            do {
+                try data.write(to: path)
+            } catch {
+                print("[recording] Failed to write local timeline: \(error)")
+            }
+        }
+
+        // Complete upload (includes the timeline in the payload)
         do {
-            let url = try await upload.complete()
+            let url = try await upload.complete(timeline: timelineData)
             print("[recording] Stopped, URL: \(url)")
             return url
         } catch {
             print("[recording] Complete failed: \(error)")
+            return nil
+        }
+    }
+
+    private func encodeTimeline(_ timeline: RecordingTimeline) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            return try encoder.encode(timeline)
+        } catch {
+            print("[recording] Failed to encode timeline: \(error)")
             return nil
         }
     }
@@ -306,6 +369,8 @@ actor RecordingActor {
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         pauseStartHostTime = now
 
+        timeline.recordPaused(t: logicalElapsedSeconds())
+
         // The audio path also tracks pauses (in TimestampAdjuster) so post-resume
         // mic samples retime correctly. Both accumulators must advance together.
         await writer.pause(at: now)
@@ -316,20 +381,46 @@ actor RecordingActor {
 
         // Add the pause duration to our accumulator so subsequent video frames
         // continue from the same logical time as the last pre-pause frame.
+        var pauseSeconds: Double = 0
         if let pauseStart = pauseStartHostTime {
             let pauseDuration = now - pauseStart
             pauseAccumulator = pauseAccumulator + pauseDuration
+            pauseSeconds = pauseDuration.seconds
         }
         pauseStartHostTime = nil
+
+        timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: pauseSeconds)
 
         await writer.resume(at: now)
         startMetronome()
     }
 
+    /// Logical recording time in seconds (wall elapsed minus time spent paused).
+    /// Returns 0 before commit. Used for timeline event timestamps so events on
+    /// the timeline line up with segment PTS values.
+    private func logicalElapsedSeconds() -> Double {
+        guard let start = recordingStartTime else { return 0 }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        return ((now - start) - pauseAccumulator).seconds
+    }
+
+    /// Called from the upload actor callback to fold upload results into the
+    /// timeline. `t` is captured at the moment the callback fires.
+    func recordUploadResult(filename: String, success: Bool, error: String?) {
+        timeline.recordUploadResult(
+            filename: filename,
+            success: success,
+            error: error,
+            t: logicalElapsedSeconds()
+        )
+    }
+
     // MARK: - Mode Switch
 
     func switchMode(to newMode: RecordingMode) {
+        let previous = mode
         mode = newMode
+        timeline.recordModeSwitch(from: previous, to: newMode, t: timeline.now())
         print("[recording] Mode switched to: \(newMode)")
     }
 
@@ -503,6 +594,18 @@ actor RecordingActor {
     // MARK: - Segment Handling
 
     private func handleSegment(_ segment: VideoSegment) async {
+        // Record in the timeline before uploading so the emit event is
+        // definitely ordered before any upload result event.
+        if segment.type == .media {
+            timeline.recordSegment(
+                index: segment.index,
+                filename: segment.filename,
+                bytes: segment.data.count,
+                duration: segment.duration,
+                emittedAt: logicalElapsedSeconds()
+            )
+        }
+
         // Upload to server
         await upload.enqueue(segment)
 

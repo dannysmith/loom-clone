@@ -53,6 +53,23 @@ videos.post("/:id/complete", async (c) => {
   const playlist = buildPlaylist(video);
   await writePlaylist(id, playlist);
 
+  // If a timeline JSON was sent in the body, persist it alongside the
+  // segments. The client writes this file locally too; the server copy is
+  // the authoritative one post-upload.
+  const contentType = c.req.header("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const body = (await c.req.json()) as { timeline?: unknown };
+      if (body.timeline) {
+        const path = join("data", id, "recording.json");
+        await Bun.write(path, JSON.stringify(body.timeline, null, 2));
+        console.log(`[complete] timeline saved: ${id}/recording.json`);
+      }
+    } catch (err) {
+      console.error(`[complete] failed to parse timeline body:`, err);
+    }
+  }
+
   const url = `/v/${video.slug}`;
   console.log(`[complete] ${video.slug} -> ${url}`);
   return c.json({ url, slug: video.slug });

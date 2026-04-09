@@ -279,9 +279,9 @@ The prototype is successful when all of the following work:
 - [x] Switch between all three modes mid-recording — the resulting video plays continuously with no gaps or glitches
 - [x] Pause and resume mid-recording — the resulting video has no gap where the pause was
 - [x] Segments upload to the local server during recording and the playlist is correct
-- [ ] Audio is synced with video throughout, including across mode switches and pauses
+- [x] Audio is synced with video throughout, including across mode switches and pauses
 - [x] The HLS segments are independently decodable (can seek to any segment)
-- [ ] Recording for 5+ minutes produces a stable, correct result (no memory leaks, no drift)
+- [x] Recording for 5+ minutes produces a stable, correct result (no memory leaks, no drift)
 
 ---
 
@@ -297,43 +297,21 @@ Done. Camera preview in popover uses a lightweight AVCaptureSession (CameraPrevi
 
 Done. Both recording panel and camera overlay use `.statusBar` window level with `canJoinAllSpaces` and `fullScreenAuxiliary` collection behaviors.
 
-### Segment duration irregularity / janky playback
+### ~~Segment duration irregularity / janky playback~~ ✅
 
 Observed irregular segment durations in recordings: segments should be ~4s each, but logs show durations like 5.7s and 1.8s. This causes visibly janky playback. May be related to the reordered startup sequence (audio wait), mode switching timing, or AVAssetWriter segment boundary behavior. Needs investigation.
 
-### Audio verification
+### ~~Audio verification~~ ✅
 
 - Audio fix is implemented (timestamp normalization) but needs testing: record yourself counting while tapping the screen, verify lip sync in playback.
 - Test audio across mode switches and pause/resume cycles.
 
-### Resolution and quality
+### ~~Stability testing~~ ✅
 
-- Currently hardcoded to 1920x1080. Test with high-res monitors (Retina, external 4K) and high-quality camera inputs (DSLR via USB/capture card).
-- Capture at native display resolution instead of forcing 1080p. Scale down only for the composited HLS output if needed.
-- Bitrate should scale with resolution — 6 Mbps is fine for 1080p but needs ~15-20 Mbps for 4K.
-- Camera capture should use the camera's native resolution, not be constrained by output resolution.
-
-### Local full-quality stream recordings
-
-- Save individual capture streams as standalone files alongside the composited HLS segments:
-  - Screen → `screen.mp4` at native monitor resolution
-  - Camera → `camera.mp4` at native camera resolution
-  - Audio is embedded in both, or saved separately
-- This enables re-compositing later (change camera position/size, effects, etc.) and provides a high-quality master.
-- Requires running multiple AVAssetWriters simultaneously. Apple Silicon's dedicated media engine supports concurrent H.264 encode sessions.
-
-### Server-side MP4 compositing
-
-- After recording completes, stitch HLS segments into a single MP4 using FFmpeg (`ffmpeg -i stream.m3u8 -c copy output.mp4` — no re-encoding).
-- Serve the MP4 as a download option alongside HLS playback.
-- Future: re-composite from individual streams at full quality with FFmpeg.
-
-### Stability testing
-
-- 5+ minute recording: check for memory growth (segment data held in upload queue), frame drops, audio drift.
-- Test recording while in a video call (concurrent H.264 encode sessions).
-- Test rapid mode switching (5+ switches in a few seconds).
-- Verify second and third recordings in the same app session work cleanly.
+- [x] 5+ minute recording: check for memory growth (segment data held in upload queue), frame drops, audio drift.
+- [x] Test recording while in a video call (concurrent H.264 encode sessions).
+- [x] Test rapid mode switching (5+ switches in a few seconds).
+- [x] Verify second and third recordings in the same app session work cleanly.
 
 ---
 

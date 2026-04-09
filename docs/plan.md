@@ -236,7 +236,7 @@ CREATE VIRTUAL TABLE videos_fts USING fts5(
 - Cloudflare Workers deployment
 - DNS for `v.danny.is`
 
-### Phase 2: Polish
+## Ideas for Later
 
 - On-device transcription via WhisperKit, transcript uploaded alongside video metadata
 - AI-generated titles and summaries from transcript
@@ -246,9 +246,6 @@ CREATE VIRTUAL TABLE videos_fts USING fts5(
 - Keyboard shortcut configuration for recording controls
 - Basic metadata editing in the desktop app (title, slug) without opening a browser
 - Post-stop UI in desktop app (copy link, edit title, open video page, trash)
-
-### Phase 3: Long Tail
-
 - Iframely listing for Notion auto-embed
 - Thumbnail selection and editing
 - Transcript with clickable timestamps synced to video playback

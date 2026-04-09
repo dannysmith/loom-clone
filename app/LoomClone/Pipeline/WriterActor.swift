@@ -40,14 +40,17 @@ actor WriterActor {
         writer.delegate = delegate
         self.writerDelegate = delegate
 
-        // Video input: H.264 High Profile, 6 Mbps
+        // Video input: H.264 High Profile, 6 Mbps.
+        // Only the 2s duration-based keyframe trigger is set — the frame-count
+        // trigger (every 60 frames) would fight it at variable input rates and
+        // produce unpredictable keyframe placement, which in turn skews segment
+        // boundaries since AVAssetWriter closes segments at keyframes.
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: CompositionActor.outputWidth,
             AVVideoHeightKey: CompositionActor.outputHeight,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: 6_000_000,
-                AVVideoMaxKeyFrameIntervalKey: 60,
                 AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoExpectedSourceFrameRateKey: 30,
@@ -98,14 +101,17 @@ actor WriterActor {
         print("[writer] Started writing")
     }
 
+    /// Append a video sample buffer whose PTS is already in final form.
+    /// The metronome in RecordingActor emits frames with PTS =
+    /// `primingOffset + frameIdx / 30` and handles pause by not advancing
+    /// `frameIdx`, so this path intentionally bypasses `TimestampAdjuster` —
+    /// the adjuster's pause accumulator only applies to audio.
     func appendVideo(_ sampleBuffer: CMSampleBuffer) {
-        guard !isPaused,
-              hasStartedSession,
+        guard hasStartedSession,
               let videoInput,
               videoInput.isReadyForMoreMediaData else { return }
 
-        guard let adjusted = timestampAdjuster.adjust(sampleBuffer) else { return }
-        videoInput.append(adjusted)
+        videoInput.append(sampleBuffer)
     }
 
     func appendAudio(_ sampleBuffer: CMSampleBuffer) {
@@ -138,6 +144,18 @@ actor WriterActor {
 
     func finish() async {
         guard let writer else { return }
+
+        // If the session never started (e.g. cancelled during prepare/countdown),
+        // there's nothing to finish — finishWriting() on an unstarted writer
+        // throws "AVAssetWriterStatusUnknown" errors. Just clean up state.
+        guard hasStartedSession else {
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            self.hasStartedSession = false
+            return
+        }
+
         // No manual flushSegment() — only valid when preferredOutputSegmentInterval is .indefinite.
         // finishWriting() automatically flushes any remaining data as a final segment.
 
@@ -154,6 +172,7 @@ actor WriterActor {
         self.writer = nil
         self.videoInput = nil
         self.audioInput = nil
+        self.hasStartedSession = false
     }
 
     // MARK: - Segment Handling

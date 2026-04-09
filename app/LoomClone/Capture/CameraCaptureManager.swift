@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreMedia
 
 final class CameraCaptureManager: NSObject, @unchecked Sendable {
@@ -52,16 +52,27 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         session.commitConfiguration()
         self.session = session
 
-        // startRunning blocks — dispatch to background
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
-            print("[camera] Capture started: \(device.localizedName)")
+        // startRunning() blocks until the session is actually running. Wait for
+        // it to complete before returning so callers don't race against the
+        // hardware coming up.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+                continuation.resume()
+            }
         }
+        print("[camera] Capture started: \(device.localizedName)")
     }
 
-    func stopCapture() {
-        session?.stopRunning()
-        session = nil
+    func stopCapture() async {
+        guard let session else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.stopRunning()
+                continuation.resume()
+            }
+        }
+        self.session = nil
         print("[camera] Capture stopped")
     }
 }

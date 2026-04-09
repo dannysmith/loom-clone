@@ -3,6 +3,11 @@ import CoreMedia
 /// Handles audio priming offset and pause/resume timestamp manipulation.
 /// Used within WriterActor — not thread-safe on its own.
 struct TimestampAdjuster {
+    /// Canonical offset applied to all timestamps to handle AAC audio priming.
+    /// The metronome in RecordingActor references this so video and audio PTS
+    /// land on the same zero-point after the writer starts its session.
+    static let defaultPrimingOffset = CMTime(seconds: 10, preferredTimescale: 600)
+
     /// Offset applied to all timestamps to handle AAC audio priming.
     /// All appended CMSampleBuffers have their PTS shifted by this amount.
     let primingOffset: CMTime
@@ -13,7 +18,7 @@ struct TimestampAdjuster {
     /// Timestamp when the last pause started.
     private var pauseStartTime: CMTime?
 
-    init(primingOffset: CMTime = CMTime(seconds: 10, preferredTimescale: 600)) {
+    init(primingOffset: CMTime = Self.defaultPrimingOffset) {
         self.primingOffset = primingOffset
     }
 

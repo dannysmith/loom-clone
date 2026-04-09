@@ -30,10 +30,13 @@ final class RecordingCoordinator {
     var selectedDisplay: SCDisplay?
     var selectedCamera: AVCaptureDevice? {
         didSet {
-            if let camera = selectedCamera {
-                cameraPreview.start(device: camera)
-            } else {
-                cameraPreview.stop()
+            let camera = selectedCamera
+            Task { @MainActor in
+                if let camera {
+                    await cameraPreview.start(device: camera)
+                } else {
+                    await cameraPreview.stop()
+                }
             }
         }
     }
@@ -47,6 +50,15 @@ final class RecordingCoordinator {
     // MARK: - Permissions
 
     private(set) var screenPermissionDenied = false
+
+    // MARK: - Countdown
+
+    /// Seconds remaining in the pre-recording countdown. nil when not counting.
+    /// 3 → 2 → 1 → nil (then state transitions to .recording).
+    private(set) var countdownSeconds: Int?
+
+    /// Total countdown duration. Match Loom's pattern.
+    private static let countdownDuration: Int = 3
 
     // MARK: - Timer
 
@@ -63,6 +75,10 @@ final class RecordingCoordinator {
 
     private var recordingActor: RecordingActor?
 
+    /// In-flight startup task — prepare + countdown + commit. Tracked so the
+    /// user can cancel mid-countdown by hitting Stop.
+    private var startupTask: Task<Void, Never>?
+
     // MARK: - Actions
 
     func startRecording() {
@@ -72,15 +88,15 @@ final class RecordingCoordinator {
             return
         }
 
-        state = .recording
-        recordingStartDate = Date()
+        // Reset run state
         accumulatedBeforePause = 0
         elapsedSeconds = 0
         lastVideoURL = nil
-        startTimer()
+        recordingStartDate = nil
 
-        // Stop preview session to avoid dual-session CMIO conflicts with the recording camera
-        cameraPreview.stop()
+        // Enter the countdown state immediately so the panel renders.
+        state = .countingDown
+        countdownSeconds = Self.countdownDuration
         updateCameraOverlayVisibility()
 
         let actor = RecordingActor()
@@ -91,30 +107,97 @@ final class RecordingCoordinator {
         let micID = selectedMicrophone?.uniqueID
         let currentMode = mode
 
-        Task {
-            // Wire overlay frame callback before starting capture
+        startupTask = Task { @MainActor in
+            // 1. Stop the camera preview and AWAIT it. The recording session
+            // can't start until CMIO has fully released the device, so we
+            // explicitly wait for stopRunning() before proceeding.
+            await cameraPreview.stop()
+
+            // 2. Wire the overlay frame callback before starting captures.
             await actor.setOverlayCallback { [weak self] pixelBuffer in
                 DispatchQueue.main.async {
                     self?.cameraOverlay?.updateFrame(pixelBuffer)
                 }
             }
 
-            do {
-                let _ = try await actor.startRecording(
-                    displayID: displayID,
-                    cameraID: cameraID,
-                    microphoneID: micID,
-                    mode: currentMode
-                )
-            } catch {
-                print("[coordinator] Failed to start recording: \(error)")
-                self.state = .idle
-                self.stopTimer()
+            // 3. Kick off the slow setup (server session, capture hardware,
+            // audio wait) IN PARALLEL with the visible countdown.
+            let prepareTask = Task { () -> (id: String, slug: String)? in
+                do {
+                    return try await actor.prepareRecording(
+                        displayID: displayID,
+                        cameraID: cameraID,
+                        microphoneID: micID,
+                        mode: currentMode
+                    )
+                } catch {
+                    print("[coordinator] prepareRecording failed: \(error)")
+                    return nil
+                }
             }
+
+            // 4. Tick down the countdown: 3 → 2 → 1.
+            for n in stride(from: Self.countdownDuration, through: 1, by: -1) {
+                if Task.isCancelled { break }
+                self.countdownSeconds = n
+                try? await Task.sleep(for: .seconds(1))
+            }
+
+            // 5. Cancellation check — if user hit Stop during countdown, bail.
+            if Task.isCancelled {
+                prepareTask.cancel()
+                _ = await prepareTask.value
+                await actor.cancelPreparation()
+                self.cleanupAfterCancellation()
+                return
+            }
+
+            // 6. Wait for prepare to actually finish (it usually does well
+            // before the countdown ends, but mic startup can be slow).
+            self.countdownSeconds = 0
+            let prepared = await prepareTask.value
+
+            if Task.isCancelled || prepared == nil {
+                await actor.cancelPreparation()
+                self.cleanupAfterCancellation()
+                return
+            }
+
+            // 7. Commit: anchors the recording clock, starts writer, starts metronome.
+            await actor.commitRecording()
+
+            // 8. Transition to recording state.
+            self.countdownSeconds = nil
+            self.state = .recording
+            self.recordingStartDate = Date()
+            self.accumulatedBeforePause = 0
+            self.elapsedSeconds = 0
+            self.startTimer()
+            self.updateCameraOverlayVisibility()
+        }
+    }
+
+    /// Reset state when the startup task is cancelled or fails before commit.
+    private func cleanupAfterCancellation() {
+        countdownSeconds = nil
+        state = .idle
+        recordingActor = nil
+        cameraOverlay?.hide()
+        // Restart preview if a camera is selected
+        if let camera = selectedCamera {
+            Task { await cameraPreview.start(device: camera) }
         }
     }
 
     func stopRecording() {
+        // Stop during countdown: cancel the startup task and clean up.
+        if state == .countingDown {
+            startupTask?.cancel()
+            // The startup task observes Task.isCancelled and runs
+            // cleanupAfterCancellation() on the way out.
+            return
+        }
+
         guard state == .recording || state == .paused else { return }
         state = .stopped
         stopTimer()
@@ -122,7 +205,7 @@ final class RecordingCoordinator {
 
         // Restart camera preview now that recording is done
         if let camera = selectedCamera {
-            cameraPreview.start(device: camera)
+            Task { await cameraPreview.start(device: camera) }
         }
 
         Task {
@@ -224,7 +307,8 @@ final class RecordingCoordinator {
     // MARK: - Camera Overlay
 
     private func updateCameraOverlayVisibility() {
-        guard state == .recording || state == .paused else {
+        let activeStates: Set<RecordingState> = [.countingDown, .recording, .paused]
+        guard activeStates.contains(state) else {
             cameraOverlay?.hide()
             return
         }

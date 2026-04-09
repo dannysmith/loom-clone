@@ -47,7 +47,20 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
 
 extension ScreenCaptureManager: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen else { return }
+        guard type == .screen, sampleBuffer.isValid else { return }
+
+        // SCStream delivers sample buffers with a status attachment. Only
+        // `.complete` frames carry fresh image data — `.idle`, `.blank`,
+        // `.suspended` etc. should be dropped. See SCFrameStatus docs and
+        // Apple's "Capturing screen content in macOS" sample code.
+        guard
+            let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+            let attachments = attachmentsArray.first,
+            let statusRaw = attachments[SCStreamFrameInfo.status] as? Int,
+            let status = SCFrameStatus(rawValue: statusRaw),
+            status == .complete
+        else { return }
+
         onScreenFrame?(sampleBuffer)
     }
 }

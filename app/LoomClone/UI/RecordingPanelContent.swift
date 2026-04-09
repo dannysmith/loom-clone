@@ -5,6 +5,46 @@ struct RecordingPanelContent: View {
     var onStop: () -> Void
 
     var body: some View {
+        if coordinator.state == .countingDown {
+            countdownView
+        } else {
+            recordingControls
+        }
+    }
+
+    @ViewBuilder
+    private var countdownView: some View {
+        HStack(spacing: 12) {
+            // Cancel during countdown
+            Button(action: onStop) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel")
+
+            Divider()
+                .frame(height: 24)
+
+            Text("Starting in")
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            Text("\(coordinator.countdownSeconds ?? 0)")
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .frame(minWidth: 32)
+                .contentTransition(.numericText(countsDown: true))
+                .animation(.easeOut(duration: 0.2), value: coordinator.countdownSeconds)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var recordingControls: some View {
         HStack(spacing: 12) {
             // Stop button
             Button(action: onStop) {

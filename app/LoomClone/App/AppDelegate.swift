@@ -125,8 +125,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleStop() {
+        // If we're cancelling a countdown, just stop and hide — no URL to copy.
+        let wasCountingDown = coordinator.state == .countingDown
+
         coordinator.stopRecording()
         recordingPanel?.hide()
+
+        guard !wasCountingDown else { return }
 
         // Copy URL to clipboard when available
         Task {

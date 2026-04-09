@@ -335,10 +335,6 @@ Observed irregular segment durations in recordings: segments should be ~4s each,
 - Test rapid mode switching (5+ switches in a few seconds).
 - Verify second and third recordings in the same app session work cleanly.
 
-### Recording indicator
-
-- Change the menu bar icon during recording (red dot or pulsing indicator) so the user knows at a glance.
-
 ---
 
 ## Key References

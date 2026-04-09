@@ -47,15 +47,27 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
         session.commitConfiguration()
         self.session = session
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
-            print("[mic] Capture started: \(device.localizedName)")
+        // startRunning() blocks until the session is actually running. Wait for
+        // it to complete before returning so callers don't race against the
+        // hardware coming up.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+                continuation.resume()
+            }
         }
+        print("[mic] Capture started: \(device.localizedName)")
     }
 
-    func stopCapture() {
-        session?.stopRunning()
-        session = nil
+    func stopCapture() async {
+        guard let session else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.stopRunning()
+                continuation.resume()
+            }
+        }
+        self.session = nil
         print("[mic] Capture stopped")
     }
 }

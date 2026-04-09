@@ -99,14 +99,23 @@ actor UploadActor {
 
     // MARK: - Complete
 
-    /// Signal recording complete. Waits for pending uploads, then calls the
-    /// server. If `timeline` is non-nil it's sent as the JSON body under a
-    /// `timeline` key — the server persists it alongside the segments.
-    func complete(timeline: Data? = nil) async throws -> String {
-        // Wait for queue to drain
+    /// Block until every enqueued segment has finished uploading (success or
+    /// final failure). Call this before building the timeline snapshot so
+    /// that upload-result callbacks have had a chance to fold every segment's
+    /// outcome into the builder.
+    func drainQueue() async {
         while isUploading || !pendingSegments.isEmpty {
-            try await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(for: .milliseconds(100))
         }
+    }
+
+    /// Signal recording complete. Assumes `drainQueue()` has already been
+    /// awaited so all uploads are accounted for. If `timeline` is non-nil
+    /// it's sent as the JSON body under a `timeline` key — the server
+    /// persists it alongside the segments.
+    func complete(timeline: Data? = nil) async throws -> String {
+        // Belt-and-braces: drain again in case anything slipped in.
+        await drainQueue()
 
         guard let videoId else {
             throw UploadError.noSession

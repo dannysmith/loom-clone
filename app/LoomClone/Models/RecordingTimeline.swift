@@ -254,7 +254,22 @@ final class RecordingTimelineBuilder {
     // MARK: - Build
 
     func build() -> RecordingTimeline {
-        RecordingTimeline(
+        // Sort events by logical time so the timeline reads in chronological
+        // order even when events were appended slightly out of order (e.g.
+        // `recording.stopped` is recorded before `writer.finish()` runs, but
+        // the final segment is emitted *during* finish — both have correct
+        // `t` values, they just get inserted in the wrong order). Stable sort
+        // preserves insertion order for events that share a `t` (e.g. paused
+        // and resumed at the same frozen logical time).
+        let sortedEvents = events
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.t != rhs.element.t { return lhs.element.t < rhs.element.t }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+
+        return RecordingTimeline(
             schemaVersion: RecordingTimeline.currentSchemaVersion,
             session: .init(
                 id: sessionId,
@@ -269,7 +284,7 @@ final class RecordingTimelineBuilder {
             inputs: inputs,
             encoder: Self.currentEncoder(),
             segments: segments,
-            events: events
+            events: sortedEvents
         )
     }
 

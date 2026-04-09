@@ -179,9 +179,12 @@ actor RecordingActor {
 
         // 3. Configure writer (but don't start yet — commit() does that)
         try await writer.configure()
+        // Await the downstream handling synchronously so that
+        // `writer.finish()` can wait for every trailing segment to be
+        // fully recorded in the timeline and enqueued for upload before
+        // it returns. This is what prevents the stop-flow race.
         await writer.setOnSegmentReady { [weak self] segment in
-            guard let self else { return }
-            Task { await self.handleSegment(segment) }
+            await self?.handleSegment(segment)
         }
 
         // 4. Wire capture callbacks. Frames that arrive now will populate the
@@ -289,11 +292,20 @@ actor RecordingActor {
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
 
-        // Finish writer (may emit final segments which go through handleSegment
-        // and append to the timeline).
+        // Finish writer. Blocks until every trailing segment has been fully
+        // processed by the writer's consumer — i.e. recorded in the timeline
+        // and enqueued for upload. After this line, no more segments can
+        // appear from the encoder.
         await writer.finish()
 
-        // Build and persist the timeline file locally, next to the segments.
+        // Drain the upload queue so every segment's upload result (success
+        // or final failure) has fired its callback and updated the timeline
+        // builder. Without this, trailing segments would be snapshotted as
+        // `uploaded: false` before they'd actually had a chance to upload.
+        await upload.drainQueue()
+
+        // NOW the builder is fully up-to-date: all segments, all pauses,
+        // all mode switches, all upload results. Snapshot it.
         let builtTimeline = timeline.build()
         let timelineData = encodeTimeline(builtTimeline)
 
@@ -657,7 +669,7 @@ actor RecordingActor {
 // MARK: - WriterActor Extension for Callback
 
 extension WriterActor {
-    func setOnSegmentReady(_ handler: @escaping @Sendable (VideoSegment) -> Void) {
+    func setOnSegmentReady(_ handler: @escaping @Sendable (VideoSegment) async -> Void) {
         onSegmentReady = handler
     }
 }

@@ -6,7 +6,11 @@ actor WriterActor {
 
     // MARK: - Segment Callback
 
-    var onSegmentReady: ((VideoSegment) -> Void)?
+    /// Called once per finalised segment. Awaited by the writer's consumer
+    /// loop so that `finish()` can guarantee every segment has been fully
+    /// processed downstream (timeline recorded, upload enqueued) before it
+    /// returns. Making this `async` is load-bearing for stop-flow correctness.
+    var onSegmentReady: (@Sendable (VideoSegment) async -> Void)?
 
     // MARK: - State
 
@@ -18,6 +22,33 @@ actor WriterActor {
     private var isPaused = false
     private var segmentIndex = 0
     private var hasStartedSession = false
+
+    // MARK: - Segment Pipeline
+    //
+    // AVAssetWriterDelegate fires `didOutputSegmentData` on an unknown dispatch
+    // queue. We can't do any async work from there directly, and spawning
+    // detached Tasks makes stop-time ordering undefined (trailing segments
+    // race past `finish()` and miss the timeline + upload queue).
+    //
+    // Instead, the delegate yields into this AsyncStream synchronously. A
+    // single consumer task drains the stream in order and awaits each segment
+    // through the full downstream pipeline. `finish()` closes the stream's
+    // continuation and awaits the consumer — that gives us a hard guarantee
+    // that every trailing segment is fully processed before the writer is
+    // considered done.
+
+    private var segmentStream: AsyncStream<PendingSegment>?
+    private var segmentContinuation: AsyncStream<PendingSegment>.Continuation?
+    private var consumerTask: Task<Void, Never>?
+
+    /// Sendable payload yielded by the delegate. We extract everything we need
+    /// synchronously (duration from the report) so the stream element is a
+    /// fully-Sendable value type — `AVAssetSegmentReport` is not Sendable.
+    private struct PendingSegment: Sendable {
+        let data: Data
+        let isInitialization: Bool
+        let duration: Double?
+    }
 
     init() {
         timestampAdjuster = TimestampAdjuster()
@@ -31,14 +62,41 @@ actor WriterActor {
         writer.preferredOutputSegmentInterval = CMTime(seconds: 4, preferredTimescale: 600)
         writer.initialSegmentStartTime = timestampAdjuster.primingOffset
 
-        // Wire delegate
+        // Set up the segment stream: delegate yields, consumer drains.
+        let (stream, continuation) = AsyncStream.makeStream(of: PendingSegment.self)
+        self.segmentStream = stream
+        self.segmentContinuation = continuation
+
+        // Wire delegate. It runs on some AVFoundation-owned queue so it must
+        // do only synchronous work here: extract the duration from the report
+        // (which is not Sendable and can't cross the stream boundary) and
+        // yield a plain-data struct.
         let delegate = WriterDelegate()
-        delegate.onSegment = { [weak self] data, segmentType, report in
-            guard let self else { return }
-            Task { await self.handleSegment(data: data, type: segmentType, report: report) }
+        delegate.onSegment = { data, segmentType, report in
+            let duration: Double? = {
+                guard let report,
+                      let trackReport = report.trackReports.first else { return nil }
+                return trackReport.duration.seconds
+            }()
+            continuation.yield(
+                PendingSegment(
+                    data: data,
+                    isInitialization: segmentType == .initialization,
+                    duration: duration
+                )
+            )
         }
         writer.delegate = delegate
         self.writerDelegate = delegate
+
+        // Consumer: drains the stream in order, awaiting each segment through
+        // the full downstream pipeline. One hop into the actor per segment.
+        consumerTask = Task { [weak self] in
+            guard let self else { return }
+            for await pending in stream {
+                await self.handlePendingSegment(pending)
+            }
+        }
 
         // Video input: H.264 High Profile, 6 Mbps.
         // Only the 2s duration-based keyframe trigger is set — the frame-count
@@ -149,6 +207,13 @@ actor WriterActor {
         // there's nothing to finish — finishWriting() on an unstarted writer
         // throws "AVAssetWriterStatusUnknown" errors. Just clean up state.
         guard hasStartedSession else {
+            // Still tear down the consumer if one was created by configure().
+            segmentContinuation?.finish()
+            _ = await consumerTask?.value
+            consumerTask = nil
+            segmentStream = nil
+            segmentContinuation = nil
+
             self.writer = nil
             self.videoInput = nil
             self.audioInput = nil
@@ -159,15 +224,27 @@ actor WriterActor {
         // No manual flushSegment() — only valid when preferredOutputSegmentInterval is .indefinite.
         // finishWriting() automatically flushes any remaining data as a final segment.
 
+        // Keep the completion closure trivial so it doesn't capture the
+        // non-Sendable `writer`. Read status/error from the actor AFTER
+        // the continuation resumes — by then the writer is in its terminal
+        // state and the access happens on the actor, not in a Sendable closure.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            writer.finishWriting {
-                print("[writer] Finished writing, status: \(writer.status.rawValue)")
-                if let error = writer.error {
-                    print("[writer] Error: \(error)")
-                }
-                continuation.resume()
-            }
+            writer.finishWriting { continuation.resume() }
         }
+        print("[writer] Finished writing, status: \(writer.status.rawValue)")
+        if let error = writer.error {
+            print("[writer] Error: \(error)")
+        }
+
+        // Close the segment stream and await the consumer so that every
+        // trailing segment — including those flushed inside finishWriting —
+        // has been fully processed by `handlePendingSegment` and the awaited
+        // `onSegmentReady` callback before finish() returns.
+        segmentContinuation?.finish()
+        _ = await consumerTask?.value
+        consumerTask = nil
+        segmentStream = nil
+        segmentContinuation = nil
 
         self.writer = nil
         self.videoInput = nil
@@ -177,30 +254,27 @@ actor WriterActor {
 
     // MARK: - Segment Handling
 
-    private func handleSegment(
-        data: Data,
-        type: AVAssetSegmentType,
-        report: AVAssetSegmentReport?
-    ) {
+    /// Runs on the actor, one-at-a-time, driven by the consumer task. Awaits
+    /// the downstream handler so `finish()` can be sure a segment is fully
+    /// processed end-to-end before it reports completion.
+    private func handlePendingSegment(_ pending: PendingSegment) async {
         let segment: VideoSegment
 
-        switch type {
-        case .initialization:
+        if pending.isInitialization {
             segment = VideoSegment(
                 index: 0,
                 filename: "init.mp4",
-                data: data,
+                data: pending.data,
                 duration: 0,
                 type: .initialization
             )
-            print("[writer] Init segment: \(data.count) bytes")
-
-        case .separable:
-            let duration = extractDuration(from: report) ?? 4.0
+            print("[writer] Init segment: \(pending.data.count) bytes")
+        } else {
+            let duration = pending.duration ?? 4.0
 
             // finishWriting() emits empty trailing segments with 0 duration — skip them
             if duration < 0.01 {
-                print("[writer] Skipping empty segment (\(data.count) bytes, \(String(format: "%.3f", duration))s)")
+                print("[writer] Skipping empty segment (\(pending.data.count) bytes, \(String(format: "%.3f", duration))s)")
                 return
             }
 
@@ -209,24 +283,14 @@ actor WriterActor {
             segment = VideoSegment(
                 index: segmentIndex,
                 filename: filename,
-                data: data,
+                data: pending.data,
                 duration: duration,
                 type: .media
             )
-            print("[writer] Segment \(filename): \(data.count) bytes, \(String(format: "%.3f", duration))s")
-
-        @unknown default:
-            print("[writer] Unknown segment type: \(type)")
-            return
+            print("[writer] Segment \(filename): \(pending.data.count) bytes, \(String(format: "%.3f", duration))s")
         }
 
-        onSegmentReady?(segment)
-    }
-
-    private func extractDuration(from report: AVAssetSegmentReport?) -> Double? {
-        guard let report,
-              let trackReport = report.trackReports.first else { return nil }
-        return trackReport.duration.seconds
+        await onSegmentReady?(segment)
     }
 
     // MARK: - Errors

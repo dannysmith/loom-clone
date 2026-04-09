@@ -53,6 +53,14 @@ export function addSegment(
   video.segments.push({ filename, duration });
 }
 
+export function deleteVideo(id: string): VideoRecord | undefined {
+  const video = videos.get(id);
+  if (!video) return undefined;
+  videos.delete(id);
+  slugIndex.delete(video.slug);
+  return video;
+}
+
 export function completeVideo(id: string): VideoRecord {
   const video = videos.get(id);
   if (!video) throw new Error(`Video ${id} not found`);

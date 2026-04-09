@@ -110,6 +110,33 @@ actor UploadActor {
         return fullURL
     }
 
+    // MARK: - Cancel
+
+    /// Abandon the recording: drop any pending segments and tell the server
+    /// to delete the video. Safe to call even if no session was created.
+    func cancel() async {
+        pendingSegments.removeAll()
+
+        guard let videoId else { return }
+
+        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)")!)
+        request.httpMethod = "DELETE"
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                print("[upload] Cancelled server-side: \(videoId)")
+            } else {
+                print("[upload] Cancel returned status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+            }
+        } catch {
+            print("[upload] Cancel failed: \(error)")
+        }
+
+        self.videoId = nil
+        self.slug = nil
+    }
+
     // MARK: - Types
 
     enum UploadError: Error {

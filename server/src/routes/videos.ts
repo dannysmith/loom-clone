@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { join } from "path";
-import { mkdir } from "fs/promises";
+import { mkdir, rm } from "fs/promises";
 import {
   createVideo,
   getVideo,
   addSegment,
   completeVideo,
+  deleteVideo,
 } from "../lib/store";
 import { buildPlaylist, writePlaylist } from "../lib/playlist";
 
@@ -55,6 +56,18 @@ videos.post("/:id/complete", async (c) => {
   const url = `/v/${video.slug}`;
   console.log(`[complete] ${video.slug} -> ${url}`);
   return c.json({ url, slug: video.slug });
+});
+
+// Cancel/delete a recording
+videos.delete("/:id", async (c) => {
+  const { id } = c.req.param();
+  const video = deleteVideo(id);
+  if (!video) return c.json({ error: "Video not found" }, 404);
+
+  await rm(join("data", id), { recursive: true, force: true });
+
+  console.log(`[delete] ${id} (slug: ${video.slug})`);
+  return c.json({ ok: true });
 });
 
 export default videos;

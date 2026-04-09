@@ -265,6 +265,28 @@ actor RecordingActor {
         }
     }
 
+    /// Cancel a committed recording. Tears down the pipeline like stop(),
+    /// but discards the result: tells the server to delete the video and
+    /// removes the local safety-net copy.
+    func cancelRecording() async {
+        isRecording = false
+
+        await cancelMetronome()
+        await screenCapture.stopCapture()
+        await cameraCapture.stopCapture()
+        await micCapture.stopCapture()
+        await writer.finish()
+
+        await upload.cancel()
+
+        if let localDir = localSavePath {
+            try? FileManager.default.removeItem(at: localDir)
+        }
+        localSavePath = nil
+
+        print("[recording] Cancelled")
+    }
+
     /// Cancel during prepare/countdown — captures may be running but the
     /// writer was never started. Tear down without trying to finalise.
     func cancelPreparation() async {

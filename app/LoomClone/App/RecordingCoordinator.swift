@@ -363,6 +363,49 @@ final class RecordingCoordinator {
         }
     }
 
+    /// Abandon the current recording after a confirmation prompt. Tears
+    /// down the pipeline, deletes the server-side video, and removes the
+    /// local safety-net copy. No-op unless currently recording or paused.
+    @discardableResult
+    func cancelRecording() -> Bool {
+        guard state == .recording || state == .paused else { return false }
+
+        let alert = NSAlert()
+        alert.messageText = "Discard recording?"
+        alert.informativeText = "This will permanently delete the recording. This action cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Keep Recording")
+
+        // Pause while the confirmation is on-screen so we're not burning
+        // disk/CPU on footage the user is about to throw away.
+        let wasRecording = (state == .recording)
+        if wasRecording { pauseRecording() }
+
+        let response = alert.runModal()
+
+        guard response == .alertFirstButtonReturn else {
+            if wasRecording { resumeRecording() }
+            return false
+        }
+
+        state = .stopped
+        stopTimer()
+        cameraOverlay?.hide()
+
+        if isPopoverOpen, let camera = selectedCamera {
+            Task { await cameraPreview.start(device: camera) }
+        }
+
+        Task {
+            await recordingActor?.cancelRecording()
+            self.recordingActor = nil
+            self.lastVideoURL = nil
+            self.state = .idle
+        }
+        return true
+    }
+
     func pauseRecording() {
         guard state == .recording else { return }
         state = .paused

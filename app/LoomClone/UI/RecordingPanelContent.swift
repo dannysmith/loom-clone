@@ -3,6 +3,7 @@ import SwiftUI
 struct RecordingPanelContent: View {
     @Bindable var coordinator: RecordingCoordinator
     var onStop: () -> Void
+    var onCancel: () -> Void
 
     var body: some View {
         if coordinator.state == .countingDown {
@@ -65,6 +66,15 @@ struct RecordingPanelContent: View {
             }
             .buttonStyle(.plain)
             .help(coordinator.state == .paused ? "Resume" : "Pause")
+
+            // Discard / cancel
+            Button(action: onCancel) {
+                Image(systemName: "trash.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Discard Recording")
 
             Divider()
                 .frame(height: 24)

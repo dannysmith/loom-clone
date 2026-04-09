@@ -6,10 +6,16 @@ final class RecordingPanel {
     private var panel: NSPanel?
     private let coordinator: RecordingCoordinator
     private let onStop: () -> Void
+    private let onCancel: () -> Void
 
-    init(coordinator: RecordingCoordinator, onStop: @escaping () -> Void) {
+    init(
+        coordinator: RecordingCoordinator,
+        onStop: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         self.coordinator = coordinator
         self.onStop = onStop
+        self.onCancel = onCancel
     }
 
     func show() {
@@ -52,7 +58,8 @@ final class RecordingPanel {
 
         let content = RecordingPanelContent(
             coordinator: coordinator,
-            onStop: onStop
+            onStop: onStop,
+            onCancel: onCancel
         )
         let hostingView = NSHostingView(rootView: content)
         hostingView.translatesAutoresizingMaskIntoConstraints = false

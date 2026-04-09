@@ -119,9 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showRecordingPanel() {
         if recordingPanel == nil {
-            recordingPanel = RecordingPanel(coordinator: coordinator, onStop: { [weak self] in
-                self?.handleStop()
-            })
+            recordingPanel = RecordingPanel(
+                coordinator: coordinator,
+                onStop: { [weak self] in self?.handleStop() },
+                onCancel: { [weak self] in self?.handleCancel() }
+            )
         }
         recordingPanel?.show()
     }
@@ -130,6 +132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // See the `NSPopoverDelegate` extension below for the lifecycle hooks
     // that start and stop the camera preview.
+
+    func handleCancel() {
+        if coordinator.cancelRecording() {
+            recordingPanel?.hide()
+        }
+    }
 
     func handleStop() {
         // If we're cancelling a countdown, just stop and hide — no URL to copy.

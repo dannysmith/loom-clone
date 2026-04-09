@@ -6,10 +6,6 @@ struct MenuView: View {
     @Bindable var coordinator: RecordingCoordinator
     var onRecord: () -> Void
 
-    /// Width of the left-hand label column in the device picker rows.
-    /// Sized to comfortably fit "Microphone" (the widest label).
-    private let labelColumnWidth: CGFloat = 80
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
 
@@ -18,58 +14,69 @@ struct MenuView: View {
                 serverUnavailableBanner
             }
 
-            // Screen permission banner (shown instead of display picker when denied)
+            // Screen permission banner replaces the Display picker when denied
             if coordinator.screenPermissionDenied {
                 screenPermissionBanner
-            } else if !coordinator.availableDisplays.isEmpty {
-                pickerRow(label: "Display") {
-                    DropdownMenu(
-                        selection: coordinator.selectedDisplay?.displayID,
-                        options: coordinator.availableDisplays.map {
-                            .init(id: $0.displayID, label: displayName(for: $0))
-                        },
-                        onSelect: { id in
-                            coordinator.selectedDisplay = coordinator.availableDisplays.first {
-                                $0.displayID == id
-                            }
-                        }
-                    )
-                }
             }
 
-            // Camera picker
-            if !coordinator.availableCameras.isEmpty {
-                pickerRow(label: "Camera") {
-                    DropdownMenu(
-                        selection: coordinator.selectedCamera?.uniqueID,
-                        options: coordinator.availableCameras.map {
-                            .init(id: $0.uniqueID, label: $0.localizedName)
-                        },
-                        onSelect: { id in
-                            coordinator.selectedCamera = coordinator.availableCameras.first {
-                                $0.uniqueID == id
+            // Device pickers. SwiftUI's own `Picker` wraps `NSPopUpButton`
+            // but leaves its horizontal content-hugging priority at
+            // `defaultHigh`, which is why `.frame(maxWidth: .infinity)`
+            // never actually stretched it. `NativePopUpPicker` wraps
+            // `NSPopUpButton` directly with hugging priority lowered, so
+            // SwiftUI frame modifiers work as expected and `Form.columns`
+            // is able to give all three controls a uniform width.
+            Form {
+                if !coordinator.screenPermissionDenied && !coordinator.availableDisplays.isEmpty {
+                    LabeledContent("Display") {
+                        NativePopUpPicker(
+                            selection: coordinator.selectedDisplay?.displayID,
+                            options: coordinator.availableDisplays.map {
+                                .init(id: $0.displayID, label: displayName(for: $0))
+                            },
+                            onSelect: { id in
+                                coordinator.selectedDisplay = coordinator.availableDisplays.first {
+                                    $0.displayID == id
+                                }
                             }
-                        }
-                    )
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                if !coordinator.availableCameras.isEmpty {
+                    LabeledContent("Camera") {
+                        NativePopUpPicker(
+                            selection: coordinator.selectedCamera?.uniqueID,
+                            options: coordinator.availableCameras.map {
+                                .init(id: $0.uniqueID, label: $0.localizedName)
+                            },
+                            onSelect: { id in
+                                coordinator.selectedCamera = coordinator.availableCameras.first {
+                                    $0.uniqueID == id
+                                }
+                            }
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                if !coordinator.availableMicrophones.isEmpty {
+                    LabeledContent("Microphone") {
+                        NativePopUpPicker(
+                            selection: coordinator.selectedMicrophone?.uniqueID,
+                            options: coordinator.availableMicrophones.map {
+                                .init(id: $0.uniqueID, label: $0.localizedName)
+                            },
+                            onSelect: { id in
+                                coordinator.selectedMicrophone = coordinator.availableMicrophones.first {
+                                    $0.uniqueID == id
+                                }
+                            }
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
                 }
             }
-
-            // Microphone picker
-            if !coordinator.availableMicrophones.isEmpty {
-                pickerRow(label: "Microphone") {
-                    DropdownMenu(
-                        selection: coordinator.selectedMicrophone?.uniqueID,
-                        options: coordinator.availableMicrophones.map {
-                            .init(id: $0.uniqueID, label: $0.localizedName)
-                        },
-                        onSelect: { id in
-                            coordinator.selectedMicrophone = coordinator.availableMicrophones.first {
-                                $0.uniqueID == id
-                            }
-                        }
-                    )
-                }
-            }
+            .formStyle(.columns)
 
             // Preview area — contents depend on mode
             if coordinator.state == .idle {
@@ -133,28 +140,6 @@ struct MenuView: View {
         .frame(width: 300)
     }
 
-    // MARK: - Picker Row Helper
-
-    /// A label + control row where the label has a fixed column width and
-    /// the control fills the remaining space. The HStack is forced to
-    /// `maxWidth: .infinity` and the content gets `layoutPriority(1)` so
-    /// SwiftUI's Picker (which has a sticky intrinsic width based on the
-    /// widest menu item) actually expands to the row width instead of
-    /// shrinking to fit its shortest selection.
-    @ViewBuilder
-    private func pickerRow<Content: View>(
-        label: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .frame(width: labelColumnWidth, alignment: .leading)
-            content()
-                .layoutPriority(1)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: - Preview Area
 
     /// Preview content shown in the popover when idle. Adapts to the current
@@ -165,27 +150,40 @@ struct MenuView: View {
     @ViewBuilder
     private var previewArea: some View {
         ZStack(alignment: .bottomTrailing) {
-            // Background layer — either screen snapshot or black.
+            // Invisible flexible base layer. The ZStack's width is the max
+            // of its children's returned widths, and the set of children
+            // changes with mode (cameraOnly has a single NSViewRepresentable
+            // child; screenAndCamera has an image plus a small fixed-size
+            // camera circle; screenOnly has an image alone). With only
+            // mode-dependent children, SwiftUI re-measured the ZStack on
+            // every mode switch and the reported width drifted by a few
+            // points, producing the small horizontal jitter. A permanent
+            // `Color.clear` child pinned to the proposed size keeps the
+            // ZStack's reported width locked across every mode.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Background layer — screen snapshot or placeholder.
             if coordinator.mode != .cameraOnly {
                 if let img = coordinator.screenPreview.image {
                     Image(decorative: img, scale: 1.0, orientation: .up)
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 } else {
-                    ZStack {
-                        Color.black.opacity(0.4)
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+                    Color.black.opacity(0.4)
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
 
-            // Camera layer — either full-frame or PiP circle.
+            // Camera layer — full-frame or PiP circle.
             if coordinator.mode == .cameraOnly {
                 if coordinator.cameraPreview.isActive {
                     CameraPreviewView(manager: coordinator.cameraPreview)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 } else {
                     Color.black.opacity(0.4)
                 }
@@ -201,8 +199,7 @@ struct MenuView: View {
                     .padding(8)
             }
         }
-        .frame(height: 160)
-        .frame(maxWidth: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }

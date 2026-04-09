@@ -114,10 +114,14 @@ final class RecordingCoordinator {
             await cameraPreview.stop()
 
             // 2. Wire the overlay frame callback before starting captures.
-            await actor.setOverlayCallback { [weak self] pixelBuffer in
-                DispatchQueue.main.async {
-                    self?.cameraOverlay?.updateFrame(pixelBuffer)
-                }
+            // Capture the overlay reference by value (it's Sendable) so the
+            // closure can call enqueue directly from the camera capture queue,
+            // bypassing both the actor and the main thread for per-frame work.
+            // The overlay was created by `updateCameraOverlayVisibility()`
+            // before this task started.
+            let overlay = self.cameraOverlay
+            await actor.setOverlayCallback { [overlay] sampleBuffer in
+                overlay?.enqueue(sampleBuffer)
             }
 
             // 3. Kick off the slow setup (server session, capture hardware,

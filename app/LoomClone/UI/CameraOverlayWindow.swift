@@ -1,25 +1,28 @@
 import AppKit
-import CoreImage
+import AVFoundation
+import CoreMedia
 
-/// Transparent floating window that shows the live camera feed as a circle.
-/// Visible during recording in modes that use the camera (screenAndCamera, cameraOnly).
-/// Draggable. Appears above fullscreen apps and follows Space switches.
+/// Transparent floating window that shows the live camera feed as a circle
+/// during recording. Uses the same `CameraPreviewLayerView` as the popover
+/// preview, fed by sample buffers from the recording's camera capture session.
 ///
-/// Uses frame-based rendering (CALayer + CIContext) instead of AVCaptureVideoPreviewLayer
-/// to avoid dual-session conflicts with CameraCaptureManager during recording.
-@MainActor
-final class CameraOverlayWindow {
+/// Visible during recording in modes that use the camera (screenAndCamera,
+/// cameraOnly). Draggable. Appears above fullscreen apps and follows Space
+/// switches via `.statusBar` window level + `.canJoinAllSpaces` /
+/// `.fullScreenAuxiliary` collection behaviors.
+///
+/// Intentionally NOT `@MainActor` so the capture queue can call `enqueue`
+/// without an actor hop. Methods that manipulate AppKit state (show/hide) are
+/// explicitly `@MainActor`. The `previewView` reference is guarded by the
+/// same convention: mutated only on main, read by `enqueue` on any thread.
+final class CameraOverlayWindow: @unchecked Sendable {
 
-    private var panel: NSPanel?
-    private var imageLayer: CALayer?
-    private let ciContext: CIContext
+    @MainActor private var panel: NSPanel?
+    nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
     let diameter: CGFloat = 240
 
-    init() {
-        ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    }
-
+    @MainActor
     func show(on screen: NSScreen?) {
         if panel != nil {
             panel?.orderFrontRegardless()
@@ -52,41 +55,36 @@ final class CameraOverlayWindow {
         container.layer?.borderWidth = 2
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.3).cgColor
 
-        // Image layer for rendering camera frames
-        let imgLayer = CALayer()
-        imgLayer.frame = container.bounds
-        imgLayer.contentsGravity = .resizeAspectFill
-        container.layer?.addSublayer(imgLayer)
+        // Reuse the same display layer view as the popover preview.
+        let preview = CameraPreviewLayerView(frame: container.bounds)
+        preview.autoresizingMask = [.width, .height]
+        container.addSubview(preview)
 
         panel.contentView = container
         self.panel = panel
-        self.imageLayer = imgLayer
+        self.previewView = preview
 
         positionPanel(on: screen)
         panel.orderFrontRegardless()
     }
 
-    /// Render a camera frame into the overlay. Called from RecordingActor via coordinator.
-    func updateFrame(_ pixelBuffer: CVPixelBuffer) {
-        guard let imageLayer else { return }
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(
-            ciImage,
-            from: CGRect(x: 0, y: 0, width: width, height: height)
-        ) else { return }
-        imageLayer.contents = cgImage
+    /// Enqueue a sample buffer for display. Thread-safe — call from any queue.
+    func enqueue(_ sampleBuffer: CMSampleBuffer) {
+        previewView?.enqueue(sampleBuffer)
     }
 
+    @MainActor
     func hide() {
+        previewView?.flush()
         panel?.orderOut(nil)
         panel = nil
-        imageLayer = nil
+        previewView = nil
     }
 
+    @MainActor
     var isVisible: Bool { panel != nil }
 
+    @MainActor
     private func positionPanel(on screen: NSScreen?) {
         guard let screen = screen ?? NSScreen.main else { return }
         let visibleFrame = screen.visibleFrame

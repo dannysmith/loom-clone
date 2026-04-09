@@ -30,10 +30,15 @@ actor RecordingActor {
 
     // MARK: - Overlay Frame Callback
 
-    private var onCameraFrameForOverlay: (@Sendable (CVPixelBuffer) -> Void)?
+    /// Set by the coordinator to receive raw camera sample buffers for the
+    /// on-screen overlay window. Fired directly from the camera capture queue
+    /// (BEFORE entering this actor) so the overlay isn't blocked by metronome
+    /// scheduling. Stored as a nonisolated property so the camera capture
+    /// callback can read it without an actor hop.
+    nonisolated(unsafe) private var onCameraSampleForOverlay: (@Sendable (CMSampleBuffer) -> Void)?
 
-    func setOverlayCallback(_ callback: @escaping @Sendable (CVPixelBuffer) -> Void) {
-        onCameraFrameForOverlay = callback
+    func setOverlayCallback(_ callback: @escaping @Sendable (CMSampleBuffer) -> Void) {
+        onCameraSampleForOverlay = callback
     }
 
     // MARK: - The Recording Clock
@@ -161,6 +166,12 @@ actor RecordingActor {
         if camera != nil {
             cameraCapture.onCameraFrame = { [weak self] buffer in
                 guard let self else { return }
+                // Fire the overlay callback FIRST, directly from the capture
+                // queue. This bypasses the actor entirely so the on-screen
+                // overlay updates at full camera framerate even when the
+                // metronome is busy.
+                self.onCameraSampleForOverlay?(buffer)
+                // Then enter the actor for the recording-side caching work.
                 Task { await self.handleCameraFrame(buffer) }
             }
         }
@@ -311,16 +322,12 @@ actor RecordingActor {
         latestScreenFrame = pixelBuffer
     }
 
-    /// Camera frames are cached for the metronome and also forwarded to the
-    /// composition actor and the on-screen overlay. The overlay callback is
-    /// fired BEFORE the await on composition so it doesn't queue behind it.
+    /// Camera frames are cached for the metronome and forwarded to the
+    /// composition actor. The on-screen overlay is fed separately, directly
+    /// from the camera capture queue (see `onCameraSampleForOverlay`), so
+    /// it doesn't wait on the actor.
     private func handleCameraFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        // Fire overlay callback first so the on-screen circle stays smooth
-        // even when the composition actor is busy.
-        onCameraFrameForOverlay?(pixelBuffer)
-
         latestCameraFrame = pixelBuffer
         await composition.updateCameraFrame(pixelBuffer)
     }

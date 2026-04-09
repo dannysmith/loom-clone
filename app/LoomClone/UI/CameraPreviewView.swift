@@ -1,55 +1,32 @@
 import SwiftUI
 import AVFoundation
 
-/// NSViewRepresentable that displays an AVCaptureSession's video feed.
-/// Used in the menu popover to show camera preview before recording.
+/// SwiftUI wrapper around `CameraPreviewLayerView`. Wires the supplied
+/// `CameraPreviewManager`'s sample buffer callback to the underlying display
+/// layer so live camera frames render via `AVSampleBufferDisplayLayer`.
+///
+/// Both this view (popover preview) and `CameraOverlayWindow` (in-recording
+/// overlay) use the same `CameraPreviewLayerView` underneath, just fed by
+/// different capture sessions.
 struct CameraPreviewView: NSViewRepresentable {
-    let session: AVCaptureSession?
+    let manager: CameraPreviewManager
 
-    func makeNSView(context: Context) -> CameraPreviewNSView {
-        let view = CameraPreviewNSView()
-        view.updateSession(session)
+    func makeNSView(context: Context) -> CameraPreviewLayerView {
+        let view = CameraPreviewLayerView()
+        manager.onSampleBuffer = { [weak view] sampleBuffer in
+            view?.enqueue(sampleBuffer)
+        }
         return view
     }
 
-    func updateNSView(_ nsView: CameraPreviewNSView, context: Context) {
-        nsView.updateSession(session)
-    }
-}
-
-/// NSView that hosts an AVCaptureVideoPreviewLayer and keeps it sized to the view bounds.
-final class CameraPreviewNSView: NSView {
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-    private var currentSession: AVCaptureSession?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
+    func updateNSView(_ nsView: CameraPreviewLayerView, context: Context) {
+        // Re-wire the callback every update in case SwiftUI swaps the manager.
+        manager.onSampleBuffer = { [weak nsView] sampleBuffer in
+            nsView?.enqueue(sampleBuffer)
+        }
     }
 
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-    }
-
-    func updateSession(_ session: AVCaptureSession?) {
-        guard session !== currentSession else { return }
-        currentSession = session
-
-        previewLayer?.removeFromSuperlayer()
-        previewLayer = nil
-
-        guard let session else { return }
-
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        layer.frame = bounds
-        self.layer?.addSublayer(layer)
-        self.previewLayer = layer
-    }
-
-    override func layout() {
-        super.layout()
-        previewLayer?.frame = bounds
+    static func dismantleNSView(_ nsView: CameraPreviewLayerView, coordinator: ()) {
+        nsView.flush()
     }
 }

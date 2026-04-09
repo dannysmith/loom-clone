@@ -52,9 +52,9 @@ struct MenuView: View {
             }
 
             // Camera preview (shown when idle and camera is available)
-            if coordinator.cameraPreview.session != nil && coordinator.state == .idle {
+            if coordinator.cameraPreview.isActive && coordinator.state == .idle {
                 ZStack {
-                    CameraPreviewView(session: coordinator.cameraPreview.session)
+                    CameraPreviewView(manager: coordinator.cameraPreview)
 
                     // Circle indicator showing the visible area in Screen+Camera mode
                     if coordinator.mode == .screenAndCamera {

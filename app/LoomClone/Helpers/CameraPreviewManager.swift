@@ -1,16 +1,33 @@
 @preconcurrency import AVFoundation
+import CoreMedia
 
-/// Manages a lightweight AVCaptureSession solely for camera preview display.
-/// Used for popover preview (before recording) and the camera overlay (during recording).
-/// This is separate from CameraCaptureManager which handles frame delivery for encoding.
+/// Manages a lightweight AVCaptureSession used to feed live camera frames to
+/// the popover preview before recording starts. Separate from `CameraCaptureManager`
+/// which owns the recording session.
+///
+/// Frames are exposed via `onSampleBuffer` callback (fired from the capture
+/// queue) so consumers can render them through `AVSampleBufferDisplayLayer`.
 @MainActor
 @Observable
-final class CameraPreviewManager {
+final class CameraPreviewManager: NSObject {
 
-    private(set) var session: AVCaptureSession?
+    /// Observable presence flag — true when the preview session is live.
+    /// SwiftUI views read this to decide whether to show the preview area.
+    private(set) var isActive: Bool = false
+
+    /// Set by consumers to receive live sample buffers. Called from the
+    /// capture queue (a high-priority dispatch queue), not the main thread.
+    /// Excluded from `@Observable` tracking — the macro's generated code can't
+    /// coexist with `nonisolated` on a stored property.
+    @ObservationIgnored
+    nonisolated(unsafe) var onSampleBuffer: (@Sendable (CMSampleBuffer) -> Void)?
+
+    private var session: AVCaptureSession?
     private var currentDeviceID: String?
-
-    var isRunning: Bool { session?.isRunning ?? false }
+    private let captureQueue = DispatchQueue(
+        label: "com.loomclone.camera-preview",
+        qos: .userInteractive
+    )
 
     /// Start the preview session for `device`. Awaits the AVCaptureSession's
     /// `startRunning()` so callers know the hardware is actually live before
@@ -21,6 +38,7 @@ final class CameraPreviewManager {
         await stop()
 
         let session = AVCaptureSession()
+        session.beginConfiguration()
         session.sessionPreset = .high
 
         do {
@@ -33,6 +51,17 @@ final class CameraPreviewManager {
             return
         }
 
+        let output = AVCaptureVideoDataOutput()
+        output.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        ]
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: captureQueue)
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+        }
+
+        session.commitConfiguration()
         self.session = session
         self.currentDeviceID = device.uniqueID
 
@@ -42,6 +71,7 @@ final class CameraPreviewManager {
                 continuation.resume()
             }
         }
+        self.isActive = true
         print("[camera-preview] Started: \(device.localizedName)")
     }
 
@@ -58,6 +88,17 @@ final class CameraPreviewManager {
         }
         self.session = nil
         currentDeviceID = nil
+        isActive = false
         print("[camera-preview] Stopped")
+    }
+}
+
+extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+    nonisolated func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        onSampleBuffer?(sampleBuffer)
     }
 }

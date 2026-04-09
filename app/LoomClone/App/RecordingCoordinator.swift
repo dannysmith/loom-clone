@@ -321,7 +321,11 @@ final class RecordingCoordinator {
             if cameraOverlay == nil {
                 cameraOverlay = CameraOverlayWindow()
             }
-            cameraOverlay?.show(on: nil)
+            // Match the overlay shape to the compositor's output:
+            //   - cameraOnly   → full 16:9 frame (rectangle)
+            //   - screenAndCamera → circular PiP (circle)
+            let style: CameraOverlayWindow.Style = (mode == .cameraOnly) ? .rectangle : .circle
+            cameraOverlay?.show(on: nil, style: style)
         } else {
             cameraOverlay?.hide()
         }

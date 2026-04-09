@@ -2,34 +2,70 @@ import AppKit
 import AVFoundation
 import CoreMedia
 
-/// Transparent floating window that shows the live camera feed as a circle
-/// during recording. Uses the same `CameraPreviewLayerView` as the popover
-/// preview, fed by sample buffers from the recording's camera capture session.
+/// Transparent floating window that shows the live camera feed during
+/// recording. Uses the same `CameraPreviewLayerView` as the popover preview,
+/// fed by sample buffers from the recording's camera capture session.
 ///
-/// Visible during recording in modes that use the camera (screenAndCamera,
-/// cameraOnly). Draggable. Appears above fullscreen apps and follows Space
-/// switches via `.statusBar` window level + `.canJoinAllSpaces` /
-/// `.fullScreenAuxiliary` collection behaviors.
+/// Has two visual styles depending on recording mode:
+///   - `.circle`    — 240x240 circular crop, used in screenAndCamera (matches
+///                    the circular PiP that the compositor actually produces)
+///   - `.rectangle` — 360x202 16:9 frame, used in cameraOnly (matches the
+///                    full-frame camera output that goes into the recording)
+///
+/// Draggable. Appears above fullscreen apps and follows Space switches via
+/// `.statusBar` window level + `.canJoinAllSpaces` / `.fullScreenAuxiliary`.
 ///
 /// Intentionally NOT `@MainActor` so the capture queue can call `enqueue`
-/// without an actor hop. Methods that manipulate AppKit state (show/hide) are
-/// explicitly `@MainActor`. The `previewView` reference is guarded by the
-/// same convention: mutated only on main, read by `enqueue` on any thread.
+/// without an actor hop. Methods that manipulate AppKit state are explicitly
+/// `@MainActor`. `previewView` is mutated only on main, and read by `enqueue`
+/// on any thread — the read is a pointer load, atomic on ARM, and the worst
+/// case during a style change is that one frame gets enqueued into the
+/// outgoing preview view, which is harmless.
 final class CameraOverlayWindow: @unchecked Sendable {
 
+    enum Style: Equatable {
+        case circle
+        case rectangle
+
+        var size: NSSize {
+            switch self {
+            case .circle: return NSSize(width: 240, height: 240)
+            case .rectangle: return NSSize(width: 360, height: 202)  // 16:9
+            }
+        }
+
+        var cornerRadius: CGFloat {
+            switch self {
+            case .circle: return 120   // half of 240 → circle
+            case .rectangle: return 12
+            }
+        }
+    }
+
     @MainActor private var panel: NSPanel?
+    @MainActor private var currentStyle: Style = .circle
     nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
-    let diameter: CGFloat = 240
-
+    /// Show (or reconfigure) the overlay with the given style. If the overlay
+    /// is already visible with the same style, just brings it to front. If
+    /// it's visible with a different style, rebuilds in place — the outer
+    /// `CameraOverlayWindow` reference stays valid so callbacks that captured
+    /// it keep working.
     @MainActor
-    func show(on screen: NSScreen?) {
-        if panel != nil {
+    func show(on screen: NSScreen?, style: Style) {
+        if panel != nil && currentStyle == style {
             panel?.orderFrontRegardless()
             return
         }
 
-        let size = NSSize(width: diameter, height: diameter)
+        // Remember the previous position so we don't jump the overlay around
+        // when the user has dragged it somewhere and then switched modes.
+        let previousOrigin = panel?.frame.origin
+
+        tearDownPanel()
+        currentStyle = style
+
+        let size = style.size
 
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -47,15 +83,13 @@ final class CameraOverlayWindow: @unchecked Sendable {
         panel.backgroundColor = .clear
         panel.hasShadow = true
 
-        // Container view with circular mask
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         container.wantsLayer = true
-        container.layer?.cornerRadius = diameter / 2
+        container.layer?.cornerRadius = style.cornerRadius
         container.layer?.masksToBounds = true
         container.layer?.borderWidth = 2
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.3).cgColor
 
-        // Reuse the same display layer view as the popover preview.
         let preview = CameraPreviewLayerView(frame: container.bounds)
         preview.autoresizingMask = [.width, .height]
         container.addSubview(preview)
@@ -64,8 +98,39 @@ final class CameraOverlayWindow: @unchecked Sendable {
         self.panel = panel
         self.previewView = preview
 
-        positionPanel(on: screen)
+        if let previousOrigin {
+            // Preserve the user's dragged position, but clamp the new frame
+            // to the visible screen so a larger size doesn't hang off the
+            // edge (e.g. when switching from the compact circle to the wider
+            // 16:9 rectangle while near the right edge).
+            let proposed = NSRect(origin: previousOrigin, size: size)
+            let clamped = clampedToVisibleFrame(proposed, on: screen)
+            panel.setFrame(clamped, display: false)
+        } else {
+            positionPanel(on: screen)
+        }
         panel.orderFrontRegardless()
+    }
+
+    @MainActor
+    private func clampedToVisibleFrame(_ frame: NSRect, on screen: NSScreen?) -> NSRect {
+        guard let screen = screen ?? NSScreen.main else { return frame }
+        let visible = screen.visibleFrame
+        let edgeMargin: CGFloat = 8
+        var result = frame
+        if result.maxX > visible.maxX - edgeMargin {
+            result.origin.x = visible.maxX - result.width - edgeMargin
+        }
+        if result.minX < visible.minX + edgeMargin {
+            result.origin.x = visible.minX + edgeMargin
+        }
+        if result.maxY > visible.maxY - edgeMargin {
+            result.origin.y = visible.maxY - result.height - edgeMargin
+        }
+        if result.minY < visible.minY + edgeMargin {
+            result.origin.y = visible.minY + edgeMargin
+        }
+        return result
     }
 
     /// Enqueue a sample buffer for display. Thread-safe — call from any queue.
@@ -75,6 +140,11 @@ final class CameraOverlayWindow: @unchecked Sendable {
 
     @MainActor
     func hide() {
+        tearDownPanel()
+    }
+
+    @MainActor
+    private func tearDownPanel() {
         previewView?.flush()
         panel?.orderOut(nil)
         panel = nil
@@ -88,7 +158,8 @@ final class CameraOverlayWindow: @unchecked Sendable {
     private func positionPanel(on screen: NSScreen?) {
         guard let screen = screen ?? NSScreen.main else { return }
         let visibleFrame = screen.visibleFrame
-        let x = visibleFrame.maxX - diameter - 40
+        let size = currentStyle.size
+        let x = visibleFrame.maxX - size.width - 40
         let y = visibleFrame.minY + 40
         panel?.setFrameOrigin(NSPoint(x: x, y: y))
     }

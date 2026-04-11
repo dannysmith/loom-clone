@@ -2,10 +2,11 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
-/// Writes a single capture stream (video or audio) to a standalone MP4 / M4A
-/// file at native quality. Used for the local "high-quality master" files
-/// that live alongside the composited HLS segments — `screen.mp4`,
-/// `camera.mp4`, `audio.m4a`.
+/// Writes a single capture stream (video or audio) to a standalone
+/// MP4 / MOV / M4A file at native quality. Used for the local
+/// "high-quality master" files that live alongside the composited HLS
+/// segments — `screen.mov` (ProRes 422 Proxy, task-0A Phase 2),
+/// `camera.mp4` (H.264), `audio.m4a` (AAC).
 ///
 /// Deliberately much simpler than `WriterActor`:
 /// - No HLS delegate, no segment stream, no `AVAssetSegmentReport`.
@@ -20,7 +21,21 @@ import Foundation
 actor RawStreamWriter {
 
     enum Kind: Sendable {
-        case video(width: Int, height: Int, bitrate: Int)
+        /// H.264 via VideoToolbox on the hardware H.264/HEVC media engine.
+        /// Used for the raw camera writer. Target bitrate, H.264 High Profile,
+        /// 2 s keyframe interval.
+        case videoH264(width: Int, height: Int, bitrate: Int)
+
+        /// ProRes 422 Proxy via the hardware ProRes engine — a separate
+        /// silicon block on M*Pro / M*Max chips, distinct from the H.264
+        /// engine that handles the composited HLS writer and the raw camera
+        /// writer. Used for the raw screen writer to offload the heaviest
+        /// stream off the (single, already contended) H.264 engine on
+        /// M2 Pro-class hardware. ProRes is roughly CBR-per-frame based on
+        /// resolution (~45 Mb/s at 1080p, ~180 Mb/s at 4K) so there's no
+        /// target bitrate to pass. See task-0A Phase 2.
+        case videoProRes(width: Int, height: Int)
+
         case audio(bitrate: Int, sampleRate: Int, channels: Int)
     }
 
@@ -46,7 +61,8 @@ actor RawStreamWriter {
 
         let fileType: AVFileType
         switch kind {
-        case .video: fileType = .mp4
+        case .videoH264: fileType = .mp4
+        case .videoProRes: fileType = .mov
         case .audio: fileType = .m4a
         }
 
@@ -54,12 +70,12 @@ actor RawStreamWriter {
 
         let input: AVAssetWriterInput
         switch kind {
-        case .video(let width, let height, let bitrate):
+        case .videoH264(let width, let height, let bitrate):
             // Deliberately no `AVVideoColorPropertiesKey` here. A previous
             // iteration declared Rec. 709 on the output, which was safe for
             // the raw camera writer (its input buffers are tagged Rec. 709
             // by `CameraCaptureManager`) but **dangerous for the raw screen
-            // writer**: ScreenCaptureKit delivers frames in the display's
+            // writer** — ScreenCaptureKit delivered frames in the display's
             // native colour space (sRGB / Display P3), and declaring Rec. 709
             // output forced AVFoundation to spawn a `videomediaconverter`
             // thread that did GPU-side colour conversion on every frame.
@@ -69,10 +85,9 @@ actor RawStreamWriter {
             // compositing — hung the whole machine (observed 2026-04-11,
             // WindowServer watchdog timeout). Omitting the key lets the
             // writer infer its output colour space from the first input
-            // pixel buffer's attachments, which is exactly what we want:
-            // camera output gets Rec. 709 (from the tagged buffers) and
-            // screen output gets the display's native space (from the
-            // ScreenCaptureKit tags). See task-0A Phase 1.
+            // pixel buffer's attachments, which is what we want: camera
+            // output gets Rec. 709 from the tagged buffers automatically.
+            // See task-0A Phase 1.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
@@ -84,6 +99,24 @@ actor RawStreamWriter {
                     AVVideoExpectedSourceFrameRateKey: 30,
                     AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
                 ] as [String: Any],
+            ]
+            input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+
+        case .videoProRes(let width, let height):
+            // ProRes 422 Proxy via the hardware ProRes engine. No
+            // `AVVideoCompressionPropertiesKey` because ProRes doesn't take
+            // the same settings dict as H.264 — bitrate / keyframe / profile
+            // keys don't apply. No `AVVideoColorPropertiesKey` either: we
+            // let AVFoundation infer the output colour space from the input
+            // pixel buffers, which avoids the GPU-side colour conversion
+            // that caused the WindowServer hang on 2026-04-11 (see the
+            // H.264 case above for the full context). ScreenCaptureKit
+            // frames come tagged with the display's native colour space
+            // and that tag propagates through to the ProRes output.
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.proRes422Proxy,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 

@@ -68,6 +68,25 @@ This fix is orthogonal to the encoder contention — it reduces CIContext worklo
 
 Once we have structured error feedback we can wire up a recovery path: on error, rebuild the `CIContext` + `MTLCommandQueue`; if rebuild also fails, end the recording cleanly with a user-visible error. This is belt-and-braces for unexpected future environments (different cameras, bigger displays, thermal events).
 
+### Historical incident: 2026-04-11 WindowServer hang
+
+Recorded here as load-bearing context for anyone working on future phases — the failure mode we actually hit was worse than the "degraded quality" that motivated this task in the first place, and the cause is instructive.
+
+**What happened.** Mid-way through implementing Phase 1, we added `AVVideoColorPropertiesKey = Rec. 709` to `RawStreamWriter.swift` (both the raw screen and raw camera writers). On the first recording test after that change, the entire Mac hung: mouse frozen, no keyboard response, forced power-button reboot.
+
+**Why.** ScreenCaptureKit delivers pixel buffers in the display's native colour space (sRGB or Display P3 on a Retina Mac) — **not** Rec. 709. By declaring Rec. 709 on the raw screen writer's output, we asked AVFoundation to insert a GPU-side colourspace conversion stage between the input and the hardware encoder. That spawned a `com.apple.coremedia.videomediaconverter` thread which added per-frame GPU work on top of the already-contended three-encoder pipeline. The GPU — shared with WindowServer for display compositing — got wedged. WindowServer's `com.apple.WindowServer.HIDEvents` dispatch queue stopped processing mouse/keyboard events. After 40 seconds of no check-in, WindowServer hit its watchdog timeout (`bug_type 409`) and was killed. There was no kernel panic — it was a userspace watchdog, and the rest of the system was technically alive but unusable without a working WindowServer.
+
+**Diagnostic evidence.** `/Library/Logs/DiagnosticReports/WindowServer-2026-04-11-114809.ips`. Signature: WindowServer's render-server thread (`com.apple.coreanimation.render-server`) was the only TH_RUN thread in the process — everything else including main was TH_WAIT. LoomClone's stackshot showed three `mediaprocessor.videocompression` threads + one `videomediaconverter` thread — the converter is what confirmed the diagnosis, since it only appears in the pipeline when AVFoundation needs to convert colour spaces.
+
+**What we fixed.** Removed `AVVideoColorPropertiesKey` from `RawStreamWriter` entirely. The composited HLS writer (`WriterActor`) still declares it, and that's safe because `CompositionActor.compositeFrame` renders directly into Rec. 709 via `ciContext.render(..., colorSpace: CGColorSpace(name: .itur_709))` — the declared output matches the input, no conversion happens. The camera buffer attachments we set in `CameraCaptureManager` still propagate through to the raw camera writer's output file via `.shouldPropagate` — so `camera.mp4` is still correctly tagged Rec. 709, just without forcing the conversion path on the raw screen writer.
+
+**Lessons for future phases.**
+
+1. **`AVVideoColorPropertiesKey` is a conversion request, not a metadata annotation.** If you declare an output colour space that doesn't match the input, AVFoundation will convert on the GPU. This is not a free metadata tag.
+2. **A "watchdog" is not a "panic".** On Apple Silicon, GPU-resource contention can manifest as a WindowServer hang (bug_type 409) rather than a classic kernel panic. The symptoms look identical to the user — frozen UI, forced reboot — but the diagnostic artifact lives at `/Library/Logs/DiagnosticReports/WindowServer-*.ips` rather than in `/Library/Logs/DiagnosticReports/*.panic`.
+3. **Staged testing is non-negotiable.** After any change touching the encode pipeline on this hardware, test at 30 s before stepping up to 1 min before stepping up to longer. The cost of a second hang is much higher than the cost of a few iterative tests.
+4. **The ZV-1's format description is tagged even though individual pixel buffers aren't.** This was a surprise discovered via Phase 1's format-introspection logging: `[camera] Format introspection: subType=420v primaries=ITU_R_709_2 transfer=ITU_R_709_2 matrix=ITU_R_709_2`, while the camera *preview* path logged `createFromPixelbuffer: kCVImageBufferYCbCrMatrixKey not found. Using R709`. Format description extensions describe the codec; individual buffers carry their own attachments (or don't). Our Phase 1 per-buffer tagging is still doing useful work during recording — just not for the reason originally documented in the scratchpad.
+
 ---
 
 ## Phase 1 — Rec 709 colour metadata on camera buffers
@@ -111,7 +130,7 @@ AVVideoColorPropertiesKey: [
 ]
 ```
 
-**`RawStreamWriter.swift`** — same addition on both the raw screen and raw camera video outputs.
+**`RawStreamWriter.swift`** — ~~same addition on both the raw screen and raw camera video outputs.~~ **DO NOT DO THIS.** This was in the original plan and turned out to be the direct cause of the 2026-04-11 WindowServer hang (see the historical incident in the Background section). Raw writers must omit `AVVideoColorPropertiesKey` entirely — they let AVFoundation infer the output colour space from the input pixel buffers. The camera path still produces correctly Rec. 709-tagged output because `CameraCaptureManager`'s delegate callback attaches the tags with `.shouldPropagate` mode, and AVAssetWriter honours pixel-buffer attachments when no explicit output properties are set.
 
 **`CompositionActor.swift`** — the `render(...)` call already passes `CGColorSpace(name: .itur_709)`. Leave it. Add a line-level comment explaining the tagging contract so future-us doesn't get confused.
 
@@ -119,14 +138,32 @@ AVVideoColorPropertiesKey: [
 
 ### Exit criteria
 
-- [ ] Camera pixel buffers exit `CameraCaptureManager` with all three colour attachments set
-- [ ] All three `AVAssetWriter` video outputs declare `AVVideoColorPropertiesKey`
-- [ ] Xcode Instruments Metal System Trace of a live recording shows the CIContext render step no longer running the multi-stage colour conversion chain on camera frames (compare before/after traces)
-- [ ] Composited HLS playback colour is visually indistinguishable from before (sanity check that we haven't introduced a colour error)
-- [ ] Raw `camera.mp4` opened in QuickTime shows correct colour
-- [ ] Raw `screen.mp4` opened in QuickTime shows correct colour
-- [ ] Camera format introspection logs are visible on startup and include pixel format, matrix, transfer function, primaries
-- [ ] A 5-minute recording on M2 Pro with display + camera + mic shows no behavioural regression
+- [x] Camera pixel buffers exit `CameraCaptureManager` with all three colour attachments set
+- [~] ~~All three `AVAssetWriter` video outputs declare `AVVideoColorPropertiesKey`~~ — revised: only the composited HLS writer (`WriterActor`) declares it. Raw writers (`RawStreamWriter`) must not, per the 2026-04-11 incident. Camera output is still correctly Rec. 709-tagged via pixel-buffer attachment propagation.
+- [ ] Xcode Instruments Metal System Trace of a live recording shows the CIContext render step no longer running the multi-stage colour conversion chain on camera frames — not verified via Instruments. Verified behaviourally instead: Stage 1/2 recording tests showed healthy metronome cadence with no CIContext back-pressure and no regressions.
+- [x] Composited HLS playback colour is visually indistinguishable from before (confirmed by playback of the 1-minute test recording)
+- [x] Raw `camera.mp4` opened in QuickTime shows correct colour
+- [x] Raw `screen.mov` opened in QuickTime shows correct colour (formerly `screen.mp4`; see Phase 2)
+- [x] Camera format introspection logs are visible on startup and include pixel format, matrix, transfer function, primaries — confirmed on the ZV-1, which logs `subType=420v primaries=ITU_R_709_2 transfer=ITU_R_709_2 matrix=ITU_R_709_2`
+- [~] 5-minute recording on M2 Pro with display + camera + mic shows no behavioural regression — superseded by Phase 2's staged validation (Stages 1 and 2 passed at 30 s and ~76 s; Stage 3 pending at 4K for 5 min)
+
+### Outcome (2026-04-11)
+
+**Status:** Substantially complete, with one deliberate deviation from the original plan (see the `RawStreamWriter` note in the Implementation outline).
+
+**What landed:**
+
+- `CameraCaptureManager.captureOutput` attaches Rec. 709 colour metadata to every pixel buffer with `.shouldPropagate` so both CIImage (the compositor) and AVAssetWriter (the raw camera writer) honour the tags downstream.
+- Format introspection at camera startup logs the active format's pixel format (fourcc) and declared colour extensions.
+- `WriterActor` declares `AVVideoColorPropertiesKey = Rec. 709` on the composited HLS output — safe because `CompositionActor` renders directly into Rec. 709.
+- `CompositionActor.compositeFrame` gained a comment explaining the tagging contract.
+
+**What was deliberately not done:**
+
+- `RawStreamWriter` does **not** declare `AVVideoColorPropertiesKey`. The 2026-04-11 WindowServer hang (documented in the Background section) proved that declaring Rec. 709 output on a writer whose input pixel buffers arrive in a different colour space forces a GPU-side conversion that wedges the GPU on contended hardware. Let AVFoundation infer from input instead.
+- Xcode Instruments Metal System Trace comparison was not produced. Behavioural testing (segment cadence, absence of GPU errors in `log stream`) turned out to be a sufficient health signal, and Phase 2's architectural fix made the CIContext optimisation much less load-bearing anyway.
+
+**Surprising finding:** ZV-1's format description declares Rec. 709 extensions, but individual pixel buffers delivered to the *preview path* (via `AVCaptureVideoPreviewLayer` / `CameraPreviewManager`) arrive without attachments — Core Image logs `createFromPixelbuffer: kCVImageBufferYCbCrMatrixKey not found. Using R709`. Our recording path doesn't hit these warnings because we tag the buffer before forwarding it. The preview-path warnings are now a separate noise-cleanup task in the scratchpad.
 
 ---
 
@@ -179,13 +216,15 @@ Split the writer initialisation based on kind:
     "filename": "screen.mov",
     "width": 3840, "height": 2160,
     "videoCodec": "prores422proxy",
-    "averageBitrate": 187500000,
-    "bytes": 4221111222
+    "bitrate": 129497400,
+    "bytes": 1235718003
   }
 }
 ```
 
 Camera and audio blocks unchanged.
+
+**Correction from the original plan:** the original doc proposed renaming the field to `averageBitrate`. We kept the existing `bitrate` field name to avoid a schema-version bump and to keep the code path uniform with the camera stream (which still reports its H.264 *target* bitrate in the same field). The semantic difference — "target" for H.264, "observed average" for ProRes — lives in a comment near the setter in `RecordingActor.stopRecording`. If this ambiguity becomes a problem for downstream tooling, bump `schemaVersion` to 2 and rename then.
 
 **Logging** — add a one-time startup log line reporting "Raw screen writer: ProRes 422 Proxy at {width}x{height}" so we can see in crash reports what the writer was configured with.
 
@@ -217,17 +256,57 @@ Ranked by preference:
 
 ### Exit criteria
 
-- [ ] `RawStreamWriter.Kind` has a `.videoProRes` case and the existing H.264 case is renamed `.videoH264`
-- [ ] Raw screen writer is instantiated with `.videoProRes` at native display resolution
-- [ ] Output filename is `screen.mov`, file type is `.mov`, codec key is `AVVideoCodecType.proRes422Proxy`
-- [ ] `recording.json` `rawStreams.screen` block is updated to reflect the codec change
-- [ ] **On M2 Pro**: a 10-minute recording with display + camera + mic at the highest available preset produces no `kIOGPUCommandBufferCallback*` errors (verified via `log stream` or Instruments)
-- [ ] Composited HLS segments are a consistent ~4 seconds each throughout the 10-minute recording
-- [ ] `screen.mov` plays cleanly in QuickTime at native resolution
-- [ ] Activity Monitor GPU pane shows Media Engine + ProRes engine both in use during recording
-- [ ] Raw `camera.mp4` is unchanged in behaviour (still H.264, still 12 Mbps, still at native camera format)
-- [ ] Composited HLS upload pipeline is unchanged — recording still ends with a working playback URL
-- [ ] Cancelling a recording cleans up `screen.mov` along with everything else
+- [x] `RawStreamWriter.Kind` has a `.videoProRes` case and the existing H.264 case is renamed `.videoH264`
+- [x] Raw screen writer is instantiated with `.videoProRes` at native display resolution
+- [x] Output filename is `screen.mov`, file type is `.mov`, codec key is `AVVideoCodecType.proRes422Proxy`
+- [x] `recording.json` `rawStreams.screen` block is updated to reflect the codec change (codec: `prores422proxy`, bitrate: observed average computed from bytes ÷ duration)
+- [~] **On M2 Pro**: a 10-minute recording with display + camera + mic at the highest available preset produces no `kIOGPUCommandBufferCallback*` errors — Stage 1 (30 s, 1080p) and Stage 2 (~76 s, 1080p) passed cleanly. Stage 3 (5 min at 4K) scheduled.
+- [x] Composited HLS segments are a consistent ~4 seconds each throughout the recording — confirmed on the 1-minute test: 18 middle segments at 4.0002 s mean, min 3.992 s, max 4.007 s, total spread 15 ms across 72 s
+- [x] `screen.mov` plays cleanly in QuickTime at native resolution — confirmed on both the 30 s and 1 min test recordings
+- [ ] Activity Monitor GPU pane shows Media Engine + ProRes engine both in use during recording — not explicitly observed. Behavioural evidence (clean segment cadence + no GPU errors + ProRes output file at the expected bitrate) strongly implies it. Worth eyeballing during Stage 3 for completeness.
+- [x] Raw `camera.mp4` is unchanged in behaviour (still H.264, still 12 Mbps, still at native camera format) — confirmed: 1-minute test produced 109 MB at 1280×720 with observed 11.97 Mbps, within 0.3% of the 12 Mbps target
+- [x] Composited HLS upload pipeline is unchanged — recording still ends with a working playback URL — confirmed
+- [ ] Cancelling a recording cleans up `screen.mov` along with everything else — not explicitly tested. The cancel path already removes the whole local session directory (`RecordingActor.cancelRecording` → `FileManager.removeItem(at: localSavePath)`), so `screen.mov` falls out of that for free, but worth a manual spot-check.
+
+### Outcome (2026-04-11)
+
+**Status:** Implemented, three-stage validation in progress. Stages 1 and 2 passed cleanly; Stage 3 (5 min at 4K) pending.
+
+**What landed:**
+
+- `RawStreamWriter.Kind.video` renamed to `.videoH264`; new `.videoProRes(width:height:)` case added.
+- `RawStreamWriter.configure` branches on kind: `.videoH264` → `.mp4` / `AVVideoCodecType.h264` / existing compression settings; `.videoProRes` → `.mov` / `AVVideoCodecType.proRes422Proxy` / no `AVVideoCompressionPropertiesKey` (ProRes doesn't take H.264's settings dict) / no `AVVideoColorPropertiesKey` (see Phase 1 incident).
+- `RecordingActor.prepareRecording` now instantiates the raw screen writer with `.videoProRes` at the display's native pixel size, writing to `screen.mov`. Camera writer continues to use `.videoH264` at the camera's native format.
+- `rawScreenDims` tuple reshaped to `(width: Int, height: Int)?` — no bitrate field, since ProRes has no target bitrate to carry through.
+- `RecordingActor.stopRecording` computes the observed average bitrate from `bytes × 8 ÷ logicalDuration` when populating the timeline's `rawStreams.screen` entry, guarding against tiny durations.
+- Dead code removed: the `rawScreenBitrate(forHeight:)` helper in `RecordingActor` is gone — it was only used by the old H.264 screen writer.
+- Startup log line reports "Raw screen writer: ProRes 422 Proxy at {width}x{height} (hardware ProRes engine)" so crash reports show exactly what the writer was configured with.
+
+**Empirical results from the 1-minute test** (session `0cf230dc-07f9-4d2e-93fd-01e7505e612d`):
+
+| Metric | Value |
+|---|---|
+| Session duration | 76.34 s |
+| Segments emitted | 20 (18 middle + 2 partials) |
+| Middle-segment cadence | 4.0002 s mean, spread 15 ms |
+| `screen.mov` size | 1.24 GB at 3840×2160 |
+| `screen.mov` observed bitrate | **129.5 Mbps** |
+| `camera.mp4` size | 109 MB at 1280×720 |
+| `camera.mp4` observed bitrate | 11.97 Mbps |
+| `audio.m4a` size | 1.44 MB |
+| Composited HLS total | 46.9 MB (20 segments) |
+| Upload errors | 0 |
+| `kIOGPU*` errors | 0 |
+
+**Notable empirical finding: ProRes 422 Proxy runs notably below Apple's spec sheet on mixed content.** Apple publishes ~181 Mbps for 4K/30 ProRes 422 Proxy; our observed average on real content was 129.5 Mbps (71% of spec). Content with more motion pushes it higher — the first 32 s of the recording averaged far below that, the next 44 s (with scrolling / window moves) much higher. For future capacity planning:
+
+- **Low-motion 4K content**: ~100 Mbps observed → ~12.5 GB/hour
+- **High-motion 4K content**: ~180 Mbps spec → ~22.5 GB/hour
+- Rule of thumb: budget ~15 GB/hour for a 4K master file, up to ~25 GB/hour for busy content
+
+This is larger than the original plan's estimate (~11 GB for 10 min ≈ 66 GB/hour at the full spec). Worth remembering when we eventually add auto-cleanup of raw files after server confirmation.
+
+**Segment size trajectory within the 1-minute test:** seg_001 through seg_008 averaged ~1.4 MB each (static content). seg_009 through seg_018 jumped to ~3.4 MB each with peaks at 5.5 MB (active content — scrolling, window moves). Critically, **segment durations stayed locked to 4.000 ± 0.008 s throughout this 3× bitrate jump**, which is the single strongest signal that the H.264 engine has headroom on the two-stream split (composited HLS + raw camera) that Phase 2 left it with.
 
 ---
 
@@ -401,10 +480,10 @@ The raw camera file is the master. The user might later decide the adjustments w
 
 Phases land in order, each committed independently. Each phase must leave the app in a shippable state so we can stop between phases if priorities change.
 
-- **Phase 1** is low-risk and orthogonal to everything else. Land it first to get a cleaner baseline for Phase 2 testing.
-- **Phase 2** is the main architectural fix and the one that unblocks stable recording on M2 Pro. Hardware-dependent — must be validated on real M2 Pro with the full 10-minute stress test before merging. If validation fails, fall back to a contingency (documented in Phase 2) before moving to Phase 3.
-- **Phase 3** is defense-in-depth. Lower priority if Phase 2 proves rock-solid, but still recommended — the failure modes of any future hardware/environment shift are unpleasant without it.
-- **Phase 4** builds new functionality on the stable foundation and is meaningful only if 1–3 land first.
+- **Phase 1** — ✅ **Done (2026-04-11)** with one deliberate deviation. Camera buffer tagging + format introspection + composited-HLS colour declaration are in. The raw-writer colour declaration was omitted after the WindowServer hang incident (see Background). See Phase 1's Outcome subsection for full details.
+- **Phase 2** — ✅ **Implemented (2026-04-11)**, validation in progress. Stages 1 and 2 passed (30 s and ~76 s at 1080p on M2 Pro, both with display + camera + mic, zero GPU errors, healthy 4 s segment cadence). **Stage 3 is pending**: 5 min at 4K with the same three sources. If Stage 3 is clean, Phase 2 is fully validated and the remaining unchecked exit criteria can close.
+- **Phase 3** — defense-in-depth, now with stronger motivation after the 2026-04-11 incident. Phase 2 removed the known encoder-contention path, but the incident proved that the failure mode on this hardware can jump from "CIContext logs a recoverable error" straight past "degraded quality" to "WindowServer watchdog kills the UI". Structured error handling in the compositor lets us detect a stalled render and bail cleanly instead of silently degrading, and the rebuild-then-stop recovery path is the closest we can get to a safety net if a future change (different camera, bigger display, thermal event, macOS update) re-introduces contention. Still recommended as the next phase after Stage 3 passes.
+- **Phase 4** — builds new functionality on the stable foundation and is meaningful only if 1–3 land first.
 
 After all four phases land, the scratchpad entries "GPU contention during recording with multiple concurrent encoders", "Camera feed metadata and colorspace handling", and "Camera Adjustments" are fully addressed.
 

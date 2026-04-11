@@ -110,8 +110,8 @@ struct MenuView: View {
                 .labelsHidden()
             }
 
-            // Output preset picker. 4K is hidden when no selected source can
-            // natively feed it.
+            // Output preset picker. 1440p is hidden when no selected source
+            // can natively feed it.
             qualityPicker
 
             // Record button — disabled if any prerequisite isn't satisfied
@@ -249,12 +249,12 @@ struct MenuView: View {
 
     @ViewBuilder
     private var qualityPicker: some View {
-        // SwiftUI's segmented Picker has no per-option disabled state, so 4K
-        // is simply omitted when the current source can't feed it. The
-        // downgrade hooks below catch the case where the user had 4K
+        // SwiftUI's segmented Picker has no per-option disabled state, so
+        // 1440p is simply omitted when the current source can't feed it. The
+        // downgrade hooks below catch the case where the user had 1440p
         // selected and the source becomes unavailable.
         let presets = OutputPreset.all.filter {
-            $0 != .p4k || coordinator.is4KAvailable
+            $0 != .p1440 || coordinator.is1440pAvailable
         }
         Picker("Quality", selection: $coordinator.outputPreset) {
             ForEach(presets) { preset in
@@ -264,17 +264,17 @@ struct MenuView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        // 4K availability depends on display and camera (not mode — see
-        // is4KAvailable). Re-check whenever either changes.
-        .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in downgradeIf4KUnavailable() }
-        .onChange(of: coordinator.selectedCamera?.uniqueID) { _, _ in downgradeIf4KUnavailable() }
+        // 1440p availability depends on display and camera (not mode — see
+        // is1440pAvailable). Re-check whenever either changes.
+        .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in downgradeIf1440pUnavailable() }
+        .onChange(of: coordinator.selectedCamera?.uniqueID) { _, _ in downgradeIf1440pUnavailable() }
     }
 
-    /// If the user had 4K selected and the active source can no longer feed
-    /// it (e.g. they switched from a 4K display to 1080p, or to cameraOnly
-    /// with a 720p webcam), fall back to 1080p silently.
-    private func downgradeIf4KUnavailable() {
-        if coordinator.outputPreset == .p4k && !coordinator.is4KAvailable {
+    /// If the user had 1440p selected and the active source can no longer
+    /// feed it (e.g. they switched from a 1440p+ display to 1080p, or to
+    /// cameraOnly with a 720p webcam), fall back to 1080p silently.
+    private func downgradeIf1440pUnavailable() {
+        if coordinator.outputPreset == .p1440 && !coordinator.is1440pAvailable {
             coordinator.outputPreset = .p1080
         }
     }

@@ -30,7 +30,11 @@ actor RecordingActor {
 
     /// Captured at prepare time so we can populate the timeline `rawStreams`
     /// block after `finish()`. Avoids re-resolving devices at stop time.
-    private var rawScreenDims: (width: Int, height: Int, bitrate: Int)?
+    /// Screen has no bitrate field — the raw screen writer uses ProRes
+    /// 422 Proxy (task-0A Phase 2), which is roughly CBR-per-frame and has
+    /// no target-bitrate setting. The observed average is computed from
+    /// final bytes on disk ÷ logical duration at timeline-population time.
+    private var rawScreenDims: (width: Int, height: Int)?
     private var rawCameraDims: (width: Int, height: Int, bitrate: Int)?
     private var rawAudioConfig: (bitrate: Int, sampleRate: Int, channels: Int)?
 
@@ -226,14 +230,18 @@ actor RecordingActor {
             let nativeSize = ScreenCaptureManager.nativePixelSize(for: display)
             let width = Int(nativeSize.width)
             let height = Int(nativeSize.height)
-            let bitrate = Self.rawScreenBitrate(forHeight: height)
-            let url = localDir.appendingPathComponent("screen.mp4")
-            let w = RawStreamWriter(url: url, kind: .video(width: width, height: height, bitrate: bitrate))
+            // ProRes 422 Proxy on the hardware ProRes engine — offloads the
+            // heaviest stream off the H.264 media engine so the composited
+            // HLS writer and the raw camera writer have the H.264 engine
+            // to themselves. See task-0A Phase 2 (architectural rationale
+            // in the Background section).
+            let url = localDir.appendingPathComponent("screen.mov")
+            let w = RawStreamWriter(url: url, kind: .videoProRes(width: width, height: height))
             do {
                 try await w.configure()
                 screenRawWriter = w
-                rawScreenDims = (width, height, bitrate)
-                print("[recording] Raw screen writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps")
+                rawScreenDims = (width, height)
+                print("[recording] Raw screen writer: ProRes 422 Proxy at \(width)x\(height) (hardware ProRes engine)")
             } catch {
                 print("[recording] Failed to configure raw screen writer: \(error)")
             }
@@ -323,7 +331,7 @@ actor RecordingActor {
                 if width > 0 && height > 0 {
                     let bitrate = 12_000_000
                     let url = localDir.appendingPathComponent("camera.mp4")
-                    let w = RawStreamWriter(url: url, kind: .video(width: width, height: height, bitrate: bitrate))
+                    let w = RawStreamWriter(url: url, kind: .videoH264(width: width, height: height, bitrate: bitrate))
                     do {
                         try await w.configure()
                         cameraRawWriter = w
@@ -384,15 +392,6 @@ actor RecordingActor {
         startMetronome()
 
         print("[recording] Committed at \(recordingStartTime?.seconds ?? 0)")
-    }
-
-    /// Bitrate for the raw screen master file based on native height.
-    /// Higher bitrates than the composited HLS — these are the masters and
-    /// disk is cheap relative to re-recording.
-    private static func rawScreenBitrate(forHeight height: Int) -> Int {
-        if height <= 1080 { return 25_000_000 }
-        if height <= 1440 { return 35_000_000 }
-        return 60_000_000
     }
 
     enum RecordingError: Error {
@@ -460,13 +459,22 @@ actor RecordingActor {
         // Populate timeline raw stream metadata now that the files are on
         // disk and we can read their final byte sizes.
         if let dims = rawScreenDims, let w = screenRawWriter {
+            // ProRes is roughly CBR-per-frame with no target-bitrate setting,
+            // so compute the observed average from actual bytes ÷ logical
+            // duration rather than parroting a fictitious target. Guard
+            // against tiny durations to avoid division blowups on a recording
+            // that stopped almost immediately.
+            let bytes = w.bytesOnDisk() ?? 0
+            let observedBitrate = logicalDuration > 0.1
+                ? Int(Double(bytes) * 8.0 / logicalDuration)
+                : 0
             timeline.setRawScreen(
                 filename: w.url.lastPathComponent,
                 width: dims.width,
                 height: dims.height,
-                codec: "h264",
-                bitrate: dims.bitrate,
-                bytes: w.bytesOnDisk() ?? 0
+                codec: "prores422proxy",
+                bitrate: observedBitrate,
+                bytes: bytes
             )
         }
         if let dims = rawCameraDims, let w = cameraRawWriter {

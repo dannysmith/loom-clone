@@ -100,18 +100,19 @@ final class RecordingCoordinator {
         }
     }
 
-    /// True if 4K is meaningful for *any* mode the user could switch into
+    /// True if 1440p is meaningful for *any* mode the user could switch into
     /// during this recording. Devices can't change mid-recording, but mode
-    /// can — so 4K is offered whenever EITHER the selected display or the
-    /// selected camera can natively feed it.
-    var is4KAvailable: Bool {
+    /// can — so 1440p is offered whenever EITHER the selected display or the
+    /// selected camera can natively feed it. (There is no 4K preset — see
+    /// `OutputPreset.p1440` for the reasoning.)
+    var is1440pAvailable: Bool {
         let displayOK: Bool = {
             guard let display = selectedDisplay else { return false }
-            return Int(ScreenCaptureManager.nativePixelSize(for: display).height) >= 2160
+            return Int(ScreenCaptureManager.nativePixelSize(for: display).height) >= 1440
         }()
         let cameraOK: Bool = {
             guard let cam = selectedCamera else { return false }
-            return CameraCaptureManager.maxNativeHeight(for: cam) >= 2160
+            return CameraCaptureManager.maxNativeHeight(for: cam) >= 1440
         }()
         return displayOK || cameraOK
     }

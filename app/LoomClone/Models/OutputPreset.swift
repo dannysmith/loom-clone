@@ -28,15 +28,23 @@ struct OutputPreset: Equatable, Hashable, Sendable, Identifiable {
         bitrate: 6_000_000
     )
 
-    static let p4k = OutputPreset(
-        id: "4k",
-        label: "4K",
-        width: 3840,
-        height: 2160,
-        bitrate: 18_000_000
+    /// QHD / 1440p. Replaces the previous 4K option (task-0A Phase 2 Stage 3
+    /// observation, 2026-04-11): at 4K the composited HLS writer overloaded
+    /// the M2 Pro H.264 engine when running alongside the raw camera writer
+    /// and caused CIContext GPU timeouts. 1440p is 1.78× the pixel count of
+    /// 1080p (vs 4× for 4K) and well within the H.264 engine's headroom.
+    /// Raw master files (screen.mov, camera.mp4) still capture at native
+    /// resolution regardless of this preset — this only bounds the composited
+    /// HLS stream that gets uploaded for instant playback.
+    static let p1440 = OutputPreset(
+        id: "1440p",
+        label: "1440p",
+        width: 2560,
+        height: 1440,
+        bitrate: 10_000_000
     )
 
-    static let all: [OutputPreset] = [.p720, .p1080, .p4k]
+    static let all: [OutputPreset] = [.p720, .p1080, .p1440]
     static let `default`: OutputPreset = .p1080
 
     static func fromID(_ id: String) -> OutputPreset {

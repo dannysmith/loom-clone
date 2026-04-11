@@ -24,8 +24,36 @@ struct RecordingTimeline: Encodable {
     var inputs: Inputs
     var preset: PresetInfo
     var encoder: EncoderInfo
+    var rawStreams: RawStreams?
     var segments: [SegmentEntry]
     var events: [Event]
+
+    /// Local-only high-quality master files written alongside the HLS
+    /// segments. Each entry is present only if its source was actually
+    /// recorded (i.e. user selected that input).
+    struct RawStreams: Encodable {
+        let screen: VideoStream?
+        let camera: VideoStream?
+        let audio: AudioStream?
+
+        struct VideoStream: Encodable {
+            let filename: String
+            let width: Int
+            let height: Int
+            let videoCodec: String
+            let bitrate: Int
+            let bytes: Int64
+        }
+
+        struct AudioStream: Encodable {
+            let filename: String
+            let audioCodec: String
+            let bitrate: Int
+            let sampleRate: Int
+            let channels: Int
+            let bytes: Int64
+        }
+    }
 
     struct PresetInfo: Encodable {
         let id: String
@@ -143,6 +171,9 @@ final class RecordingTimelineBuilder {
     private var durationSeconds: Double?
     private var inputs: RecordingTimeline.Inputs = .init(display: nil, camera: nil, microphone: nil)
     private var preset: OutputPreset = .default
+    private var rawScreen: RecordingTimeline.RawStreams.VideoStream?
+    private var rawCamera: RecordingTimeline.RawStreams.VideoStream?
+    private var rawAudio: RecordingTimeline.RawStreams.AudioStream?
     private var segments: [RecordingTimeline.SegmentEntry] = []
     private var events: [RecordingTimeline.Event] = []
 
@@ -164,6 +195,39 @@ final class RecordingTimelineBuilder {
 
     func setPreset(_ preset: OutputPreset) {
         self.preset = preset
+    }
+
+    func setRawScreen(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64) {
+        rawScreen = .init(
+            filename: filename,
+            width: width,
+            height: height,
+            videoCodec: codec,
+            bitrate: bitrate,
+            bytes: bytes
+        )
+    }
+
+    func setRawCamera(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64) {
+        rawCamera = .init(
+            filename: filename,
+            width: width,
+            height: height,
+            videoCodec: codec,
+            bitrate: bitrate,
+            bytes: bytes
+        )
+    }
+
+    func setRawAudio(filename: String, codec: String, bitrate: Int, sampleRate: Int, channels: Int, bytes: Int64) {
+        rawAudio = .init(
+            filename: filename,
+            audioCodec: codec,
+            bitrate: bitrate,
+            sampleRate: sampleRate,
+            channels: channels,
+            bytes: bytes
+        )
     }
 
     func setInputs(
@@ -304,6 +368,9 @@ final class RecordingTimelineBuilder {
                 bitrate: preset.bitrate
             ),
             encoder: Self.currentEncoder(preset: preset),
+            rawStreams: (rawScreen == nil && rawCamera == nil && rawAudio == nil)
+                ? nil
+                : .init(screen: rawScreen, camera: rawCamera, audio: rawAudio),
             segments: segments,
             events: sortedEvents
         )

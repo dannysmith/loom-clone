@@ -1,0 +1,173 @@
+import AVFoundation
+import CoreMedia
+import Foundation
+
+/// Writes a single capture stream (video or audio) to a standalone MP4 / M4A
+/// file at native quality. Used for the local "high-quality master" files
+/// that live alongside the composited HLS segments — `screen.mp4`,
+/// `camera.mp4`, `audio.m4a`.
+///
+/// Deliberately much simpler than `WriterActor`:
+/// - No HLS delegate, no segment stream, no `AVAssetSegmentReport`.
+/// - No priming offset (raw files aren't HLS, the AAC encoder delay is
+///   handled inside the MP4 itself by the framework).
+/// - No internal `TimestampAdjuster`. Sample buffers are pre-retimed by
+///   the caller (`RecordingActor`) so each writer's PTS values start at
+///   zero on its own session timeline.
+/// - One file, one input. Video writers don't take audio, audio writers
+///   don't take video. Audio is a single-source recording so it's
+///   captured into its own file rather than embedded in both video files.
+actor RawStreamWriter {
+
+    enum Kind: Sendable {
+        case video(width: Int, height: Int, bitrate: Int)
+        case audio(bitrate: Int, sampleRate: Int, channels: Int)
+    }
+
+    let url: URL
+    let kind: Kind
+
+    private var writer: AVAssetWriter?
+    private var input: AVAssetWriterInput?
+    private var hasStartedSession = false
+    private var didFinish = false
+
+    init(url: URL, kind: Kind) {
+        self.url = url
+        self.kind = kind
+    }
+
+    // MARK: - Setup
+
+    func configure() throws {
+        // The destination URL must not exist when AVAssetWriter is created
+        // — it will refuse to overwrite. Belt-and-braces remove.
+        try? FileManager.default.removeItem(at: url)
+
+        let fileType: AVFileType
+        switch kind {
+        case .video: fileType = .mp4
+        case .audio: fileType = .m4a
+        }
+
+        let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
+
+        let input: AVAssetWriterInput
+        switch kind {
+        case .video(let width, let height, let bitrate):
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: bitrate,
+                    AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoExpectedSourceFrameRateKey: 30,
+                    AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+                ] as [String: Any],
+            ]
+            input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+
+        case .audio(let bitrate, let sampleRate, let channels):
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: bitrate,
+            ]
+            input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+        }
+
+        input.expectsMediaDataInRealTime = true
+
+        guard writer.canAdd(input) else {
+            throw RawWriterError.cannotAddInput
+        }
+        writer.add(input)
+
+        self.writer = writer
+        self.input = input
+        self.hasStartedSession = false
+        self.didFinish = false
+    }
+
+    func startWriting() {
+        guard let writer else { return }
+        writer.startWriting()
+        // Caller pre-retimes buffers so PTS starts at zero on each writer's
+        // own session timeline. The session origin is correspondingly zero.
+        writer.startSession(atSourceTime: .zero)
+        hasStartedSession = true
+    }
+
+    // MARK: - Append
+
+    func append(_ sampleBuffer: CMSampleBuffer) {
+        guard hasStartedSession,
+              let input,
+              input.isReadyForMoreMediaData else { return }
+        input.append(sampleBuffer)
+    }
+
+    // MARK: - Finish
+
+    func finish() async {
+        guard !didFinish else { return }
+        didFinish = true
+
+        guard let writer else { return }
+
+        // If the session never started (cancelled during prepare/countdown),
+        // there's nothing to finish — finishWriting() on an unstarted writer
+        // throws. Just clean up and remove the empty file if it exists.
+        guard hasStartedSession else {
+            try? FileManager.default.removeItem(at: url)
+            self.writer = nil
+            self.input = nil
+            return
+        }
+
+        input?.markAsFinished()
+
+        // CRITICAL: AVAssetWriter.finishWriting does NOT call its completion
+        // handler when the writer is in .failed status (Apple docs: "If the
+        // status is AVAssetWriterStatusFailed, the block might not be called").
+        // Wrapping it in withCheckedContinuation would hang the actor forever.
+        // Check status first and bail with a log if the writer already failed.
+        if writer.status == .failed {
+            print("[raw-writer] \(url.lastPathComponent) FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
+            self.writer = nil
+            self.input = nil
+            return
+        }
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            writer.finishWriting { continuation.resume() }
+        }
+
+        if let error = writer.error {
+            print("[raw-writer] \(url.lastPathComponent) finished with error: \(error)")
+        } else {
+            print("[raw-writer] \(url.lastPathComponent) finished, status: \(writer.status.rawValue)")
+        }
+
+        self.writer = nil
+        self.input = nil
+    }
+
+    // MARK: - File metadata
+
+    /// Bytes on disk after `finish()` has run. Returns nil if the file
+    /// doesn't exist (e.g. cancelled before any data was written).
+    nonisolated func bytesOnDisk() -> Int64? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return (attrs[.size] as? NSNumber)?.int64Value
+    }
+
+    enum RawWriterError: Error {
+        case cannotAddInput
+    }
+}

@@ -229,16 +229,26 @@ actor WriterActor {
         // No manual flushSegment() — only valid when preferredOutputSegmentInterval is .indefinite.
         // finishWriting() automatically flushes any remaining data as a final segment.
 
-        // Keep the completion closure trivial so it doesn't capture the
-        // non-Sendable `writer`. Read status/error from the actor AFTER
-        // the continuation resumes — by then the writer is in its terminal
-        // state and the access happens on the actor, not in a Sendable closure.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            writer.finishWriting { continuation.resume() }
-        }
-        print("[writer] Finished writing, status: \(writer.status.rawValue)")
-        if let error = writer.error {
-            print("[writer] Error: \(error)")
+        // CRITICAL: AVAssetWriter.finishWriting does NOT call its completion
+        // handler when the writer is in .failed status (Apple docs: "If the
+        // status is AVAssetWriterStatusFailed, the block might not be called").
+        // Wrapping it in withCheckedContinuation would hang the actor forever.
+        // Check status first and bail with a log if the writer already failed.
+        if writer.status == .failed {
+            print("[writer] FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
+        } else {
+            // Mark both inputs as finished before calling finishWriting (Apple
+            // best practice — tells the writer no more samples are coming).
+            videoInput?.markAsFinished()
+            audioInput?.markAsFinished()
+
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                writer.finishWriting { continuation.resume() }
+            }
+            print("[writer] Finished writing, status: \(writer.status.rawValue)")
+            if let error = writer.error {
+                print("[writer] Error: \(error)")
+            }
         }
 
         // Close the segment stream and await the consumer so that every

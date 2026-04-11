@@ -17,6 +17,23 @@ actor RecordingActor {
     private let writer = WriterActor()
     private let upload = UploadActor()
 
+    // MARK: - Raw Stream Writers
+    //
+    // High-quality master files written locally alongside the composited HLS
+    // segments. Created in `prepareRecording` for whichever sources the user
+    // has selected. Each writer consumes its source's frames at native rate
+    // (not metronome-paced) and writes to its own MP4 / M4A.
+
+    private var screenRawWriter: RawStreamWriter?
+    private var cameraRawWriter: RawStreamWriter?
+    private var audioRawWriter: RawStreamWriter?
+
+    /// Captured at prepare time so we can populate the timeline `rawStreams`
+    /// block after `finish()`. Avoids re-resolving devices at stop time.
+    private var rawScreenDims: (width: Int, height: Int, bitrate: Int)?
+    private var rawCameraDims: (width: Int, height: Int, bitrate: Int)?
+    private var rawAudioConfig: (bitrate: Int, sampleRate: Int, channels: Int)?
+
     // MARK: - State
 
     private var mode: RecordingMode = .screenAndCamera
@@ -193,6 +210,54 @@ actor RecordingActor {
         // 3. Configure writer and compositor for this preset.
         await composition.configure(preset: preset)
         try await writer.configure(preset: preset)
+
+        // 3a. Configure raw stream writers — one per selected source.
+        // These write native-resolution master files into the local session
+        // dir alongside the HLS segments. Done before the composited writer
+        // starts so they're ready for the first frame.
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
+        rawScreenDims = nil
+        rawCameraDims = nil
+        rawAudioConfig = nil
+
+        if let display, let localDir = localSavePath {
+            let nativeSize = ScreenCaptureManager.nativePixelSize(for: display)
+            let width = Int(nativeSize.width)
+            let height = Int(nativeSize.height)
+            let bitrate = Self.rawScreenBitrate(forHeight: height)
+            let url = localDir.appendingPathComponent("screen.mp4")
+            let w = RawStreamWriter(url: url, kind: .video(width: width, height: height, bitrate: bitrate))
+            do {
+                try await w.configure()
+                screenRawWriter = w
+                rawScreenDims = (width, height, bitrate)
+                print("[recording] Raw screen writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps")
+            } catch {
+                print("[recording] Failed to configure raw screen writer: \(error)")
+            }
+        }
+
+        // The camera raw writer is configured AFTER cameraCapture.startCapture
+        // returns (further down) so we can read the actual delivered dims
+        // from the running session, not guess them via bestFormat.
+
+        if microphone != nil, let localDir = localSavePath {
+            let bitrate = 192_000
+            let sampleRate = 48_000
+            let channels = 2
+            let url = localDir.appendingPathComponent("audio.m4a")
+            let w = RawStreamWriter(url: url, kind: .audio(bitrate: bitrate, sampleRate: sampleRate, channels: channels))
+            do {
+                try await w.configure()
+                audioRawWriter = w
+                rawAudioConfig = (bitrate, sampleRate, channels)
+                print("[recording] Raw audio writer: AAC \(bitrate / 1000) kbps")
+            } catch {
+                print("[recording] Failed to configure raw audio writer: \(error)")
+            }
+        }
         // Await the downstream handling synchronously so that
         // `writer.finish()` can wait for every trailing segment to be
         // fully recorded in the timeline and enqueued for upload before
@@ -243,6 +308,34 @@ actor RecordingActor {
             // Cap camera capture at the preset height. No point decoding a 4K
             // camera stream just to downscale to 1080p in the compositor.
             await cameraCapture.startCapture(device: camera, maxHeight: preset.height)
+
+            // Now that the camera session is running, read its actual
+            // delivered dimensions and configure the raw camera writer
+            // with them. Doing this *after* startCapture means we don't
+            // depend on `bestFormat` to predict the dims — we read them
+            // from the truth (the device's activeFormat). Some cameras
+            // (e.g. ZV-1 over USB) return nil from bestFormat but still
+            // deliver fine via the .high preset fallback.
+            if let localDir = localSavePath {
+                let nativeSize = cameraCapture.nativePixelSize
+                let width = Int(nativeSize.width)
+                let height = Int(nativeSize.height)
+                if width > 0 && height > 0 {
+                    let bitrate = 12_000_000
+                    let url = localDir.appendingPathComponent("camera.mp4")
+                    let w = RawStreamWriter(url: url, kind: .video(width: width, height: height, bitrate: bitrate))
+                    do {
+                        try await w.configure()
+                        cameraRawWriter = w
+                        rawCameraDims = (width, height, bitrate)
+                        print("[recording] Raw camera writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps")
+                    } catch {
+                        print("[recording] Failed to configure raw camera writer: \(error)")
+                    }
+                } else {
+                    print("[recording] Camera nativePixelSize is zero — skipping raw camera writer")
+                }
+            }
         }
         if let microphone {
             await micCapture.startCapture(device: microphone)
@@ -280,11 +373,26 @@ actor RecordingActor {
         // Open the writer session
         await writer.startWriting()
 
+        // Open raw writer sessions. Each one runs on its own native source
+        // cadence — they're not metronome-paced.
+        await screenRawWriter?.startWriting()
+        await cameraRawWriter?.startWriting()
+        await audioRawWriter?.startWriting()
+
         // Start the 30fps metronome — emits frames from the cache regardless
         // of what the underlying sources are doing.
         startMetronome()
 
         print("[recording] Committed at \(recordingStartTime?.seconds ?? 0)")
+    }
+
+    /// Bitrate for the raw screen master file based on native height.
+    /// Higher bitrates than the composited HLS — these are the masters and
+    /// disk is cheap relative to re-recording.
+    private static func rawScreenBitrate(forHeight height: Int) -> Int {
+        if height <= 1080 { return 25_000_000 }
+        if height <= 1440 { return 35_000_000 }
+        return 60_000_000
     }
 
     enum RecordingError: Error {
@@ -305,24 +413,85 @@ actor RecordingActor {
         timeline.markStopped(logicalDuration: logicalDuration)
 
         // Stop the metronome first so no more frames get appended
+        print("[recording] Stopping metronome...")
         await cancelMetronome()
+        print("[recording] Metronome stopped")
 
         // Stop captures (each await waits for stopRunning() to actually return)
+        print("[recording] Stopping captures...")
         await screenCapture.stopCapture()
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
+        print("[recording] Captures stopped")
+
+        // Kick off raw writer finishes in the background, in parallel with
+        // the composited writer's finish flow. Each raw writer is independent
+        // — finalising one doesn't block the others. We await them all
+        // together below before snapshotting the timeline.
+        let screenW = screenRawWriter
+        let cameraW = cameraRawWriter
+        let audioW = audioRawWriter
+        let rawFinishTask = Task { [screenW, cameraW, audioW] in
+            await withTaskGroup(of: Void.self) { group in
+                if let w = screenW { group.addTask { await w.finish() } }
+                if let w = cameraW { group.addTask { await w.finish() } }
+                if let w = audioW { group.addTask { await w.finish() } }
+            }
+        }
 
         // Finish writer. Blocks until every trailing segment has been fully
         // processed by the writer's consumer — i.e. recorded in the timeline
         // and enqueued for upload. After this line, no more segments can
         // appear from the encoder.
+        print("[recording] Finishing composited writer...")
         await writer.finish()
+        print("[recording] Composited writer done")
 
         // Drain the upload queue so every segment's upload result (success
         // or final failure) has fired its callback and updated the timeline
         // builder. Without this, trailing segments would be snapshotted as
         // `uploaded: false` before they'd actually had a chance to upload.
         await upload.drainQueue()
+
+        // Wait for raw writers to finish flushing. They've been running in
+        // parallel with the composited finish; this is the join point.
+        await rawFinishTask.value
+
+        // Populate timeline raw stream metadata now that the files are on
+        // disk and we can read their final byte sizes.
+        if let dims = rawScreenDims, let w = screenRawWriter {
+            timeline.setRawScreen(
+                filename: w.url.lastPathComponent,
+                width: dims.width,
+                height: dims.height,
+                codec: "h264",
+                bitrate: dims.bitrate,
+                bytes: w.bytesOnDisk() ?? 0
+            )
+        }
+        if let dims = rawCameraDims, let w = cameraRawWriter {
+            timeline.setRawCamera(
+                filename: w.url.lastPathComponent,
+                width: dims.width,
+                height: dims.height,
+                codec: "h264",
+                bitrate: dims.bitrate,
+                bytes: w.bytesOnDisk() ?? 0
+            )
+        }
+        if let cfg = rawAudioConfig, let w = audioRawWriter {
+            timeline.setRawAudio(
+                filename: w.url.lastPathComponent,
+                codec: "aac-lc",
+                bitrate: cfg.bitrate,
+                sampleRate: cfg.sampleRate,
+                channels: cfg.channels,
+                bytes: w.bytesOnDisk() ?? 0
+            )
+        }
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
 
         // NOW the builder is fully up-to-date: all segments, all pauses,
         // all mode switches, all upload results. Snapshot it.
@@ -372,6 +541,16 @@ actor RecordingActor {
         await micCapture.stopCapture()
         await writer.finish()
 
+        // Finalise raw writers so their AVAssetWriters release cleanly
+        // before the local dir is removed below. The files themselves are
+        // about to be deleted along with the rest of the session dir.
+        await screenRawWriter?.finish()
+        await cameraRawWriter?.finish()
+        await audioRawWriter?.finish()
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
+
         await upload.cancel()
 
         if let localDir = localSavePath {
@@ -391,6 +570,17 @@ actor RecordingActor {
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
         await writer.finish()  // no-op when hasStartedSession == false
+
+        // Same for raw writers — they were configured but never started.
+        // RawStreamWriter.finish() handles the unstarted case by removing
+        // the empty file and bailing.
+        await screenRawWriter?.finish()
+        await cameraRawWriter?.finish()
+        await audioRawWriter?.finish()
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
+
         print("[recording] Preparation cancelled")
     }
 
@@ -458,23 +648,70 @@ actor RecordingActor {
 
     // MARK: - Frame Handling
 
-    /// Screen frames are cached, not directly encoded. The metronome reads
-    /// the cache on every tick. Frames may arrive during prepare (before
-    /// commit) — we still cache them so the metronome has fresh content the
-    /// instant it starts.
+    /// Screen frames are cached for the metronome (composited HLS path)
+    /// AND retimed + appended to the raw screen writer at native cadence.
+    /// Frames may arrive during prepare (before commit) — we still cache
+    /// them so the metronome has fresh content the instant it starts, but
+    /// raw writes are gated on `isRecording` so pre-commit frames don't
+    /// reach the raw file.
     private func handleScreenFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         latestScreenFrame = pixelBuffer
+
+        if let screenRawWriter,
+           let retimed = retimedSampleForRawWriter(sampleBuffer) {
+            await screenRawWriter.append(retimed)
+        }
     }
 
-    /// Camera frames are cached for the metronome and forwarded to the
-    /// composition actor. The on-screen overlay is fed separately, directly
-    /// from the camera capture queue (see `onCameraSampleForOverlay`), so
-    /// it doesn't wait on the actor.
+    /// Camera frames are cached for the metronome, forwarded to the
+    /// composition actor, AND retimed + appended to the raw camera writer.
+    /// The on-screen overlay is fed separately from the capture queue
+    /// itself (see `onCameraSampleForOverlay`).
     private func handleCameraFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         latestCameraFrame = pixelBuffer
         await composition.updateCameraFrame(pixelBuffer)
+
+        if let cameraRawWriter,
+           let retimed = retimedSampleForRawWriter(sampleBuffer) {
+            await cameraRawWriter.append(retimed)
+        }
+    }
+
+    /// Retime a sample buffer onto the recording's logical timeline so it
+    /// can be appended to a raw writer. Returns nil if the recording isn't
+    /// committed yet, the recording is paused, or the sample's PTS is
+    /// before the recording start anchor.
+    ///
+    /// Both raw video and raw audio writers use this — same single-anchor
+    /// formula the metronome uses for the composited path.
+    private func retimedSampleForRawWriter(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        guard isRecording,
+              pauseStartHostTime == nil,
+              let startTime = recordingStartTime else { return nil }
+
+        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard originalPTS.isValid else { return nil }
+
+        let relPTS = (originalPTS - startTime) - pauseAccumulator
+        guard relPTS >= .zero else { return nil }
+
+        let duration = CMSampleBufferGetDuration(sampleBuffer)
+        var timing = CMSampleTimingInfo(
+            duration: duration,
+            presentationTimeStamp: relPTS,
+            decodeTimeStamp: .invalid
+        )
+        var out: CMSampleBuffer?
+        CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &out
+        )
+        return out
     }
 
     private func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
@@ -516,6 +753,32 @@ actor RecordingActor {
 
         guard let retimed else { return }
         await writer.appendAudio(retimed)
+
+        // Raw audio path: independent retiming using RecordingActor's
+        // pauseAccumulator (no priming offset — that's an HLS-only concern).
+        // The pause check is the same gate the composited path uses inside
+        // WriterActor.appendAudio.
+        if let audioRawWriter, pauseStartHostTime == nil {
+            let rawAudioPTS = relativePTS - pauseAccumulator
+            if rawAudioPTS >= .zero {
+                var rawTiming = CMSampleTimingInfo(
+                    duration: duration,
+                    presentationTimeStamp: rawAudioPTS,
+                    decodeTimeStamp: .invalid
+                )
+                var rawOut: CMSampleBuffer?
+                CMSampleBufferCreateCopyWithNewTiming(
+                    allocator: kCFAllocatorDefault,
+                    sampleBuffer: sampleBuffer,
+                    sampleTimingEntryCount: 1,
+                    sampleTimingArray: &rawTiming,
+                    sampleBufferOut: &rawOut
+                )
+                if let rawOut {
+                    await audioRawWriter.append(rawOut)
+                }
+            }
+        }
     }
 
     // MARK: - Metronome

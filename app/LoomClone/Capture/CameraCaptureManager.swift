@@ -52,8 +52,12 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         ).devices
     }
 
-    /// Native pixel dimensions of the active capture format. Set after
-    /// `startCapture` resolves the best format for the requested max height.
+    /// Native pixel dimensions of the format AVCaptureSession is actually
+    /// delivering. Set unconditionally after `startCapture` returns —
+    /// reflects the device's `activeFormat` regardless of whether the
+    /// configured preset, the explicit `bestFormat` path, or the `.high`
+    /// fallback was used. Used by the recording actor to declare the raw
+    /// camera writer's dimensions.
     private(set) var nativePixelSize: CGSize = .zero
 
     func startCapture(device: AVCaptureDevice, maxHeight: Int = Int.max) async {
@@ -83,7 +87,6 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 }
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
-                nativePixelSize = CGSize(width: Int(dims.width), height: Int(dims.height))
                 print("[camera] Selected format: \(dims.width)x\(dims.height) @ 30fps (cap: \(maxHeight))")
             } catch {
                 print("[camera] Could not set activeFormat: \(error) — falling back to .high")
@@ -126,7 +129,18 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 continuation.resume()
             }
         }
-        print("[camera] Capture started: \(device.localizedName)")
+
+        // Now that the session is actually running, read the device's
+        // active format dims. This is the source of truth: it works whether
+        // we configured a specific format above or fell through to .high
+        // (which mutates `device.activeFormat` itself when the session is
+        // applied). Previously we only set `nativePixelSize` inside the
+        // `bestFormat` success branch, which meant cameras whose format
+        // discovery returned nil (e.g. ZV-1 over USB) silently left the
+        // size at zero — and the raw camera writer was never created.
+        let activeDims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        nativePixelSize = CGSize(width: Int(activeDims.width), height: Int(activeDims.height))
+        print("[camera] Capture started: \(device.localizedName) @ \(activeDims.width)x\(activeDims.height)")
     }
 
     func stopCapture() async {

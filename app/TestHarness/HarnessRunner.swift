@@ -337,12 +337,17 @@ final class HarnessRunner {
                 // Produce screen frame (if any) — first try the compositor,
                 // fall back to the direct source buffer.
                 let screenBuffer = screenSource?.makePixelBuffer(index: Int64(frameIndex))
+                var cameraFedSomeWriter = false
                 if let cs = cameraSource,
                    let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex)) {
                     compositor?.updateCameraFrame(cameraBuffer)
                     // The camera source may also feed a raw camera writer
                     // directly via appendVideo below.
-                    feedCameraWriters(cameraBuffer, frameIndex: Int64(frameIndex), frameRate: frameRate)
+                    cameraFedSomeWriter = feedCameraWriters(
+                        cameraBuffer,
+                        frameIndex: Int64(frameIndex),
+                        frameRate: frameRate
+                    )
                 }
 
                 let videoBuffer: CVPixelBuffer?
@@ -363,11 +368,18 @@ final class HarnessRunner {
                     if firstFrameAt == nil { firstFrameAt = events.elapsed() }
                     lastFrameAt = events.elapsed()
                     framesSubmitted += 1
-                } else if videoBuffer == nil && (screenSource != nil || cameraSource != nil) {
-                    // Only count a drop if we actually had a source that
-                    // should have produced a buffer. A compositor with
-                    // no source intentionally returns nil (no input)
-                    // and that's not a drop.
+                } else if cameraFedSomeWriter {
+                    // Camera-only run (e.g. T1.5): the camera writer
+                    // received a frame, the main video path has no
+                    // screen source, so there's no screen-side sample
+                    // buffer — that's expected, not a drop.
+                    if firstFrameAt == nil { firstFrameAt = events.elapsed() }
+                    lastFrameAt = events.elapsed()
+                    framesSubmitted += 1
+                } else if videoBuffer == nil && screenSource != nil {
+                    // We had a screen source that failed to produce a
+                    // buffer — that IS a drop. Cap the log output so
+                    // a persistent failure doesn't flood events.jsonl.
                     framesDropped += 1
                     if framesDropped <= 5 {
                         events.log("metronome.no-buffer", ["frame": frameIndex])
@@ -425,13 +437,19 @@ final class HarnessRunner {
     /// any raw-h264 writer whose name contains "camera" consumes the
     /// camera source directly. This is minimal-ceremony by design —
     /// it keeps the test configs flat.
-    private func feedCameraWriters(_ camera: CVPixelBuffer, frameIndex: Int64, frameRate: Int) {
+    ///
+    /// Returns true if at least one writer was fed, so the metronome
+    /// can account for the frame without double-counting.
+    private func feedCameraWriters(_ camera: CVPixelBuffer, frameIndex: Int64, frameRate: Int) -> Bool {
         guard let sample = Self.makeSampleBuffer(from: camera,
                                                  index: frameIndex,
-                                                 frameRate: frameRate) else { return }
+                                                 frameRate: frameRate) else { return false }
+        var fedAny = false
         for w in writers where w.kind == "raw-h264" && w.name.lowercased().contains("camera") {
             w.appendVideo(sample)
+            fedAny = true
         }
+        return fedAny
     }
 
     private func feedAudioWriters(_ sample: CMSampleBuffer) {

@@ -169,85 +169,78 @@ final class SyntheticFrameSource: @unchecked Sendable {
         }
     }
 
-    /// Fills the BGRA buffer in-place. We write rows directly so we
-    /// don't depend on GPU work — this is a pure CPU path.
+    /// Fills the BGRA buffer in-place. Uses memset_pattern4 (macOS
+    /// SIMD-accelerated fixed-4-byte pattern fill) so a 4K fill costs
+    /// microseconds, not tens of milliseconds. Per-pixel Swift loops
+    /// are catastrophically slow in Debug (O(100ms) at 4K) and even
+    /// in Release are too slow to keep up with a 30 fps metronome
+    /// while leaving time for the actual encoder.
     private func fillBGRA(buffer: CVPixelBuffer, frameIndex: Int64) {
-        let w = CVPixelBufferGetWidth(buffer)
         let h = CVPixelBufferGetHeight(buffer)
         let stride = CVPixelBufferGetBytesPerRow(buffer)
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
 
-        // Pick per-frame base colour so the encoder sees motion.
-        let phase = Int(frameIndex % 256)
+        let phase = UInt8(frameIndex & 0xFF)
 
         switch pattern {
         case .solid:
-            memsetBGRA(base: base, stride: stride, h: h,
-                       b: UInt8(phase), g: UInt8((phase * 2) % 256), r: UInt8((phase * 3) % 256))
+            // Per-frame colour so the encoder has motion between
+            // frames but within-frame content is flat.
+            let px: [UInt8] = [phase, phase &* 2, phase &* 3, 0xFF]
+            px.withUnsafeBufferPointer { ptr in
+                memset_pattern4(base, ptr.baseAddress, stride * h)
+            }
 
         case .gradient:
+            // Vertical gradient. One memset_pattern4 call per row,
+            // varying the colour per row. Still fast.
             for y in 0..<h {
-                let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
-                let shade = UInt8((y * 255 / max(h - 1, 1)) % 256)
-                var x = 0
-                while x < w {
-                    row[x * 4 + 0] = shade          // B
-                    row[x * 4 + 1] = shade          // G
-                    row[x * 4 + 2] = UInt8(phase)   // R
-                    row[x * 4 + 3] = 0xFF           // A
-                    x += 1
+                let shade = UInt8((y * 255 / max(h - 1, 1)) & 0xFF)
+                let px: [UInt8] = [shade, shade, phase, 0xFF]
+                let row = base.advanced(by: y * stride)
+                px.withUnsafeBufferPointer { ptr in
+                    memset_pattern4(row, ptr.baseAddress, stride)
                 }
             }
 
         case .moving:
-            // Diagonal stripe that shifts every frame. Creates both
-            // high-frequency detail (edges) and motion, which is what
-            // the H.264 encoder actually has to work on.
-            let offset = Int(frameIndex * 8)
+            // Alternating 32-row stripes that shift one stripe per
+            // frame. Produces both motion and edges for the encoder
+            // while staying bounded to h/32 pattern fills per frame.
+            let stripeHeight = 32
+            let offset = Int(frameIndex) % (stripeHeight * 2)
+            let dark: [UInt8] = [0x22, 0x22, phase, 0xFF]
+            let light: [UInt8] = [0xDD, 0xDD, phase, 0xFF]
             for y in 0..<h {
-                let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
-                var x = 0
-                while x < w {
-                    let bucket = ((x + y + offset) / 32) % 2
-                    let c: UInt8 = bucket == 0 ? 0x22 : 0xDD
-                    row[x * 4 + 0] = c
-                    row[x * 4 + 1] = c
-                    row[x * 4 + 2] = UInt8(phase)
-                    row[x * 4 + 3] = 0xFF
-                    x += 1
+                let useDark = ((y + offset) / stripeHeight) % 2 == 0
+                let row = base.advanced(by: y * stride)
+                if useDark {
+                    dark.withUnsafeBufferPointer { ptr in
+                        memset_pattern4(row, ptr.baseAddress, stride)
+                    }
+                } else {
+                    light.withUnsafeBufferPointer { ptr in
+                        memset_pattern4(row, ptr.baseAddress, stride)
+                    }
                 }
             }
 
         case .noise:
-            // Cheap LCG so we don't have to call arc4random per pixel.
+            // True per-pixel noise is too slow at 4K. Approximation:
+            // pick 8 random-ish colours per frame and cycle through
+            // them per row. Not real noise, but non-trivial content
+            // for the encoder and O(h) memset_pattern4 calls per frame.
             var state = UInt32(truncatingIfNeeded: frameIndex &* 2654435761)
             for y in 0..<h {
-                let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
-                var x = 0
-                while x < w {
-                    state = state &* 1664525 &+ 1013904223
-                    row[x * 4 + 0] = UInt8(truncatingIfNeeded: state >> 24)
-                    row[x * 4 + 1] = UInt8(truncatingIfNeeded: state >> 16)
-                    row[x * 4 + 2] = UInt8(truncatingIfNeeded: state >> 8)
-                    row[x * 4 + 3] = 0xFF
-                    x += 1
+                state = state &* 1664525 &+ 1013904223
+                let r = UInt8(truncatingIfNeeded: state >> 24)
+                let g = UInt8(truncatingIfNeeded: state >> 16)
+                let b = UInt8(truncatingIfNeeded: state >> 8)
+                let px: [UInt8] = [b, g, r, 0xFF]
+                let row = base.advanced(by: y * stride)
+                px.withUnsafeBufferPointer { ptr in
+                    memset_pattern4(row, ptr.baseAddress, stride)
                 }
-            }
-        }
-    }
-
-    private func memsetBGRA(base: UnsafeMutableRawPointer, stride: Int, h: Int,
-                            b: UInt8, g: UInt8, r: UInt8) {
-        for y in 0..<h {
-            let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
-            var x = 0
-            let pixelsPerRow = stride / 4
-            while x < pixelsPerRow {
-                row[x * 4 + 0] = b
-                row[x * 4 + 1] = g
-                row[x * 4 + 2] = r
-                row[x * 4 + 3] = 0xFF
-                x += 1
             }
         }
     }

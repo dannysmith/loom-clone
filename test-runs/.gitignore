@@ -1,6 +1,8 @@
-# Ignore all contents of this directory — individual run logs can be
-# large and are not worth tracking. The directory itself is tracked
-# via .gitkeep so the default `test-runs-root` path always exists.
+# Ignore all individual run directories — they contain logs, raw
+# video outputs, and system snapshots that are too large (and too
+# machine-specific) to track. Summary markdown files that record
+# aggregate findings across a tier run are tracked.
 *
 !.gitignore
 !.gitkeep
+!*.md

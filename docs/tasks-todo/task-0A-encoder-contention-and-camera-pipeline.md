@@ -282,7 +282,6 @@ Ranked by preference:
 1. **Reduce ProRes resolution.** Write `screen.mov` at a scaled-down resolution (e.g. 2560×1440 for a 4K display), not native. Still ProRes, still on the dedicated engine, less data throughput. We lose some master-file fidelity but the raw file is still usable for re-composition.
 2. **Force one H.264 stream to software encode** via `VTSessionSetProperty` with `kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder = false` on the raw camera writer. Apple's docs imply this is allowed; community reports are thin. Software H.264 at 720p/12 Mbps is tractable on modern CPUs.
 3. **Drop the raw camera H.264 writer and re-derive it from a higher-quality composited track.** Changes the master-file story significantly — lose this as a last resort.
-4. **Disable live composited HLS** and only write raw streams during recording, compositing post-stop. Breaks "URL on clipboard within seconds of stop" — the principle we care about most. True last resort.
 
 ### Exit criteria
 
@@ -356,7 +355,7 @@ In response to this we proposed capping composited HLS output at 1080p regardles
 
 ---
 
-## Phase 2b — Replace 4K preset with 1440p (BROKEN, do not use)
+## Phase 2b — Replace 4K preset with 1440p (BROKEN)
 
 ### What we tried
 
@@ -442,4 +441,3 @@ All of these are speculative until task-0B and task-0C produce real data. Do not
 - `docs/tasks-todo/task-0D-compositor-error-handling-and-camera-adjustments.md` — the follow-on task that picks up Phases 3 and 4 after the pipeline is stable
 - `docs/tasks-todo/task-0-scratchpad.md` — original scratchpad where these issues were first documented
 - `docs/requirements.md` — product requirements, especially the "Quality" section (streamed version may be lower quality than local capture)
-

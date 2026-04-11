@@ -28,3 +28,28 @@ targets:
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: XT349SJG9U
+
+  LoomCloneTestHarness:
+    # Diagnostic tool for AVFoundation/VideoToolbox/CIContext configurations.
+    # See docs/tasks-todo/task-0C-isolation-test-harness.md. NOT shipped.
+    # This is an app bundle (not a CLI) because screen capture and camera
+    # access require a bundled signed app with entitlements.
+    type: application
+    platform: macOS
+    sources:
+      - path: TestHarness
+        excludes:
+          - "Scripts/**"
+          - "test-runs/**"
+          - "README.md"
+    settings:
+      base:
+        INFOPLIST_FILE: TestHarness/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TestHarness/TestHarness.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.danny.loomclone.testharness
+        PRODUCT_NAME: LoomCloneTestHarness
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: XT349SJG9U

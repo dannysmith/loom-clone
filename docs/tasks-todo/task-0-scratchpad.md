@@ -20,6 +20,7 @@
   - Requires running multiple AVAssetWriters simultaneously. Apple Silicon's dedicated media engine supports concurrent H.264 encode sessions.
   - Full composited recording also available as MP4, perhaps composited from the stream files locally after recording has finished?
 - [ ] Consider how we handle temporarry drops in connectivity, and also if the server doesn't reciev every chunk streamed to it.
+- [ ] Sliders for adjusting camera feed white balance and brightness. These should be reflected in the camera previews in the popover, the composited, streamed up video and the preview overlay while recording. They should not be reflected in the raw camera.mp4 written to local disk.
 - [ ] Server-side MP4 compositing
   - After recording completes, stitch HLS segments into a single MP4 using FFmpeg (`ffmpeg -i stream.m3u8 -c copy output.mp4` — no re-encoding).
   - Serve the MP4 as a download option alongside HLS playback.

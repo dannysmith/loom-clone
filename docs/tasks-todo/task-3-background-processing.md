@@ -6,7 +6,9 @@ Goal: Build on the server app to add proper file storage for videos, background 
 
 ## FFmpeg background processing
 
-- 3-rendition HLS + thumbnails from source file
+- 3-rendition HLS
+- Generating thumbnails from source file
+- Audio cleanup?
 
 ## Full-quality uploads from mac app
 

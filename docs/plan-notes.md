@@ -8,30 +8,6 @@ The implementation plan for the personal video tool described in `requirements.m
 
 Three layers: a native macOS desktop app for recording, a server for processing and management, and a viewer layer that operates independently of the server.
 
-```
-Desktop App (Swift, macOS 14+)
-    |
-    |-- fMP4 HLS segments ---- HTTPS PUT ----> Server ----> R2
-    |-- Local copy retained until server confirms            |
-    |-- Source file uploaded to R2 after recording            |
-    |                                                        v
-    |                                              FFmpeg (background)
-    |                                              3-rendition HLS + thumbnails
-    |                                                        |
-    |                                                        v
-    |                                              Renditions stored in R2
-    |
-Server (Hono + Bun + SQLite, Hetzner)
-    |
-    |-- Metadata to Cloudflare KV on create/update
-    |
-Viewer Layer (Cloudflare Workers + KV)
-    |
-    |-- v.danny.is/{slug}        Video page (Vidstack + HLS from R2)
-    |-- v.danny.is/embed/{slug}  Player only (for iframes)
-    |-- v.danny.is/oembed        oEmbed JSON endpoint
-```
-
 ### Recording Flow
 
 1. User hits record. App calls `POST /api/videos` — server creates record, allocates slug, returns video ID and upload credentials.
@@ -235,32 +211,3 @@ CREATE VIRTUAL TABLE videos_fts USING fts5(
 - R2 bucket, public access configuration
 - Cloudflare Workers deployment
 - DNS for `v.danny.is`
-
-## Ideas for Later
-
-- On-device transcription via WhisperKit, transcript uploaded alongside video metadata
-- AI-generated titles and summaries from transcript
-- Transcript display on video page
-- Camera overlay shape options (circle, rounded rectangle) and corner placement
-- MP4 import via admin UI with tus resumable upload
-- Keyboard shortcut configuration for recording controls
-- Basic metadata editing in the desktop app (title, slug) without opening a browser
-- Post-stop UI in desktop app (copy link, edit title, open video page, trash)
-- Iframely listing for Notion auto-embed
-- Thumbnail selection and editing
-- Transcript with clickable timestamps synced to video playback
-- Sitemap generation for public videos
-- Basic view count (stored in KV, incremented by Worker)
-- Storage tiering: delete renditions for old unwatched videos, keep source, re-transcode on demand
-- Trim start/end of recordings (desktop app or web)
-- Audio enhancement (noise reduction, gating — desktop or server-side)
-
----
-
-## Risks
-
-The research identified one area of genuine technical risk: running the full desktop pipeline simultaneously (screen capture + camera capture + Core Image compositing + AVAssetWriter HLS segmentation + HTTP segment upload + mode switching). Each component works individually and is well-documented. The combination has not been validated in any open-source project. This is what Phase 0 exists to prove.
-
-Everything else — the server, FFmpeg transcoding, R2, Workers, Vidstack — uses established tools in well-understood patterns. The novelty and risk are concentrated in the desktop app's recording pipeline.
-
-See `docs/research/architecture-synthesis.md` for the full risk assessment.

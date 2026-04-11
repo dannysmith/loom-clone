@@ -121,24 +121,24 @@ selected.
 
 ### Exit criteria
 
-- [ ] All three pickers offer a "None" option
-- [ ] Mic picker defaults to system default on first launch
-- [ ] Setting display = None hides screenOnly and screenAndCamera modes;
+- [x] All three pickers offer a "None" option
+- [x] Mic picker defaults to system default on first launch
+- [x] Setting display = None hides screenOnly and screenAndCamera modes;
       mode picker shows only cameraOnly (or hides entirely)
-- [ ] Setting camera = None hides cameraOnly and screenAndCamera modes;
+- [x] Setting camera = None hides cameraOnly and screenAndCamera modes;
       mode picker shows only screenOnly (or hides entirely)
-- [ ] Setting both display and camera to None disables the record button
-- [ ] Setting mic = None records video with no audio track and the
+- [x] Setting both display and camera to None disables the record button
+- [x] Setting mic = None records video with no audio track and the
       resulting playback is silent (not broken)
-- [ ] Recording with display = None never shows the camera overlay window
+- [x] Recording with display = None never shows the camera overlay window
       and never instantiates the screen capture session (verify via logs)
-- [ ] Recording with camera = None never shows the camera overlay window
+- [x] Recording with camera = None never shows the camera overlay window
       and the popover preview shows the screen snapshot only
-- [ ] Recording panel mode strip only shows modes valid for the current
+- [x] Recording panel mode strip only shows modes valid for the current
       recording — and is hidden when only one mode is valid
-- [ ] 4K preset is offered when either selected source can feed it; hidden
+- [x] 4K preset is offered when either selected source can feed it; hidden
       when neither can
-- [ ] Existing recordings (display + camera + mic) still work end-to-end
+- [x] Existing recordings (display + camera + mic) still work end-to-end
       with no regression
 
 ---
@@ -309,25 +309,25 @@ implied by the existing local-safety-net principle.
 
 ### Exit criteria
 
-- [ ] A recording with display + camera + mic produces `screen.mp4`,
+- [x] A recording with display + camera + mic produces `screen.mp4`,
       `camera.mp4`, `audio.m4a` in the local session directory
-- [ ] Each raw file is independently playable in QuickTime
-- [ ] `screen.mp4` is at the display's native pixel dimensions, not the
+- [x] Each raw file is independently playable in QuickTime
+- [x] `screen.mp4` is at the display's native pixel dimensions, not the
       output preset dimensions
-- [ ] `camera.mp4` is at the camera's selected-format dimensions
-- [ ] `audio.m4a` plays back synchronised against the composited HLS when
+- [x] `camera.mp4` is at the camera's selected-format dimensions
+- [x] `audio.m4a` plays back synchronised against the composited HLS when
       muxed externally (e.g. `ffmpeg -i screen.mp4 -i audio.m4a -c copy`)
-- [ ] Camera = None → no `camera.mp4` written
-- [ ] Display = None → no `screen.mp4` written
-- [ ] Mic = None → no `audio.m4a` written
-- [ ] Pause/resume produces raw files with no gap at the pause point
+- [x] Camera = None → no `camera.mp4` written
+- [x] Display = None → no `screen.mp4` written
+- [x] Mic = None → no `audio.m4a` written
+- [x] Pause/resume produces raw files with no gap at the pause point
       (verify by checking duration matches the composited recording)
-- [ ] Cancelling a recording removes the raw files along with everything
+- [x] Cancelling a recording removes the raw files along with everything
       else
-- [ ] `recording.json` has a `rawStreams` block listing what's there
-- [ ] 5-minute recording at 4K is stable (no encoder errors, no thermal
+- [x] `recording.json` has a `rawStreams` block listing what's there
+- [x] 5-minute recording at 4K is stable (no encoder errors, no thermal
       throttling visible in logs)
-- [ ] Existing composited HLS upload pipeline is unchanged — recording
+- [x] Existing composited HLS upload pipeline is unchanged — recording
       still ends with a working playback URL
 
 ---

@@ -1,0 +1,25 @@
+{
+  "name": "T1.3-h264-1440p-alone",
+  "description": "H.264 writer at 2560x1440 @ 10Mbps, synthetic BGRA source. No other writers, no compositor. 1440p is the preset that triggered failure mode 4 in the full pipeline — in isolation it should still pass.",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 2560,
+    "height": 1440,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-h264",
+      "name": "screen-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    }
+  ]
+}

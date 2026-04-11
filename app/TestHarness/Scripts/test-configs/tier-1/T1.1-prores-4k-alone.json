@@ -1,0 +1,24 @@
+{
+  "name": "T1.1-prores-4k-alone",
+  "description": "ProRes 422 Proxy writer at native 4K, synthetic BGRA source, no other writers, no compositor. Baseline: if this fails we have a fundamental problem that isn't about concurrency.",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen",
+      "width": 3840,
+      "height": 2160
+    }
+  ]
+}

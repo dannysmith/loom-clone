@@ -1,0 +1,25 @@
+{
+  "name": "T1.2-h264-1080p-alone",
+  "description": "H.264 writer at 1920x1080 @ 6Mbps, synthetic BGRA source. No other writers, no compositor.",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 1920,
+    "height": 1080,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-h264",
+      "name": "screen-1080p",
+      "width": 1920,
+      "height": 1080,
+      "bitrate": 6000000
+    }
+  ]
+}

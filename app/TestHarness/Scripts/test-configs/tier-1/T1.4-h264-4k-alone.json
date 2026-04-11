@@ -1,0 +1,25 @@
+{
+  "name": "T1.4-h264-4k-alone",
+  "description": "H.264 writer at 3840x2160 @ 18Mbps, synthetic BGRA source. Expected to stress the M2 Pro H.264 engine but should not deadlock when run alone (failure mode 3 involved two concurrent H.264 streams).",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-h264",
+      "name": "screen-4k",
+      "width": 3840,
+      "height": 2160,
+      "bitrate": 18000000
+    }
+  ]
+}

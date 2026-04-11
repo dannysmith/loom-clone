@@ -1,0 +1,23 @@
+{
+  "name": "T1.7-audio-alone",
+  "description": "AAC-LC audio writer only. Sanity check that the audio path works in isolation (the pipeline in failure mode 4 has an audio writer parked alongside the dead ProRes/HLS writers — this confirms the harness can drive audio in isolation).",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-audio",
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-audio",
+      "name": "audio",
+      "sampleRate": 48000,
+      "channels": 2,
+      "bitrate": 128000
+    }
+  ]
+}

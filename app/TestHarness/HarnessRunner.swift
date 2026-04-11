@@ -315,9 +315,17 @@ final class HarnessRunner {
         let audioSamplesPerBuffer = 1024
         let audioBuffersPerFrame = max(1, 48_000 / frameRate / audioSamplesPerBuffer)
 
+        // Does this run have any video path at all? Audio-only configs
+        // have no screen or camera source and no compositor — we still
+        // run the loop so the audio path gets ticked at a stable rate,
+        // but we skip the video work entirely (no fake "no-buffer"
+        // events, no spurious dropped-frame counts).
+        let hasVideoPath = (screenSource != nil) || (cameraSource != nil) || (compositor != nil)
+
         events.log("metronome.start", [
             "frameRate": frameRate,
             "totalFrames": totalFrames,
+            "hasVideoPath": hasVideoPath,
         ])
 
         let startTime = Date()
@@ -325,43 +333,46 @@ final class HarnessRunner {
         var audioIndex: Int64 = 0
 
         for frameIndex in 0..<totalFrames {
-            // Produce screen frame (if any) — first try the compositor,
-            // fall back to the direct source buffer.
-            let screenBuffer = screenSource?.makePixelBuffer(index: Int64(frameIndex))
-            if let cs = cameraSource,
-               let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex)) {
-                compositor?.updateCameraFrame(cameraBuffer)
-                // The camera source may also feed a raw camera writer
-                // directly via appendVideo below.
-                feedCameraWriters(cameraBuffer, frameIndex: Int64(frameIndex), frameRate: frameRate)
-            }
+            if hasVideoPath {
+                // Produce screen frame (if any) — first try the compositor,
+                // fall back to the direct source buffer.
+                let screenBuffer = screenSource?.makePixelBuffer(index: Int64(frameIndex))
+                if let cs = cameraSource,
+                   let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex)) {
+                    compositor?.updateCameraFrame(cameraBuffer)
+                    // The camera source may also feed a raw camera writer
+                    // directly via appendVideo below.
+                    feedCameraWriters(cameraBuffer, frameIndex: Int64(frameIndex), frameRate: frameRate)
+                }
 
-            let videoBuffer: CVPixelBuffer?
-            if let compositor {
-                videoBuffer = compositor.compositeFrame(
-                    screen: screenBuffer,
-                    includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
-                )
-            } else {
-                videoBuffer = screenBuffer
-            }
+                let videoBuffer: CVPixelBuffer?
+                if let compositor {
+                    videoBuffer = compositor.compositeFrame(
+                        screen: screenBuffer,
+                        includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
+                    )
+                } else {
+                    videoBuffer = screenBuffer
+                }
 
-            if let videoBuffer,
-               let sample = (screenSource ?? cameraSource)?.makeSampleBuffer(
-                pixelBuffer: videoBuffer,
-                index: Int64(frameIndex),
-                frameRate: frameRate
-               ) ?? Self.makeSampleBuffer(from: videoBuffer,
-                                          index: Int64(frameIndex),
-                                          frameRate: frameRate) {
-
-                feedVideoWriters(sample)
-                if firstFrameAt == nil { firstFrameAt = events.elapsed() }
-                lastFrameAt = events.elapsed()
-                framesSubmitted += 1
-            } else if videoBuffer == nil {
-                framesDropped += 1
-                events.log("metronome.no-buffer", ["frame": frameIndex])
+                if let videoBuffer,
+                   let sample = Self.makeSampleBuffer(from: videoBuffer,
+                                                      index: Int64(frameIndex),
+                                                      frameRate: frameRate) {
+                    feedVideoWriters(sample)
+                    if firstFrameAt == nil { firstFrameAt = events.elapsed() }
+                    lastFrameAt = events.elapsed()
+                    framesSubmitted += 1
+                } else if videoBuffer == nil && (screenSource != nil || cameraSource != nil) {
+                    // Only count a drop if we actually had a source that
+                    // should have produced a buffer. A compositor with
+                    // no source intentionally returns nil (no input)
+                    // and that's not a drop.
+                    framesDropped += 1
+                    if framesDropped <= 5 {
+                        events.log("metronome.no-buffer", ["frame": frameIndex])
+                    }
+                }
             }
 
             // Audio (silent PCM) — emit enough buffers per video frame

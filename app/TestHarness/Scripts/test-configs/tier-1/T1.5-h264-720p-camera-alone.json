@@ -1,0 +1,25 @@
+{
+  "name": "T1.5-h264-720p-camera-alone",
+  "description": "H.264 writer at 1280x720 @ 12Mbps, synthetic YCbCr 420v source tagged Rec. 709 (mirrors how CameraCaptureManager tags camera buffers in the main app).",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-camera",
+    "width": 1280,
+    "height": 720,
+    "pattern": "moving",
+    "colorSpace": "rec709"
+  },
+  "writers": [
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

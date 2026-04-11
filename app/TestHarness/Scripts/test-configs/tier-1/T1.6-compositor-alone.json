@@ -1,0 +1,33 @@
+{
+  "name": "T1.6-compositor-alone",
+  "description": "CIContext compositor with screen + camera sources, no writers attached. The metronome ticks and calls compositeFrame every cycle; the output pixel buffer is simply released. Confirms the compositor itself (CIContext render path + IOSurface pool churn) doesn't deadlock without any encoder involvement.",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": []
+}

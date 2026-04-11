@@ -1,8 +1,14 @@
-# Task 1 — Run Test Harness Tests
+# Task 2 — Run Test Harness Tests
 
 Use the isolation test harness at `app/TestHarness/` to empirically map out which AVFoundation / VideoToolbox / CIContext configurations are stable on this M2 Pro Mac and which are not. The goal is to replace speculation about the failure modes with data, so that task-4 (recording pipeline stabilisation) can resolve the main-branch Phase 2b situation with evidence instead of guesses, and so that `docs/m2-pro-video-pipeline-failures.md` can be updated from "what we don't know" to "what we now know" footnotes.
 
 This is an execution task, not a coding task. The harness already exists and is working — this task runs tests in it and records what happens.
+
+## Dependencies
+
+This task **depends on task-1 (VideoToolbox best-practice tunings)** having landed first. Task-1 applies the high-confidence tunings (pixel format, `PrepareToEncodeFrames` warm-up, `RealTime = false`, `AllowFrameReordering = false`, `MaxFrameDelayCount` bounded, diagnostic safety nets) to **both** the main-app recording pipeline and the harness writers. Running this task against a harness whose writers are still on default settings means Tier 5 parameter sweeps would be varying one knob against an unaudited baseline — the results would be contaminated and hard to attribute.
+
+If task-1 has not yet landed by the time this task starts, stop and finish task-1 first. The rare exception is Tier 2 two-writer tests against the pre-task-1 harness, which are useful as a regression check that task-1 didn't break anything — but any Tier 3+ work must wait for the best-practice baseline.
 
 ## Context
 
@@ -11,18 +17,20 @@ Before starting, read:
 - `docs/m2-pro-video-pipeline-failures.md` — institutional memory of the four failure modes observed to date. Failure mode 4 (the 1440p-preset kernel-level IOGPUFamily deadlock, 2026-04-11 13:32) is the headline problem this test plan exists to diagnose.
 - `app/TestHarness/README.md` — how the harness works, how to build it, how to run a single config or a whole tier, how to recover after a hang, and how to write a new test config.
 - `docs/research/11-m2-pro-video-pipeline-deep-dive.md` — deeper research into IOGPUFamily behaviour, VideoToolbox tuning knobs, and how comparable apps handle concurrent hardware video sessions on Apple Silicon. Produces the concrete hypotheses that feed into Tier 5 parameter sweeps.
+- `docs/tasks-todo/task-1-videotoolbox-best-practice-tunings.md` — the upstream task whose tunings this task is validating empirically. The Tier 5 priority list here depends on the audit/implementation notes task-1 produced — read those before writing Tier 5 configs so you know which knobs are already on best-practice defaults and which are new `tunings` keys added during task-1.
 - `docs/tasks-todo/task-4-recording-pipeline-stabilisation.md` — the task this execution work unblocks. Don't modify the main app's pipeline as part of this task; findings get written up and handed back to task-4.
 
 ## Current state
 
 - **Tier 1 has been run** (2026-04-11). All 7 configs PASSED on the dev M2 Pro. Baseline recorded at `test-runs/tier-1-baseline-2026-04-11.md`. This already tells us that the 1440p preset and 4K H.264 work fine in isolation — failure modes 3 and 4 are specifically about concurrent sessions, not the absolute resolution of any individual writer.
+- **Task-1 (best-practice tunings) is expected to have updated the harness writers** to reflect best practice. Before starting Tier 2 here, re-run `./app/TestHarness/Scripts/run-tier-1.sh` to confirm all 7 Tier 1 configs still PASS on the post-task-1 harness. Commit a fresh `test-runs/tier-1-baseline-post-task-1-<date>.md` if anything changed — a Tier 1 regression from task-1 is a hard stop and needs to be resolved before continuing.
 - Tiers 2–5 are not yet populated. Configs and runner scripts land as part of this task.
 
 ## Hard constraints
 
 - **Do not run a Tier 3+ configuration without dry-running it first.** The safety scaffolding (watchdog, last-known-good marker) is not a substitute for reading the config. Every new Tier 3+ config gets `--dry-run`'d before it's run for real, and gets run alone, not batched with other Tier 3 configs.
 - **Do not batch Tier 3 runs.** The runner script already stops on the first `fail-killed` result; do not pass `--continue-on-fail` to it for Tier 3.
-- **Do not modify the main LoomClone recording pipeline as part of this task.** If a finding suggests a main-app change, write it up and hand it back to task-0A.
+- **Do not modify the main LoomClone recording pipeline as part of this task.** If a finding suggests a main-app change, write it up and hand it back to task-4 (not task-1 — task-1 is the best-practice tunings and by the time this task runs it should already be complete).
 - **After any hang, follow the recovery procedure in `app/TestHarness/README.md` before running anything else.** In particular, check for `test-runs/_in-progress.json`, record the dangerous config somewhere durable, and move the marker aside (don't delete it).
 
 ## Test plan
@@ -101,26 +109,28 @@ Commit the real-capture implementation as its own step before any Tier 4 test co
 
 Goal: take the most interesting configuration from Tiers 3–4 and vary individual tuning parameters (from the deep-dive research in `docs/research/11-m2-pro-video-pipeline-deep-dive.md`) to see which ones move the needle.
 
+**Important framing.** By the time this task starts, task-1 has already shipped the high-confidence tunings (priorities 1–5 below) as the main-app and harness defaults. That changes the purpose of Tier 5 sweeps from *"try a new tuning to see if it helps"* to *"isolate the contribution of a tuning we already ship, by flipping it back to the pre-task-1 value and measuring the delta."* This is a more valuable experiment: it tells us not just whether the combined tunings work, but *which specific tuning is carrying which part of the weight*. If Tier 3 passes at 1440p on the post-task-1 defaults, Tier 5 reverse-sweeps tell us the minimal subset of tunings we actually needed. If Tier 3 still fails at 1440p, Tier 5 tells us whether the failure depends on specific tuning combinations — i.e. whether any single reversion also causes Tier 3 to fail.
+
 Structure: take the most interesting configuration, run it N times with one parameter changed per run. The research doc lists these as falsifiable hypotheses H1–H12 in section 7 — consult that section for the full rationale, expected behaviour, and pass/fail criteria of each one before writing the config. The priority list below is lifted directly from the research doc's ranked shortlist and is ordered cheapest/highest-leverage first. Confidence labels (**high** / **medium** / **low**) reflect how strongly Apple docs, WWDC sessions, or production-app code support the hypothesis.
 
-| Priority | Sweep | Confidence | Source evidence |
-|---|---|---|---|
-| 1 | `VTCompressionSessionPrepareToEncodeFrames` called during a sequential warm-up phase before the SCStream opens, vs not called at all (current) | **high** | `VTCompressionSession.h`: "If this isn't called, any necessary resources will be allocated on the first `VTCompressionSessionEncodeFrame` call." Our spindump shows the hang is on exactly that allocation path. OBS, FFmpeg, and HandBrake all call this. |
-| 2 | `kVTCompressionPropertyKey_MaxFrameDelayCount` — 1, 2, 4 vs `kVTUnlimitedFrameDelayCount` (the default) | **high** | `VTCompressionProperties.h` verbatim: "limits the number of frames that may be held in the 'compression window'". Each held frame retains its source IOSurface. HandBrake is the only examined production app that sets this. |
-| 3 | `kVTCompressionPropertyKey_AllowFrameReordering` — `false` vs `true` on H.264 writers | **high** | Removes the B-frame reorder buffer entirely. HLS doesn't require B-frames. Cap already sets `false`. |
-| 4 | `kVTCompressionPropertyKey_RealTime` — `kCFBooleanFalse` vs unset (current default "unknown") vs `kCFBooleanTrue` | **medium-high** | OBS issue #5840 (<https://github.com/obsproject/obs-studio/issues/5840>) documents that `RealTime = true` caused heavy framedrops on M1/M2 and that "removing the `RealTime` property makes the HW VideoToolbox very reliable." OBS, FFmpeg, and HandBrake all ship `kCFBooleanFalse`. The mechanism is undocumented, so actually measure it in our three-session setup rather than trusting the single-session OBS result. |
-| 5 | `SCStreamConfiguration.pixelFormat` — `420v` (YCbCr 4:2:0 biplanar) vs BGRA | **high** | WWDC22/10155 lists `420v` "for encoding and streaming" and Apple's 4K/60 sample uses it. Cap uses it. Cuts per-frame screen IOSurface bytes from 4 bpp to 1.5 bpp (~63% reduction). Note: Tier 3 T3.6 already covers synthetic-source 420v; this sweep is the real-capture equivalent once Tier 4 lands. |
-| 6 | `kCVPixelBufferPoolMaximumBufferAgeKey` — 0.1 s vs the 1 s default; plus `kCVPixelBufferPoolAllocationThresholdKey` hard ceiling via `CVPixelBufferPoolCreatePixelBufferWithAuxAttributes` | **medium** | `CVPixelBufferPool.h` documents the 1 s default age-out. The threshold key lets the pool fail fast (returns `kCVReturnWouldExceedAllocationThreshold`) instead of triggering a kernel allocation at the wrong moment. |
-| 7 | Serialised encoder start-up: create writer 1 → `PrepareToEncodeFrames` → wait → writer 2 → … → then open SCStream, vs parallel creation (current) | **medium** | Hypothesis: the three-encoder allocation race during the first few hundred milliseconds is the vulnerable window. Removing the parallelism at that one moment removes the contention. Composes with sweep 1; treat as "sweep 1 with extra strictness." |
-| 8 | `SCStreamConfiguration.queueDepth` — 3 (default) vs higher | **medium** | WWDC22/10155 verbatim: "Increase the depth of the frame queue to ensure high fps at the expense of increasing the memory footprint of WindowServer." Each unit = one extra IOSurface. |
-| 9 | `kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder = true` (diagnostic) | **medium** | Not a fix — a safety net. Makes silent software fallback fail loudly. `VTCompressionProperties.h` enumerates "the hardware encoding resources on the machine are busy" as a failure case, so this may surface the contention as a clean error code instead of a kernel deadlock. |
-| 10 | `kVTCompressionPropertyKey_PixelBufferPoolIsShared` read-back audit (diagnostic) | **high as diagnostic** | Not a sweep — a sanity check that should run on every Tier 5 config. If any session reports `false` (indicating a pixel-format mismatch silently doubles the pool), that's an actionable bug regardless of the other results. |
+| Priority | Sweep | Already a task-1 default? | Confidence | Source evidence |
+|---|---|---|---|---|
+| 1 | `VTCompressionSessionPrepareToEncodeFrames` warm-up (via serialised `startWriting()` ordering per task-1 tuning 2) vs pre-task-1 lazy/parallel creation | **yes** (task-1 tuning 2) | **high** | `VTCompressionSession.h`: "If this isn't called, any necessary resources will be allocated on the first `VTCompressionSessionEncodeFrame` call." Our spindump shows the hang is on exactly that allocation path. Reverse-sweep measures whether the warm-up is what saved us. |
+| 2 | `kVTCompressionPropertyKey_MaxFrameDelayCount` — 1, 2, 4, `kVTUnlimitedFrameDelayCount` | **yes** (task-1 tuning 5 ships `1`/`2`/`2` defaults) | **high** | Each held frame retains its source IOSurface. HandBrake is the only examined production app that sets this. Reverse-sweep to `kVTUnlimitedFrameDelayCount` measures the contribution of the bounded window. |
+| 3 | `kVTCompressionPropertyKey_AllowFrameReordering` — `false` (task-1 default) vs `true` on H.264 writers | **yes** (task-1 tuning 4) | **high** | Removes the B-frame reorder buffer entirely. HLS doesn't require B-frames. Reverse-sweep to `true` measures whether disabling B-frames mattered. |
+| 4 | `kVTCompressionPropertyKey_RealTime` — `kCFBooleanFalse` (task-1 default) vs unset vs `kCFBooleanTrue` | **yes** (task-1 tuning 3) | **medium-high** | OBS issue #5840 (<https://github.com/obsproject/obs-studio/issues/5840>) documents that `RealTime = true` caused heavy framedrops on M1/M2 and that "removing the `RealTime` property makes the HW VideoToolbox very reliable." OBS, FFmpeg, and HandBrake all ship `kCFBooleanFalse`. The mechanism is undocumented, so actually measure it in our three-session setup rather than trusting the single-session OBS result. |
+| 5 | `SCStreamConfiguration.pixelFormat` / `SyntheticFrameSource` format — `420v` (task-1 default, covered by T3.6 and T4.1/T4.3 for real capture) vs BGRA | **yes** (task-1 tuning 1) | **high** | WWDC22/10155 lists `420v` "for encoding and streaming" and Apple's 4K/60 sample uses it. Cap uses it. Cuts per-frame screen IOSurface bytes from 4 bpp to 1.5 bpp (~63% reduction). Reverse-sweep to BGRA isolates the pixel format's contribution. |
+| 6 | `kCVPixelBufferPoolMaximumBufferAgeKey` — 0.1 s vs the 1 s default; plus `kCVPixelBufferPoolAllocationThresholdKey` hard ceiling via `CVPixelBufferPoolCreatePixelBufferWithAuxAttributes` | **no** (new sweep) | **medium** | `CVPixelBufferPool.h` documents the 1 s default age-out. The threshold key lets the pool fail fast (returns `kCVReturnWouldExceedAllocationThreshold`) instead of triggering a kernel allocation at the wrong moment. |
+| 7 | Serialised encoder start-up — covered by task-1 tuning 2; this sweep explicitly pits it against forced-parallel start-up via the `harness.warmUp = "parallel"` override that task-1 added to `HarnessConfig` | **yes** (task-1 tuning 2) | **medium** | Hypothesis H7: the three-encoder allocation race during the first few hundred milliseconds is the vulnerable window. Removing the parallelism at that one moment removes the contention. Reverse-sweep measures how much of the 1440p stability delta comes from serialisation specifically. |
+| 8 | `SCStreamConfiguration.queueDepth` — 3 (default) vs higher | **no** (new sweep) | **medium** | WWDC22/10155 verbatim: "Increase the depth of the frame queue to ensure high fps at the expense of increasing the memory footprint of WindowServer." Each unit = one extra IOSurface. |
+| 9 | `kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder = true` (diagnostic) | **partial** (task-1 tuning 6 ships the read-back assertion; the `RequireHardware...` encoder spec itself may not apply to AVAssetWriter-owned sessions) | **medium** | Not a fix — a safety net. Makes silent software fallback fail loudly. `VTCompressionProperties.h` enumerates "the hardware encoding resources on the machine are busy" as a failure case, so this may surface the contention as a clean error code instead of a kernel deadlock. |
+| 10 | `kVTCompressionPropertyKey_PixelBufferPoolIsShared` read-back audit (diagnostic) | **yes** (task-1 tuning 7) | **high as diagnostic** | Not a sweep — a sanity check that should run on every Tier 5 config (and every Tier 3 config, per task-1). If any session reports `false` (indicating a pixel-format mismatch silently doubles the pool), that's an actionable bug regardless of the other results. |
 
-Tuning-knob plumbing: new knobs are added to the harness's writer `configure()` methods as the research surfaces them. Read `app/TestHarness/README.md` § "Writer tunings" for the currently-supported keys and the two-line pattern for adding one. Keep the mapping explicit per the README's guidance — don't pass the dict through opaquely.
+Tuning-knob plumbing: task-1 adds `realTime`, `maxFrameDelayCount`, `allowFrameReordering`, and `harness.warmUp` as new `tunings` keys on the harness config schema. Read the updated `app/TestHarness/README.md` § "Writer tunings" to see the current inventory and the two-line pattern for adding a new one. Priorities 6 and 8 are the only sweeps in the table above that may still need new `tunings` keys added as part of this task.
 
 This tier is where the harness pays off: an automated sweep of 10–20 configurations running overnight while the developer works on something else is dramatically more efficient than manual testing. Most Tier 5 sweeps can be expressed as multiple JSON files in `test-configs/tier-5/` that differ only in one `tunings` key. The tier runner picks them up in order and stops on the first fail like any other tier.
 
-**The composing question.** The research doc's H7 (serialised start-up) composes with H2 (`PrepareToEncodeFrames`). H5 (pixel format) composes with everything. If an individual sweep doesn't flip a failing config to passing, run a combined sweep with the top three highest-confidence tunings applied simultaneously before declaring the 1440p preset unshippable. Production-app recipes (Cap, OBS, FFmpeg, HandBrake — see research doc Area 4) all apply multiple tunings at once; a single-variable sweep may miss a combined effect.
+**The composing question.** If every single-variable reverse-sweep of a task-1 tuning (priorities 1–5) still passes at 1440p, the combined tunings are load-bearing as a *set* rather than individually — each one contributes some headroom but no single one is critical. If a single reverse-sweep causes the hang to come back, that single tuning is the load-bearing piece and task-4 must preserve it. If the pre-task-1 defaults fail at 1440p (the reasonable expectation) but the post-task-1 defaults also fail, nothing in this set is sufficient and the decision framework below applies.
 
 ### Research hypotheses quick reference
 
@@ -131,7 +141,7 @@ The research doc at `docs/research/11-m2-pro-video-pipeline-deep-dive.md` § 7 d
 | H1 — ScreenCaptureKit `420v` pixel format | T3.6 (synthetic), Tier 5 priority 5 (with real capture) | Highest-leverage single change per the research. |
 | H2 — `VTCompressionSessionPrepareToEncodeFrames` warm-up | Tier 5 priority 1 | Maps directly to the preparationQueue stall the spindump shows. |
 | H3 — `MaxFrameDelayCount` bounded | Tier 5 priority 2 | |
-| H4 — `AllowFrameReordering = false` on H.264 | Tier 5 priority 3 | May already be set in the harness writers; verify first. |
+| H4 — `AllowFrameReordering = false` on H.264 | Tier 5 priority 3 | Shipped by task-1 as a harness default. Tier 5 reverse-sweep against `true` measures its contribution. |
 | H5 — `RealTime = kCFBooleanFalse` on all sessions | Tier 5 priority 4 | The OBS #5840 hypothesis. |
 | H6 — `CVPixelBufferPool` tuning (age, threshold) | Tier 5 priority 6 | |
 | H7 — Serialised encoder start-up | Tier 5 priority 7 | Composes with H2. |
@@ -139,7 +149,7 @@ The research doc at `docs/research/11-m2-pro-video-pipeline-deep-dive.md` § 7 d
 | H9 — `PixelBufferPoolIsShared` audit | Tier 5 priority 10 (diagnostic per run) | Not a standalone sweep — log on every session create. |
 | H10 — `RequireHardwareAcceleratedVideoEncoder = true` | Tier 5 priority 9 (diagnostic) | |
 | H11 — Shape change: drop ProRes, match Cap's two-writer recipe | Outside tier structure — this is the decision-framework fallback if nothing else works | Decision-framework option below. Do not run blindly without reading the research doc's rationale. |
-| H12 — Per-writer heartbeat supervisor | Not a harness hypothesis — this is a main-app resilience improvement | Hand off to task-4 (or a task-4 follow-up) if Tier 3 confirms that neither the harness nor the main app can cleanly recover from the hang in userspace. Not a tuning knob, so explicitly out of scope for task-2. |
+| H12 — Per-writer heartbeat supervisor | Not a harness hypothesis — this is a main-app resilience improvement | Hand off to task-4 (or a task-4 follow-up) if Tier 3 confirms that neither the harness nor the main app can cleanly recover from the hang in userspace. Not a tuning knob, so explicitly out of scope for task-1. |
 
 Before creating a Tier 5 config, read the corresponding hypothesis in the research doc in full. The research doc contains the "why we think this" and "pass criterion" detail that doesn't fit in this table.
 
@@ -210,7 +220,7 @@ Whatever the result, the output of this task is concrete evidence that informs t
 3. **Tier 4 configs** (if real-capture support lands in the harness as part of this task) and baseline summary.
 4. **Tier 5 parameter sweep configs and summaries** for whatever subset of the deep-dive research hypotheses have landed by the time Tier 3 results are in hand.
 5. **Updates to `docs/m2-pro-video-pipeline-failures.md`** — the empirical evidence the harness produces should flow back into the failure modes doc as "what we now know" footnotes, particularly in the "What we don't know" subsections. This is the single most valuable long-term artefact of this task.
-6. **A findings hand-off note to task-0A** summarising which harness-validated approach Phase 3 and 4 should take, and why. Either add it as a new section in `task-0A-encoder-contention-and-camera-pipeline.md` or link to it from there.
+6. **A findings hand-off note to task-4** summarising which harness-validated path (A / B / C / D from task-4's decision framework) the stabilisation work should take, and why. Either add it as a new section in `docs/tasks-todo/task-4-recording-pipeline-stabilisation.md` under "## Findings hand-off from task-2" or commit a standalone summary document under `docs/research/` or `test-runs/` and link to it from task-4.
 
 ## Handoff
 

@@ -36,6 +36,11 @@ Three layers: a native macOS desktop app for recording, a server for processing 
 - Server (Hono + Bun + SQLite, Hetzner)
 - Viewer Layer (Cloudflare Workers + KV)
 
+## Task Management
+
+- Uncompleted tasks live in `docs/tasks-todo/`. Tasks with a number that starts with `x` (eg `task-x-thing.md` or `task-x3-thing.md`) are unprioritised.
+- `task-0-scratchpad.md` is never completed and is a running scratchpad for smaller tasks and checklists. Never edit this file unless specifically asked to - leave that to the user.
+
 ## Project Structure
 
 ```
@@ -48,10 +53,10 @@ Three layers: a native macOS desktop app for recording, a server for processing 
 │   │   ├── Models/
 │   │   ├── Pipeline/
 │   │   └── UI/
+    └── TestHarness/                      # Harness for testing various things for the macOS app
 ├── docs
 │   ├── archive                           # Archived docs
 │   │   └── initial-requirements.md.      # Original Requirements before refinement
-│   ├── plan-notes.md
 │   ├── requirements.md                   # Refine overall requirements docs for whole system
 │   ├── research/                         # Research Notes
 │   ├── tasks-done/                       # Completed tasks

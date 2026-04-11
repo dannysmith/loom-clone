@@ -1,16 +1,72 @@
 # LoomCloneTestHarness
 
-Diagnostic instrument for probing M2 Pro AVFoundation / VideoToolbox / CIContext configurations in isolation. Built to answer the hypotheses raised by task-0B and to bisect the failure modes documented in `docs/m2-pro-video-pipeline-failures.md`, without repeatedly hanging the developer's machine.
+A diagnostic instrument for probing `AVFoundation` / `VideoToolbox` / `CIContext` / `ScreenCaptureKit` configurations in isolation, without having to exercise them through the real recording pipeline.
 
-This is **not** a shippable part of LoomClone. It is a separate Xcode target (`LoomCloneTestHarness`) that lives in the same project so it can share entitlements and code-signing infrastructure. The main LoomClone recording pipeline is not modified by this task, and the harness does not depend on any of the main app's actors or UI.
+It exists because this project targets Apple Silicon Pro-class chips (single H.264 engine, separate ProRes engine, shared IOGPUFamily kernel arbiter) where the wrong combination of concurrent writers, resolutions, or `VTCompressionSession` tunings can cause a kernel-level GPU wedge that hard-locks the Mac. Iterating on those configurations inside the main app means hanging the developer's machine and hard-rebooting every time something goes wrong. The harness lets us vary **one knob at a time** in a process that is safer, more observable, and more reproducible than the real app. See `docs/m2-pro-video-pipeline-failures.md` for the institutional memory of failure modes this tool is meant to help diagnose.
+
+This is **not** a shippable part of LoomClone. It is a second Xcode target (`LoomCloneTestHarness`) in the same project so it can share code-signing infrastructure and entitlements, but it does not depend on any actor / UI code from the main app, and the main recording pipeline is never modified as a result of running it.
 
 ## When to use it
 
-- You have a hypothesis about what combination of writers / resolutions / tuning knobs is failing, and want to verify it without touching the main app.
-- You are about to change the main recording pipeline and want to validate the change on isolated synthetic input first.
-- You're sweeping a VideoToolbox / CVPixelBufferPool / SCStreamConfiguration property across a range of values and want machine-parseable pass/fail output.
+- You have a hypothesis about which combination of writers / resolutions / tuning knobs is failing, and you want to verify it without touching the main app.
+- You're about to change the main recording pipeline and want to validate the change on synthetic input first.
+- You're sweeping a `VTCompressionSession` / `CVPixelBufferPool` / `SCStreamConfiguration` property across a range of values and want machine-parseable pass/fail output.
+- You've hit a new failure mode and want to bisect the minimal reproducer.
 
-See `docs/tasks-todo/task-0C-isolation-test-harness.md` for the full design context, the tier-by-tier test plan, and the safety scaffolding rationale.
+## How it works
+
+One run = one JSON config in, one `result.json` out, plus a directory of supporting artefacts. The harness is deliberately linear — no retries, no UI, no interactive state machine. Everything interesting is in the config or in the run directory.
+
+```
+┌────────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────────┐
+│ HarnessCon─│ →  │ HarnessRun─  │ →  │ Sources      │ →  │ Writers    │
+│ fig (JSON) │    │ ner          │    │ (synthetic / │    │ (HLS /     │
+└────────────┘    │              │    │  real)       │    │  H.264 /   │
+                  │  metronome   │    └──────┬───────┘    │  ProRes /  │
+                  │              │           ↓            │  audio)    │
+                  │              │    ┌──────────────┐    └──────┬─────┘
+                  │              │    │ HarnessCom─  │           ↓
+                  │              │    │ positor      │    ┌────────────┐
+                  │              │    │ (CIContext,  │    │ result.    │
+                  │              │    │  optional)   │    │ json +     │
+                  │              │    └──────────────┘    │ events.    │
+                  │              │                        │ jsonl +    │
+                  │              │                        │ snapshots  │
+                  └──────┬───────┘                        └────────────┘
+                         │
+                         ↓
+                  ┌────────────┐
+                  │ Watchdog + │
+                  │ in─progress│
+                  │ marker     │
+                  └────────────┘
+```
+
+Key components:
+
+- **`HarnessConfig`** — flat `Codable` JSON schema describing the writers to instantiate, source(s) to drive, optional compositor, duration, and per-writer tuning knobs. Written to `config.json` in the run directory so every run is byte-exact reproducible.
+- **`HarnessRunner`** — orchestrates a single run. Writes the pre-run system snapshot, arms the watchdog, builds sources + compositor + writers, drives a metronome that produces frames and feeds them into the writers, stops the writers, writes the post-run snapshot, computes the pass/fail outcome, and writes `result.json`.
+- **`SyntheticFrameSource`** — produces `CVPixelBuffer` / `CMSampleBuffer` frames without touching any capture API. Supports BGRA (screen-like), 420v YCbCr (camera-like), and silent PCM audio. Uses `memset_pattern4` for fast in-place fills so even 4K synthetic content keeps up with a 30 fps metronome. Synthetic frames are the default because they remove the capture layer as a confounding variable — if a test fails with synthetic frames, the capture layer is not the cause.
+- **Writers** — minimal analogues of the main-app `WriterActor` / `RawStreamWriter`: composited HLS (H.264 + AVAssetWriter HLS profile with a segment-capture delegate), raw H.264 `.mp4`, raw ProRes 422 Proxy `.mov`, raw AAC `.m4a`. Each is independently enable/disable-able and has a `tunings` dict for sweeping `AVAssetWriterInput` / `VTCompressionSession` properties.
+- **`HarnessCompositor`** — optional `CIContext`-based compositor that reads one or two input `CIImage`s and renders a composited output into the composited HLS writer's input. Supports both `ciContext.render(..., to:bounds:)` and `ciContext.startTask(toRender:to:)` paths, the Lanczos-scaling toggle, and the PiP circle-mask camera overlay.
+- **Observability** — `EventLog` (JSONL, thread-safe), `SystemSnapshot` (`vm_stat` / `ioreg -c IOSurfaceRoot` / `ps -M` / `powermetrics` captured before and after the run), `WatchdogTimer` (pthread-based hard kill-switch), and `InProgressMarker` (`test-runs/_in-progress.json` written pre-run, deleted on clean completion).
+- **Outcome classifier** — `pass` / `degraded` / `fail-recorded` / `fail-killed` based on writer final status, the presence of GPU errors or dropped frames, HLS segment cadence stability, and whether the watchdog fired.
+
+The runner script (`Scripts/run-tier-<N>.sh`) is a shell wrapper that runs a whole tier of configs in order, dry-runs each one first, and stops on the first killed or recorded failure.
+
+## Test tier convention
+
+Configs live under `Scripts/test-configs/tier-<N>/` and runner scripts at `Scripts/run-tier-<N>.sh`. Tiers are grouped by risk and purpose rather than subject matter:
+
+| Tier | Purpose |
+|---|---|
+| **Tier 1** | Single-component isolation. One writer at a time, synthetic sources only. Any failure here means a fundamental single-writer bug, not concurrency. |
+| **Tier 2** | Two-writer combinations, synthetic sources. Finds issues that emerge from concurrent writers but stops short of the known-hang region. |
+| **Tier 3** | Three-writer combinations, including configurations known to trigger kernel wedges on the target hardware. Synthetic sources. Run one config at a time, never batched — the last-known-good marker is designed for this tier. |
+| **Tier 4** | Real-capture replacement. Takes selected configs from earlier tiers and runs them again with `SCStream` + `AVCaptureSession` instead of synthetic sources, to check whether findings from synthetic runs survive the real capture layer. |
+| **Tier 5** | Parameter sweeps. Takes one configuration and varies a single `VTCompressionSession` / `CVPixelBufferPool` / `SCStreamConfiguration` property across a range of values. Automation pays off here — an overnight sweep of 20 configs is much more efficient than manual testing. |
+
+Not every tier is populated at any given time — treat the list as the scheme, not an inventory. What exists is whatever is in `Scripts/test-configs/` and `Scripts/run-tier-*.sh` right now.
 
 ## Build
 
@@ -19,9 +75,9 @@ cd app
 xcodebuild -project LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build
 ```
 
-This produces `app/build/Debug/LoomCloneTestHarness.app`. The binary inside is what the runner scripts execute directly (`open -a` would work too but loses stdout capture).
+This produces `app/build/Debug/LoomCloneTestHarness.app`. The binary inside is what the runner scripts execute directly (`open -a` works too, but loses stdout capture).
 
-Every time `project.yml` changes you'll need to regenerate:
+Whenever `project.yml` changes you need to regenerate the xcodeproj:
 
 ```
 cd app && xcodegen generate
@@ -39,15 +95,15 @@ Exit codes:
 | code | meaning |
 |---|---|
 | 0 | PASS |
-| 20 | DEGRADED (completed but one or more soft-fail conditions tripped) |
-| 30 | FAIL (recorded) — writer failed or output is missing |
-| 40 | FAIL (killed) — watchdog fired, this config is dangerous |
+| 20 | DEGRADED — completed but one or more soft-fail conditions tripped |
+| 30 | FAIL (recorded) — a writer failed or output is missing |
+| 40 | FAIL (killed) — watchdog fired, this config is probably dangerous |
 | 2 | argv / config-file error |
 | 1 | other |
 
 ## Dry-run a config
 
-Dry-run validates the config, prints what the harness WOULD do, and exits without touching any AVFoundation entry point. **Always dry-run a new config before running it for real**, especially anything in Tier 3+:
+Dry-run validates the config, prints what the harness WOULD do, and exits without touching any `AVFoundation` entry point. **Always dry-run a new config before running it for real**, especially anything that touches the known-hang region of the configuration space:
 
 ```
 ./app/build/Debug/LoomCloneTestHarness.app/Contents/MacOS/LoomCloneTestHarness \
@@ -61,18 +117,18 @@ Dry-run validates the config, prints what the harness WOULD do, and exits withou
 ./app/TestHarness/Scripts/run-tier-1.sh
 ```
 
-This script is the real entry point for systematic testing. It:
+The runner script:
 
 1. Refuses to start if `test-runs/_in-progress.json` exists (see "Recovery after a hang" below).
 2. Dry-runs every config first.
-3. Runs each config in order, stopping on the first fail-recorded or fail-killed result unless `--continue-on-fail` is passed.
+3. Runs each config in order, stopping on the first `fail-recorded` or `fail-killed` result unless `--continue-on-fail` is passed.
 4. Writes a summary at the end.
 
-Only `run-tier-1.sh` is committed right now. Higher tiers will land incrementally. **Do not run Tier 3 tests** until the full safety scaffolding (watchdog + marker + in-process cleanup) has been validated with a dry-run for each config.
+The runner can also be invoked with `--dry-run-only` to exercise the flow without running the real tests.
 
 ## Run outputs
 
-Each run writes to `test-runs/<timestamp>-<config-name>/`:
+Each run writes a fresh directory to `test-runs/<timestamp>-<config-name>/`:
 
 ```
 test-runs/2026-04-11-153300-T1.1-prores-4k-alone/
@@ -85,56 +141,149 @@ test-runs/2026-04-11-153300-T1.1-prores-4k-alone/
     └── screen.mov
 ```
 
-The `test-runs/` directory is tracked (`.gitkeep`) but its contents are gitignored so runs don't pollute the repo.
+The `test-runs/` directory itself is tracked (via `.gitkeep`) but its contents are gitignored except for aggregate `*.md` summaries — individual run directories are large and machine-specific. If you want to record findings across a tier run, commit a markdown summary alongside the run dirs.
 
 ### What each file is
 
 - **`config.json`** — byte-identical copy of the JSON the runner consumed. Start from this when reproducing a failure.
-- **`events.jsonl`** — one line per structured event. Grep / jq-friendly. Look for `writer.failed-before-finish`, `writer.dropped`, `metronome.no-buffer`, `compositor.render-error`, `compositor.pool-exhausted`.
-- **`result.json`** — the machine-readable outcome. `outcome` field is `"pass"` / `"degraded"` / `"fail-recorded"` / `"fail-killed"`. `issues` lists soft-fail reasons. `writers` has per-writer final status and byte counts.
-- **`system-snapshot-{start,end}.txt`** — `vm_stat`, `sysctl`, `ps -M`, `ioreg -c IOSurfaceRoot -l` (truncated), `powermetrics` (if root). Diff these to see what changed across the run.
-- **`outputs/`** — the actual writer outputs. Useful to open in QuickTime / `ffprobe` to confirm the files are well-formed.
+- **`events.jsonl`** — one line per structured event. Grep- and jq-friendly. Notable event kinds: `writer.failed-before-finish`, `writer.dropped`, `writer.segment`, `metronome.no-buffer`, `compositor.render-error`, `compositor.pool-exhausted`, `watchdog.armed`.
+- **`result.json`** — the machine-readable outcome. `outcome` field is `"pass"` / `"degraded"` / `"fail-recorded"` / `"fail-killed"`. `issues` lists soft-fail reasons. `writers[]` has per-writer final status, error description, output bytes, and (for HLS) the array of observed segment durations.
+- **`system-snapshot-{start,end}.txt`** — `uname`, `sw_vers`, `sysctl hw.*`, `vm_stat`, `ps -M`, `ioreg -c IOSurfaceRoot -l` (truncated), `powermetrics` (requires root, otherwise just records the denial). Diff `start` vs `end` to see what changed over the run.
+- **`outputs/`** — the actual writer output files. Useful to open in QuickTime or `ffprobe` to confirm the files are well-formed.
+
+## Safety model
+
+The harness will, by design, eventually be asked to run configurations that trigger a hang. Three independent safeguards stand between that config and an unrecoverable Mac:
+
+1. **Wall-clock watchdog.** Every run is armed with a `pthread`-based timer that fires `duration + watchdogGraceSeconds` after the run starts. On fire it prints a diagnostic line and calls `exit(40)`. The watchdog thread is separated from the Swift concurrency runtime so it stays armed even if the main pipeline is wedged. This does not rescue us from a true kernel-level hang (if the kernel is stuck, no userspace code runs), but it catches every "userspace stall with a stuck thread" case.
+2. **Last-known-good marker.** Before starting, the harness writes `test-runs/_in-progress.json` containing the test name and full config. On clean completion it deletes the file. If the Mac hangs and has to be hard-rebooted, the file survives — the runner script on next invocation refuses to start until the marker is acknowledged.
+3. **Dry-run mode.** `--dry-run` validates a config and prints what the harness would do, without calling any `AVFoundation` entry point. This is the first thing any new config should be run with.
+
+The runner script layers onto these by running tier configs in order, stopping on the first `fail-killed` or `fail-recorded` by default, and refusing to start in the presence of a marker.
 
 ## Recovery after a hang
 
-If a Tier 3+ config triggers a kernel-level wedge and you have to hard-reboot the Mac:
+If a config triggers a kernel-level wedge and forces a hard reboot:
 
 1. Reboot and log back in.
 2. **Do not run any tier script yet.**
-3. Check `test-runs/_in-progress.json`. It will exist, and it will contain the name + full config of the test that hung. Read it.
+3. Check `test-runs/_in-progress.json`. It will exist, and it will contain the name and full config of the test that hung. Read it.
 4. Write the dangerous config's name down somewhere durable so you don't accidentally run it again.
-5. Move the marker aside (don't delete it — keep it as a historical record):
+5. Move the marker aside as a historical record (don't delete it):
    ```
-   mv test-runs/_in-progress.json test-runs/_last-hang-2026-04-11.json
+   mv test-runs/_in-progress.json test-runs/_last-hang-YYYY-MM-DD.json
    ```
-6. Update `docs/m2-pro-video-pipeline-failures.md` with the new hang if it's a new pattern.
-7. Now you can run tier scripts again.
+6. Record the new failure mode in `docs/m2-pro-video-pipeline-failures.md` if it's not already documented.
+7. You can now run tier scripts again.
 
 If the marker is missing after a hang you thought happened, either the harness finished cleanly (check the latest run directory) or the marker was somehow lost — either way, investigate before assuming it's safe to proceed.
 
-## Adding a new test
+## Writing a new test config
 
-1. Drop a new JSON file under `Scripts/test-configs/tier-<N>/`. The filename should start with `T<N>.<X>-` for ordering.
-2. Dry-run it with `--dry-run` to sanity-check.
-3. If it's a Tier 1 or Tier 2 config, you can just run it via `run-tier-<N>.sh`.
-4. If it's Tier 3+, add the new config to the runner script (or a new runner script) and verify the safety scaffolding is active (marker, watchdog deadline) before running it for real.
+Test configs are flat JSON. The minimum shape is:
+
+```json
+{
+  "name": "T1.1-prores-4k-alone",
+  "tier": "tier-1",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen",
+      "width": 3840,
+      "height": 2160
+    }
+  ]
+}
+```
+
+Fields:
+
+- `name` — unique identifier shown in events, result, and the run directory name. Follow the `T<tier>.<index>-<slug>` convention for tier configs.
+- `tier` — label used by the runner script to group configs (purely informational to the harness itself).
+- `durationSeconds` — how long the metronome runs. The watchdog fires at `durationSeconds + watchdogGraceSeconds`.
+- `frameRate` — metronome tick rate. Defaults to 30.
+- `source.kind` — one of `synthetic-screen` (BGRA), `synthetic-camera` (420v YCbCr), `synthetic-audio` (silent PCM), `real-screen` (ScreenCaptureKit), `real-camera` (AVCaptureSession). A single source can declare `additional` sub-sources for tests that need both a screen and camera feed.
+- `source.pattern` — `solid`, `gradient`, `moving`, or `noise`. `moving` is the default because static content compresses to almost nothing and doesn't stress the encoder realistically.
+- `source.colorSpace` — `srgb` (display default), `p3` (wide-gamut display), `rec709` (camera default). Controls the attachment tags on synthetic pixel buffers so downstream writers see the same input shape they would in production.
+- `compositor` — optional. When present, the compositor receives the source frames and its output feeds the composited HLS writer. Fields: `outputWidth`, `outputHeight`, `includeCameraOverlay`, `useLanczosScaling`, `renderMode` (`render-to-bounds` or `start-task`).
+- `writers[]` — each writer is configured by `kind` (`composited-hls`, `raw-h264`, `raw-prores`, `raw-audio`), a unique `name`, dimensions, bitrate, and an optional `tunings` dict.
+- `expected` — informational, not enforced: `"pass"` / `"degraded"` / `"fail"` / `"fail-killed"` / `"unknown"`.
+
+When creating a config:
+
+1. Drop it under `Scripts/test-configs/tier-<N>/` with a `T<N>.<X>-<slug>.json` filename so the runner picks it up in order.
+2. `--dry-run` it first.
+3. If it's in a known-safe tier, run it directly or via the tier runner.
+4. If it's in a tier known to approach the failure region, verify the safety scaffolding is behaving (marker, watchdog deadline) before running it for real — and run it by itself, not batched.
+
+## Writer tunings
 
 Writer tunings are supplied as a `tunings` dict on the writer config. Currently-supported keys:
 
 | writer kind | key | type |
 |---|---|---|
-| `raw-h264` | `averageBitRate` | int |
+| `raw-h264` | `averageBitRate` | int (bits/sec) |
 | `raw-h264` | `expectedFrameRate` | int |
 | `raw-h264` | `maxKeyFrameIntervalDuration` | int (seconds) |
-| `composited-hls` | `declareRec709Output` | bool (default true) |
+| `composited-hls` | `declareRec709Output` | bool — default `true`; set to `false` to test what happens without `AVVideoColorPropertiesKey` on the writer output |
 
-New knobs are added by editing the relevant writer's `configure()` method — keep the mapping explicit rather than passing the dict through.
+Adding a new tuning knob is a two-line edit to the relevant writer's `configure()` method: read the key from `tunings` and apply it to the `AVAssetWriterInput` / `VTCompressionSession` properties. Keep the mapping explicit — don't pass the dict through opaquely.
 
-## What this harness does NOT do
+## What this harness is NOT
 
-- It does not run Tier 4 real-capture tests yet (`real-screen` / `real-camera` source kinds bail at setup time).
-- It does not reproduce the main app's pause/resume/mode-switch machinery.
-- It does not watch for `kIOGPUCommandBufferCallback*` log messages via `os_log`/`log stream` — for now, those show up in Xcode console when you run the harness attached to a debugger. A future iteration should shell out to `log stream --predicate 'eventMessage CONTAINS "kIOGPU"'` in the background and capture matches into the event log.
-- It does not yet implement the segment cadence trend plot — `result.json` contains raw `segmentDurations` arrays for HLS writers that you can plot externally.
+- It is not a production recording pipeline. It is allowed to be messier, simpler, and more directly coupled than the main app's actors.
+- It is not a UI-driven app. There is no window, no settings panel, no live preview. Everything is driven from config files on disk.
+- It is not a performance benchmark or quality comparison tool. It measures whether a configuration is stable and what it produces, not whether one configuration is "better" than another.
+- It does not reproduce the main app's pause / resume / mode-switch machinery. One config, one run, no in-flight reconfiguration.
+- It does not, out of the box, tail `os_log` / `log stream` for `kIOGPUCommandBufferCallback*` messages. Those show up in the Xcode console when the harness is run attached to a debugger.
 
-Each of these is cheap to add when the task-0B research surfaces a hypothesis that needs it.
+## Layout
+
+```
+app/TestHarness/
+├── README.md
+├── Info.plist
+├── TestHarness.entitlements
+├── TestHarnessMain.swift         // @main, argv, AppKit entry
+├── HarnessConfig.swift           // Codable config schema
+├── HarnessResult.swift           // Codable result schema
+├── HarnessDryRun.swift           // --dry-run printer
+├── HarnessRunner.swift           // per-run orchestrator + metronome
+├── Sources/
+│   └── SyntheticFrameSource.swift
+├── Compositor/
+│   └── HarnessCompositor.swift
+├── Writers/
+│   ├── HarnessWriter.swift              // common protocol
+│   ├── HarnessCompositedHLSWriter.swift
+│   ├── HarnessRawH264Writer.swift
+│   ├── HarnessRawProResWriter.swift
+│   └── HarnessRawAudioWriter.swift
+├── Observability/
+│   ├── EventLog.swift
+│   ├── SystemSnapshot.swift
+│   ├── WatchdogTimer.swift
+│   └── InProgressMarker.swift
+└── Scripts/
+    ├── run-tier-1.sh
+    ├── run-tier-2.sh             // if present
+    ├── ...
+    └── test-configs/
+        ├── tier-1/
+        │   └── *.json
+        ├── tier-2/
+        └── ...
+```
+
+Run outputs land at the repo root under `test-runs/` so they're out of the way of the app target and easy to clean up.

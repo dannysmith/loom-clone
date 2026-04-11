@@ -141,6 +141,26 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         let activeDims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         nativePixelSize = CGSize(width: Int(activeDims.width), height: Int(activeDims.height))
         print("[camera] Capture started: \(device.localizedName) @ \(activeDims.width)x\(activeDims.height)")
+
+        // Format introspection — logs what the active format declares for
+        // pixel format + colour metadata. Many USB cameras and capture cards
+        // deliver buffers with missing or inconsistent colour extensions,
+        // which is why the delegate callback tags pixel buffers explicitly
+        // with Rec. 709 before forwarding. Logging the declared values at
+        // startup gives us a diagnostic trail for future camera debugging.
+        let fmtDesc = device.activeFormat.formatDescription
+        let subType = CMFormatDescriptionGetMediaSubType(fmtDesc)
+        let subTypeStr = String(
+            format: "%c%c%c%c",
+            (subType >> 24) & 0xff,
+            (subType >> 16) & 0xff,
+            (subType >> 8) & 0xff,
+            subType & 0xff
+        )
+        let primaries = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String ?? "none"
+        let transfer = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String ?? "none"
+        let matrix = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String ?? "none"
+        print("[camera] Format introspection: subType=\(subTypeStr) primaries=\(primaries) transfer=\(transfer) matrix=\(matrix)")
     }
 
     func stopCapture() async {
@@ -162,6 +182,22 @@ extension CameraCaptureManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        // Phase 1 (task-0A): Tag the pixel buffer with explicit Rec. 709
+        // colour metadata before forwarding. Many USB cameras (ZV-1, generic
+        // capture cards) deliver buffers without YCbCrMatrix / TransferFunction
+        // / ColorPrimaries attachments — CIContext then runs an expensive
+        // multi-stage colourspace conversion chain on every frame because it
+        // can't know the source space. Rec. 709 is the correct default for
+        // SDR consumer cameras (Apple TN2227, QA1839). `.shouldPropagate` so
+        // both CIImage and AVAssetWriter honour the tags downstream.
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            let attachments: [CFString: Any] = [
+                kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+                kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+            ]
+            CVBufferSetAttachments(pixelBuffer, attachments as CFDictionary, .shouldPropagate)
+        }
         onCameraFrame?(sampleBuffer)
     }
 }

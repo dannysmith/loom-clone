@@ -108,10 +108,22 @@ actor WriterActor {
         // trigger (every 60 frames) would fight it at variable input rates and
         // produce unpredictable keyframe placement, which in turn skews segment
         // boundaries since AVAssetWriter closes segments at keyframes.
+        //
+        // `AVVideoColorPropertiesKey` declares Rec. 709 on the output so the
+        // writer doesn't do its own redundant colourspace conversion — paired
+        // with the Rec. 709 tags that `CameraCaptureManager` attaches to
+        // camera pixel buffers (see task-0A Phase 1). Without this the output
+        // colour space is unspecified and AVFoundation falls back to a
+        // conservative path that costs GPU time per frame.
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: preset.width,
             AVVideoHeightKey: preset.height,
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+            ] as [String: Any],
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: preset.bitrate,
                 AVVideoMaxKeyFrameIntervalDurationKey: 2.0,

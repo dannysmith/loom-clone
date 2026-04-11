@@ -110,6 +110,11 @@ actor CompositionActor {
             composited = overlay.composited(over: screenScaled)
         }
 
+        // Rendering into Rec. 709. This relies on the camera pipeline tagging
+        // every incoming pixel buffer with matching Rec. 709 colour metadata
+        // (`CameraCaptureManager.captureOutput`, task-0A Phase 1). Without
+        // those tags CIContext can't know the source colour space and falls
+        // back to an expensive multi-stage conversion chain on every frame.
         let colorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
         ciContext.render(composited, to: output, bounds: outputBounds, colorSpace: colorSpace)
         return output

@@ -55,6 +55,24 @@ actor RawStreamWriter {
         let input: AVAssetWriterInput
         switch kind {
         case .video(let width, let height, let bitrate):
+            // Deliberately no `AVVideoColorPropertiesKey` here. A previous
+            // iteration declared Rec. 709 on the output, which was safe for
+            // the raw camera writer (its input buffers are tagged Rec. 709
+            // by `CameraCaptureManager`) but **dangerous for the raw screen
+            // writer**: ScreenCaptureKit delivers frames in the display's
+            // native colour space (sRGB / Display P3), and declaring Rec. 709
+            // output forced AVFoundation to spawn a `videomediaconverter`
+            // thread that did GPU-side colour conversion on every frame.
+            // Added to an already contended three-encoder pipeline on an
+            // M2 Pro's single media engine, that extra GPU work wedged the
+            // GPU and — because WindowServer shares the same GPU for display
+            // compositing — hung the whole machine (observed 2026-04-11,
+            // WindowServer watchdog timeout). Omitting the key lets the
+            // writer infer its output colour space from the first input
+            // pixel buffer's attachments, which is exactly what we want:
+            // camera output gets Rec. 709 (from the tagged buffers) and
+            // screen output gets the display's native space (from the
+            // ScreenCaptureKit tags). See task-0A Phase 1.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,

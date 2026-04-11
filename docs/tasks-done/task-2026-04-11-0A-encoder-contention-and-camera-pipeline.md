@@ -1,38 +1,30 @@
-# Task 0A — Encoder Contention, Camera Pipeline & Adjustments
+# Task 0A — Encoder Contention & Camera Pipeline
 
-Three related issues in the macOS recording pipeline, sequenced so each phase builds on the foundation of the previous one and can be committed independently.
+Two related issues in the macOS recording pipeline, sequenced so each phase builds on the foundation of the previous one and can be committed independently.
 
-**The core finding**: Our current approach runs three concurrent hardware H.264 encode sessions (composited HLS + raw `screen.mp4` + raw `camera.mp4`) on an M2 Pro that has a single media-engine video encode block. The time-slicing budget is exceeded and the hardware encoder back-pressures, which visibly manifests as `CIContext.render()` timing out with `kIOGPUCommandBufferCallbackErrorTimeout` — the CIContext is a downstream symptom, not the cause. A dedicated `MTLCommandQueue` does **not** isolate us: the Metal command scheduler and VideoToolbox both arbitrate through the same IOKit command-buffer queue.
+**The core finding**: Our recording pipeline runs three concurrent hardware H.264 encode sessions (composited HLS + raw `screen.mp4` + raw `camera.mp4`) on an M2 Pro that has a single media-engine video encode block. The time-slicing budget is exceeded and the hardware encoder back-pressures, which visibly manifests as `CIContext.render()` timing out with `kIOGPUCommandBufferCallbackErrorTimeout` — the CIContext is a downstream symptom, not the cause. A dedicated `MTLCommandQueue` does **not** isolate us: the Metal command scheduler and VideoToolbox both arbitrate through the same IOKit command-buffer queue.
 
-**The fix**, in summary: stop running three concurrent H.264 sessions. Move the heaviest raw stream (`screen.mp4`) to the ProRes engine — a separate silicon block on M*Pro and M*Max chips that's currently idle in our pipeline. Along the way, fix missing colourspace metadata on camera buffers (which is independently causing CIContext to run an expensive multi-stage colour conversion chain every frame), plumb proper error handling into the compositor so we can detect and recover from future stalls, and finally build camera adjustment controls on the now-stable foundation.
-
-Read `docs/requirements.md` for product context, `task-0-scratchpad.md` for the historical framing of these issues, `docs/m2-pro-video-pipeline-failures.md` for the complete failure-mode incident report, and the Background section below before starting any phase.
+**The fix**, in summary: stop running three concurrent H.264 sessions. Move the heaviest raw stream (`screen.mp4`) to the ProRes engine — a separate silicon block on M*Pro and M*Max chips that's currently idle in our pipeline. Along the way, fix missing colourspace metadata on camera buffers (which is independently causing CIContext to run an expensive multi-stage colour conversion chain every frame).
 
 ---
 
-## ⚠️ Current status (2026-04-11) — PAUSED
+## Status — Archived 2026-04-11
 
-This task is **paused pending task-0B (research) and task-0C (isolation test harness)**. The work that followed Phase 2 hit a kernel-level failure mode that our model of the hardware did not predict, and we do not want to continue making speculative changes to the recording pipeline until we have better empirical data.
+This task is archived. Phases 1 and 2 landed cleanly. Phase 2b (replacing the 4K preset with a 1440p preset) landed but triggered a kernel-level IOGPUFamily deadlock (failure mode 4) that required a hard power-button reboot. The Phase 2b code is still on `main`.
 
-### DANGER — the `main` branch is currently unsafe at 1440p
+**Remaining work has been split out:**
 
-The `main` branch includes committed Phase 2b code (the 1440p preset replacing 4K). **Selecting the 1440p preset and hitting record on this build triggers failure mode 4** — a kernel-level IOGPUFamily deadlock that causes a WindowServer watchdog timeout and requires a hard power-button reboot. This has happened once already on the developer's Mac on 2026-04-11 at 13:32. See `docs/m2-pro-video-pipeline-failures.md` for the full incident.
+- **`docs/tasks-todo/task-4-recording-pipeline-stabilisation.md`** — resolving Phase 2b (making 1440p safe, or removing it) once the isolation test harness has produced the empirical data needed to choose a path. Main-branch safety fix lives here.
+- **`docs/tasks-todo/task-1-run-test-harness-tests.md`** — the test-harness execution work that feeds task-4 with real data. Consumes the harness built during this task's pause.
+- **`docs/tasks-todo/task-5-compositor-error-handling-and-camera-adjustments.md`** — the old Phase 3 (compositor error handling) and Phase 4 (camera white-balance / brightness adjustments) moved out of this task when it was paused, so they weren't blocked on resolving the pipeline instability.
 
-**Until Phase 2b is resolved**: do not select the 1440p preset on this build. The 1080p preset remains safe and is the only production-validated configuration.
+> ⚠️ **`main` is currently unsafe at 1440p.** The `main` branch includes committed Phase 2b code. **Selecting the 1440p preset and hitting record on this build triggers failure mode 4** — a kernel-level IOGPUFamily deadlock that causes a WindowServer watchdog timeout and requires a hard power-button reboot. This has happened once already on the developer's Mac on 2026-04-11 at 13:32. See `docs/m2-pro-video-pipeline-failures.md`. Until task-4 ships, do not select the 1440p preset. The 1080p preset remains safe and is the only production-validated configuration.
 
-### Phase-by-phase state
+### Phase-by-phase summary
 
-- **Phase 1** — ✅ Done. Committed in `a71e7cc` ("WIP Phase 1"). Camera Rec. 709 pixel buffer tagging, format introspection logging, and composited-HLS `AVVideoColorPropertiesKey` landed. The first implementation caused failure mode 2 (also a WindowServer watchdog hang) when `AVVideoColorPropertiesKey` was declared on the raw writers too — that path was removed before commit. See Phase 1's Outcome subsection below and the failure modes doc.
-- **Phase 2** — ✅ Done. Committed in `71211eb`. Raw screen writer switched to ProRes 422 Proxy on the dedicated ProRes engine. Validated at **1080p preset only** via Stages 1 and 2 (30 s and ~76 s, all writers active, zero GPU errors, healthy 4 s segment cadence). **Stage 3 was never run as originally specified** — the 4K preset was attempted instead and triggered failure mode 3 (H.264 engine back-pressure cascade, ~5 s screen freeze, recoverable). We then moved to Phase 2b rather than completing Stage 3 at 1080p. See Phase 2's Outcome subsection for the empirical data we do have.
-- **Phase 2b** — ⚠️ Committed in `71211eb`, **broken**. Replaced the 4K preset with a 1440p preset on the hypothesis that 1440p's 1.78× pixel area over 1080p would stay within the H.264 engine's headroom. The first test recording at 1440p triggered failure mode 4 (kernel-level IOGPUFamily deadlock → WindowServer watchdog → hard reboot). The code is still in `main`. See the Phase 2b section below for the full outcome.
-- **Phase 3** (CIContext error handling) and **Phase 4** (camera adjustments) — **moved to `docs/tasks-todo/task-0D-compositor-error-handling-and-camera-adjustments.md`** to keep this task focused on resolving the pipeline instability.
-
-### Next work, in order
-
-1. **Task-0B — deeper research** into IOGPUFamily behaviour, VideoToolbox tuning knobs we're not using, and how comparable apps (Cap, OBS, FFmpeg) handle concurrent hardware video sessions on Apple Silicon. Run as a parallel research session. See `docs/tasks-todo/task-0B-video-pipeline-research.md`.
-2. **Task-0C — isolation test harness** that lets us empirically test writer combinations + session tuning without hanging the developer's Mac. Run as a parallel coding session. See `docs/tasks-todo/task-0C-isolation-test-harness.md`.
-3. **Resolve Phase 2b** based on the findings from 0B/0C. Likely paths: revert Phase 2b to restore the proven-stable 1080p-only state; reduce raw screen capture resolution below native Retina; switch `SCStreamConfiguration.pixelFormat` to 420v; apply specific `VTCompressionSession` properties that task-0B research finds are load-bearing; or something else entirely driven by what the harness shows.
-4. **Task-0D** — Phases 3 and 4 from the original plan. Picks up after Phase 2b is resolved.
+- **Phase 1** — ✅ Done. Committed in `a71e7cc`. Camera Rec. 709 pixel buffer tagging, format introspection logging, and composited-HLS `AVVideoColorPropertiesKey` landed. The first implementation caused failure mode 2 (a WindowServer watchdog hang) when `AVVideoColorPropertiesKey` was declared on the raw writers too — that path was removed before commit. See Phase 1's Outcome subsection below.
+- **Phase 2** — ✅ Done. Committed in `71211eb`. Raw screen writer switched to ProRes 422 Proxy on the dedicated ProRes engine. Validated at **1080p preset only** via Stages 1 and 2 (30 s and ~76 s, all writers active, zero GPU errors, healthy 4 s segment cadence). **Stage 3 was never run as originally specified** — the 4K preset was attempted instead and triggered failure mode 3 (H.264 engine back-pressure cascade, ~5 s screen freeze, recoverable). We then moved to Phase 2b rather than completing Stage 3 at 1080p. See Phase 2's Outcome subsection.
+- **Phase 2b** — ⚠️ Committed in `71211eb`, **landed broken**. Replaced the 4K preset with a 1440p preset on the hypothesis that 1440p's 1.78× pixel area over 1080p would stay within the H.264 engine's headroom. The first test recording at 1440p triggered failure mode 4 (kernel-level IOGPUFamily deadlock → WindowServer watchdog → hard reboot). See the Phase 2b section below for the full outcome. Resolving this is task-4's job.
 
 ### Reference document
 
@@ -391,7 +383,7 @@ Full diagnostic evidence inlined in `docs/m2-pro-video-pipeline-failures.md` (fa
 
 Phase 2's architectural premise was: "ProRes engine is separate silicon from the H.264 engine, so offloading the raw screen writer to ProRes 422 Proxy frees the H.264 engine to handle the two remaining H.264 streams." This is true at the hardware-engine level and it worked at 1080p preset. **What it didn't account for is that both engines still allocate their working buffers through the shared `IOGPUFamily` kernel extension.** When enough simultaneous hardware-backed video sessions compete for IOSurface allocations from IOGPUFamily on a single-media-engine chip, the kernel arbiter can enter a state where it stops servicing new allocation requests from the VideoToolbox preparation thread. The stopped thread holds GPU resources WindowServer needs for its own display compositing; WindowServer watchdogs; system hangs.
 
-This is a gap in publicly-available Apple developer documentation. Our previous research pass (the one that informed Phase 2) found nothing about IOGPUFamily as a shared bottleneck below both hardware video engines. Task-0B is supposed to close this gap — or, if the answers aren't public, at least produce concrete hypotheses for task-0C's harness to test.
+This is a gap in publicly-available Apple developer documentation. Our previous research pass (the one that informed Phase 2) found nothing about IOGPUFamily as a shared bottleneck below both hardware video engines. Closing this gap — or, failing that, producing concrete hypotheses testable in the isolation harness — is the purpose of the follow-on research / harness tasks (task-1).
 
 ### Why 1440p and not 1080p
 
@@ -403,41 +395,33 @@ Empirically, the only meaningful differences between the 1080p preset (proven st
 4. Output pool IOSurface size per buffer: 8.3 MB → 14.7 MB (1.78× larger)
 5. PiP overlay circle diameter: 240 px → 320 px
 
-None of these individually should trigger a kernel deadlock. Which combination crosses the line, and why, is **unknown**. Answering this question is the purpose of task-0C's Tier 3 test plan.
+None of these individually should trigger a kernel deadlock. Which combination crosses the line, and why, is **unknown at the time of archiving this task**. Answering that question is the purpose of task-1's Tier 3 test plan, and applying the answer to the main pipeline is task-4's job.
 
-### Current state
+### Current state at archive time
 
 - Phase 2b code is in `main` (committed in `71211eb`). The working tree is clean.
 - Recording at 1440p preset on the current build will reproduce failure mode 4. Do not test this.
 - Recording at 1080p or 720p preset on the current build is still safe (those configurations are unchanged from Phase 2's validated state).
-- No action has been taken to revert or gate Phase 2b. This was an explicit choice — we wanted to preserve the ability to test "what happens at 1440p" in the isolation test harness, and reverting the preset code would make that test plan harder to set up. If you need to be sure Phase 2b won't bite someone unfamiliar with the situation, add a runtime guard or revert the commit.
+- No action was taken to revert or gate Phase 2b as part of this task. That was an explicit choice — preserving the ability to test "what happens at 1440p" in the isolation test harness, since reverting the preset code would have made that test plan harder to set up. Making `main` safe again is task-4's job.
 
-### Paths forward
+### Where the resolution lives
 
-The decision for what to do with Phase 2b will depend on what task-0B and task-0C produce. The likely options, roughly ranked:
-
-1. **A research-informed fix lands.** Task-0B identifies a specific `VTCompressionSession` property, `SCStreamConfiguration` option, or pipeline change that empirically resolves the deadlock (validated in task-0C's harness). We update Phase 2b with the fix, re-test, ship.
-2. **Reduce raw screen capture resolution.** If task-0C's Tier 3.3 test passes (ProRes screen at display-points resolution rather than native Retina), we accept the quality trade-off on raw masters and ship 1440p with lower-res screen capture. The user has indicated this trade-off is acceptable as a last-resort.
-3. **Drop the raw camera writer while recording at 1440p preset.** If task-0C's Tier 3.5 test shows this works, we lose the raw camera master above 1080p preset. Less desirable because it's a feature regression.
-4. **Revert Phase 2b entirely.** Ship 1080p preset as the maximum streaming resolution. Raw screen master is still at native Retina. This is the safest fallback — we know it works. Loses the "higher-quality streaming" ambition that motivated Phase 2b in the first place.
-5. **Revert Phase 2, revert Phase 2b, ship pre-task state.** Absolute worst case. Back to 3× H.264 engines and degraded-but-not-hanging quality at 1080p preset. Not preferred; we'd rather keep the ProRes offload win from Phase 2 even at 1080p.
-
-All of these are speculative until task-0B and task-0C produce real data. Do not implement any of them in isolation — they all depend on findings from those tasks.
+The decision of what to do with Phase 2b depends on empirical data from the test harness. That data is produced by task-1 (running the harness tests), and applied to the main-app pipeline by task-4 (recording pipeline stabilisation). Both docs list the paths forward in detail. Do not try to resolve Phase 2b in isolation from those tasks.
 
 ---
 
 ## Follow-ups not in this task
 
-- **Metronome skipping CIContext in single-source modes.** In `cameraOnly` mode the compositor currently runs a full render every metronome tick even though there's no screen to composite. An optimisation would skip the render and feed the camera frame directly to the HLS writer. Not in scope for the current failure-mode focus.
-- **Broader camera testing matrix.** Phase 1's format-introspection logging should eventually include data from a couple of cameras (built-in FaceTime HD, USB ZV-1). A fuller matrix (Continuity Camera, Elgato Cam Link, generic USB webcam) is a future task.
-- **CIContext error handling and recovery.** Moved to `task-0D` as Phase 1 of that task.
-- **Camera white-balance and brightness adjustments.** Moved to `task-0D` as Phase 2 of that task.
+- **Metronome skipping CIContext in single-source modes.** In `cameraOnly` mode the compositor runs a full render every metronome tick even though there's no screen to composite. Optimisation. Out of scope here; flagged in task-4's follow-ups.
+- **Broader camera testing matrix.** Phase 1's format-introspection logging should eventually include data from more cameras (Continuity Camera, Elgato Cam Link, generic USB webcam). Out of scope here; flagged in task-4's follow-ups.
+- **CIContext error handling and recovery** — moved to `task-5` as Phase 1 of that task.
+- **Camera white-balance and brightness adjustments** — moved to `task-5` as Phase 2 of that task.
 
 ## Cross-task references
 
-- `docs/m2-pro-video-pipeline-failures.md` — complete failure-mode incident report, load-bearing for understanding why this task is paused
-- `docs/tasks-todo/task-0B-video-pipeline-research.md` — deeper research into IOGPUFamily, VideoToolbox tuning, and comparable apps
-- `docs/tasks-todo/task-0C-isolation-test-harness.md` — isolation test harness for empirical validation
-- `docs/tasks-todo/task-0D-compositor-error-handling-and-camera-adjustments.md` — the follow-on task that picks up Phases 3 and 4 after the pipeline is stable
-- `docs/tasks-todo/task-0-scratchpad.md` — original scratchpad where these issues were first documented
-- `docs/requirements.md` — product requirements, especially the "Quality" section (streamed version may be lower quality than local capture)
+- `docs/m2-pro-video-pipeline-failures.md` — complete failure-mode incident report, load-bearing context for everything this task touched.
+- `docs/tasks-todo/task-1-run-test-harness-tests.md` — test harness execution plan that produces the data task-4 needs to resolve Phase 2b.
+- `docs/tasks-todo/task-4-recording-pipeline-stabilisation.md` — the follow-on task that resolves Phase 2b and makes `main` safe again.
+- `docs/tasks-todo/task-5-compositor-error-handling-and-camera-adjustments.md` — the follow-on task for the old Phases 3 and 4.
+- `docs/tasks-todo/task-0-scratchpad.md` — original scratchpad where these issues were first documented.
+- `docs/requirements.md` — product requirements, especially the "Quality" section (streamed version may be lower quality than local capture).

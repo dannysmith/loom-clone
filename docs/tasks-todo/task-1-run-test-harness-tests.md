@@ -1,6 +1,6 @@
 # Task 1 — Run Test Harness Tests
 
-Use the isolation test harness (built in task-0C, lives at `app/TestHarness/`) to empirically map out which AVFoundation / VideoToolbox / CIContext configurations are stable on this M2 Pro Mac and which are not. The goal is to replace speculation about the failure modes with data, so that task-0A (the recording pipeline rework) can unblock Phases 3 and 4 with evidence instead of guesses, and so that `docs/m2-pro-video-pipeline-failures.md` can be updated from "what we don't know" to "what we now know" footnotes.
+Use the isolation test harness at `app/TestHarness/` to empirically map out which AVFoundation / VideoToolbox / CIContext configurations are stable on this M2 Pro Mac and which are not. The goal is to replace speculation about the failure modes with data, so that task-4 (recording pipeline stabilisation) can resolve the main-branch Phase 2b situation with evidence instead of guesses, and so that `docs/m2-pro-video-pipeline-failures.md` can be updated from "what we don't know" to "what we now know" footnotes.
 
 This is an execution task, not a coding task. The harness already exists and is working — this task runs tests in it and records what happens.
 
@@ -10,15 +10,15 @@ Before starting, read:
 
 - `docs/m2-pro-video-pipeline-failures.md` — institutional memory of the four failure modes observed to date. Failure mode 4 (the 1440p-preset kernel-level IOGPUFamily deadlock, 2026-04-11 13:32) is the headline problem this test plan exists to diagnose.
 - `app/TestHarness/README.md` — how the harness works, how to build it, how to run a single config or a whole tier, how to recover after a hang, and how to write a new test config.
-- `docs/tasks-todo/task-0B-video-pipeline-research.md` — the research task running alongside this work. It produces concrete hypotheses that should feed into Tier 5 parameter sweeps.
-- `docs/tasks-todo/task-0A-encoder-contention-and-camera-pipeline.md` — the task this execution work unblocks. Don't modify the main app's pipeline as part of this task; findings get written up and handed back to task-0A.
+- `docs/research/11-m2-pro-video-pipeline-deep-dive.md` — deeper research into IOGPUFamily behaviour, VideoToolbox tuning knobs, and how comparable apps handle concurrent hardware video sessions on Apple Silicon. Produces the concrete hypotheses that feed into Tier 5 parameter sweeps.
+- `docs/tasks-todo/task-4-recording-pipeline-stabilisation.md` — the task this execution work unblocks. Don't modify the main app's pipeline as part of this task; findings get written up and handed back to task-4.
 
 ## Current state
 
 - **Tier 1 has been run** (2026-04-11). All 7 configs PASSED on the dev M2 Pro. Baseline recorded at `test-runs/tier-1-baseline-2026-04-11.md`. This already tells us that the 1440p preset and 4K H.264 work fine in isolation — failure modes 3 and 4 are specifically about concurrent sessions, not the absolute resolution of any individual writer.
 - Tiers 2–5 are not yet populated. Configs and runner scripts land as part of this task.
 
-## Hard constraints (repeat from task-0C — still load-bearing)
+## Hard constraints
 
 - **Do not run a Tier 3+ configuration without dry-running it first.** The safety scaffolding (watchdog, last-known-good marker) is not a substitute for reading the config. Every new Tier 3+ config gets `--dry-run`'d before it's run for real, and gets run alone, not batched with other Tier 3 configs.
 - **Do not batch Tier 3 runs.** The runner script already stops on the first `fail-killed` result; do not pass `--continue-on-fail` to it for Tier 3.
@@ -99,9 +99,9 @@ Commit the real-capture implementation as its own step before any Tier 4 test co
 
 ### Tier 5 — Parameter sweeps
 
-Goal: take the most interesting configuration from Tiers 3–4 and vary individual tuning parameters (from task-0B research) to see which ones move the needle.
+Goal: take the most interesting configuration from Tiers 3–4 and vary individual tuning parameters (from the deep-dive research in `docs/research/11-m2-pro-video-pipeline-deep-dive.md`) to see which ones move the needle.
 
-Structure: take the most interesting configuration, run it N times with one parameter changed per run. Examples of parameters to sweep (the concrete list comes from task-0B):
+Structure: take the most interesting configuration, run it N times with one parameter changed per run. Examples of parameters to sweep (the concrete list comes from the research doc):
 
 - `kVTCompressionPropertyKey_RealTime` — true vs false on all writers
 - `kVTCompressionPropertyKey_MaxFrameDelayCount` — 0, 1, 2, 4
@@ -113,7 +113,7 @@ Structure: take the most interesting configuration, run it N times with one para
 - `SCStreamConfiguration.pixelFormat` (BGRA, 420v, 420f)
 - `SCStreamConfiguration.width` / `height` (sub-native-resolution screen capture)
 
-This tier is where the harness pays off: an automated sweep of 10–20 configurations running overnight while the developer works on something else is dramatically more efficient than manual testing. New tuning knobs are added to the harness's writer `configure()` methods as task-0B surfaces them — the dict lives under `tunings` on each writer config. See `app/TestHarness/README.md` § "Writer tunings" for the currently-supported keys.
+This tier is where the harness pays off: an automated sweep of 10–20 configurations running overnight while the developer works on something else is dramatically more efficient than manual testing. New tuning knobs are added to the harness's writer `configure()` methods as the research surfaces them — the dict lives under `tunings` on each writer config. See `app/TestHarness/README.md` § "Writer tunings" for the currently-supported keys.
 
 Most Tier 5 sweeps can be expressed as multiple JSON files in `test-configs/tier-5/` that differ only in one `tunings` key. The tier runner picks them up in order and stops on the first fail like any other tier.
 
@@ -135,7 +135,7 @@ Whatever the result, the output of this task is concrete evidence that informs t
 1. **Tier 2 configs, runner script, baseline summary** committed to the repo. Summary lives at `test-runs/tier-2-baseline-<date>.md` and records per-config outcomes, interesting observations, and links to the runs that produced them. Run directories themselves stay gitignored.
 2. **Tier 3 configs, runner script, baseline summary**, run one config at a time per the safety constraints above. The known-hang T3.2 is the single most important data point in this tier — it's the reference point everything else is compared against.
 3. **Tier 4 configs** (if real-capture support lands in the harness as part of this task) and baseline summary.
-4. **Tier 5 parameter sweep configs and summaries** for whatever subset of task-0B hypotheses have landed by the time Tier 3 results are in hand.
+4. **Tier 5 parameter sweep configs and summaries** for whatever subset of the deep-dive research hypotheses have landed by the time Tier 3 results are in hand.
 5. **Updates to `docs/m2-pro-video-pipeline-failures.md`** — the empirical evidence the harness produces should flow back into the failure modes doc as "what we now know" footnotes, particularly in the "What we don't know" subsections. This is the single most valuable long-term artefact of this task.
 6. **A findings hand-off note to task-0A** summarising which harness-validated approach Phase 3 and 4 should take, and why. Either add it as a new section in `task-0A-encoder-contention-and-camera-pipeline.md` or link to it from there.
 
@@ -143,9 +143,9 @@ Whatever the result, the output of this task is concrete evidence that informs t
 
 This task's outputs are consumed by two places:
 
-1. **Task-0A (recording pipeline rework).** Phases 3 and 4 of task-0A are currently blocked on "what actually works on this hardware". The baseline summaries from this task provide the answer. When task-0A resumes, any change that touches the recording pipeline should be validated in the harness first — don't reopen the "change the main app, run a real recording, hope for the best" loop.
+1. **Task-4 (recording pipeline stabilisation).** Task-4 is blocked on "what actually works on this hardware". The baseline summaries from this task provide the answer. When task-4 starts, any change that touches the recording pipeline should be validated in the harness first — don't reopen the "change the main app, run a real recording, hope for the best" loop.
 2. **`docs/m2-pro-video-pipeline-failures.md`.** Harness findings update the "What we don't know" subsections of each failure mode with concrete answers. This is how the institutional memory stays current as we learn more.
 
 ## Adding new tests mid-task
 
-task-0B research is running alongside this work and will surface new hypotheses that weren't in the original plan. Fold those in by adding new JSON configs to the appropriate tier directory — the harness is designed to make this cheap. If a new hypothesis doesn't obviously belong in an existing tier, add it to the tier that matches its risk level (Tier 2 for two-writer tests, Tier 3 for three-writer, Tier 5 for parameter sweeps on an existing config).
+Further research passes may surface new hypotheses that weren't in the original plan. Fold those in by adding new JSON configs to the appropriate tier directory — the harness is designed to make this cheap. If a new hypothesis doesn't obviously belong in an existing tier, add it to the tier that matches its risk level (Tier 2 for two-writer tests, Tier 3 for three-writer, Tier 5 for parameter sweeps on an existing config).

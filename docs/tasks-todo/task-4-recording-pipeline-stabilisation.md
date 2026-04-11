@@ -12,7 +12,11 @@ This task's exit criteria include either (a) making 1440p safe or (b) explicitly
 
 ## Dependencies
 
-This task depends on task-1 (Running Test Harness Tests) having produced real data — specifically, Tier 3 results that tell us which variant of the 1440p configuration is stable on M2 Pro:
+This task depends on task-1 (Running Test Harness Tests) having produced real data — specifically, Tier 3 results that tell us which variant of the 1440p configuration is stable on M2 Pro.
+
+It also benefits from **task-2 (VideoToolbox best-practice tunings)** having shipped first, so that the pipeline being stabilised is already on a known-best-practice baseline. Task-2 applies the high-confidence tunings (ScreenCaptureKit `420v`, `PrepareToEncodeFrames` warm-up, `RealTime = false`, `AllowFrameReordering = false`, `MaxFrameDelayCount` bounded, diagnostic safety nets) that comparable production apps (Cap, OBS, FFmpeg, HandBrake) all use. If task-2 hasn't shipped by the time this task starts, the Path A analysis below should still assume those tunings are in place — applying them and applying a targeted Path A fix on top of them is the intended sequence.
+
+Specifically, task-1 Tier 3 is expected to produce:
 
 - **T3.1** (1080p baseline with all three writers + compositor) — expected PASS, confirms the harness reproduces the proven-stable config.
 - **T3.2** (1440p with all three writers + compositor) — expected FAIL-KILLED, confirms the harness reproduces the known-hang.

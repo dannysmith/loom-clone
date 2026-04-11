@@ -4,6 +4,8 @@ Build a small, focused tool for running AVFoundation/VideoToolbox/CIContext conf
 
 This is a coding task, but the goal is a **measurement instrument**, not a shippable feature. The harness should favour observability, reproducibility, and safety over production quality.
 
+**This task is only about building the harness.** The test plan that it will be run against, along with the decision framework for interpreting results, lives in `docs/tasks-todo/task-1-run-test-harness-tests.md`. Don't conflate "build the tool" with "run the experiments" — they're separate commits, separate sessions, and separate audiences.
+
 ## Context
 
 Read `docs/m2-pro-video-pipeline-failures.md` in full before starting. It documents the four failure modes we've observed and the diagnostic evidence for each. In particular, failure mode 4 (the 1440p-preset kernel-level IOGPUFamily deadlock) is the headline problem this harness exists to help diagnose.
@@ -27,14 +29,12 @@ Produce a standalone tool that can:
 6. Log enough instrumentation that a stalled or failed run produces useful post-mortem data without requiring a kernel spindump.
 7. Be safely scriptable so we can run a sequence of test configurations without manually driving the app for each one.
 
-The harness is the tool; the test plan in this doc is what we want to run in it first.
-
 ## Out of scope
 
 - **Replacing or replicating the real app's recording pipeline.** The harness is allowed to be messier, simpler, and more directly coupled than `RecordingActor` / `CompositionActor` / `WriterActor` in the main app. It can duplicate a bit of code if that makes it cleaner.
 - **Shipping.** Nothing from the harness gets shipped to users. It lives in the repo, builds locally, and is for development use.
-- **Exhaustive test coverage.** The test plan in this doc is a starting point. The harness should be flexible enough to add more tests easily, but the initial deliverable doesn't need to cover every possible combination.
-- **Fixing the failure modes.** This task does not touch the main app's recording pipeline. Task-0A will do that later, using the data this harness produces.
+- **Executing the test plan.** The actual experiments the harness runs are task-1's job. This task ends when the harness is working end-to-end with the Tier 1 (single-component isolation) suite producing clean pass/fail output.
+- **Fixing the failure modes.** This task does not touch the main app's recording pipeline. Task-0A will do that later, using the data task-1 produces.
 
 ## What the harness IS
 
@@ -206,14 +206,11 @@ app/
       WatchdogTimer.swift          // Wall-clock kill-switch
     Scripts/
       run-tier-1.sh                // Shell script that runs tier 1 configs in order
-      run-tier-2.sh
       test-configs/
         tier-1/
           01-prores-only.json
           02-h264-1080p-only.json
           ...
-        tier-2/
-        tier-3/
 ```
 
 None of this layout is mandatory — if it makes sense to collapse Writers/ into one file for simplicity, do that. The point is separation of concerns: sources produce frames, writers consume them, the compositor is optional between them, observability captures what's happening, watchdog keeps us safe.
@@ -232,120 +229,20 @@ Things the harness should try to capture during a run that the real app doesn't 
 
 Not everything has to be captured — some of this may be overkill or costly. Start with event log + system snapshots + pass/fail, and add the more exotic instrumentation if we find ourselves needing it.
 
-## Test plan
-
-This is the initial set of configurations to run in the harness. Task-0B research will produce additional hypotheses that get folded in, so treat this as the starting tier-list, not the complete plan.
-
-### Tier 1 — Baseline components in isolation
-
-Goal: prove each component works on its own before combining them. Any Tier 1 failure means we have a fundamental problem that's not about concurrency.
-
-All Tier 1 tests use synthetic frames, 30-second duration, no real capture.
-
-| # | Name | Config |
-|---|---|---|
-| T1.1 | ProRes 4K alone | ProRes writer at 3840×2160, synthetic screen-like BGRA source. No other writers, no compositor. |
-| T1.2 | H.264 1080p alone | H.264 writer at 1920×1080 @ 6 Mbps, synthetic BGRA source. |
-| T1.3 | H.264 1440p alone | H.264 writer at 2560×1440 @ 10 Mbps, synthetic BGRA source. |
-| T1.4 | H.264 4K alone | H.264 writer at 3840×2160 @ 18 Mbps, synthetic BGRA source. This is expected to stress the H.264 engine but shouldn't deadlock alone. |
-| T1.5 | H.264 720p camera alone | H.264 writer at 1280×720 @ 12 Mbps, synthetic YCbCr source. |
-| T1.6 | CIContext compositor alone | Compositor with both sources, no writers attached. Confirms the compositor itself doesn't deadlock. |
-| T1.7 | AAC audio alone | Audio writer, synthetic PCM source. Sanity check. |
-
-Expected: all PASS. Any failure here is a bug in the harness, not a real finding.
-
-### Tier 2 — Two-writer combinations
-
-Goal: find out if two simultaneous writers cause any observable issues. If these all pass, we know single-writer concurrency isn't the trigger.
-
-All Tier 2 tests use synthetic frames, 30-second duration.
-
-| # | Name | Config |
-|---|---|---|
-| T2.1 | 2×H.264 at 1080p + 720p | HLS 1080p @ 6 Mbps + raw H.264 720p @ 12 Mbps. Matches the Phase 2 stable config minus ProRes. |
-| T2.2 | 2×H.264 at 1440p + 720p | HLS 1440p @ 10 Mbps + raw H.264 720p @ 12 Mbps. Does 1440p HLS by itself (no ProRes, no compositor) trigger the failure? |
-| T2.3 | 2×H.264 at 4K + 720p | HLS 4K @ 18 Mbps + raw H.264 720p @ 12 Mbps. Expected to back-pressure (failure mode 3 analogue) but not deadlock. |
-| T2.4 | ProRes 4K + H.264 1080p HLS | Confirms the ProRes-plus-one-H.264 base case works. |
-| T2.5 | ProRes 4K + H.264 1440p HLS | **Critical.** This is "like Phase 2b but without the raw camera writer." Does removing the raw camera writer fix failure mode 4, or is it still triggered? |
-| T2.6 | ProRes 4K + H.264 4K HLS | Hostile configuration — both streams at 4K. Expected to fail. |
-
-### Tier 3 — Three-writer combinations (the failure region)
-
-Goal: find the exact tipping point. These include the known-hang config from failure mode 4. Run Tier 3 tests one at a time; do not batch them. Use the last-known-good marker.
-
-| # | Name | Config |
-|---|---|---|
-| T3.1 | Phase 2 1080p stable baseline | HLS H.264 1080p @ 6 Mbps + raw H.264 720p camera + ProRes 4K screen + compositor. **Expected to PASS** (reproduces the proven-stable Stage 2 config). |
-| T3.2 | Phase 2b 1440p known-hang | HLS H.264 1440p @ 10 Mbps + raw H.264 720p camera + ProRes 4K screen + compositor. **Expected to FAIL (killed)** — this is the configuration that hung the Mac on 2026-04-11 at 13:32. The watchdog should catch it. |
-| T3.3 | 1440p with ProRes at display res | Same as T3.2 but ProRes screen writer at display-points resolution (1920×1080 from a Retina display) instead of native 3840×2160. Tests the user's hypothesis that reducing raw screen resolution relieves IOGPU pressure. |
-| T3.4 | 1440p with ProRes at mid res | Same as T3.2 but ProRes screen writer at 2560×1440 (same as the HLS output). Midpoint between native and display-points. |
-| T3.5 | 1440p without raw camera writer | HLS H.264 1440p + ProRes 4K screen + compositor (no raw camera writer). Does removing one H.264 session avoid failure mode 4? This is the "what if we split the 2 H.264 engine load differently" test. |
-| T3.6 | 1440p with BGRA→420v screen | Like T3.2 but synthetic screen source delivers 420v YCbCr instead of BGRA. Reduces per-frame IOSurface by half. |
-
-### Tier 4 — Real capture replacement
-
-Goal: Verify that findings from Tiers 1-3 (which use synthetic frames) hold up when ScreenCaptureKit and AVCaptureSession are in the pipeline. Run the most interesting Tier 3 configs again with real capture.
-
-Only run Tier 4 after Tier 3 has produced clear results.
-
-| # | Name | Config |
-|---|---|---|
-| T4.1 | Real-capture Phase 2 1080p | T3.1 with real SCStream + AVCaptureSession. Sanity check that real capture doesn't change the baseline. |
-| T4.2 | Real-capture known-hang 1440p | T3.2 with real capture. Confirms the failure reproduces with real capture too (we expect yes). |
-| T4.3 | Real-capture best-performing Tier 3 variant | Whichever Tier 3 variant looked most promising, now with real capture. |
-
-### Tier 5 — Parameter sweeps
-
-Goal: once we have a known-stable-or-not baseline, vary individual tuning parameters from task-0B research to see which ones move the needle.
-
-Structure each as: take the most interesting configuration from Tiers 3-4, and run it N times with one parameter changed per run. Examples:
-
-- Vary `kVTCompressionPropertyKey_RealTime` from true to false on all writers
-- Vary `kVTCompressionPropertyKey_MaxFrameDelayCount` across 0, 1, 2, 4
-- Vary pixel buffer pool sizes
-- With and without `VTCompressionSessionPrepareToEncodeFrames`
-- Vary `SCStreamConfiguration.queueDepth`
-- Vary `SCStreamConfiguration.pixelFormat`
-
-The specific parameters to sweep come from task-0B research. This tier is where the harness pays off: an automated sweep of 10 configurations while the developer works on something else is much more efficient than manual testing.
-
-## Decision framework — what to do with the results
-
-Once we have real data from the harness, we can make informed decisions about task-0A. A rough flow:
-
-- **If T3.1 passes and T3.2 fails as expected**, the harness is working and the failure is reproducible in an isolated context. Good.
-- **If T3.3 (display-res ProRes) passes**, the fix for task-0A Phase 2b is to reduce the raw screen capture resolution. Write it up as a recommendation, weigh the quality tradeoff, and decide whether to ship it.
-- **If T3.5 (no raw camera) passes**, the fix might be to drop the raw camera writer on this hardware or move camera elsewhere. Less desirable because it loses a feature.
-- **If T3.6 (YCbCr screen source) passes**, the fix is a one-line `SCStreamConfiguration` change. Best-case outcome.
-- **If none of T3.3–T3.6 pass**, the harness has proven that the 1440p preset is fundamentally incompatible with the full writer set on this hardware, and we should revert Phase 2b to ship 1080p only. Accept the loss of 1440p and move on.
-- **If a Tier 5 sweep finds a specific `VTCompressionSession` property setting that flips failure to success**, we've identified both a fix and a deeper understanding of what's happening.
-
-Whatever the result, the output of this task is concrete evidence that informs the next step of task-0A. We will not leave this task with "I think we should try X" — we'll leave it with "we ran X and it PASSED/FAILED, here's the data."
-
 ## Deliverable
 
 1. **Harness source code** in `app/TestHarness/` (or a similar location in the Xcode project). New Xcode target named `LoomCloneTestHarness` or similar. Builds to a debug `.app` bundle.
-2. **Test configuration files** checked into the repo at `app/TestHarness/Scripts/test-configs/` covering at minimum Tiers 1-3 as defined above.
-3. **Runner scripts** at `app/TestHarness/Scripts/run-tier-N.sh` for each tier. These are shell scripts, not Swift — they need to persist across reboots and be trivial to run after a hang.
-4. **Brief README** at `app/TestHarness/README.md` covering: how to build, how to run a single test, how to run a tier, how to interpret results, how to add new tests, how to recover after a hang (check for the last-known-good marker).
-5. **Initial test run results** — run Tiers 1 and 2 at minimum, ideally also Tier 3 up to the known-hang config T3.2. Commit the results directory structure so we have a baseline. Don't commit the actual log files (they can be large), but do commit a summary of what passed/failed.
-6. **Updates to `docs/m2-pro-video-pipeline-failures.md`** — whatever empirical evidence the harness produces should feed back into the failure modes doc as new "what we know now" footnotes, particularly updating the "What we don't know" sections with concrete answers.
+2. **Initial test configuration files** checked into the repo at `app/TestHarness/Scripts/test-configs/tier-1/` covering Tier 1 (single-component isolation) as a proof the harness end-to-end works. The broader test plan — Tiers 2–5 — is the next task's job, not this one's.
+3. **A runner script** at `app/TestHarness/Scripts/run-tier-1.sh`. Shell script, not Swift — it needs to persist across reboots and be trivial to run after a hang.
+4. **A `README.md`** at `app/TestHarness/README.md` covering: how to build, how to run a single test, how to run a tier, how to interpret results, how to add new tests, how to recover after a hang (check for the last-known-good marker). This is the evergreen user-facing doc for the harness.
+5. **Tier 1 baseline results committed** — run the Tier 1 suite at least once on the dev machine and commit a short markdown summary at `test-runs/tier-1-baseline-<date>.md` recording what passed / failed / degraded. Run directories themselves stay gitignored.
 
 ## Hard constraints
 
-- **Do not reproduce failure mode 4 in the main LoomClone app.** The developer's Mac should never hang again because of a manual test. If the harness needs to run the known-hang configuration T3.2 to verify reproducibility, it does so with full safety scaffolding (last-known-good marker, watchdog, separate process from the main app).
+- **Do not reproduce failure mode 4 in the main LoomClone app.** The developer's Mac should never hang again because of a manual test. The harness itself is the entire safety boundary — don't add fallbacks that run tests through the main app.
 - **The harness process must be killable.** If a test runs longer than its budget, the wall-clock watchdog must fire. If the user sends SIGINT, the harness must clean up and exit. If either of these fails reliably, the safety story collapses.
 - **No changes to the main LoomClone recording pipeline in this task.** The harness is additive. Any findings that suggest a main-app change get written up and handed to task-0A.
 - **Results go to a fixed location that survives reboots.** `test-runs/` under the project root, committed to `.gitignore` so individual run dirs aren't staged, but the directory itself is tracked with a `.gitkeep`.
-
-## Handoff
-
-This task feeds task-0A in two ways:
-
-1. **Direct hypotheses to validate.** Task-0B research produces hypotheses; this task validates them; task-0A implements the winning approach.
-2. **Confidence for code changes.** When task-0A eventually resumes (Phases 3 and 4), any change that touches the recording pipeline should be validated in the harness first. Don't re-open a loop of "change the main app, run a real recording, hope for the best."
-
-The harness also feeds `docs/m2-pro-video-pipeline-failures.md`. Findings from harness runs should update the "What we don't know" subsections in that doc with "what we now know" footnotes, so the doc stays current.
 
 ## Briefing for the implementing session
 
@@ -362,13 +259,11 @@ If running this task with a subagent, the briefing should include:
 
 2. **Understand the current state of task-0A** by reading `docs/tasks-todo/task-0A-encoder-contention-and-camera-pipeline.md`. You don't need to understand every phase, but you should know why this harness exists.
 
-3. **Build in order:** start with Tier 1 (single-component tests), then Tier 2, then Tier 3. Do not attempt Tier 4 or 5 until Tier 3 is producing clean results.
+3. **Build in order:** start with a minimal working harness that runs one Tier 1 config end-to-end, then add observability (event log, system snapshot, pass/fail determination, watchdog timer) before adding more writer types. Commit frequently — the scaffold, the Tier 1 configs, and the Tier 1 baseline run should each be their own commit.
 
 4. **Do not touch the main LoomClone app's recording pipeline.** The harness is additive. If you find you need a change to the main app to implement something, stop and write it up as a task-0A follow-up instead.
 
-5. **Every test run that involves a potentially-dangerous configuration** (anything in Tier 3 or later) should be preceded by a dry-run and run with the full safety scaffolding in place.
-
-6. **Commit as you go.** After Tier 1 is working, commit. After Tier 2, commit. After Tier 3.1 (the stable baseline reproduction), commit. Don't try to land this as one monolithic PR — incremental progress is useful even if the full test plan isn't complete.
+5. **Every test run that involves a potentially-dangerous configuration** (anything beyond Tier 1) should be preceded by a dry-run and run with the full safety scaffolding in place. In practice, this task scope only includes running Tier 1 — higher tiers are task-1's job.
 
 An example prompt for the subagent:
 

@@ -6,30 +6,6 @@ Two related improvements to the macOS recording pipeline that were originally pl
 
 **Phase 2** (originally task-0A Phase 4) adds live white-balance and brightness sliders for the camera feed, applied to the composited HLS stream and all live previews but NOT to the raw `camera.mp4` master file.
 
-## Prerequisites
-
-This task is **blocked** until the following are true:
-
-1. **`docs/m2-pro-video-pipeline-failures.md` has been read** by whoever picks this up. Understanding the failure modes is load-bearing for doing this work safely.
-2. **Task-0B is complete or substantially complete.** The research deliverable (`docs/research/11-m2-pro-video-pipeline-deep-dive.md` or similar) must exist and be reviewed. Its findings may change how Phase 1 of this task is implemented — for example, if task-0B discovers that a specific `CIContext` initialisation pattern or Metal device configuration avoids the failure modes we've seen, Phase 1 should incorporate that.
-3. **Task-0C is complete or substantially complete.** The isolation test harness at `app/TestHarness/` must exist and be usable. Any changes this task makes to `CompositionActor` should be validated in the harness BEFORE being tested in the main app.
-4. **Task-0A's Phase 2b situation has been resolved.** The `main` branch currently includes committed Phase 2b code (the 1440p preset) that reproduces failure mode 4. Before this task can start, task-0A's Phase 2b must be either:
-   - Reverted (restore 1080p as the max preset), OR
-   - Replaced with a fix validated via task-0C's harness
-   - In either case, recording at any available preset on the `main` branch must be safe before this task begins.
-
-If any of the above are not true, stop and escalate. Do not start this task in a half-prepared state.
-
-## Context
-
-Read these documents in this order before starting:
-
-1. `docs/m2-pro-video-pipeline-failures.md` — all four failure modes, especially failure modes 3 and 4 (the ones that informed why Phase 1 of this task matters more than we originally thought).
-2. `docs/tasks-todo/task-0A-encoder-contention-and-camera-pipeline.md` — the precursor task. Especially its `Current status` block at the top and the Phase 2b section, so you understand what state the pipeline is in when this task begins.
-3. `docs/research/11-m2-pro-video-pipeline-deep-dive.md` (or whatever task-0B's deliverable is called) — may contain findings that change Phase 1's implementation approach.
-4. `docs/tasks-todo/task-0C-isolation-test-harness.md` — so you know how to validate changes in the harness.
-5. `docs/requirements.md` — product requirements, especially the camera-related Nice-to-Haves section.
-
 ## Why these two phases are in the same task
 
 Phase 1 (error handling) and Phase 2 (camera adjustments) are related in two ways:

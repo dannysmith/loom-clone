@@ -492,6 +492,13 @@ final class HarnessRunner {
     // MARK: - Outcome
 
     private func computeOutcome() -> String {
+        // Note: `writers` may be empty. T1.6 (compositor-alone) is a
+        // deliberate example — the metronome ticks and the compositor
+        // runs, but no writer consumes the composited output. That's
+        // a valid configuration and should report "pass" as long as
+        // nothing else went wrong. Don't add a "zero writers" guard
+        // here; the loop below simply does nothing and we fall
+        // through to the correct outcome.
         var hasFailure = false
         var hasSoftIssue = false
 

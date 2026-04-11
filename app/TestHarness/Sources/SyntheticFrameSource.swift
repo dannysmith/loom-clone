@@ -169,12 +169,24 @@ final class SyntheticFrameSource: @unchecked Sendable {
         }
     }
 
-    /// Fills the BGRA buffer in-place. Uses memset_pattern4 (macOS
-    /// SIMD-accelerated fixed-4-byte pattern fill) so a 4K fill costs
-    /// microseconds, not tens of milliseconds. Per-pixel Swift loops
-    /// are catastrophically slow in Debug (O(100ms) at 4K) and even
-    /// in Release are too slow to keep up with a 30 fps metronome
-    /// while leaving time for the actual encoder.
+    /// Fills the BGRA buffer in-place.
+    ///
+    /// ⚠️ Performance-critical. Do NOT rewrite this as a per-pixel
+    /// Swift loop. At 4K (3840×2160 × 4 bytes = 33 MB/frame) a
+    /// bounds-checked element-by-element loop in Debug takes ~100 ms
+    /// per frame, which means the synthetic source cannot keep up
+    /// with a 30 fps metronome, which means the harness watchdog
+    /// fires on every 4K test — a silent false positive that looks
+    /// exactly like a real pipeline stall. The original
+    /// implementation of this function had that bug and it took
+    /// a full tier run and a diff of events.jsonl to spot. The
+    /// `memset_pattern4` version below runs in microseconds at 4K
+    /// and keeps the synthetic path out of the way of the actual
+    /// encoder under test.
+    ///
+    /// If you need a more detailed synthetic pattern, build it
+    /// from `memset_pattern4` / `memcpy` primitives, not Swift
+    /// element access.
     private func fillBGRA(buffer: CVPixelBuffer, frameIndex: Int64) {
         let h = CVPixelBufferGetHeight(buffer)
         let stride = CVPixelBufferGetBytesPerRow(buffer)

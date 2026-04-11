@@ -220,6 +220,8 @@ Fields:
 - `writers[]` — each writer is configured by `kind` (`composited-hls`, `raw-h264`, `raw-prores`, `raw-audio`), a unique `name`, dimensions, bitrate, and an optional `tunings` dict.
 - `expected` — informational, not enforced: `"pass"` / `"degraded"` / `"fail"` / `"fail-killed"` / `"unknown"`.
 
+> ⚠️ **Camera-writer naming gotcha.** The runner routes frames to a raw-h264 writer whose `name` contains the substring `"camera"` (case-insensitive) from the camera source, not from the screen source. This keeps test configs flat but it means a writer named e.g. `"screen-camera-overlay"` will silently receive camera frames instead of screen frames. If you have a non-camera raw-h264 writer, keep the word "camera" out of its name. If you have a camera writer, put "camera" in its name.
+
 When creating a config:
 
 1. Drop it under `Scripts/test-configs/tier-<N>/` with a `T<N>.<X>-<slug>.json` filename so the runner picks it up in order.

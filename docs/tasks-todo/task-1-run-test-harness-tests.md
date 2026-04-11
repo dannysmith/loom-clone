@@ -80,7 +80,16 @@ Goal: find the exact tipping point. Includes the known-hang configuration from f
 
 Goal: verify that findings from Tiers 1–3 (which use synthetic frames) hold up when `ScreenCaptureKit` and `AVCaptureSession` are in the pipeline. Run the most interesting Tier 3 configs again with real capture.
 
-Only run Tier 4 after Tier 3 has produced clear results. Requires implementing the `real-screen` and `real-camera` source kinds in the harness first — they currently bail at setup time.
+Only run Tier 4 after Tier 3 has produced clear results.
+
+**Prerequisite: implement real-capture source kinds.** The harness's `real-screen` and `real-camera` source kinds currently throw `HarnessRunnerError.unsupportedSource` at setup time — Tier 1–3 only needed synthetic frames so the real-capture path was left unimplemented. Before any Tier 4 test can run, this has to land:
+
+- Add a `CapturedFrameSource` (or equivalent) that wraps `SCStream` for screen and `AVCaptureSession` for camera, mirroring `app/LoomClone/Capture/ScreenCaptureManager.swift` and `CameraCaptureManager.swift`. Don't share code with the main app — the harness is intentionally standalone, and copying ~100 lines is cheaper than cross-target coupling.
+- Wire the capture delegate callbacks into `HarnessRunner.runMetronome` so captured frames feed the same writer / compositor paths that synthetic frames do. The capture layer runs on its own dispatch queue — take the latest frame per metronome tick rather than trying to drive the metronome off the capture callback.
+- Remember the harness app bundle already has `com.apple.security.device.camera` and `com.apple.security.device.audio-input` entitlements. Screen capture doesn't need an entitlement but does need TCC approval on first run — the harness will get the standard system prompt, accept it and re-run.
+- Dry-run a synthetic version of the target Tier 4 config first (same writer set, `kind: synthetic-screen` + `synthetic-camera`) to prove the runner side still works before adding the real-capture variable.
+
+Commit the real-capture implementation as its own step before any Tier 4 test configs go in.
 
 | # | Name | Config |
 |---|---|---|

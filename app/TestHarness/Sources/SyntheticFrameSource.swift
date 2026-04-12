@@ -28,6 +28,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
 
     enum Kind: Sendable {
         case screenBGRA      // 32BGRA, full range
+        case screen420v      // 420YpCbCr8BiPlanarVideoRange — matches main-app SCStream
         case camera420v      // 420YpCbCr8BiPlanarVideoRange (video range)
         case audioSilentPCM  // stereo f32 silence
     }
@@ -76,7 +77,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
         switch kind {
         case .screenBGRA:
             pixelFormat = kCVPixelFormatType_32BGRA
-        case .camera420v:
+        case .screen420v, .camera420v:
             pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         case .audioSilentPCM:
             return nil
@@ -162,7 +163,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
         switch kind {
         case .screenBGRA:
             fillBGRA(buffer: buffer, frameIndex: frameIndex)
-        case .camera420v:
+        case .screen420v, .camera420v:
             fillYCbCr420(buffer: buffer, frameIndex: frameIndex)
         case .audioSilentPCM:
             break

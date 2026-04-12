@@ -60,7 +60,9 @@ struct HarnessConfig: Codable, Sendable {
 
 struct SourceConfig: Codable, Sendable {
 
-    /// "synthetic-screen" (BGRA), "synthetic-camera" (420v YCbCr),
+    /// "synthetic-screen" (420v YCbCr, matches main-app SCStream),
+    /// "synthetic-screen-bgra" (32BGRA — explicit BGRA exception case),
+    /// "synthetic-camera" (420v YCbCr),
     /// "synthetic-audio" (silent PCM for the audio writer),
     /// "real-screen" (ScreenCaptureKit, opt-in Tier 4),
     /// "real-camera" (AVCaptureSession, opt-in Tier 4).

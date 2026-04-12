@@ -151,6 +151,20 @@ final class HarnessRunner {
         let src = config.source
         switch src.kind {
         case "synthetic-screen":
+            // Task-1 tuning 1: default synthetic-screen to 420v to match
+            // the main-app SCStream pixel path (ScreenCaptureManager sets
+            // kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange). Use the
+            // explicit "synthetic-screen-bgra" kind for the BGRA exception
+            // case.
+            let w = src.width ?? 3840
+            let h = src.height ?? 2160
+            screenSource = SyntheticFrameSource(
+                kind: .screen420v,
+                width: w, height: h,
+                pattern: parsePattern(src.pattern),
+                colorSpace: parseColorSpace(src.colorSpace)
+            )
+        case "synthetic-screen-bgra":
             let w = src.width ?? 3840
             let h = src.height ?? 2160
             screenSource = SyntheticFrameSource(
@@ -184,6 +198,15 @@ final class HarnessRunner {
         for extra in src.additional ?? [] {
             switch extra.kind {
             case "synthetic-screen":
+                let w = extra.width ?? 3840
+                let h = extra.height ?? 2160
+                screenSource = SyntheticFrameSource(
+                    kind: .screen420v,
+                    width: w, height: h,
+                    pattern: parsePattern(extra.pattern),
+                    colorSpace: parseColorSpace(extra.colorSpace)
+                )
+            case "synthetic-screen-bgra":
                 let w = extra.width ?? 3840
                 let h = extra.height ?? 2160
                 screenSource = SyntheticFrameSource(

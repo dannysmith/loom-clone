@@ -1,0 +1,38 @@
+{
+  "name": "T2.4-prores-4k-plus-h264-1080p-hls",
+  "description": "ProRes 4K screen writer (raw SCStream path) + composited H.264 HLS at 1080p @ 6Mbps (CIContext scales 4K screen to 1080p, no camera overlay). Confirms the ProRes-plus-one-H.264 base case works — one H.264 engine, one ProRes engine, one CIContext. If this fails, something is wrong with having both engines active concurrently even at a modest HLS bitrate.",
+  "tier": "tier-2",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "compositor": {
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "includeCameraOverlay": false,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1080p",
+      "width": 1920,
+      "height": 1080,
+      "bitrate": 6000000
+    }
+  ]
+}

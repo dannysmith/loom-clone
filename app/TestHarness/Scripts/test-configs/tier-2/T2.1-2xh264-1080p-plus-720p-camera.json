@@ -1,0 +1,48 @@
+{
+  "name": "T2.1-2xh264-1080p-plus-720p-camera",
+  "description": "Phase 2 stable config minus ProRes. Composited HLS at 1080p @ 6Mbps (screen scaled to 1080p with 720p camera PiP overlay) plus a raw H.264 720p camera writer at 12Mbps. Two concurrent H.264 encode sessions, no ProRes engine involvement. If this fails, 2x H.264 concurrency at 1080p + 720p is the trigger.",
+  "tier": "tier-2",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1080p",
+      "width": 1920,
+      "height": 1080,
+      "bitrate": 6000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

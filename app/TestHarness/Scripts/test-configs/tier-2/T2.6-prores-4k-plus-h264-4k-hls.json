@@ -1,0 +1,38 @@
+{
+  "name": "T2.6-prores-4k-plus-h264-4k-hls",
+  "description": "Hostile configuration: ProRes 4K + composited H.264 HLS at 4K @ 18Mbps. Both streams at native display resolution. Expected to fail (back-pressure or worse). Useful as an upper-bound marker — if this somehow passes, the ceiling is higher than we thought.",
+  "tier": "tier-2",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "fail",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "compositor": {
+    "outputWidth": 3840,
+    "outputHeight": 2160,
+    "includeCameraOverlay": false,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-4k",
+      "width": 3840,
+      "height": 2160,
+      "bitrate": 18000000
+    }
+  ]
+}

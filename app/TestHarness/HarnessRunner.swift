@@ -387,21 +387,47 @@ final class HarnessRunner {
                     )
                 }
 
-                let videoBuffer: CVPixelBuffer?
+                // Build two independent routes so the harness can
+                // reproduce main-app Phase 2's shape, where ProRes
+                // records the raw SCStream output while the composited
+                // HLS writer gets the CIContext compositor output:
+                //   - rawScreen  → fed to raw-prores and raw-h264 (screen).
+                //   - composited → fed to composited-hls. Falls back to
+                //     the raw screen buffer when no compositor is
+                //     configured (matches pre-existing behaviour for
+                //     configs that use composited-hls without a compositor).
+                let compositedBuffer: CVPixelBuffer?
                 if let compositor {
-                    videoBuffer = compositor.compositeFrame(
+                    compositedBuffer = compositor.compositeFrame(
                         screen: screenBuffer,
                         includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
                     )
                 } else {
-                    videoBuffer = screenBuffer
+                    compositedBuffer = screenBuffer
                 }
 
-                if let videoBuffer,
-                   let sample = Self.makeSampleBuffer(from: videoBuffer,
-                                                      index: Int64(frameIndex),
-                                                      frameRate: frameRate) {
-                    feedVideoWriters(sample)
+                let rawScreenSample: CMSampleBuffer? = screenBuffer.flatMap {
+                    Self.makeSampleBuffer(from: $0,
+                                          index: Int64(frameIndex),
+                                          frameRate: frameRate)
+                }
+                let compositedSample: CMSampleBuffer?
+                if compositor != nil {
+                    compositedSample = compositedBuffer.flatMap {
+                        Self.makeSampleBuffer(from: $0,
+                                              index: Int64(frameIndex),
+                                              frameRate: frameRate)
+                    }
+                } else {
+                    // Share the raw-screen sample when there's no
+                    // compositor — both routes would wrap the same
+                    // CVPixelBuffer anyway.
+                    compositedSample = rawScreenSample
+                }
+
+                if rawScreenSample != nil || compositedSample != nil {
+                    feedVideoWriters(rawScreen: rawScreenSample,
+                                     composited: compositedSample)
                     if firstFrameAt == nil { firstFrameAt = events.elapsed() }
                     lastFrameAt = events.elapsed()
                     framesSubmitted += 1
@@ -413,7 +439,7 @@ final class HarnessRunner {
                     if firstFrameAt == nil { firstFrameAt = events.elapsed() }
                     lastFrameAt = events.elapsed()
                     framesSubmitted += 1
-                } else if videoBuffer == nil && screenSource != nil {
+                } else if screenSource != nil {
                     // We had a screen source that failed to produce a
                     // buffer — that IS a drop. Cap the log output so
                     // a persistent failure doesn't flood events.jsonl.
@@ -458,14 +484,30 @@ final class HarnessRunner {
         events.log("metronome.stop", ["framesSubmitted": framesSubmitted])
     }
 
-    private func feedVideoWriters(_ sample: CMSampleBuffer) {
-        for w in writers where w.kind != "raw-audio" && w.kind != "raw-h264-camera" {
-            // The composited HLS writer and raw-h264 / raw-prores
-            // (screen-side) all take the composited or screen-sourced
-            // video stream. The raw-h264 camera writer is fed via
-            // feedCameraWriters instead.
-            if w.kind == "raw-h264" || w.kind == "composited-hls" || w.kind == "raw-prores" {
-                w.appendVideo(sample)
+    /// Route screen-side writers by kind + name convention:
+    ///   - `composited-hls`  → the composited sample (falls back to
+    ///     rawScreen when no compositor is configured).
+    ///   - `raw-prores`      → the rawScreen sample. Always. Mirrors
+    ///     main-app Phase 2 where ProRes records the native SCStream
+    ///     output, not the compositor output.
+    ///   - `raw-h264` (screen side, i.e. name does NOT contain "camera")
+    ///                       → the rawScreen sample.
+    ///   - `raw-h264` (camera side) → fed separately via
+    ///     `feedCameraWriters`. Ignored here.
+    private func feedVideoWriters(rawScreen: CMSampleBuffer?,
+                                  composited: CMSampleBuffer?) {
+        for w in writers {
+            switch w.kind {
+            case "composited-hls":
+                if let composited { w.appendVideo(composited) }
+            case "raw-prores":
+                if let rawScreen { w.appendVideo(rawScreen) }
+            case "raw-h264":
+                if !w.name.lowercased().contains("camera"), let rawScreen {
+                    w.appendVideo(rawScreen)
+                }
+            default:
+                break
             }
         }
     }

@@ -1,0 +1,38 @@
+{
+  "name": "T2.5-prores-4k-plus-h264-1440p-hls",
+  "description": "CRITICAL test. ProRes 4K + composited H.264 HLS at 1440p @ 10Mbps — Phase 2b minus the raw camera writer. Does removing the raw camera writer prevent failure mode 4? If this PASSES, task-4 Path C (drop the raw camera writer at 1440p+) becomes a viable fix. If this FAILS, the combination of ProRes 4K + 1440p HLS + CIContext is sufficient on its own to trigger the kernel wedge.",
+  "tier": "tier-2",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "unknown",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb"
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": false,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    }
+  ]
+}

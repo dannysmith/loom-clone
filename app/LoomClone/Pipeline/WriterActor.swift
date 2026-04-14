@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import UniformTypeIdentifiers
+import VideoToolbox
 
 actor WriterActor {
 
@@ -130,6 +131,14 @@ actor WriterActor {
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoExpectedSourceFrameRateKey: 30,
                 AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+                // Task-1 tuning 3: OBS/FFmpeg/HandBrake all ship this as
+                // false on Apple Silicon after OBS issue #5840 documented
+                // framedrops and unreliability with it set to true on
+                // M1/M2. Mechanism is undocumented but the production-app
+                // convergence is strong signal, and it may affect how the
+                // encoder reserves/releases IOSurface backing — the same
+                // resource failure mode 4 deadlocks on.
+                kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
             ] as [String: Any],
         ]
 

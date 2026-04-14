@@ -239,6 +239,7 @@ Writer tunings are supplied as a `tunings` dict on the writer config. Currently-
 | `raw-h264` | `averageBitRate` | int (bits/sec) |
 | `raw-h264` | `expectedFrameRate` | int |
 | `raw-h264` | `maxKeyFrameIntervalDuration` | int (seconds) |
+| `raw-h264`, `composited-hls` | `realTime` | bool — default `false` (matches task-1 tuning 3 after OBS #5840); `true` sets `kVTCompressionPropertyKey_RealTime = true`; JSON `null` leaves the property unset entirely (for comparison against the documented "unknown" default) |
 | `composited-hls` | `declareRec709Output` | bool — default `true`; set to `false` to test what happens without `AVVideoColorPropertiesKey` on the writer output |
 
 Adding a new tuning knob is a two-line edit to the relevant writer's `configure()` method: read the key from `tunings` and apply it to the `AVAssetWriterInput` / `VTCompressionSession` properties. Keep the mapping explicit — don't pass the dict through opaquely.

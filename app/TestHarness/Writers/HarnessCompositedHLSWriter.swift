@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import VideoToolbox
 
 // MARK: - HarnessCompositedHLSWriter
 //
@@ -108,17 +109,32 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
         ]
 
+        // Task-1 tuning 3: RealTime = false by default. Overridable via
+        // the `realTime` tunings key for Tier 5 priority 4 sweeps across
+        // {unset, false, true}.
+        var compression: [String: Any] = [
+            AVVideoAverageBitRateKey: bitrate,
+            AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
+            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+            AVVideoExpectedSourceFrameRateKey: 30,
+            AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+        ]
+        switch tunings["realTime"] {
+        case .some(.bool(let b)):
+            compression[kVTCompressionPropertyKey_RealTime as String] = (b ? kCFBooleanTrue : kCFBooleanFalse) as Any
+        case .some(.null):
+            break  // explicit opt-out — leave RealTime unset (default state)
+        case .none:
+            compression[kVTCompressionPropertyKey_RealTime as String] = kCFBooleanFalse as Any
+        default:
+            compression[kVTCompressionPropertyKey_RealTime as String] = kCFBooleanFalse as Any
+        }
+
         var settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitrate,
-                AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoExpectedSourceFrameRateKey: 30,
-                AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-            ] as [String: Any],
+            AVVideoCompressionPropertiesKey: compression,
         ]
 
         // Tuning: allow opting the Rec.709 output declaration on or

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import VideoToolbox
 
 /// Writes a single capture stream (video or audio) to a standalone
 /// MP4 / MOV / M4A file at native quality. Used for the local
@@ -98,6 +99,9 @@ actor RawStreamWriter {
                     AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                     AVVideoExpectedSourceFrameRateKey: 30,
                     AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+                    // Task-1 tuning 3: see WriterActor for the full
+                    // rationale (OBS #5840 convergence).
+                    kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
                 ] as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)

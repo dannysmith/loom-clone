@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import VideoToolbox
 
 // MARK: - HarnessRawH264Writer
 //
@@ -60,6 +61,21 @@ final class HarnessRawH264Writer: HarnessWriter {
             AVVideoExpectedSourceFrameRateKey: 30,
             AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
         ]
+        // Task-1 tuning 3: RealTime = false by default. Overridable
+        // via the `realTime` tunings key for Tier 5 priority 4 sweeps
+        // across {unset, false, true}. A JSONValue.null override
+        // leaves the property unset (matching the macOS default of
+        // "unknown") for the comparison against an explicit bool.
+        switch tunings["realTime"] {
+        case .some(.bool(let b)):
+            compression[kVTCompressionPropertyKey_RealTime as String] = (b ? kCFBooleanTrue : kCFBooleanFalse) as Any
+        case .some(.null):
+            break
+        case .none:
+            compression[kVTCompressionPropertyKey_RealTime as String] = kCFBooleanFalse as Any
+        default:
+            compression[kVTCompressionPropertyKey_RealTime as String] = kCFBooleanFalse as Any
+        }
         // Surface a handful of tunings so parameter sweeps can flip
         // them from the config without new code. Anything not listed
         // here is ignored — new knobs get added as task-0B findings

@@ -1,0 +1,51 @@
+{
+  "name": "T4.5-synthetic-screen-real-camera-1440p",
+  "description": "Mirror of T4.4: synthetic 4K screen + REAL camera. Isolates the other direction. Interpretation together with T4.4: if T4.2 hangs, T4.5 passes, and T4.4 hangs → screen capture is the differentiator. If T4.2 hangs, T4.5 hangs, and T4.4 passes → camera capture is the differentiator. If both T4.4 and T4.5 pass while T4.2 hangs → it's the interaction of both real streams that matters.",
+  "tier": "tier-4",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "unknown",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "real-camera",
+        "deviceUniqueID": "0x0000000000000000"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

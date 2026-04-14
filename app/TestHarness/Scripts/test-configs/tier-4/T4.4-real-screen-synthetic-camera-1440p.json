@@ -1,0 +1,51 @@
+{
+  "name": "T4.4-real-screen-synthetic-camera-1440p",
+  "description": "T4.2 shape but the camera is SYNTHETIC. Real screen capture (SCStream buffers, WindowServer IOSurface pool) + synthetic 1280x720 camera (harness-allocated CVPixelBuffer pool) + composited HLS 1440p + ProRes 4K + raw H.264 camera writer. Isolates screen-capture-vs-camera-capture as the real-capture differentiator. Interpretation: if T4.2 hangs and T4.4 hangs too → screen capture is the trigger. If T4.2 hangs and T4.4 passes → camera capture is the trigger.",
+  "tier": "tier-4",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "unknown",
+  "source": {
+    "kind": "real-screen",
+    "displayID": 3,
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

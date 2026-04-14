@@ -1,0 +1,48 @@
+{
+  "name": "T4.1-real-capture-phase-2-1080p",
+  "description": "Real-capture reproduction of T3.1 (Phase 2 stable baseline). Real SCStream on the main display (BenQ EW2780U, 3840x2160 native) + real AVCaptureSession on the Sony ZV-1 (1280x720). Composited HLS at 1080p with camera overlay, ProRes 4K raw screen, raw H.264 720p camera. Expected PASS — sanity check that real capture doesn't regress a known-stable configuration. If this fails, something is wrong with the real-capture plumbing rather than with any interesting failure mode.",
+  "tier": "tier-4",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "real-screen",
+    "displayID": 3,
+    "additional": [
+      {
+        "kind": "real-camera",
+        "deviceUniqueID": "0x0000000000000000"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1080p",
+      "width": 1920,
+      "height": 1080,
+      "bitrate": 6000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

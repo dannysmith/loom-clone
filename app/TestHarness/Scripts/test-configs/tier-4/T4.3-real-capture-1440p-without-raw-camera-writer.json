@@ -1,0 +1,41 @@
+{
+  "name": "T4.3-real-capture-1440p-without-raw-camera-writer",
+  "description": "T4.2 minus the raw H.264 camera writer. Real screen capture, real camera capture (still feeds the compositor overlay), but no second concurrent H.264 encode session for the camera. If T4.2 hangs and T4.3 passes, task-4 Path C (drop the raw camera writer at 1440p+) is evidence-backed. Run only AFTER T4.2 has produced a result — if T4.2 passes, T4.3's comparison is not informative.",
+  "tier": "tier-4",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "unknown",
+  "source": {
+    "kind": "real-screen",
+    "displayID": 3,
+    "additional": [
+      {
+        "kind": "real-camera",
+        "deviceUniqueID": "0x0000000000000000"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    }
+  ]
+}

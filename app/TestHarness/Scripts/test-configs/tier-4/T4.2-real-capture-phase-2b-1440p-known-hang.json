@@ -1,0 +1,48 @@
+{
+  "name": "T4.2-real-capture-phase-2b-1440p-known-hang",
+  "description": "THE critical test. Same writers as T4.1 but HLS at 1440p @ 10Mbps — the exact configuration that wedged the Mac on 2026-04-11 13:32, now with real capture. If this FAILS (watchdog fires / machine hangs), failure mode 4 is reproducible in the harness and Tier 5 parameter sweeps can pin down the critical variable. If this PASSES, the hang is intermittent / state-dependent and we need different evidence (repeated runs, thermal state capture, display-config polling). DANGER — may hang the Mac. Save any open work first. Run alone via run-tier-4.sh.",
+  "tier": "tier-4",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "fail-killed",
+  "source": {
+    "kind": "real-screen",
+    "displayID": 3,
+    "additional": [
+      {
+        "kind": "real-camera",
+        "deviceUniqueID": "0x0000000000000000"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

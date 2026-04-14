@@ -197,11 +197,34 @@ private func listDevicesAndExit() async -> Never {
         for d in devices {
             print("  deviceUniqueID=\(d.uniqueID)")
             print("    name:           \(d.localizedName)")
-            let maxH = CapturedCameraSource.bestFormat(for: d, maxHeight: Int.max).map { fmt -> String in
+            if let fmt = CapturedCameraSource.bestFormat(for: d, maxHeight: Int.max) {
                 let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-                return "\(dims.width)x\(dims.height)"
-            } ?? "no 30fps-capable format"
-            print("    best @30fps:    \(maxH)")
+                print("    best @30fps:    \(dims.width)x\(dims.height)")
+            } else {
+                print("    best @30fps:    none — session will fall back to .high preset")
+            }
+            // Show the first 6 declared formats so we can see what the
+            // device actually supports (esp. useful for USB cameras where
+            // bestFormat returns nil because of weird frame-range declarations).
+            print("    formats (up to first 6):")
+            for (i, fmt) in d.formats.prefix(6).enumerated() {
+                let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+                let ranges = fmt.videoSupportedFrameRateRanges
+                    .map { "\($0.minFrameRate.rounded())-\($0.maxFrameRate.rounded())fps" }
+                    .joined(separator: ",")
+                let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
+                let subStr = String(
+                    format: "%c%c%c%c",
+                    (subType >> 24) & 0xff,
+                    (subType >> 16) & 0xff,
+                    (subType >> 8) & 0xff,
+                    subType & 0xff
+                )
+                print("      [\(i)] \(dims.width)x\(dims.height) \(subStr) @ \(ranges)")
+            }
+            if d.formats.count > 6 {
+                print("      ... + \(d.formats.count - 6) more")
+            }
         }
     }
 

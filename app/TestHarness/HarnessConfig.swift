@@ -158,6 +158,31 @@ struct SourceConfig: Codable, Sendable {
     /// may deliver at ≥30fps. Defaults to unlimited; set this to cap
     /// high-res USB cameras at e.g. 720 for parity with the main app.
     var maxHeight: Int?
+
+    // Swift's synthesised Codable treats defaulted `var` properties as
+    // required at decode time. Give SourceConfig the same tolerant
+    // `init(from:)` pattern as `HarnessConfig` so configs can omit
+    // defaulted fields without a decode error.
+    enum CodingKeys: String, CodingKey {
+        case kind, width, height, pattern, colorSpace, additional
+        case displayID, displayName
+        case deviceUniqueID, deviceName, maxHeight
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(String.self, forKey: .kind)
+        self.width = try c.decodeIfPresent(Int.self, forKey: .width)
+        self.height = try c.decodeIfPresent(Int.self, forKey: .height)
+        self.pattern = try c.decodeIfPresent(String.self, forKey: .pattern) ?? "moving"
+        self.colorSpace = try c.decodeIfPresent(String.self, forKey: .colorSpace) ?? "srgb"
+        self.additional = try c.decodeIfPresent([SourceConfig].self, forKey: .additional)
+        self.displayID = try c.decodeIfPresent(UInt32.self, forKey: .displayID)
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        self.deviceUniqueID = try c.decodeIfPresent(String.self, forKey: .deviceUniqueID)
+        self.deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName)
+        self.maxHeight = try c.decodeIfPresent(Int.self, forKey: .maxHeight)
+    }
 }
 
 // MARK: - CompositorConfig

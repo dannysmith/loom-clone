@@ -620,7 +620,12 @@ final class HarnessRunner {
     /// Returns the max relative drift from the 4s target, ignoring the
     /// first segment (which always has priming variance).
     private func cadenceDrift(durations: [Double]) -> Double? {
-        let interior = durations.dropFirst()
+        // Drop the init segment (always first, nonstandard length) AND
+        // the tail segment (always last, short because the recording
+        // ends mid-interval when duration isn't a multiple of the 4 s
+        // target). What remains are the interior segments whose
+        // durations actually signal cadence stability.
+        let interior = durations.dropFirst().dropLast()
         guard !interior.isEmpty else { return nil }
         let target = 4.0
         let worst = interior.map { abs($0 - target) / target }.max() ?? 0

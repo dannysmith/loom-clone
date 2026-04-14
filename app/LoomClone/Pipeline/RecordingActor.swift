@@ -274,7 +274,37 @@ actor RecordingActor {
             await self?.handleSegment(segment)
         }
 
-        // 4. Wire capture callbacks. Frames that arrive now will populate the
+        // 4. Task-1 tuning 2: warm up writers BEFORE opening any capture source.
+        // `AVAssetWriter.startWriting()` → `startSession(atSourceTime:)` internally
+        // calls `VTCompressionSessionPrepareToEncodeFrames`, which allocates the
+        // encoder's IOSurface working set through IOGPUFamily. Doing that while
+        // SCStream is already allocating its own IOSurfaces is exactly the race
+        // failure mode 4's spindump captured (`videotoolbox.preparationQueue`
+        // stuck inside IOGPUFamily kext during early-recording). Warming up here
+        // means all three warmable writers' allocations happen in a quiet
+        // window, before SCK starts competing for the same kernel resource.
+        //
+        // The camera raw writer is intentionally NOT warmed up here — it's
+        // constructed further down, after `cameraCapture.startCapture()` returns
+        // and we can read the delivered dimensions from `device.activeFormat`.
+        // It warms up at its own construction point, which is still before
+        // `commitRecording` anchors the clock and starts the metronome.
+        //
+        // Safety: `handleScreenFrame` and `handleCameraFrame` guard their raw-
+        // writer appends through `retimedSampleForRawWriter`, which returns
+        // nil unless `isRecording == true` — so frames that arrive during the
+        // capture-startup window below go into caches only, not into the
+        // warmed-up writers. The HLS writer is only fed by the metronome,
+        // which doesn't start until `commitRecording`. The init segment that
+        // fires out of the HLS writer's delegate during this `startWriting()`
+        // is handled by `handleSegment`, which tolerates a pre-commit state
+        // (`timeline.recordSegment` is only called for `.media` segments;
+        // `logicalElapsedSeconds()` returns 0 before commit).
+        await writer.startWriting()
+        await screenRawWriter?.startWriting()
+        await audioRawWriter?.startWriting()
+
+        // 5. Wire capture callbacks. Frames that arrive now will populate the
         // caches but won't be encoded — the metronome only starts in commit()
         // and `recordingStartTime` is still nil so audio samples are dropped.
         if display != nil {
@@ -304,13 +334,23 @@ actor RecordingActor {
             }
         }
 
-        // 5. Start captures and AWAIT each session's hardware coming online.
+        // 6. Start captures and AWAIT each session's hardware coming online.
         // The capture managers now actually wait for `startRunning()` to
         // complete before returning, so by the time these awaits resolve every
         // source is genuinely live.
+        //
+        // If `screenCapture.startCapture` throws here, the warmed-up writers
+        // from step 4 have open `AVAssetWriter` sessions that must be torn
+        // down cleanly before re-throwing — otherwise the next prepare
+        // attempt would leak the old instances.
         audioHasArrived = false
         if let display {
-            try await screenCapture.startCapture(display: display, excludingApp: ourApp)
+            do {
+                try await screenCapture.startCapture(display: display, excludingApp: ourApp)
+            } catch {
+                await tearDownWarmedUpWritersOnPrepareFailure()
+                throw error
+            }
         }
         if let camera {
             // Cap camera capture at the preset height. No point decoding a 4K
@@ -378,20 +418,38 @@ actor RecordingActor {
         // Anchor the timeline at the same moment.
         timeline.markStarted()
 
-        // Open the writer session
-        await writer.startWriting()
-
-        // Open raw writer sessions. Each one runs on its own native source
-        // cadence — they're not metronome-paced.
-        await screenRawWriter?.startWriting()
+        // The HLS, raw-screen, and raw-audio writers were already warmed up
+        // in `prepareRecording` (task-1 tuning 2). Only the camera raw writer
+        // still warms up here, because it's constructed after
+        // `cameraCapture.startCapture()` returns with the delivered dims from
+        // `device.activeFormat`. It's still warmed up serially, still before
+        // the metronome feeds any frames.
         await cameraRawWriter?.startWriting()
-        await audioRawWriter?.startWriting()
 
         // Start the 30fps metronome — emits frames from the cache regardless
         // of what the underlying sources are doing.
         startMetronome()
 
         print("[recording] Committed at \(recordingStartTime?.seconds ?? 0)")
+    }
+
+    /// Cleanup path for `prepareRecording` failing after the HLS / screen-raw /
+    /// audio-raw writers have been warmed up (task-1 tuning 2). Called only
+    /// from the error path; on the happy path the writers are owned through
+    /// to `stopRecording`.
+    private func tearDownWarmedUpWritersOnPrepareFailure() async {
+        await writer.finish()
+        if let w = screenRawWriter {
+            await w.finish()
+            screenRawWriter = nil
+            rawScreenDims = nil
+        }
+        if let w = audioRawWriter {
+            await w.finish()
+            audioRawWriter = nil
+            rawAudioConfig = nil
+        }
+        print("[recording] Tore down warmed-up writers after prepare failure")
     }
 
     enum RecordingError: Error {

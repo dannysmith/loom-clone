@@ -213,6 +213,7 @@ Fields:
 - `tier` — label used by the runner script to group configs (purely informational to the harness itself).
 - `durationSeconds` — how long the metronome runs. The watchdog fires at `durationSeconds + watchdogGraceSeconds`.
 - `frameRate` — metronome tick rate. Defaults to 30.
+- `warmUp` — writer warm-up strategy. `"serial"` (default) runs each writer's `startWriting()` sequentially, matching the main app's `prepareRecording()` ordering after task-1 tuning 2. `"parallel"` kicks every writer off at the same time via a `TaskGroup` — only useful for Tier 5 priority 7 (serialised-vs-parallel warm-up sweep).
 - `source.kind` — one of `synthetic-screen` (420v YCbCr, matches the main-app `SCStream` pixel path), `synthetic-screen-bgra` (32BGRA, for the explicit BGRA exception case), `synthetic-camera` (420v YCbCr), `synthetic-audio` (silent PCM), `real-screen` (ScreenCaptureKit), `real-camera` (AVCaptureSession). A single source can declare `additional` sub-sources for tests that need both a screen and camera feed.
 - `source.pattern` — `solid`, `gradient`, `moving`, or `noise`. `moving` is the default because static content compresses to almost nothing and doesn't stress the encoder realistically.
 - `source.colorSpace` — `srgb` (display default), `p3` (wide-gamut display), `rec709` (camera default). Controls the attachment tags on synthetic pixel buffers so downstream writers see the same input shape they would in production.

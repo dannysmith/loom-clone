@@ -39,6 +39,14 @@ struct HarnessConfig: Codable, Sendable {
     /// production pipeline.
     var frameRate: Int = 30
 
+    /// Writer warm-up strategy. "serial" (default) mirrors the main app's
+    /// `prepareRecording()` ordering: each writer's `startWriting()` runs
+    /// and fully completes before the next one starts. "parallel" kicks
+    /// every writer off at the same time via a `TaskGroup` — only useful
+    /// for Tier 5 priority 7 (serialised-vs-parallel warm-up sweep).
+    /// See task-1 tuning 2 for the rationale.
+    var warmUp: String = "serial"
+
     /// Frame source configuration — synthetic by default.
     let source: SourceConfig
 
@@ -54,6 +62,38 @@ struct HarnessConfig: Codable, Sendable {
     /// has an opinion. Purely informational — used by the runner summary.
     /// Values: "pass", "degraded", "fail", "fail-killed", "unknown".
     var expected: String = "unknown"
+
+    // Swift's synthesised Codable treats defaulted `var` properties as
+    // required at decode time — the Swift default only fires at
+    // struct-construction time, not when decoding from JSON. That means
+    // adding a new defaulted field to this schema would silently break
+    // every existing config on disk. This custom decoder uses
+    // `decodeIfPresent` for every defaulted field so new optional fields
+    // can be added without a JSON migration, which is the "tolerant to
+    // growth" property the file header calls out. `encode(to:)` is still
+    // auto-synthesised.
+    enum CodingKeys: String, CodingKey {
+        case name, description, tier
+        case durationSeconds, watchdogGraceSeconds
+        case frameRate, warmUp
+        case source, compositor, writers
+        case expected
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.description = try c.decodeIfPresent(String.self, forKey: .description)
+        self.tier = try c.decodeIfPresent(String.self, forKey: .tier)
+        self.durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
+        self.watchdogGraceSeconds = try c.decodeIfPresent(Double.self, forKey: .watchdogGraceSeconds) ?? 10.0
+        self.frameRate = try c.decodeIfPresent(Int.self, forKey: .frameRate) ?? 30
+        self.warmUp = try c.decodeIfPresent(String.self, forKey: .warmUp) ?? "serial"
+        self.source = try c.decode(SourceConfig.self, forKey: .source)
+        self.compositor = try c.decodeIfPresent(CompositorConfig.self, forKey: .compositor)
+        self.writers = try c.decode([WriterConfig].self, forKey: .writers)
+        self.expected = try c.decodeIfPresent(String.self, forKey: .expected) ?? "unknown"
+    }
 }
 
 // MARK: - SourceConfig

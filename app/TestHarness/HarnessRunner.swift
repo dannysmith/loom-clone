@@ -123,9 +123,23 @@ final class HarnessRunner {
                                   summary: "setup failed: \(error.localizedDescription)")
         }
 
-        // Start the writers.
-        for w in writers {
-            w.startWriting()
+        // Start the writers. Default is serial — each writer's startWriting()
+        // fully completes before the next one begins, matching the main app's
+        // prepareRecording ordering after task-1 tuning 2. "parallel" is a
+        // Tier 5 priority 7 sweep variant that kicks them off at the same
+        // time via a TaskGroup, so we can measure whether serialised warm-up
+        // is actually load-bearing.
+        events.log("writers.warm-up", ["mode": config.warmUp])
+        if config.warmUp == "parallel" {
+            await withTaskGroup(of: Void.self) { group in
+                for w in writers {
+                    group.addTask { w.startWriting() }
+                }
+            }
+        } else {
+            for w in writers {
+                w.startWriting()
+            }
         }
 
         // Drive the metronome for the configured duration.

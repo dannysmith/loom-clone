@@ -100,6 +100,17 @@ final class HarnessRawH264Writer: HarnessWriter {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: compression,
+            // Task-1 tuning 6: require the hardware H.264 encoder.
+            // VTCompressionProperties.h calls out
+            // "the hardware encoding resources on the machine are busy"
+            // as a documented failure mode for this property — on M2 Pro
+            // that's the exact condition failure mode 4 suggests we're
+            // brushing up against. Setting this means silent software
+            // fallback fails loudly at startWriting() instead of dragging
+            // the GPU into a deadlock.
+            AVVideoEncoderSpecificationKey: [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+            ] as [String: Any],
         ]
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)

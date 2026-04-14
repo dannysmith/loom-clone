@@ -120,6 +120,22 @@ actor WriterActor {
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: preset.width,
             AVVideoHeightKey: preset.height,
+            // Task-1 tuning 6: require the hardware H.264 encoder.
+            // VTCompressionProperties.h documents the failure cases
+            // for this property explicitly, including "the hardware
+            // encoding resources on the machine are busy" — which is
+            // exactly the condition failure mode 4 suggests we're
+            // brushing up against on M2 Pro. Setting this means
+            // silent software fallback fails loudly at startWriting()
+            // instead of dragging the GPU into a deadlock.
+            // The readback form (reading
+            // UsingHardwareAcceleratedVideoEncoder after session
+            // creation) isn't implementable because AVAssetWriter
+            // doesn't expose its internal VTCompressionSession — we
+            // rely on enforcement only.
+            AVVideoEncoderSpecificationKey: [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+            ] as [String: Any],
             AVVideoColorPropertiesKey: [
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
                 AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,

@@ -93,6 +93,11 @@ actor RawStreamWriter {
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
+                // Task-1 tuning 6: require hardware H.264. See
+                // WriterActor for the rationale.
+                AVVideoEncoderSpecificationKey: [
+                    kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+                ] as [String: Any],
                 AVVideoCompressionPropertiesKey: [
                     AVVideoAverageBitRateKey: bitrate,
                     AVVideoMaxKeyFrameIntervalDurationKey: 2.0,

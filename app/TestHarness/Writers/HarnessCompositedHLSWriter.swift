@@ -144,6 +144,11 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: compression,
+            // Task-1 tuning 6: require hardware H.264. See
+            // HarnessRawH264Writer for the rationale.
+            AVVideoEncoderSpecificationKey: [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+            ] as [String: Any],
         ]
 
         // Tuning: allow opting the Rec.709 output declaration on or

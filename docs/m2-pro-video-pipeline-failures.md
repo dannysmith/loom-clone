@@ -490,13 +490,103 @@ Things we cannot answer from publicly available information, that would signific
 7. **Does `VTCompressionSessionPrepareToEncodeFrames`** (an API we don't currently call) pre-allocate IOSurface resources in a way that would prevent allocation stalls mid-recording?
 8. **What's the IOSurface memory footprint cliff?** At 1080p preset the total IOSurface working set across all writers + compositor + capture fits in some footprint we know is safe. At 1440p something broke. We don't know if it's a raw memory limit, a pool-count limit, a per-surface-size limit, or something more subtle.
 
+## Resolution (2026-04-14)
+
+The failure sections above are the ground-truth record of what happened. This section records what we did after the 2026-04-11 hangs, what we tested, and the current state of each failure mode. The detailed audit trails for each piece of work live in their own docs — this section is the narrative that ties them together.
+
+### What we applied — VideoToolbox best-practice tunings
+
+Seven tunings were considered from the research pass (`docs/research/11-m2-pro-video-pipeline-deep-dive.md`), derived by auditing what OBS, Cap, HandBrake, and FFmpeg ship on Apple Silicon. Five were applied to both the main app and the test harness; two turned out to be unreachable through `AVAssetWriter`'s public API and were deferred.
+
+Applied:
+
+1. **`SCStreamConfiguration.pixelFormat = 420v`** (`kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange`). Matches what every other production screen recorder ships. OBS issue #5840 documents this as "the format that makes the HW VideoToolbox very reliable" on M1/M2. Halves per-frame screen IOSurface bytes vs BGRA. (`ScreenCaptureManager.swift`)
+2. **Writer warm-up reordering.** `writer.startWriting()` moved from `commitRecording()` into `prepareRecording()`, called before `SCStream.startCapture()` opens. Gives VideoToolbox time to allocate encoder resources before frames start arriving — directly addresses the `preparationQueue` stall the failure mode 4 spindump shows. (`RecordingActor.prepareRecording`)
+3. **`kVTCompressionPropertyKey_RealTime = kCFBooleanFalse`** on all H.264 writers. Counter-intuitive, but the OBS community reports `RealTime = true` causes heavy frame drops on M1/M2; false/unset is the reliable default. (`WriterActor`, `RawStreamWriter(.videoH264)`)
+4. **`AVVideoAllowFrameReorderingKey = false`** on all H.264 writers. Disables B-frames and their reorder buffer. HLS doesn't need them. (same files)
+5. **`kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder = true`** on all H.264 writers. Makes silent software fallback impossible — `startWriting()` throws loudly with a VT error if hardware isn't available. Safety net, not a fix. (same files)
+
+Deferred (not reachable through `AVAssetWriter`):
+
+6. **`kVTCompressionPropertyKey_MaxFrameDelayCount` bounding.** `AVAssetWriter` hardcodes a value of `3` for H.264 and throws `NSInvalidArgumentException` for any other value, and rejects compression-properties dicts entirely on ProRes. Reachable only via direct `VTCompressionSession`.
+7. **`PixelBufferPoolIsShared` audit.** Property lives on the internal `VTCompressionSession` which `AVAssetWriter` doesn't expose.
+
+Per-tuning detail including what was tried, what rolled back, and why two tunings couldn't land: `docs/task-1-tunings-audit-2026-04-14.md`.
+
+### What we tested — isolation test harness
+
+A standalone diagnostic target at `app/TestHarness/` was built to exercise writer / compositor / capture combinations against synthetic frames outside the main app. The intent was to answer, against data rather than speculation, whether the post-task-1 pipeline was stable at the configuration that hung the Mac, and to run reverse-sweeps identifying which specific tuning was load-bearing.
+
+Results on synthetic content:
+
+- **Tier 1** (single component in isolation): 7 configs, all PASS.
+- **Tier 2** (two-writer combinations): 6 configs, all PASS.
+- **Tier 3** (three-writer combinations, including **T3.2 — the literal 2026-04-11 13:32 configuration reconstructed**): 6 configs, all PASS including T3.2.
+
+The Tier 3 result says one clear thing: **the writer shape alone is not the sole trigger for failure mode 4.** Post-task-1, the same writer configuration that wedged the Mac runs cleanly against synthetic input.
+
+Caveat worth writing down: synthetic "moving pattern" content in 420v compresses 3–4× more efficiently than real `SCStream` output, so the synthetic H.264 encoder runs at 20–30% of its target bitrate — materially less load than real capture produces. **Tier 4 (real-capture replacement) was meant to close that gap but didn't.** The harness's `SCStream` delivery path develops a latent back-pressure bug when writers are attached — delivery collapses from ~30 fps (no writers) to ~0.4 fps (any writer attached). Three attempted fixes didn't resolve it. Task-2 closed without Tier 4 evidence rather than chase a harness bug indefinitely.
+
+Full write-up with baselines, per-tier analysis, and the Tier 4 failure mode: `docs/task-2-harness-findings-2026-04-14.md`. Baselines at `test-runs/tier-{1,2,3}-baseline-*.md`.
+
+### What we validated on the main app — 2026-04-14
+
+Two recordings on the post-task-1 main app against the same M2 Pro, same Sony ZV-1 camera, same BenQ EW2780U 4K display that was attached on 2026-04-11:
+
+| Preset | Duration | Mode switches | HLS achieved / target | Raw screen | Raw camera | Hangs |
+|---|---|---|---|---|---|---|
+| 1080p | 71 s | 4 | 4.6 Mbps / 6 Mbps (77%) | ProRes 4K @ 121 Mbps | H.264 720p @ 12 Mbps, 25 fps | none |
+| **1440p** | **62 s** | **3** | **8.05 Mbps / 10 Mbps (80%)** | **ProRes 4K @ 135 Mbps** | **H.264 720p @ 12 Mbps, 25 fps** | **none** |
+
+Both recordings: zero `kIOGPUCommandBufferCallback*` errors, healthy 4 s HLS segment cadence, all segments uploaded successfully, playback verified in the web viewer.
+
+SCStream's actual delivery rate on the main app under the full Phase 2b writer load is ~28 fps (measured from the ProRes packet count over the recording duration). The main-app pipeline is healthy under real load. For reference: the harness reports ~0.4 fps in the same writer shape, which — given the main app works — is a harness-specific bug and not a product problem.
+
+### The one quality trade-off — ProRes chroma subsampling
+
+Task-1 tuning 1 (`pixelFormat = 420v`) is the one change that has a measurable quality cost. SCStream now delivers 4:2:0 YUV 8-bit where previously it delivered 4:4:4 BGRA 8-bit. The raw ProRes master file reports `yuv422p10le` (4:2:2 10-bit) in its container, but the extra chroma precision is upsampled from the 4:2:0 source — not recovered information.
+
+For typical screen content (text, UI, app windows, code editors) this is imperceptible. It might be visible on close inspection of:
+
+- Very thin coloured text or lines (e.g. syntax-highlighted code on dark backgrounds).
+- Fine chroma-heavy graphics (dashboard gradients, tight coloured edges, small coloured icons).
+
+This is the chroma subsampling OBS, Cap, and FFmpeg all ship for screen capture. WWDC22/10155 recommends `420v` explicitly "for encoding and streaming." Accepted trade-off.
+
+No other quality characteristics changed — H.264 High profile, target bitrates, audio codec/bitrate, resolutions, frame rates are all as before.
+
+### Failure-mode status after resolution
+
+| # | Failure mode | Status |
+|---|---|---|
+| 1 | Degraded segment cadence | **Avoided by shape, not by tuning.** The Phase 2 move to ProRes for the raw screen writer (pre-task-1) eliminated the third concurrent H.264 session, which was the trigger. Not directly re-tested at its triggering shape — there's no configuration on `main` that reproduces three concurrent H.264 writers. |
+| 2 | GPU colourspace conversion wedge | **Resolved by Phase 1**, before task-1. Rec. 709 attachment tagging happens explicitly on camera buffers (`CameraCaptureManager`); `AVVideoColorPropertiesKey` is only declared on writers whose input actually matches. Not re-triggered since. |
+| 3 | H.264 encoder back-pressure cascade | **Avoided by shape, not by tuning.** Same story as mode 1 — Phase 2's ProRes offload removed the triggering configuration. |
+| 4 | IOGPUFamily kernel deadlock | **Resolved in practice by task-1.** The exact configuration that hung the Mac on 2026-04-11 13:32 now runs cleanly under real load on the main app at 1440p (see validation table above). We have not isolated which specific tuning is load-bearing — that was blocked on Tier 5 reverse-sweeps, which couldn't run without the Tier 4 real-capture reproduction the harness couldn't produce. |
+
+### What remains unknown
+
+Failure mode 4 is resolved in practice but only partially explained:
+
+- **Which specific tuning carries the stability weight.** We applied five tunings at once. The combined set works; no reverse-sweep has isolated whether it's `420v`, warm-up ordering, `RealTime = false`, `AllowFrameReordering = false`, or some specific combination that matters. Reverse-sweeping requires a reproducing real-capture configuration.
+- **Whether the hang can re-emerge under edge conditions** — specific display configurations, thermal pressure, prolonged recording, specific content patterns. We've validated ~60 s at 1440p; longer-duration validation hasn't happened yet.
+- **The full kernel-side interaction** between SCStream's IOSurface pool and VideoToolbox's encoder pool that underlies the original deadlock. The spindump evidence shows the symptom (`IOGPUFamily` blocked on `preparationQueue`); the proximate cause is understood; the architectural root (why this specific combination of pools and engines deadlocks on M2 Pro specifically) remains a partial model.
+
+If the hang reappears under any condition, this document plus `docs/task-2-harness-findings-2026-04-14.md` is the starting material. First concrete step would be fixing the harness's real-capture delivery bug so Tier 5 reverse-sweeps become runnable.
+
 ## Related documents
 
-- `docs/tasks-todo/task-0A-encoder-contention-and-camera-pipeline.md` — the active task doc that tracks Phases 1, 2, 2b, 3, and 4 of this work, including the Background section that documents the original research and the historical incident callouts for failure modes 2 and 4
-- `docs/tasks-todo/task-0-scratchpad.md` — the original scratchpad where failure mode 1 was first documented, before the task was broken out
-- `docs/tasks-done/2026-04-11-task-0A-source-selection-and-raw-recording.md` — the predecessor task that added raw local recording (the reason we have 3 concurrent writers in the first place)
-- `docs/requirements.md` — product requirements, specifically the "Quality" section which documents that the streamed/composited version can be lower resolution than local capture. This is load-bearing for decisions about capping composited HLS output below native capture resolution.
+- `docs/task-1-tunings-audit-2026-04-14.md` — detailed audit of each of the seven tunings: what the research flagged, what was already in place, what was applied, what was tried and rolled back, what was deferred and why
+- `docs/task-2-harness-findings-2026-04-14.md` — close-out narrative of the harness work: what the synthetic tiers showed, the Tier 4 real-capture bug, and why task-2 closed without that evidence
+- `docs/research/11-m2-pro-video-pipeline-deep-dive.md` — research pass that produced the twelve hypotheses (H1–H12) behind the tunings and sweep priorities
+- `docs/tasks-done/task-2026-04-14-1-videotoolbox-best-practice-tunings.md` — the task doc for the tunings work
+- `docs/tasks-done/task-2026-04-14-2-run-test-harness-tests.md` — the task doc for the harness work
+- `docs/tasks-todo/task-4-recording-pipeline-stabilisation.md` — the placeholder task doc that now gates on main-app validation (to be rewritten once validation produces a clear outcome, or closed if the 2026-04-14 validation stands)
+- `docs/tasks-done/task-2026-04-11-0A-encoder-contention-and-camera-pipeline.md` — the Phase 1 / 2 / 2b record including failure modes 2 and 4's historical incident callouts
+- `docs/tasks-done/task-2026-04-11-0A-source-selection-and-raw-recording.md` — the predecessor task that added raw local recording (the reason we have three concurrent writers in the first place)
+- `docs/requirements.md` — product requirements, specifically the "Quality" section, which documents the composited-vs-capture resolution separation that underlies the Path B/C/D/F options in task-4
 - `docs/research/01-macos-recording-apis.md` — original research phase on ScreenCaptureKit, AVAssetWriter, CoreImage architecture
+- `app/TestHarness/README.md` — the harness itself, including the "Active limitations" section documenting the Tier 4 real-capture bug
 
 ## Primary source diagnostic files
 

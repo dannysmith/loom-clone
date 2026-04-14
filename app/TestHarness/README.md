@@ -13,6 +13,16 @@ This is **not** a shippable part of LoomClone. It is a second Xcode target (`Loo
 - You're sweeping a `VTCompressionSession` / `CVPixelBufferPool` / `SCStreamConfiguration` property across a range of values and want machine-parseable pass/fail output.
 - You've hit a new failure mode and want to bisect the minimal reproducer.
 
+## Active limitations (2026-04-14)
+
+**Real-capture screen (`real-screen` source) does not work reliably** when writers are attached. Symptom: `SCStream`'s delegate fires at the expected ~30 fps when the harness has no writers, but collapses to ~0.4 fps as soon as any writer is attached — regardless of writer kind, resolution, or whether we skip feeding duplicates. Three independent fixes were attempted (retain `CMSampleBuffer` rather than `CVPixelBuffer`; dedup writer feeds on a source-generation counter; tie the compositor+HLS path to real screen rate); none changed the delivery rate. Root cause not isolated.
+
+Consequence: **Tier 4 real-capture tests cannot be trusted to exercise the real capture path.** T4.0 (screen-only, no writers) works correctly and is useful for verifying capture permissions and display selection. T4.1–T4.5 currently produce output files whose "screen" content is mostly a frozen initial frame; their pass/fail outcomes are not diagnostic. Do not use their results to make decisions about the main-app pipeline.
+
+Real-capture camera (`real-camera` source / `AVCaptureSession`) appears to work correctly.
+
+If you return to this: start by reading `docs/m2-pro-video-pipeline-failures.md` — there's a summary of the harness work and what we still don't know. Then build a bisection suite (one writer at a time, with vs without compositor, with vs without `startWriting()`, etc) before attempting another fix.
+
 ## How it works
 
 One run = one JSON config in, one `result.json` out, plus a directory of supporting artefacts. The harness is deliberately linear — no retries, no UI, no interactive state machine. Everything interesting is in the config or in the run directory.
@@ -83,6 +93,21 @@ Whenever `project.yml` changes you need to regenerate the xcodeproj:
 cd app && xcodegen generate
 ```
 
+## Enumerate displays and cameras (`--list-devices`)
+
+Before using any `real-screen` / `real-camera` source, run:
+
+```
+./app/build/Debug/LoomCloneTestHarness.app/Contents/MacOS/LoomCloneTestHarness --list-devices
+```
+
+This enumerates available `SCDisplay`s (with `displayID`, `localizedName`, points-size, pixel-size) and `AVCaptureDevice`s (with `uniqueID`, `localizedName`, best ≥30 fps format, first few declared formats including frame-rate ranges). It also triggers the TCC permission paths:
+
+- **Camera**: calls `AVCaptureDevice.requestAccess(for: .video)` → macOS prompts on first run; denial prints an actionable message pointing at System Settings → Privacy & Security → Camera.
+- **Screen recording**: calls `SCShareableContent.current`. macOS cannot prompt for screen recording from code post-macOS 13 — if permission is missing, the displays list comes back empty (or throws) and the output tells you to enable the harness in System Settings → Privacy & Security → Screen & System Audio Recording.
+
+Copy the IDs you want into the `source.displayID` / `source.deviceUniqueID` fields of your config. Name-based alternatives (`source.displayName` / `source.deviceName`, prefix match) are also supported.
+
 ## Run a single config
 
 ```
@@ -125,6 +150,19 @@ The runner script:
 4. Writes a summary at the end.
 
 The runner can also be invoked with `--dry-run-only` to exercise the flow without running the real tests.
+
+## Run a single Tier 3 / Tier 4 config (one at a time)
+
+Tiers 3 and 4 include configurations that may wedge the Mac, so their runner scripts refuse to batch — each invocation runs exactly one config:
+
+```
+./app/TestHarness/Scripts/run-tier-3.sh T3.1
+./app/TestHarness/Scripts/run-tier-3.sh T3.2-phase-2b-1440p-known-hang
+./app/TestHarness/Scripts/run-tier-3.sh --dry-run T3.2
+./app/TestHarness/Scripts/run-tier-3.sh --list
+```
+
+The name argument prefix-matches against filenames in `test-configs/tier-N/`. On a `FAIL-KILLED` result the script prints the recovery procedure instead of offering a retry.
 
 ## Run outputs
 

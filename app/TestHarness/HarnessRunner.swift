@@ -442,53 +442,51 @@ final class HarnessRunner {
                     }
                 }
 
-                // Build two independent routes so the harness can
-                // reproduce main-app Phase 2's shape, where ProRes
-                // records the raw SCStream output while the composited
-                // HLS writer gets the CIContext compositor output:
-                //   - rawScreen  → fed to raw-prores and raw-h264 (screen).
-                //   - composited → fed to composited-hls. Falls back to
-                //     the raw screen buffer when no compositor is
-                //     configured (matches pre-existing behaviour for
-                //     configs that use composited-hls without a compositor).
-                let compositedBuffer: CVPixelBuffer?
-                if let compositor {
-                    compositedBuffer = compositor.compositeFrame(
-                        screen: screenBuffer,
-                        includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
-                    )
-                } else {
-                    compositedBuffer = screenBuffer
-                }
-
-                // Build the raw-screen sample only when the screen
-                // source has produced a new buffer since last feed —
-                // dedup prevents duplicate writer work without losing
-                // ticks for the compositor path.
+                // Only do the screen-side work (composite + raw-screen
+                // sample build) when the screen source has produced a
+                // new buffer since our last feed. Synthetic sources
+                // advance generation every tick (matching the previous
+                // behaviour exactly), so synthetic runs are unchanged.
+                // For real capture this ties the compositor + HLS
+                // feed to SCStream's actual delivery rate — same
+                // model the main app uses — which keeps GPU load down
+                // to what WindowServer's SCStream can schedule around.
+                // A 30fps metronome driving a 30fps composite + H.264
+                // encode regardless of SCStream's true rate was
+                // GPU-starving SCStream itself through shared-
+                // compositor contention.
                 let screenIsFresh = (screenGen ?? lastFedScreenGen) != lastFedScreenGen
-                let rawScreenSample: CMSampleBuffer? = {
-                    guard screenIsFresh, let b = screenBuffer else { return nil }
-                    return Self.makeSampleBuffer(from: b,
-                                                 index: Int64(frameIndex),
-                                                 frameRate: frameRate)
-                }()
-                if screenIsFresh { lastFedScreenGen = screenGen ?? lastFedScreenGen }
-
-                // Composited HLS always gets a fresh sample per tick —
-                // even when the raw screen buffer is stale, the camera
-                // overlay inside the compositor is updating, so the
-                // composited output differs tick-to-tick. Drops this
-                // back to the raw screen sample when there's no
-                // compositor (the two paths converge).
-                let compositedSample: CMSampleBuffer?
-                if compositor != nil {
-                    compositedSample = compositedBuffer.flatMap {
-                        Self.makeSampleBuffer(from: $0,
-                                              index: Int64(frameIndex),
-                                              frameRate: frameRate)
+                var rawScreenSample: CMSampleBuffer?
+                var compositedSample: CMSampleBuffer?
+                if screenIsFresh {
+                    lastFedScreenGen = screenGen ?? lastFedScreenGen
+                    if let b = screenBuffer {
+                        rawScreenSample = Self.makeSampleBuffer(
+                            from: b,
+                            index: Int64(frameIndex),
+                            frameRate: frameRate
+                        )
                     }
-                } else {
-                    compositedSample = rawScreenSample
+                    let compositedBuffer: CVPixelBuffer?
+                    if let compositor {
+                        compositedBuffer = compositor.compositeFrame(
+                            screen: screenBuffer,
+                            includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
+                        )
+                    } else {
+                        compositedBuffer = screenBuffer
+                    }
+                    if compositor != nil {
+                        compositedSample = compositedBuffer.flatMap {
+                            Self.makeSampleBuffer(
+                                from: $0,
+                                index: Int64(frameIndex),
+                                frameRate: frameRate
+                            )
+                        }
+                    } else {
+                        compositedSample = rawScreenSample
+                    }
                 }
 
                 if rawScreenSample != nil || compositedSample != nil {

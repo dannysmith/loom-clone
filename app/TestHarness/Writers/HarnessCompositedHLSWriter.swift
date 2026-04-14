@@ -122,6 +122,11 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             // Overridable via the `allowFrameReordering` tunings key
             // for a controlled comparison against `true`.
             AVVideoAllowFrameReorderingKey: tunings["allowFrameReordering"]?.asBool ?? false,
+            // Task-1 tuning 5 (MaxFrameDelayCount) was deferred:
+            // AVAssetWriter hardcodes the H.264 value to 3 and throws
+            // NSException for any other value. The `maxFrameDelayCount`
+            // tunings key is intentionally not applied here — attempting
+            // to do so would crash the harness run at configure time.
         ]
         switch tunings["realTime"] {
         case .some(.bool(let b)):

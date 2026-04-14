@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import VideoToolbox
 
 // MARK: - HarnessRawProResWriter
 //
@@ -60,6 +61,13 @@ final class HarnessRawProResWriter: HarnessWriter {
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
 
+        // Task-1 tuning 5 ProRes variant was deferred: AVAssetWriter
+        // rejects any AVVideoCompressionPropertiesKey dict on a ProRes
+        // output with an NSException (confirmed 2026-04-14 by T1.1
+        // crashing with exit code 134). So the ProRes writer stays on
+        // the bare codec+dims settings, matching the main-app constraint.
+        // The `maxFrameDelayCount` tunings key is intentionally ignored
+        // here — accepting it would silently crash when set.
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.proRes422Proxy,
             AVVideoWidthKey: width,

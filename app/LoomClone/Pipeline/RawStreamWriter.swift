@@ -105,21 +105,33 @@ actor RawStreamWriter {
                     // Task-1 tuning 4: disable B-frames. See WriterActor
                     // for the rationale.
                     AVVideoAllowFrameReorderingKey: false,
+                    // Task-1 tuning 5 (MaxFrameDelayCount) was deferred
+                    // — AVAssetWriter only accepts the value 3 for H.264
+                    // (anything else throws NSException). See WriterActor
+                    // for the full context.
                 ] as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 
         case .videoProRes(let width, let height):
             // ProRes 422 Proxy via the hardware ProRes engine. No
-            // `AVVideoCompressionPropertiesKey` because ProRes doesn't take
-            // the same settings dict as H.264 — bitrate / keyframe / profile
-            // keys don't apply. No `AVVideoColorPropertiesKey` either: we
-            // let AVFoundation infer the output colour space from the input
-            // pixel buffers, which avoids the GPU-side colour conversion
-            // that caused the WindowServer hang on 2026-04-11 (see the
-            // H.264 case above for the full context). ScreenCaptureKit
-            // frames come tagged with the display's native colour space
-            // and that tag propagates through to the ProRes output.
+            // `AVVideoCompressionPropertiesKey` — AVAssetWriter rejects
+            // any compression-properties dict on a ProRes output with an
+            // NSException at input construction. Confirmed 2026-04-14
+            // during task-1 tuning 5 rollout: attempting to pass
+            // `kVTCompressionPropertyKey_MaxFrameDelayCount` through the
+            // dict crashes T1.1 (prores-4k-alone) with exit code 134.
+            // Tuning 5's ProRes variant is therefore deferred — the
+            // experimental attempt is preserved in commit history and the
+            // H.264 side of tuning 5 still applies.
+            //
+            // No `AVVideoColorPropertiesKey` either: we let AVFoundation
+            // infer the output colour space from the input pixel buffers,
+            // which avoids the GPU-side colour conversion that caused the
+            // WindowServer hang on 2026-04-11 (see the H.264 case above
+            // for the full context). ScreenCaptureKit frames come tagged
+            // with the display's native colour space and that tag
+            // propagates through to the ProRes output.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.proRes422Proxy,
                 AVVideoWidthKey: width,

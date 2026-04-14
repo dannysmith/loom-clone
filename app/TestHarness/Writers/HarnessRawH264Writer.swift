@@ -63,6 +63,8 @@ final class HarnessRawH264Writer: HarnessWriter {
             // Task-1 tuning 4: disable B-frames (see WriterActor).
             // Overridable via the `allowFrameReordering` tunings key.
             AVVideoAllowFrameReorderingKey: tunings["allowFrameReordering"]?.asBool ?? false,
+            // Task-1 tuning 5 (MaxFrameDelayCount) was deferred — see
+            // HarnessCompositedHLSWriter for the full context.
         ]
         // Task-1 tuning 3: RealTime = false by default. Overridable
         // via the `realTime` tunings key for Tier 5 priority 4 sweeps

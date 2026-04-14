@@ -146,6 +146,15 @@ actor WriterActor {
                 // Measurable but small bitrate-efficiency loss (a few %);
                 // Cap ships this way in crates/enc-avfoundation/src/mp4.rs.
                 AVVideoAllowFrameReorderingKey: false,
+                // Task-1 tuning 5 (MaxFrameDelayCount) was deferred.
+                // AVAssetWriter rejects any value other than 3 for
+                // H.264 ("For compression property MaxFrameDelayCount,
+                // video codec type avc1 only allows the value 3" — tried
+                // 2026-04-14 with value 2, crashed with NSException).
+                // HandBrake / OBS / FFmpeg bound this value because they
+                // go directly through VTCompressionSession; we can only
+                // bound it if we move off AVAssetWriter. That's a shape
+                // change belonging to task-4.
             ] as [String: Any],
         ]
 

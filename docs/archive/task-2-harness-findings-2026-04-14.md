@@ -2,7 +2,7 @@
 
 This note closes out `docs/tasks-todo/task-2-run-test-harness-tests.md`. It records what the isolation test harness did and didn't produce, and what that leaves us with going into main-app validation. Future readers asking "what did the harness actually tell us?" should find the answer here.
 
-Designed to slot directly into a future combined narrative alongside `docs/m2-pro-video-pipeline-failures.md` (what broke) and `docs/task-1-tunings-audit-2026-04-14.md` (what we did). This doc is the "what we learned" piece.
+Designed to slot directly into a future combined narrative alongside `docs/m2-pro-video-pipeline-failures.md` (what broke) and `docs/archive/task-1-tunings-audit-2026-04-14.md` (what we did). This doc is the "what we learned" piece.
 
 ## Summary
 

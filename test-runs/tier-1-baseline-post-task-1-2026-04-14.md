@@ -1,7 +1,7 @@
 # Tier 1 baseline — post task-1 — 2026-04-14
 
 Regression re-run of the Tier 1 suite on the harness after task-1 landed its
-VideoToolbox best-practice tunings (see `docs/task-1-tunings-audit-2026-04-14.md`).
+VideoToolbox best-practice tunings (see `docs/archive/task-1-tunings-audit-2026-04-14.md`).
 All 7 configs PASS — task-1 did not regress Tier 1. Safe to proceed to Tier 2.
 
 Hardware: Mac14,9 (M2 Pro, 14-inch, 32 GB), macOS 26.4.

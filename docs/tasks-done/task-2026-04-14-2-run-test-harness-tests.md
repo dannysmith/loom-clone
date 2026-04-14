@@ -9,7 +9,7 @@ This is an execution task, not a coding task — with one exception: Tier 4 need
 Read before starting:
 
 - **`docs/m2-pro-video-pipeline-failures.md`** — the four observed failure modes. Failure mode 4 (1440p preset, kernel-level IOGPUFamily deadlock) is the headline problem this tier plan exists to diagnose.
-- **`docs/task-1-tunings-audit-2026-04-14.md`** — what just landed. Task-1 applied VideoToolbox best-practice tunings (`420v`, warm-up reorder, `RealTime = false`, `AllowFrameReordering = false`, hardware-encoder enforcement) to both the main app and the harness. Two tunings (`MaxFrameDelayCount`, `PixelBufferPoolIsShared`) were deferred to task-4 because they're not reachable through `AVAssetWriter`.
+- **`docs/archive/task-1-tunings-audit-2026-04-14.md`** — what just landed. Task-1 applied VideoToolbox best-practice tunings (`420v`, warm-up reorder, `RealTime = false`, `AllowFrameReordering = false`, hardware-encoder enforcement) to both the main app and the harness. Two tunings (`MaxFrameDelayCount`, `PixelBufferPoolIsShared`) were deferred to task-4 because they're not reachable through `AVAssetWriter`.
 - **`app/TestHarness/README.md`** — how the harness works, tuning keys currently plumbed (`realTime`, `allowFrameReordering`, top-level `warmUp`), recovery procedure after a hang.
 - **`docs/research/11-m2-pro-video-pipeline-deep-dive.md`** § 7 — falsifiable hypotheses H1–H12 behind the Tier 5 sweeps.
 

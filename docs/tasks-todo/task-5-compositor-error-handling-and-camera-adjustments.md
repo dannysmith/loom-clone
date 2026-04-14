@@ -1,10 +1,10 @@
-# Task 0D — Compositor Error Handling & Camera Adjustments
+# Task 5 — Compositor Error Handling & Camera Adjustments
 
-Two related improvements to the macOS recording pipeline that were originally planned as Phase 3 and Phase 4 of task-0A, then split into this separate task when task-0A got paused pending deeper investigation of the M2 Pro video pipeline failures.
+Two related improvements to the macOS recording pipeline. Both were originally planned as later phases of task-0A and then split out so they didn't interleave with the M2 Pro failure-mode investigation; that investigation is now closed (see `docs/m2-pro-video-pipeline-failures.md`) and this task picks up where it left off.
 
-**Phase 1** (originally task-0A Phase 3) plumbs proper error handling into `CompositionActor` so render failures surface as structured results instead of silently dropped frames, and adds a teardown-and-rebuild recovery path for poisoned `CIContext` state.
+**Phase 1** plumbs proper error handling into `CompositionActor` so render failures surface as structured results instead of silently dropped frames, and adds a teardown-and-rebuild recovery path for poisoned `CIContext` state.
 
-**Phase 2** (originally task-0A Phase 4) adds live white-balance and brightness sliders for the camera feed, applied to the composited HLS stream and all live previews but NOT to the raw `camera.mp4` master file.
+**Phase 2** adds live white-balance and brightness sliders for the camera feed, applied to the composited HLS stream and all live previews but NOT to the raw `camera.mp4` master file.
 
 ## Why these two phases are in the same task
 
@@ -31,15 +31,15 @@ Failure mode 3 (the 4K preset H.264 cascade) was userspace-recoverable but still
 
 Failure mode 4 (the 1440p preset IOGPUFamily deadlock) was **not** userspace-recoverable — by the time the user-space GPU watchdog would have fired, the kernel was already wedged. Structured error handling wouldn't have caught failure mode 4 in the userspace pipeline, but a stall-detection timeout (wrapping `waitUntilCompleted`) might have given us a few seconds of warning before WindowServer's watchdog killed the system. Worth having either way.
 
-### Dependencies on task-0B findings
+### Relevant research
 
-Task-0B is researching `VTCompressionSession` and `CIContext` configuration knobs we're not currently using. Some of what it finds may affect Phase 1's implementation:
+The M2 Pro video-pipeline research pass has shipped at `docs/research/11-m2-pro-video-pipeline-deep-dive.md`. Consult it when implementing the rebuild path, particularly:
 
-- **Alternative CIContext initialisation patterns.** If task-0B finds that `CIContext(mtlDevice:)` behaves differently from `CIContext(mtlCommandQueue:)` in resource allocation or error reporting, the rebuild path in Phase 1 should use whichever gives better behaviour.
-- **Different `CIRenderDestination` configurations.** If task-0B finds that setting `.alphaMode`, `.isFlipped`, or other properties on `CIRenderDestination` affects whether CoreImage uses an intermediate buffer, we should apply those in Phase 1's refactored path.
-- **Stall detection mechanisms we don't know about.** If task-0B surfaces a Metal or CoreImage API for detecting in-progress-command-buffer state (beyond what `waitUntilCompleted` gives), use it.
+- **`CIContext` initialisation patterns** — `CIContext(mtlDevice:)` vs `CIContext(mtlCommandQueue:)` and their resource-allocation / error-reporting differences. The rebuild path should use whichever is more robust.
+- **`CIRenderDestination` configuration** — `.alphaMode`, `.isFlipped`, and related properties can affect whether CoreImage uses an intermediate buffer.
+- **Stall detection** — check whether any Metal/CoreImage APIs beyond `waitUntilCompleted` are useful for detecting in-progress-command-buffer state.
 
-If task-0B's deliverable doesn't address any of these, proceed with the implementation outline below.
+If the research doc doesn't address a specific question, proceed with the implementation outline below.
 
 ### Behaviour after this lands
 
@@ -50,7 +50,7 @@ If task-0B's deliverable doesn't address any of these, proceed with the implemen
 
 ### Implementation outline
 
-**`CompositionActor.swift`** — refactor the render path. Sketch (may be adjusted based on task-0B findings):
+**`CompositionActor.swift`** — refactor the render path. Sketch (may be adjusted based on findings in `docs/research/11-m2-pro-video-pipeline-deep-dive.md`):
 
 ```swift
 func compositeFrame(...) -> Result<CVPixelBuffer, CompositionError> {
@@ -98,7 +98,7 @@ Define a `CompositionError` enum: `.renderFailed(Error)`, `.rebuildFailed`, `.no
 
 ### Testing in the harness
 
-Before landing in the main app, use task-0C's harness to validate:
+Before landing in the main app, use the test harness at `app/TestHarness/` to validate:
 
 1. **Happy path**: the refactored render path produces the same output as the current one for a known-good 1080p recording. Byte-compare HLS segments if possible.
 2. **Induced render failure**: add a harness test that injects a `CIRenderTask` error after N frames (via a special CIContext subclass or a test hook) and confirms:
@@ -113,7 +113,7 @@ Before landing in the main app, use task-0C's harness to validate:
    - An error is published to the coordinator
 4. **Stall detection**: inject a 3-second artificial delay in the render path and confirm the timeout fires, the result is `.stallTimeout`, and rebuild is attempted.
 
-These tests should all be in the harness, not in the main LoomClone app, so we can iterate on them without risking a hang in the real recording pipeline.
+These tests should all be in the harness, not in the main LoomClone app, so we can iterate on them without risking a hang in the real recording pipeline. Note the harness's real-capture path has a known bug (see `app/TestHarness/README.md` § "Active limitations") — keep these tests on synthetic sources, which is what they need anyway.
 
 ### Exit criteria
 
@@ -201,9 +201,9 @@ The current `CameraPreviewManager` uses `AVCaptureVideoPreviewLayer` (hardware p
 
 Add to `MenuView` (popover): a collapsible "Camera Adjustments" section visible only when a camera is selected. Two `Slider` controls + a "Reset" button. Updates push to `RecordingCoordinator.cameraAdjustments` which forwards to `CompositionActor.setAdjustments(...)`.
 
-### Performance consideration carried over from task-0A
+### Performance consideration
 
-Adding a new filter stage to the camera path has a measurable GPU cost per frame. After the failures documented in `docs/m2-pro-video-pipeline-failures.md`, we are justifiably cautious about adding GPU work to the compositor. Before this phase ships, run the change through task-0C's harness at the same configurations that were validated in task-0A Phase 2 (especially 1080p preset with all writers active). Confirm no new GPU errors, no change in segment cadence, no increased IOSurface pressure. If any of those regress, back off and investigate.
+Adding a new filter stage to the camera path has a measurable GPU cost per frame. The pipeline is now stable under the task-1 tunings (see `docs/m2-pro-video-pipeline-failures.md` § Resolution) — before adding filter work, run the change through the test harness's Tier 2/Tier 3 configs (especially 1440p with all writers active) and confirm no new GPU errors, no segment-cadence regression, no increased IOSurface pressure. If anything regresses, back off and investigate.
 
 ### Why apply to the composited HLS and not the raw camera.mp4
 
@@ -227,14 +227,13 @@ The raw camera file is the master. The user might later decide the adjustments w
 
 ## Sequencing
 
-1. **Verify prerequisites** are all true (see the Prerequisites section at the top). If any are not, stop and escalate.
-2. **Read the context** documents in the order specified.
-3. **Implement Phase 1** (compositor error handling). Validate in the harness before touching the main app.
-4. **Commit Phase 1**. Integrate into the main app. Run a normal 1080p recording to confirm happy path.
-5. **Implement Phase 2** (camera adjustments). Validate in the harness. Confirm no regression versus Phase 1 baseline.
-6. **Commit Phase 2**.
-7. **Update** `docs/tasks-todo/task-0-scratchpad.md` — the "Camera Adjustments" entry (if it still exists) should be marked as done or removed.
-8. **Update** `docs/m2-pro-video-pipeline-failures.md` if any new observations came out of harness runs during this task.
+1. **Read the context** documents in the order specified in the briefing below.
+2. **Implement Phase 1** (compositor error handling). Validate in the harness before touching the main app.
+3. **Commit Phase 1**. Integrate into the main app. Run a normal 1080p recording to confirm happy path.
+4. **Implement Phase 2** (camera adjustments). Validate in the harness. Confirm no regression versus Phase 1 baseline.
+5. **Commit Phase 2**.
+6. **Update** `docs/tasks-todo/task-0-scratchpad.md` — the "Camera Adjustments" entry (if it still exists) should be marked as done or removed.
+7. **Update** `docs/m2-pro-video-pipeline-failures.md` if any new observations come out of harness runs during this task.
 
 Each phase must leave the app in a shippable state so we can stop between phases if priorities change.
 
@@ -250,22 +249,19 @@ Each phase must leave the app in a shippable state so we can stop between phases
 If running this task with a subagent, the briefing should include:
 
 1. **Read these files in this order:**
-   - `docs/m2-pro-video-pipeline-failures.md` (full — required context for understanding why this task is careful about the compositor)
-   - `docs/tasks-todo/task-0A-encoder-contention-and-camera-pipeline.md` (especially the Current status block and the Phase 2b section — so you know what state the pipeline is in)
-   - `docs/research/11-m2-pro-video-pipeline-deep-dive.md` or equivalent task-0B output (may contain findings that change Phase 1's approach)
-   - `docs/tasks-todo/task-0C-isolation-test-harness.md` and the harness code at `app/TestHarness/` (so you know how to validate changes)
-   - `docs/tasks-todo/task-0D-compositor-error-handling-and-camera-adjustments.md` (this doc, in full)
+   - `docs/m2-pro-video-pipeline-failures.md` (full — required context for understanding why this task is careful about the compositor, and the Resolution section for the current pipeline state)
+   - `docs/research/11-m2-pro-video-pipeline-deep-dive.md` (research pass — may inform Phase 1's rebuild path and CIContext/destination configuration)
+   - `app/TestHarness/README.md` (how to use the harness for validating changes; note the "Active limitations" section about real-capture)
+   - `docs/tasks-todo/task-5-compositor-error-handling-and-camera-adjustments.md` (this doc, in full)
    - `app/LoomClone/Pipeline/CompositionActor.swift` (the file being modified in both phases)
    - `app/LoomClone/Pipeline/RecordingActor.swift` (touched by Phase 1 for error propagation)
    - `app/LoomClone/App/RecordingCoordinator.swift` (touched by Phase 2 for adjustments state)
    - `app/LoomClone/UI/MenuView.swift` (touched by Phase 2 for slider UI)
 
-2. **Verify prerequisites** explicitly before starting. In particular: confirm `main` is safe to record on (no Phase 2b landmine), and the harness exists and can run the validation tests.
+2. **Do not start with the main app.** Phase 1's first work should be implementing the refactored render path **in the harness** as a test configuration. Once it's validated there, bring it into the main app.
 
-3. **Do not start with the main app.** Phase 1's first work should be implementing the refactored render path **in the harness** as a test configuration. Once it's validated there, bring it into the main app.
-
-4. **Commit in sequence**: Phase 1 lands first, validated and committed, before Phase 2 begins. Do not batch them into one PR.
+3. **Commit in sequence**: Phase 1 lands first, validated and committed, before Phase 2 begins. Do not batch them into one PR.
 
 An example prompt for the subagent:
 
-> Implement task-0D (compositor error handling and camera adjustments) in the LoomClone codebase. Before starting, verify the prerequisites at the top of `docs/tasks-todo/task-0D-compositor-error-handling-and-camera-adjustments.md` are all true — especially that task-0B research is complete, task-0C harness is usable, and task-0A's Phase 2b situation has been resolved so recording on `main` is safe. Read the context files in the order specified. Implement Phase 1 (compositor error handling) first, validating each change in the isolation harness before touching the main app. Commit Phase 1. Then implement Phase 2 (camera adjustments), again validating in the harness. Do not modify the recording pipeline in ways that aren't covered by this task.
+> Implement task-5 (compositor error handling and camera adjustments) in the LoomClone codebase. Read the context files in the order specified in the briefing section. Implement Phase 1 (compositor error handling) first, validating each change in the isolation harness before touching the main app. Commit Phase 1. Then implement Phase 2 (camera adjustments), again validating in the harness. Do not modify the recording pipeline in ways that aren't covered by this task.

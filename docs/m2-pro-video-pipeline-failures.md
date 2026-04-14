@@ -511,7 +511,7 @@ Deferred (not reachable through `AVAssetWriter`):
 6. **`kVTCompressionPropertyKey_MaxFrameDelayCount` bounding.** `AVAssetWriter` hardcodes a value of `3` for H.264 and throws `NSInvalidArgumentException` for any other value, and rejects compression-properties dicts entirely on ProRes. Reachable only via direct `VTCompressionSession`.
 7. **`PixelBufferPoolIsShared` audit.** Property lives on the internal `VTCompressionSession` which `AVAssetWriter` doesn't expose.
 
-Per-tuning detail including what was tried, what rolled back, and why two tunings couldn't land: `docs/task-1-tunings-audit-2026-04-14.md`.
+Per-tuning detail including what was tried, what rolled back, and why two tunings couldn't land: `docs/archive/task-1-tunings-audit-2026-04-14.md`.
 
 ### What we tested — isolation test harness
 
@@ -527,7 +527,7 @@ The Tier 3 result says one clear thing: **the writer shape alone is not the sole
 
 Caveat worth writing down: synthetic "moving pattern" content in 420v compresses 3–4× more efficiently than real `SCStream` output, so the synthetic H.264 encoder runs at 20–30% of its target bitrate — materially less load than real capture produces. **Tier 4 (real-capture replacement) was meant to close that gap but didn't.** The harness's `SCStream` delivery path develops a latent back-pressure bug when writers are attached — delivery collapses from ~30 fps (no writers) to ~0.4 fps (any writer attached). Three attempted fixes didn't resolve it. Task-2 closed without Tier 4 evidence rather than chase a harness bug indefinitely.
 
-Full write-up with baselines, per-tier analysis, and the Tier 4 failure mode: `docs/task-2-harness-findings-2026-04-14.md`. Baselines at `test-runs/tier-{1,2,3}-baseline-*.md`.
+Full write-up with baselines, per-tier analysis, and the Tier 4 failure mode: `docs/archive/task-2-harness-findings-2026-04-14.md`. Baselines at `test-runs/tier-{1,2,3}-baseline-*.md`.
 
 ### What we validated on the main app — 2026-04-14
 
@@ -572,12 +572,12 @@ Failure mode 4 is resolved in practice but only partially explained:
 - **Whether the hang can re-emerge under edge conditions** — specific display configurations, thermal pressure, prolonged recording, specific content patterns. We've validated ~60 s at 1440p; longer-duration validation hasn't happened yet.
 - **The full kernel-side interaction** between SCStream's IOSurface pool and VideoToolbox's encoder pool that underlies the original deadlock. The spindump evidence shows the symptom (`IOGPUFamily` blocked on `preparationQueue`); the proximate cause is understood; the architectural root (why this specific combination of pools and engines deadlocks on M2 Pro specifically) remains a partial model.
 
-If the hang reappears under any condition, this document plus `docs/task-2-harness-findings-2026-04-14.md` is the starting material. First concrete step would be fixing the harness's real-capture delivery bug so Tier 5 reverse-sweeps become runnable.
+If the hang reappears under any condition, this document plus `docs/archive/task-2-harness-findings-2026-04-14.md` is the starting material. First concrete step would be fixing the harness's real-capture delivery bug so Tier 5 reverse-sweeps become runnable.
 
 ## Related documents
 
-- `docs/task-1-tunings-audit-2026-04-14.md` — detailed audit of each of the seven tunings: what the research flagged, what was already in place, what was applied, what was tried and rolled back, what was deferred and why
-- `docs/task-2-harness-findings-2026-04-14.md` — close-out narrative of the harness work: what the synthetic tiers showed, the Tier 4 real-capture bug, and why task-2 closed without that evidence
+- `docs/archive/task-1-tunings-audit-2026-04-14.md` — detailed audit of each of the seven tunings: what the research flagged, what was already in place, what was applied, what was tried and rolled back, what was deferred and why
+- `docs/archive/task-2-harness-findings-2026-04-14.md` — close-out narrative of the harness work: what the synthetic tiers showed, the Tier 4 real-capture bug, and why task-2 closed without that evidence
 - `docs/research/11-m2-pro-video-pipeline-deep-dive.md` — research pass that produced the twelve hypotheses (H1–H12) behind the tunings and sweep priorities
 - `docs/tasks-done/task-2026-04-14-1-videotoolbox-best-practice-tunings.md` — the task doc for the tunings work
 - `docs/tasks-done/task-2026-04-14-2-run-test-harness-tests.md` — the task doc for the harness work

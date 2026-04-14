@@ -57,6 +57,12 @@ final class SyntheticFrameSource: @unchecked Sendable {
     private var pool: CVPixelBufferPool?
     private var frameIndex: Int64 = 0
 
+    // Monotonic generation counter exposed to HarnessFrameSource's
+    // `generation` requirement. Synthetic sources produce a new buffer
+    // on every `makePixelBuffer` call, so we bump this per-call and
+    // the metronome observes "different" every tick.
+    private(set) var syntheticGeneration: Int64 = 0
+
     init(kind: Kind,
          width: Int,
          height: Int,
@@ -117,6 +123,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
 
         applyPattern(to: px, frameIndex: index)
         attachColorMetadata(to: px)
+        syntheticGeneration &+= 1
         return px
     }
 

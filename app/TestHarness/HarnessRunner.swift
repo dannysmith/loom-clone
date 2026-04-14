@@ -39,6 +39,18 @@ final class HarnessRunner {
     private var firstFrameAt: Double?
     private var lastFrameAt: Double?
 
+    // Generation watermarks — the metronome only feeds the raw-screen /
+    // raw-camera writers when the source's `generation` has advanced
+    // since the previous feed. Prevents the 30fps metronome from
+    // hammering ProRes 4K with 100 copies of a single SCStream frame
+    // during periods when real capture is delivering sparsely, which
+    // GPU-starved SCStream itself through shared-compositor contention.
+    // Composited HLS still gets fed every tick because the compositor's
+    // output changes even when the raw screen buffer is stale (camera
+    // overlay updates, etc.).
+    private var lastFedScreenGen: Int64 = Int64.min
+    private var lastFedCameraGen: Int64 = Int64.min
+
     private var runtimeIssues: [String] = []
 
     init(config: HarnessConfig, testRunsRoot: String) {
@@ -401,6 +413,12 @@ final class HarnessRunner {
 
         for frameIndex in 0..<totalFrames {
             if hasVideoPath {
+                // Snapshot source generations before pulling buffers so
+                // we can decide whether each source has produced
+                // something new since our last tick.
+                let screenGen = screenSource?.generation
+                let cameraGen = cameraSource?.generation
+
                 // Produce screen frame (if any) — first try the compositor,
                 // fall back to the direct source buffer.
                 let screenBuffer = screenSource?.makePixelBuffer(index: Int64(frameIndex))
@@ -408,13 +426,20 @@ final class HarnessRunner {
                 if let cs = cameraSource,
                    let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex)) {
                     compositor?.updateCameraFrame(cameraBuffer)
-                    // The camera source may also feed a raw camera writer
-                    // directly via appendVideo below.
-                    cameraFedSomeWriter = feedCameraWriters(
-                        cameraBuffer,
-                        frameIndex: Int64(frameIndex),
-                        frameRate: frameRate
-                    )
+                    // Feed the raw camera writer only when the camera
+                    // source has produced a new buffer since last feed.
+                    // For synthetic sources generation advances every
+                    // tick (matching previous behaviour); for real
+                    // capture it advances at capture rate.
+                    let cameraIsFresh = (cameraGen ?? lastFedCameraGen) != lastFedCameraGen
+                    if cameraIsFresh {
+                        cameraFedSomeWriter = feedCameraWriters(
+                            cameraBuffer,
+                            frameIndex: Int64(frameIndex),
+                            frameRate: frameRate
+                        )
+                        lastFedCameraGen = cameraGen ?? lastFedCameraGen
+                    }
                 }
 
                 // Build two independent routes so the harness can
@@ -436,11 +461,25 @@ final class HarnessRunner {
                     compositedBuffer = screenBuffer
                 }
 
-                let rawScreenSample: CMSampleBuffer? = screenBuffer.flatMap {
-                    Self.makeSampleBuffer(from: $0,
-                                          index: Int64(frameIndex),
-                                          frameRate: frameRate)
-                }
+                // Build the raw-screen sample only when the screen
+                // source has produced a new buffer since last feed —
+                // dedup prevents duplicate writer work without losing
+                // ticks for the compositor path.
+                let screenIsFresh = (screenGen ?? lastFedScreenGen) != lastFedScreenGen
+                let rawScreenSample: CMSampleBuffer? = {
+                    guard screenIsFresh, let b = screenBuffer else { return nil }
+                    return Self.makeSampleBuffer(from: b,
+                                                 index: Int64(frameIndex),
+                                                 frameRate: frameRate)
+                }()
+                if screenIsFresh { lastFedScreenGen = screenGen ?? lastFedScreenGen }
+
+                // Composited HLS always gets a fresh sample per tick —
+                // even when the raw screen buffer is stale, the camera
+                // overlay inside the compositor is updating, so the
+                // composited output differs tick-to-tick. Drops this
+                // back to the raw screen sample when there's no
+                // compositor (the two paths converge).
                 let compositedSample: CMSampleBuffer?
                 if compositor != nil {
                     compositedSample = compositedBuffer.flatMap {
@@ -449,9 +488,6 @@ final class HarnessRunner {
                                               frameRate: frameRate)
                     }
                 } else {
-                    // Share the raw-screen sample when there's no
-                    // compositor — both routes would wrap the same
-                    // CVPixelBuffer anyway.
                     compositedSample = rawScreenSample
                 }
 

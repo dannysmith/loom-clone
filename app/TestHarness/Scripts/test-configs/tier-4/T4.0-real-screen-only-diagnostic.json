@@ -1,0 +1,14 @@
+{
+  "name": "T4.0-real-screen-only-diagnostic",
+  "description": "Diagnostic config — only SCStream on the main display, NO compositor, NO writers. Drives the metronome for 10 seconds, counts how many frames SCStream's delegate actually delivers. Pure test of whether real-screen capture works in this process at all, without any consumer back-pressure from downstream writers. If accepted_last_sec tracks close to 30 with active screen use, SCStream is fine and our earlier observations were writer-induced back-pressure. If it stays at 0.3/sec with activity, something about this process's relationship with SCStream is broken.",
+  "tier": "tier-4",
+  "durationSeconds": 10,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "real-screen",
+    "displayID": 3
+  },
+  "writers": []
+}

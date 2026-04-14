@@ -22,6 +22,19 @@ protocol HarnessFrameSource: AnyObject, Sendable {
     /// recent capture-callback buffer (or nil if none has arrived yet).
     func makePixelBuffer(index: Int64) -> CVPixelBuffer?
 
+    /// Monotonically increasing counter that changes when — and only
+    /// when — a fundamentally new pixel buffer would be returned by the
+    /// next `makePixelBuffer` call. Synthetic sources return the tick
+    /// index (a new buffer per tick). Real-capture sources return a
+    /// counter that increments on each capture-callback delivery. The
+    /// metronome uses this to avoid feeding the raw-screen and raw-
+    /// camera writers with duplicate sample buffers when the source
+    /// hasn't produced anything new — without this, a 30fps metronome
+    /// driving a 0.3fps SCStream delivery would feed ProRes 100× more
+    /// work than it's seeing from real capture, GPU-starving SCStream
+    /// itself through the shared compositor.
+    var generation: Int64 { get }
+
     /// Real-capture sources: begin capture. Called once before the
     /// metronome starts. No-op for synthetic.
     func start() async throws
@@ -32,6 +45,13 @@ protocol HarnessFrameSource: AnyObject, Sendable {
 }
 
 extension SyntheticFrameSource: HarnessFrameSource {
+    // Synthetic sources produce a new buffer on every makePixelBuffer
+    // call; the metronome's tick index is the natural generation. We
+    // expose the source's internal frame counter so the metronome sees
+    // a new generation per tick and feeds writers every tick — matching
+    // the pre-real-capture behaviour exactly.
+    var generation: Int64 { syntheticGeneration }
+
     func start() async throws {}
     func stop() async {}
 }
@@ -76,8 +96,19 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
     private var totalAccepted = 0
     private var totalRejected = 0
 
+    // Generation counter — incremented on each accepted delivery so
+    // the metronome can tell "new buffer arrived since my last feed"
+    // from "still the old buffer".
+    private var generationCounter: Int64 = 0
+
     private(set) var nativePixelSize: CGSize = .zero
     private(set) var selectedDisplayName: String = ""
+
+    var generation: Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generationCounter
+    }
 
     init(config: Config, events: EventLog? = nil) {
         self.config = config
@@ -217,6 +248,7 @@ extension CapturedScreenSource: SCStreamOutput {
         }
         lock.lock()
         latestSample = sampleBuffer
+        generationCounter &+= 1
         lock.unlock()
         accountFrame(accepted: true)
     }
@@ -285,8 +317,17 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
     private var lastLogAt = Date()
     private var totalAccepted = 0
 
+    // Generation counter — see CapturedScreenSource for rationale.
+    private var generationCounter: Int64 = 0
+
     private(set) var nativePixelSize: CGSize = .zero
     private(set) var selectedDeviceName: String = ""
+
+    var generation: Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generationCounter
+    }
 
     init(config: Config, events: EventLog? = nil) {
         self.config = config
@@ -442,6 +483,7 @@ extension CapturedCameraSource: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         lock.lock()
         latestSample = sampleBuffer
+        generationCounter &+= 1
         acceptedThisSecond += 1
         totalAccepted += 1
         let shouldLog = Date().timeIntervalSince(lastLogAt) >= 1.0

@@ -139,6 +139,13 @@ actor WriterActor {
                 // encoder reserves/releases IOSurface backing — the same
                 // resource failure mode 4 deadlocks on.
                 kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
+                // Task-1 tuning 4: disable B-frames. HLS low-latency does
+                // not require frame reordering, and the reorder buffer is
+                // a per-slot IOSurface reference chain inside the encoder.
+                // Turning it off removes those references entirely.
+                // Measurable but small bitrate-efficiency loss (a few %);
+                // Cap ships this way in crates/enc-avfoundation/src/mp4.rs.
+                AVVideoAllowFrameReorderingKey: false,
             ] as [String: Any],
         ]
 

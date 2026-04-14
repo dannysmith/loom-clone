@@ -102,6 +102,9 @@ actor RawStreamWriter {
                     // Task-1 tuning 3: see WriterActor for the full
                     // rationale (OBS #5840 convergence).
                     kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
+                    // Task-1 tuning 4: disable B-frames. See WriterActor
+                    // for the rationale.
+                    AVVideoAllowFrameReorderingKey: false,
                 ] as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)

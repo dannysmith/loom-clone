@@ -60,6 +60,9 @@ final class HarnessRawH264Writer: HarnessWriter {
             AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
             AVVideoExpectedSourceFrameRateKey: 30,
             AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+            // Task-1 tuning 4: disable B-frames (see WriterActor).
+            // Overridable via the `allowFrameReordering` tunings key.
+            AVVideoAllowFrameReorderingKey: tunings["allowFrameReordering"]?.asBool ?? false,
         ]
         // Task-1 tuning 3: RealTime = false by default. Overridable
         // via the `realTime` tunings key for Tier 5 priority 4 sweeps

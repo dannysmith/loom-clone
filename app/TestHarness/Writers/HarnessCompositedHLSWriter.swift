@@ -118,6 +118,10 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
             AVVideoExpectedSourceFrameRateKey: 30,
             AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+            // Task-1 tuning 4: disable B-frames (see WriterActor).
+            // Overridable via the `allowFrameReordering` tunings key
+            // for a controlled comparison against `true`.
+            AVVideoAllowFrameReorderingKey: tunings["allowFrameReordering"]?.asBool ?? false,
         ]
         switch tunings["realTime"] {
         case .some(.bool(let b)):

@@ -1,0 +1,54 @@
+{
+  "name": "T3.4-1440p-prores-at-mid-res",
+  "description": "Midpoint between T3.2 (ProRes 4K) and T3.3 (ProRes 1080p). Screen source + ProRes both at 2560x1440 (same as the HLS output). Identifies whether the T3.2→T3.3 delta is a binary cliff or a continuous gradient in IOGPU pressure.",
+  "tier": "tier-3",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "unknown",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 2560,
+    "height": 1440,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-1440p",
+      "width": 2560,
+      "height": 1440
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

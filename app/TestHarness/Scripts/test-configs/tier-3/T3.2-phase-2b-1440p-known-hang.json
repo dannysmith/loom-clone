@@ -1,0 +1,54 @@
+{
+  "name": "T3.2-phase-2b-1440p-known-hang",
+  "description": "Phase 2b 1440p known-hang reproduction. Same writer set as T3.1 but HLS at 1440p @ 10Mbps. This is the configuration that triggered the IOGPUFamily kernel deadlock on the main app on 2026-04-11 at 13:32 (failure mode 4). Expected FAIL-KILLED on the real-capture main-app path; behaviour on the synthetic-content harness is the open question. If this PASSES on synthetic, the failure is specific to real-capture content characteristics. If this FAILS on synthetic, the synthetic harness can reproduce the hang and Tier 5 sweeps become actionable here rather than needing Tier 4 real capture. DANGER — do not run batched with other configs; the watchdog/marker scaffolding exists for this test.",
+  "tier": "tier-3",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "fail-killed",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 2560,
+    "outputHeight": 1440,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1440p",
+      "width": 2560,
+      "height": 1440,
+      "bitrate": 10000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

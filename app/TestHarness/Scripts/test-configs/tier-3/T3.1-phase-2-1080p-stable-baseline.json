@@ -1,0 +1,54 @@
+{
+  "name": "T3.1-phase-2-1080p-stable-baseline",
+  "description": "Phase 2 stable config reproduction. HLS H.264 1080p @ 6Mbps (composited with 720p camera PiP) + raw H.264 720p camera @ 12Mbps + ProRes 4K raw screen + CIContext compositor. Three concurrent writers — two H.264 sessions and one ProRes session — plus the GPU compositor. Expected PASS: this is the proven-stable Phase 2 configuration that the main app has been running at 1080p since task-0A.",
+  "tier": "tier-3",
+  "durationSeconds": 30,
+  "watchdogGraceSeconds": 10,
+  "frameRate": 30,
+  "expected": "pass",
+  "source": {
+    "kind": "synthetic-screen",
+    "width": 3840,
+    "height": 2160,
+    "pattern": "moving",
+    "colorSpace": "srgb",
+    "additional": [
+      {
+        "kind": "synthetic-camera",
+        "width": 1280,
+        "height": 720,
+        "pattern": "moving",
+        "colorSpace": "rec709"
+      }
+    ]
+  },
+  "compositor": {
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "includeCameraOverlay": true,
+    "useLanczosScaling": true,
+    "renderMode": "render-to-bounds"
+  },
+  "writers": [
+    {
+      "kind": "raw-prores",
+      "name": "screen-prores-4k",
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "kind": "composited-hls",
+      "name": "screen-hls-1080p",
+      "width": 1920,
+      "height": 1080,
+      "bitrate": 6000000
+    },
+    {
+      "kind": "raw-h264",
+      "name": "camera-720p",
+      "width": 1280,
+      "height": 720,
+      "bitrate": 12000000
+    }
+  ]
+}

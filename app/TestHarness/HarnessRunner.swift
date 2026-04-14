@@ -31,8 +31,8 @@ final class HarnessRunner {
 
     private var writers: [HarnessWriter] = []
     private var compositor: HarnessCompositor?
-    private var screenSource: SyntheticFrameSource?
-    private var cameraSource: SyntheticFrameSource?
+    private var screenSource: HarnessFrameSource?
+    private var cameraSource: HarnessFrameSource?
 
     private var framesSubmitted = 0
     private var framesDropped = 0
@@ -142,8 +142,25 @@ final class HarnessRunner {
             }
         }
 
+        // Start any real-capture sources (SCStream / AVCaptureSession)
+        // AFTER the writers are warmed. This matches the main-app ordering
+        // from task-1 tuning 2 — writers are in `.writing` before the
+        // capture pipeline starts delivering buffers.
+        do {
+            try await startRealCaptureSources()
+        } catch {
+            events.log("run.capture-start-failed", ["error": "\(error)"])
+            await stopRealCaptureSources()
+            return await finalise(outcome: "fail-recorded",
+                                  summary: "capture failed to start: \(error)")
+        }
+
         // Drive the metronome for the configured duration.
         await runMetronome()
+
+        // Stop capture BEFORE stopping writers so no more buffers arrive
+        // while finishWriting is draining.
+        await stopRealCaptureSources()
 
         // Stop writers in parallel; each one awaits its finishWriting
         // callback. The watchdog is still armed in case finish hangs.
@@ -162,86 +179,99 @@ final class HarnessRunner {
     // MARK: - Setup
 
     private func buildFrameSources() throws {
-        let src = config.source
+        try constructSource(from: config.source)
+        for extra in config.source.additional ?? [] {
+            try constructSource(from: extra)
+        }
+    }
+
+    /// Construct a single source entry (primary or additional) and assign
+    /// it to `screenSource` / `cameraSource` based on kind. Synthetic and
+    /// real-capture kinds share the same slot — the metronome doesn't
+    /// care which a source is, it just calls `makePixelBuffer(index:)`.
+    /// Real-capture sources are constructed but NOT started here;
+    /// `startRealCaptureSources()` drives the async `start()` path.
+    private func constructSource(from src: SourceConfig) throws {
         switch src.kind {
         case "synthetic-screen":
             // Task-1 tuning 1: default synthetic-screen to 420v to match
-            // the main-app SCStream pixel path (ScreenCaptureManager sets
-            // kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange). Use the
-            // explicit "synthetic-screen-bgra" kind for the BGRA exception
-            // case.
-            let w = src.width ?? 3840
-            let h = src.height ?? 2160
+            // the main-app SCStream pixel path. Use "synthetic-screen-bgra"
+            // explicitly for the BGRA exception case.
             screenSource = SyntheticFrameSource(
                 kind: .screen420v,
-                width: w, height: h,
+                width: src.width ?? 3840,
+                height: src.height ?? 2160,
                 pattern: parsePattern(src.pattern),
                 colorSpace: parseColorSpace(src.colorSpace)
             )
         case "synthetic-screen-bgra":
-            let w = src.width ?? 3840
-            let h = src.height ?? 2160
             screenSource = SyntheticFrameSource(
                 kind: .screenBGRA,
-                width: w, height: h,
+                width: src.width ?? 3840,
+                height: src.height ?? 2160,
                 pattern: parsePattern(src.pattern),
                 colorSpace: parseColorSpace(src.colorSpace)
             )
         case "synthetic-camera":
-            let w = src.width ?? 1280
-            let h = src.height ?? 720
             cameraSource = SyntheticFrameSource(
                 kind: .camera420v,
-                width: w, height: h,
+                width: src.width ?? 1280,
+                height: src.height ?? 720,
                 pattern: parsePattern(src.pattern),
                 colorSpace: parseColorSpace(src.colorSpace)
             )
         case "synthetic-audio":
-            // Audio-only; the metronome handles this source type by
-            // generating silent PCM buffers on the fly.
+            // Audio-only; the metronome generates silent PCM on the fly.
             break
-        case "real-screen", "real-camera":
-            // Tier 4 — not yet implemented. Bail loudly rather than
-            // silently doing something weird.
-            throw HarnessRunnerError.unsupportedSource(src.kind)
+        case "real-screen":
+            var cfg = CapturedScreenSource.Config()
+            cfg.displayID = src.displayID
+            cfg.displayName = src.displayName
+            cfg.frameRate = config.frameRate
+            screenSource = CapturedScreenSource(config: cfg)
+        case "real-camera":
+            var cfg = CapturedCameraSource.Config()
+            cfg.deviceUniqueID = src.deviceUniqueID
+            cfg.deviceName = src.deviceName
+            cfg.maxHeight = src.maxHeight ?? Int.max
+            cameraSource = CapturedCameraSource(config: cfg)
         default:
             throw HarnessRunnerError.unsupportedSource(src.kind)
         }
+    }
 
-        // Additional sources (e.g. camera alongside screen).
-        for extra in src.additional ?? [] {
-            switch extra.kind {
-            case "synthetic-screen":
-                let w = extra.width ?? 3840
-                let h = extra.height ?? 2160
-                screenSource = SyntheticFrameSource(
-                    kind: .screen420v,
-                    width: w, height: h,
-                    pattern: parsePattern(extra.pattern),
-                    colorSpace: parseColorSpace(extra.colorSpace)
-                )
-            case "synthetic-screen-bgra":
-                let w = extra.width ?? 3840
-                let h = extra.height ?? 2160
-                screenSource = SyntheticFrameSource(
-                    kind: .screenBGRA,
-                    width: w, height: h,
-                    pattern: parsePattern(extra.pattern),
-                    colorSpace: parseColorSpace(extra.colorSpace)
-                )
-            case "synthetic-camera":
-                let w = extra.width ?? 1280
-                let h = extra.height ?? 720
-                cameraSource = SyntheticFrameSource(
-                    kind: .camera420v,
-                    width: w, height: h,
-                    pattern: parsePattern(extra.pattern),
-                    colorSpace: parseColorSpace(extra.colorSpace)
-                )
-            default:
-                throw HarnessRunnerError.unsupportedSource(extra.kind)
+    /// Start any real-capture sources (SCStream / AVCaptureSession) that
+    /// need to warm up before the metronome begins pulling frames.
+    /// Synthetic sources no-op. Called after the writers are warmed up
+    /// but before the metronome — this mirrors the main-app ordering
+    /// where the writers are in `.writing` state before the capture
+    /// pipeline starts delivering buffers.
+    private func startRealCaptureSources() async throws {
+        if let s = screenSource {
+            try await s.start()
+            if let captured = s as? CapturedScreenSource {
+                events.log("source.screen-started", [
+                    "display": captured.selectedDisplayName,
+                    "width": Int(captured.nativePixelSize.width),
+                    "height": Int(captured.nativePixelSize.height),
+                ])
             }
         }
+        if let c = cameraSource {
+            try await c.start()
+            if let captured = c as? CapturedCameraSource {
+                events.log("source.camera-started", [
+                    "device": captured.selectedDeviceName,
+                    "width": Int(captured.nativePixelSize.width),
+                    "height": Int(captured.nativePixelSize.height),
+                ])
+            }
+        }
+    }
+
+    private func stopRealCaptureSources() async {
+        await screenSource?.stop()
+        await cameraSource?.stop()
     }
 
     private func buildCompositor() throws {

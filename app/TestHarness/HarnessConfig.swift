@@ -128,6 +128,36 @@ struct SourceConfig: Codable, Sendable {
     /// Secondary sources (e.g. a camera-like stream alongside a
     /// screen-like stream for compositor tests).
     var additional: [SourceConfig]?
+
+    // MARK: Real-capture device selection
+    //
+    // Ignored for synthetic sources. For real-capture sources, these
+    // pin the test to a specific physical device so results are
+    // reproducible. `--list-devices` on the harness binary enumerates
+    // available IDs.
+
+    /// `real-screen` only. CGDirectDisplayID of the display to capture.
+    /// Overrides `displayName`. Default: `CGMainDisplayID()`.
+    var displayID: UInt32?
+
+    /// `real-screen` only. Case-insensitive prefix match against the
+    /// display's `NSScreen.localizedName`. Used when `displayID` is
+    /// absent.
+    var displayName: String?
+
+    /// `real-camera` only. AVCaptureDevice uniqueID (stable across
+    /// launches — e.g. `"0x0000000000000000"` for a USB camera). Overrides
+    /// `deviceName`. Default: `AVCaptureDevice.default(for: .video)`.
+    var deviceUniqueID: String?
+
+    /// `real-camera` only. Case-insensitive prefix match against
+    /// `device.localizedName`. Used when `deviceUniqueID` is absent.
+    var deviceName: String?
+
+    /// `real-camera` only. Max height (in pixels) the selected format
+    /// may deliver at ≥30fps. Defaults to unlimited; set this to cap
+    /// high-res USB cameras at e.g. 720 for parity with the main app.
+    var maxHeight: Int?
 }
 
 // MARK: - CompositorConfig

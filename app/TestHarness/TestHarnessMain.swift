@@ -1,5 +1,8 @@
 import AppKit
+@preconcurrency import AVFoundation
+import CoreMedia
 import Foundation
+import ScreenCaptureKit
 
 // MARK: - TestHarnessMain
 //
@@ -52,8 +55,12 @@ private final class HarnessAppDelegate: NSObject, NSApplicationDelegate {
 private func runHarnessAndExit() async {
     let args = HarnessArgs.parse(CommandLine.arguments)
 
+    if args.listDevices {
+        await listDevicesAndExit()
+    }
+
     guard let configPath = args.configPath else {
-        printStderr("error: --config <path> required")
+        printStderr("error: --config <path> required (or pass --list-devices)")
         exitNow(code: 2)
     }
 
@@ -93,12 +100,14 @@ private func runHarnessAndExit() async {
 struct HarnessArgs {
     var configPath: String?
     var dryRun: Bool = false
+    var listDevices: Bool = false
     var testRunsRoot: String
 
     static func parse(_ argv: [String]) -> HarnessArgs {
         var args = HarnessArgs(
             configPath: nil,
             dryRun: false,
+            listDevices: false,
             testRunsRoot: defaultTestRunsRoot()
         )
         var i = 1
@@ -110,6 +119,8 @@ struct HarnessArgs {
                 if i < argv.count { args.configPath = argv[i] }
             case "--dry-run":
                 args.dryRun = true
+            case "--list-devices":
+                args.listDevices = true
             case "--test-runs-root":
                 i += 1
                 if i < argv.count { args.testRunsRoot = argv[i] }
@@ -129,6 +140,77 @@ struct HarnessArgs {
         let cwd = FileManager.default.currentDirectoryPath
         return (cwd as NSString).appendingPathComponent("test-runs")
     }
+}
+
+// MARK: - Device listing (--list-devices)
+//
+// Prints displays (via SCShareableContent) and cameras (via
+// AVCaptureDevice.DiscoverySession) with their stable IDs so the user
+// can copy them into `source.displayID` / `source.deviceUniqueID` in
+// Tier 4 configs.
+//
+// This path also triggers the TCC permission prompts: running
+// `--list-devices` once is the recommended first step on a fresh
+// machine, because it'll either prompt or tell you clearly where to
+// grant permission.
+
+private func listDevicesAndExit() async -> Never {
+    print("== Displays ==")
+    do {
+        let content = try await SCShareableContent.current
+        if content.displays.isEmpty {
+            print("  (no displays returned by SCShareableContent — Screen Recording permission likely denied)")
+            print("  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness")
+        } else {
+            for d in content.displays {
+                let name = CapturedScreenSource.localizedName(for: d.displayID)
+                let scale = CapturedScreenSource.backingScaleFactor(for: d.displayID)
+                let pxW = Int(CGFloat(d.width) * scale)
+                let pxH = Int(CGFloat(d.height) * scale)
+                let isMain = d.displayID == CGMainDisplayID() ? " [main]" : ""
+                print("  displayID=\(d.displayID)\(isMain)")
+                print("    name:     \(name)")
+                print("    points:   \(d.width)x\(d.height)")
+                print("    pixels:   \(pxW)x\(pxH) (scale \(scale))")
+            }
+        }
+    } catch {
+        let err = error as NSError
+        if err.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && err.code == -3801 {
+            print("  Screen Recording permission DENIED (SCStreamError -3801).")
+        } else {
+            print("  error querying SCShareableContent: \(error)")
+        }
+        print("  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness, then re-run.")
+    }
+
+    print()
+    print("== Cameras ==")
+    let granted = await AVCaptureDevice.requestAccess(for: .video)
+    if !granted {
+        print("  Camera permission denied — System Settings → Privacy & Security → Camera → enable LoomCloneTestHarness")
+    }
+    let devices = CapturedCameraSource.discoverDevices()
+    if devices.isEmpty {
+        print("  (no cameras discovered)")
+    } else {
+        for d in devices {
+            print("  deviceUniqueID=\(d.uniqueID)")
+            print("    name:           \(d.localizedName)")
+            let maxH = CapturedCameraSource.bestFormat(for: d, maxHeight: Int.max).map { fmt -> String in
+                let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+                return "\(dims.width)x\(dims.height)"
+            } ?? "no 30fps-capable format"
+            print("    best @30fps:    \(maxH)")
+        }
+    }
+
+    print()
+    print("Use these IDs in Tier 4 configs:")
+    print("  source.displayID       (UInt32)")
+    print("  source.deviceUniqueID  (String)")
+
+    exitNow(code: 0)
 }
 
 // MARK: - Helpers

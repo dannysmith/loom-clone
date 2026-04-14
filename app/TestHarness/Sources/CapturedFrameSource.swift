@@ -56,16 +56,32 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
 
     private let config: Config
     private let captureQueue: DispatchQueue
+    private let events: EventLog?
     private var stream: SCStream?
 
+    // Store the whole CMSampleBuffer, not just the extracted
+    // CVPixelBuffer. The pixel buffer's IOSurface lifecycle is tied to
+    // the sample buffer's retention chain; storing only the pixel
+    // buffer reference can leave us with a valid-looking handle whose
+    // underlying surface has been released back to SCStream's pool.
+    // Observed in Tier 4 T4.1/T4.2: the screen stream froze after a
+    // handful of frames until we switched to storing the sample buffer.
     private let lock = NSLock()
-    private var latest: CVPixelBuffer?
+    private var latestSample: CMSampleBuffer?
+
+    // Per-second frame delivery counters — diagnostic.
+    private var acceptedThisSecond = 0
+    private var rejectedThisSecond = 0
+    private var lastLogAt = Date()
+    private var totalAccepted = 0
+    private var totalRejected = 0
 
     private(set) var nativePixelSize: CGSize = .zero
     private(set) var selectedDisplayName: String = ""
 
-    init(config: Config) {
+    init(config: Config, events: EventLog? = nil) {
         self.config = config
+        self.events = events
         self.captureQueue = DispatchQueue(
             label: "com.loomclone.harness.screen-capture",
             qos: .userInteractive
@@ -116,12 +132,18 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
             do { try await stream.stopCapture() } catch {}
         }
         stream = nil
+        events?.log("source.screen-totals", [
+            "accepted": totalAccepted,
+            "rejected": totalRejected,
+        ])
     }
 
     func makePixelBuffer(index: Int64) -> CVPixelBuffer? {
         lock.lock()
-        defer { lock.unlock() }
-        return latest
+        let s = latestSample
+        lock.unlock()
+        guard let s else { return nil }
+        return CMSampleBufferGetImageBuffer(s)
     }
 
     // MARK: Display resolution
@@ -175,7 +197,10 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
 
 extension CapturedScreenSource: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen, sampleBuffer.isValid else { return }
+        guard type == .screen, sampleBuffer.isValid else {
+            accountFrame(accepted: false)
+            return
+        }
         // Only accept `.complete` frames. `.idle` / `.blank` / `.suspended`
         // sample buffers carry no fresh image data — forwarding them would
         // feed stale content to the encoders and skew the test.
@@ -185,19 +210,51 @@ extension CapturedScreenSource: SCStreamOutput {
             let attachments = attachmentsArray.first,
             let statusRaw = attachments[SCStreamFrameInfo.status] as? Int,
             let status = SCFrameStatus(rawValue: statusRaw),
-            status == .complete,
-            let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
-        else { return }
+            status == .complete
+        else {
+            accountFrame(accepted: false)
+            return
+        }
         lock.lock()
-        latest = pixelBuffer
+        latestSample = sampleBuffer
         lock.unlock()
+        accountFrame(accepted: true)
+    }
+
+    private func accountFrame(accepted: Bool) {
+        lock.lock()
+        if accepted {
+            acceptedThisSecond += 1
+            totalAccepted += 1
+        } else {
+            rejectedThisSecond += 1
+            totalRejected += 1
+        }
+        let shouldLog = Date().timeIntervalSince(lastLogAt) >= 1.0
+        var acc = 0
+        var rej = 0
+        if shouldLog {
+            acc = acceptedThisSecond
+            rej = rejectedThisSecond
+            acceptedThisSecond = 0
+            rejectedThisSecond = 0
+            lastLogAt = Date()
+        }
+        lock.unlock()
+        if shouldLog {
+            events?.log("source.screen-rate", [
+                "accepted_last_sec": acc,
+                "rejected_last_sec": rej,
+            ])
+        }
     }
 }
 
 extension CapturedScreenSource: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        // Silent: the metronome will simply see `latest` stop updating,
-        // which the pass/fail classifier surfaces as dropped frames.
+        events?.log("source.screen-stopped-with-error", [
+            "error": "\(error)",
+        ])
     }
 }
 
@@ -217,16 +274,23 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
 
     private let config: Config
     private let captureQueue: DispatchQueue
+    private let events: EventLog?
     private var session: AVCaptureSession?
 
     private let lock = NSLock()
-    private var latest: CVPixelBuffer?
+    private var latestSample: CMSampleBuffer?
+
+    // Per-second delivery counters.
+    private var acceptedThisSecond = 0
+    private var lastLogAt = Date()
+    private var totalAccepted = 0
 
     private(set) var nativePixelSize: CGSize = .zero
     private(set) var selectedDeviceName: String = ""
 
-    init(config: Config) {
+    init(config: Config, events: EventLog? = nil) {
         self.config = config
+        self.events = events
         self.captureQueue = DispatchQueue(
             label: "com.loomclone.harness.camera-capture",
             qos: .userInteractive
@@ -301,12 +365,15 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
             }
         }
         self.session = nil
+        events?.log("source.camera-totals", ["accepted": totalAccepted])
     }
 
     func makePixelBuffer(index: Int64) -> CVPixelBuffer? {
         lock.lock()
-        defer { lock.unlock() }
-        return latest
+        let s = latestSample
+        lock.unlock()
+        guard let s else { return nil }
+        return CMSampleBufferGetImageBuffer(s)
     }
 
     // MARK: Device resolution
@@ -362,19 +429,32 @@ extension CapturedCameraSource: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        // Tag Rec. 709 explicitly. Many USB cameras deliver buffers with
-        // missing colour extensions; without this, CIContext runs an
-        // expensive multi-stage conversion chain per frame.
-        let attachments: [CFString: Any] = [
-            kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
-            kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
-            kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
-        ]
-        CVBufferSetAttachments(pixelBuffer, attachments as CFDictionary, .shouldPropagate)
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            // Tag Rec. 709 explicitly. Many USB cameras deliver buffers with
+            // missing colour extensions; without this, CIContext runs an
+            // expensive multi-stage conversion chain per frame.
+            let attachments: [CFString: Any] = [
+                kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+                kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+            ]
+            CVBufferSetAttachments(pixelBuffer, attachments as CFDictionary, .shouldPropagate)
+        }
         lock.lock()
-        latest = pixelBuffer
+        latestSample = sampleBuffer
+        acceptedThisSecond += 1
+        totalAccepted += 1
+        let shouldLog = Date().timeIntervalSince(lastLogAt) >= 1.0
+        var acc = 0
+        if shouldLog {
+            acc = acceptedThisSecond
+            acceptedThisSecond = 0
+            lastLogAt = Date()
+        }
         lock.unlock()
+        if shouldLog {
+            events?.log("source.camera-rate", ["accepted_last_sec": acc])
+        }
     }
 }
 

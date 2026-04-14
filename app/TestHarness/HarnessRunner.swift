@@ -228,13 +228,13 @@ final class HarnessRunner {
             cfg.displayID = src.displayID
             cfg.displayName = src.displayName
             cfg.frameRate = config.frameRate
-            screenSource = CapturedScreenSource(config: cfg)
+            screenSource = CapturedScreenSource(config: cfg, events: events)
         case "real-camera":
             var cfg = CapturedCameraSource.Config()
             cfg.deviceUniqueID = src.deviceUniqueID
             cfg.deviceName = src.deviceName
             cfg.maxHeight = src.maxHeight ?? Int.max
-            cameraSource = CapturedCameraSource(config: cfg)
+            cameraSource = CapturedCameraSource(config: cfg, events: events)
         default:
             throw HarnessRunnerError.unsupportedSource(src.kind)
         }

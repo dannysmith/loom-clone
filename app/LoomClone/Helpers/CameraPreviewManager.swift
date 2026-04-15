@@ -99,6 +99,20 @@ extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        // Tag the pixel buffer with explicit Rec. 709 colour metadata before
+        // forwarding, matching what `CameraCaptureManager` does on the
+        // recording path. Many USB cameras deliver frames without the
+        // YCbCrMatrix / TransferFunction / ColorPrimaries attachments —
+        // without these, `AVSampleBufferDisplayLayer` falls back to a
+        // conservative path and logs `createFromPixelbuffer: … Using R709`.
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            let attachments: [CFString: Any] = [
+                kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+                kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+            ]
+            CVBufferSetAttachments(pixelBuffer, attachments as CFDictionary, .shouldPropagate)
+        }
         onSampleBuffer?(sampleBuffer)
     }
 }

@@ -8,6 +8,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCameraReactionEffectGesturesEnabledDefault</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>LoomClone needs camera access to record video.</string>
 	<key>NSMicrophoneUsageDescription</key>

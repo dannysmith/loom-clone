@@ -12,6 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let coordinator = RecordingCoordinator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Turn off automatic window tabbing. We have no document windows —
+        // only an NSPopover and two NSPanels — so the AppKit tab machinery
+        // has nothing to group, and it complains at launch otherwise
+        // ("Cannot index window tabs due to missing main bundle identifier").
+        NSWindow.allowsAutomaticWindowTabbing = false
+
         setupStatusItem()
         setupPopover()
 

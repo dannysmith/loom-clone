@@ -97,9 +97,8 @@ struct MenuView: View {
 
             Divider()
 
-            // Camera adjustments (task-5 Phase 2). Only shown when a camera
-            // is selected — the sliders affect nothing if there's no camera
-            // feed to filter.
+            // Camera adjustments. Only shown when a camera is selected — the
+            // sliders affect nothing if there's no camera feed to filter.
             if coordinator.selectedCamera != nil {
                 cameraAdjustmentsSection
             }
@@ -258,7 +257,7 @@ struct MenuView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Camera Adjustments (task-5 Phase 2)
+    // MARK: - Camera Adjustments
 
     @ViewBuilder
     private var cameraAdjustmentsSection: some View {

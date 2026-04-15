@@ -31,9 +31,9 @@ actor RecordingActor {
     /// Captured at prepare time so we can populate the timeline `rawStreams`
     /// block after `finish()`. Avoids re-resolving devices at stop time.
     /// Screen has no bitrate field — the raw screen writer uses ProRes
-    /// 422 Proxy (task-0A Phase 2), which is roughly CBR-per-frame and has
-    /// no target-bitrate setting. The observed average is computed from
-    /// final bytes on disk ÷ logical duration at timeline-population time.
+    /// 422 Proxy, which is roughly CBR-per-frame and has no target-bitrate
+    /// setting. The observed average is computed from final bytes on disk
+    /// ÷ logical duration at timeline-population time.
     private var rawScreenDims: (width: Int, height: Int)?
     private var rawCameraDims: (width: Int, height: Int, bitrate: Int)?
     private var rawAudioConfig: (bitrate: Int, sampleRate: Int, channels: Int)?
@@ -90,10 +90,10 @@ actor RecordingActor {
     /// stop flow lands.
     private var terminalErrorFired = false
 
-    /// Forward the shared camera-adjustments box (task-5 Phase 2) into the
-    /// compositor so its camera-frame path picks up slider moves on the next
-    /// tick. Called once during `startRecording` — the box is reference-typed
-    /// so mutations flow through without needing to re-invoke this.
+    /// Forward the shared camera-adjustments box into the compositor so its
+    /// camera-frame path picks up slider moves on the next tick. Called once
+    /// during `startRecording` — the box is reference-typed so mutations flow
+    /// through without needing to re-invoke this.
     func setCameraAdjustmentsState(_ state: CameraAdjustmentsState) async {
         await composition.setCameraAdjustmentsState(state)
     }
@@ -264,8 +264,7 @@ actor RecordingActor {
             // ProRes 422 Proxy on the hardware ProRes engine — offloads the
             // heaviest stream off the H.264 media engine so the composited
             // HLS writer and the raw camera writer have the H.264 engine
-            // to themselves. See task-0A Phase 2 (architectural rationale
-            // in the Background section).
+            // to themselves.
             let url = localDir.appendingPathComponent("screen.mov")
             let w = RawStreamWriter(url: url, kind: .videoProRes(width: width, height: height))
             do {
@@ -305,15 +304,16 @@ actor RecordingActor {
             await self?.handleSegment(segment)
         }
 
-        // 4. Task-1 tuning 2: warm up writers BEFORE opening any capture source.
-        // `AVAssetWriter.startWriting()` → `startSession(atSourceTime:)` internally
-        // calls `VTCompressionSessionPrepareToEncodeFrames`, which allocates the
-        // encoder's IOSurface working set through IOGPUFamily. Doing that while
-        // SCStream is already allocating its own IOSurfaces is exactly the race
-        // failure mode 4's spindump captured (`videotoolbox.preparationQueue`
-        // stuck inside IOGPUFamily kext during early-recording). Warming up here
-        // means all three warmable writers' allocations happen in a quiet
-        // window, before SCK starts competing for the same kernel resource.
+        // 4. Warm up writers BEFORE opening any capture source.
+        // `AVAssetWriter.startWriting()` → `startSession(atSourceTime:)`
+        // internally calls `VTCompressionSessionPrepareToEncodeFrames`, which
+        // allocates the encoder's IOSurface working set through IOGPUFamily.
+        // Doing that while SCStream is already allocating its own IOSurfaces
+        // is a race (observed spindumps showed `videotoolbox.preparationQueue`
+        // stuck inside IOGPUFamily kext during early-recording). Warming up
+        // here means all three warmable writers' allocations happen in a
+        // quiet window, before SCK starts competing for the same kernel
+        // resource.
         //
         // The camera raw writer is intentionally NOT warmed up here — it's
         // constructed further down, after `cameraCapture.startCapture()` returns
@@ -450,11 +450,11 @@ actor RecordingActor {
         timeline.markStarted()
 
         // The HLS, raw-screen, and raw-audio writers were already warmed up
-        // in `prepareRecording` (task-1 tuning 2). Only the camera raw writer
-        // still warms up here, because it's constructed after
-        // `cameraCapture.startCapture()` returns with the delivered dims from
-        // `device.activeFormat`. It's still warmed up serially, still before
-        // the metronome feeds any frames.
+        // in `prepareRecording`. Only the camera raw writer still warms up
+        // here, because it's constructed after `cameraCapture.startCapture()`
+        // returns with the delivered dims from `device.activeFormat`. It's
+        // still warmed up serially, still before the metronome feeds any
+        // frames.
         await cameraRawWriter?.startWriting()
 
         // Start the 30fps metronome — emits frames from the cache regardless
@@ -465,9 +465,9 @@ actor RecordingActor {
     }
 
     /// Cleanup path for `prepareRecording` failing after the HLS / screen-raw /
-    /// audio-raw writers have been warmed up (task-1 tuning 2). Called only
-    /// from the error path; on the happy path the writers are owned through
-    /// to `stopRecording`.
+    /// audio-raw writers have been warmed up. Called only from the error
+    /// path; on the happy path the writers are owned through to
+    /// `stopRecording`.
     private func tearDownWarmedUpWritersOnPrepareFailure() async {
         await writer.finish()
         if let w = screenRawWriter {
@@ -995,13 +995,12 @@ actor RecordingActor {
 
     // MARK: - Composition Failure Recovery
     //
-    // task-5 Phase 1: when `CompositionActor.compositeFrame` surfaces a render
-    // error or a stall, we:
+    // When `CompositionActor.compositeFrame` surfaces a render error or a
+    // stall, we:
     //   1. Record the failure + counter in the timeline.
     //   2. Ask the compositor to rebuild its CIContext + MTLCommandQueue so
     //      the next tick renders against a fresh command queue (the old one is
-    //      assumed poisoned after the first GPU-timeout cascade — see failure
-    //      modes 1/3 in docs/m2-pro-video-pipeline-failures.md).
+    //      assumed poisoned after the first GPU-timeout cascade).
     //   3. If rebuild itself fails, fire the terminal-error callback so the
     //      coordinator can stop the recording cleanly and alert the user.
     //

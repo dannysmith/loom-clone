@@ -182,8 +182,8 @@ extension CameraCaptureManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // Phase 1 (task-0A): Tag the pixel buffer with explicit Rec. 709
-        // colour metadata before forwarding. Many USB cameras (ZV-1, generic
+        // Tag the pixel buffer with explicit Rec. 709 colour metadata before
+        // forwarding. Many USB cameras (ZV-1, generic
         // capture cards) deliver buffers without YCbCrMatrix / TransferFunction
         // / ColorPrimaries attachments — CIContext then runs an expensive
         // multi-stage colourspace conversion chain on every frame because it

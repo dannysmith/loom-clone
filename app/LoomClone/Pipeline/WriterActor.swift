@@ -113,26 +113,23 @@ actor WriterActor {
         // `AVVideoColorPropertiesKey` declares Rec. 709 on the output so the
         // writer doesn't do its own redundant colourspace conversion — paired
         // with the Rec. 709 tags that `CameraCaptureManager` attaches to
-        // camera pixel buffers (see task-0A Phase 1). Without this the output
-        // colour space is unspecified and AVFoundation falls back to a
-        // conservative path that costs GPU time per frame.
+        // camera pixel buffers. Without this the output colour space is
+        // unspecified and AVFoundation falls back to a conservative path
+        // that costs GPU time per frame.
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: preset.width,
             AVVideoHeightKey: preset.height,
-            // Task-1 tuning 6: require the hardware H.264 encoder.
-            // VTCompressionProperties.h documents the failure cases
-            // for this property explicitly, including "the hardware
-            // encoding resources on the machine are busy" — which is
-            // exactly the condition failure mode 4 suggests we're
-            // brushing up against on M2 Pro. Setting this means
-            // silent software fallback fails loudly at startWriting()
-            // instead of dragging the GPU into a deadlock.
-            // The readback form (reading
-            // UsingHardwareAcceleratedVideoEncoder after session
-            // creation) isn't implementable because AVAssetWriter
-            // doesn't expose its internal VTCompressionSession — we
-            // rely on enforcement only.
+            // Require the hardware H.264 encoder. VTCompressionProperties.h
+            // documents the failure cases for this property explicitly,
+            // including "the hardware encoding resources on the machine are
+            // busy" — exactly the condition we brush up against on M2 Pro
+            // when every engine is already loaded. Setting this means silent
+            // software fallback fails loudly at startWriting() instead of
+            // dragging the GPU into a deadlock. The readback form (reading
+            // UsingHardwareAcceleratedVideoEncoder after session creation)
+            // isn't implementable because AVAssetWriter doesn't expose its
+            // internal VTCompressionSession — we rely on enforcement only.
             AVVideoEncoderSpecificationKey: [
                 kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
             ] as [String: Any],
@@ -147,30 +144,27 @@ actor WriterActor {
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoExpectedSourceFrameRateKey: 30,
                 AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-                // Task-1 tuning 3: OBS/FFmpeg/HandBrake all ship this as
-                // false on Apple Silicon after OBS issue #5840 documented
-                // framedrops and unreliability with it set to true on
-                // M1/M2. Mechanism is undocumented but the production-app
-                // convergence is strong signal, and it may affect how the
-                // encoder reserves/releases IOSurface backing — the same
-                // resource failure mode 4 deadlocks on.
+                // OBS/FFmpeg/HandBrake all ship RealTime=false on Apple
+                // Silicon after OBS issue #5840 documented framedrops and
+                // unreliability with it set to true on M1/M2. Mechanism is
+                // undocumented but the production-app convergence is strong
+                // signal, and it may affect how the encoder reserves and
+                // releases IOSurface backing.
                 kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
-                // Task-1 tuning 4: disable B-frames. HLS low-latency does
-                // not require frame reordering, and the reorder buffer is
-                // a per-slot IOSurface reference chain inside the encoder.
-                // Turning it off removes those references entirely.
-                // Measurable but small bitrate-efficiency loss (a few %);
-                // Cap ships this way in crates/enc-avfoundation/src/mp4.rs.
+                // Disable B-frames. HLS low-latency does not require frame
+                // reordering, and the reorder buffer is a per-slot IOSurface
+                // reference chain inside the encoder. Turning it off removes
+                // those references entirely. Measurable but small bitrate-
+                // efficiency loss (a few %); Cap ships this way in
+                // crates/enc-avfoundation/src/mp4.rs.
                 AVVideoAllowFrameReorderingKey: false,
-                // Task-1 tuning 5 (MaxFrameDelayCount) was deferred.
-                // AVAssetWriter rejects any value other than 3 for
-                // H.264 ("For compression property MaxFrameDelayCount,
-                // video codec type avc1 only allows the value 3" — tried
-                // 2026-04-14 with value 2, crashed with NSException).
-                // HandBrake / OBS / FFmpeg bound this value because they
-                // go directly through VTCompressionSession; we can only
-                // bound it if we move off AVAssetWriter. That's a shape
-                // change belonging to task-4.
+                // MaxFrameDelayCount can't be tuned here: AVAssetWriter
+                // rejects any value other than 3 for H.264 ("For compression
+                // property MaxFrameDelayCount, video codec type avc1 only
+                // allows the value 3" — setting value 2 crashes with an
+                // NSException). HandBrake / OBS / FFmpeg bound this value
+                // because they go directly through VTCompressionSession; we
+                // could only bound it if we moved off AVAssetWriter.
             ] as [String: Any],
         ]
 

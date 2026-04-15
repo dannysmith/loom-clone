@@ -48,14 +48,14 @@ actor CompositionActor {
     private var latestCameraImage: CIImage?
     private var circleMask: CIImage
 
-    // MARK: - Camera Adjustments (task-5 Phase 2)
+    // MARK: - Camera Adjustments
     //
     // Optional reference to the shared state box owned by RecordingCoordinator.
-    // nil means "no adjustments" — identical behaviour to the pre-Phase-2
-    // code. When set, `updateCameraFrame` wraps incoming camera frames in the
-    // filter chain declared by the state box's current value. Because the
-    // filter chain is built lazily as a CIImage graph, the per-frame cost is
-    // paid only at render time inside `compositeFrame`.
+    // nil means "no adjustments" — camera frames pass through unchanged. When
+    // set, `updateCameraFrame` wraps incoming camera frames in the filter
+    // chain declared by the state box's current value. Because the filter
+    // chain is built lazily as a CIImage graph, the per-frame cost is paid
+    // only at render time inside `compositeFrame`.
 
     private var cameraAdjustmentsState: CameraAdjustmentsState?
 
@@ -114,10 +114,10 @@ actor CompositionActor {
         latestCameraImage = applyCameraAdjustments(to: base)
     }
 
-    /// Task-5 Phase 2: add CITemperatureAndTint + CIExposureAdjust onto the
-    /// camera-only path. Cheap when the state box is unset or the current
-    /// values are defaults — returns the input image unchanged so CoreImage
-    /// doesn't build a trivial passthrough graph every frame.
+    /// Add CITemperatureAndTint + CIExposureAdjust onto the camera-only path.
+    /// Cheap when the state box is unset or the current values are defaults —
+    /// returns the input image unchanged so CoreImage doesn't build a trivial
+    /// passthrough graph every frame.
     ///
     /// The raw `camera.mp4` writer is untouched because it consumes the
     /// original CMSampleBuffer upstream of the compositor — see
@@ -191,9 +191,9 @@ actor CompositionActor {
 
         // Render into Rec. 709. This relies on the camera pipeline tagging
         // every incoming pixel buffer with matching Rec. 709 colour metadata
-        // (`CameraCaptureManager.captureOutput`, task-0A Phase 1). Without
-        // those tags CIContext can't know the source colour space and falls
-        // back to an expensive multi-stage conversion chain on every frame.
+        // (`CameraCaptureManager.captureOutput`). Without those tags
+        // CIContext can't know the source colour space and falls back to an
+        // expensive multi-stage conversion chain on every frame.
         let destination = CIRenderDestination(pixelBuffer: output)
         destination.colorSpace = CGColorSpace(name: CGColorSpace.itur_709)
 

@@ -46,9 +46,8 @@ final class CameraOverlayWindow: @unchecked Sendable {
     @MainActor private var currentStyle: Style = .circle
     nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
-    /// Optional shared camera-adjustments state (task-5 Phase 2). Forwarded
-    /// into the preview layer on every `show()` so the overlay reflects
-    /// slider moves live.
+    /// Optional shared camera-adjustments state. Forwarded into the preview
+    /// layer on every `show()` so the overlay reflects slider moves live.
     @MainActor private var adjustmentsState: CameraAdjustmentsState?
 
     @MainActor

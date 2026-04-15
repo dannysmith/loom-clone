@@ -123,7 +123,7 @@ final class RecordingCoordinator {
     let screenPreview = ScreenPreviewManager()
     private var cameraOverlay: CameraOverlayWindow?
 
-    // MARK: - Camera Adjustments (task-5 Phase 2)
+    // MARK: - Camera Adjustments
 
     /// Live white-balance + brightness for the camera feed. Applied to every
     /// live preview surface and the composited HLS stream, but never to the
@@ -212,11 +212,11 @@ final class RecordingCoordinator {
     private var startupTask: Task<Void, Never>?
 
     /// Fired when the recording ends via a path that the AppDelegate didn't
-    /// trigger itself — currently just the task-5 Phase 1 terminal-error
-    /// escalation, where `handleTerminalRecordingError` stops the recording in
-    /// response to a GPU failure rather than a user click. AppDelegate sets
-    /// this to hide the floating RecordingPanel (which it owns) so the UI
-    /// doesn't get left in a zombie state.
+    /// trigger itself — currently just the terminal-error escalation, where
+    /// `handleTerminalRecordingError` stops the recording in response to a GPU
+    /// failure rather than a user click. AppDelegate sets this to hide the
+    /// floating RecordingPanel (which it owns) so the UI doesn't get left in a
+    /// zombie state.
     ///
     /// Not used by the normal `stopRecording()` / `cancelRecording()` flows —
     /// AppDelegate hides the panel directly in its handlers for those.
@@ -362,9 +362,9 @@ final class RecordingCoordinator {
 
             // Wire the terminal-error callback. Fires at most once per
             // recording, from a detached task inside the actor, when the
-            // compositor reports a failure that rebuild can't recover from
-            // (task-5 Phase 1). Hop to the main actor and run the normal
-            // stop flow plus a user-visible alert.
+            // compositor reports a failure that rebuild can't recover from.
+            // Hop to the main actor and run the normal stop flow plus a
+            // user-visible alert.
             await actor.setTerminalErrorCallback { [weak self] message in
                 guard let self else { return }
                 await MainActor.run {
@@ -372,9 +372,9 @@ final class RecordingCoordinator {
                 }
             }
 
-            // Wire the camera-adjustments state box (task-5 Phase 2). The
-            // compositor reads from it on every frame so slider moves take
-            // effect immediately on the composited HLS output.
+            // Wire the camera-adjustments state box. The compositor reads
+            // from it on every frame so slider moves take effect immediately
+            // on the composited HLS output.
             await actor.setCameraAdjustmentsState(self.cameraAdjustmentsState)
 
             // 3. Kick off the slow setup (server session, capture hardware,
@@ -636,11 +636,11 @@ final class RecordingCoordinator {
     // MARK: - Terminal Recording Error
 
     /// Invoked from `RecordingActor`'s terminal-error callback when the
-    /// compositor reports a render failure that rebuild can't recover from
-    /// (task-5 Phase 1). Runs the normal stop flow so local files are flushed
-    /// cleanly and then surfaces an alert to the user. No-op if we've already
-    /// moved out of the recording state (e.g. the user hit Stop between the
-    /// failure and the hop to main).
+    /// compositor reports a render failure that rebuild can't recover from.
+    /// Runs the normal stop flow so local files are flushed cleanly and then
+    /// surfaces an alert to the user. No-op if we've already moved out of the
+    /// recording state (e.g. the user hit Stop between the failure and the
+    /// hop to main).
     fileprivate func handleTerminalRecordingError(_ message: String) {
         guard state == .recording || state == .paused else { return }
 
@@ -697,8 +697,8 @@ final class RecordingCoordinator {
             if cameraOverlay == nil {
                 cameraOverlay = CameraOverlayWindow()
             }
-            // Task-5 Phase 2: pass the shared adjustments state so the
-            // overlay picks up slider moves live.
+            // Pass the shared adjustments state so the overlay picks up
+            // slider moves live.
             cameraOverlay?.setAdjustmentsState(cameraAdjustmentsState)
             // Match the overlay shape to the compositor's output:
             //   - cameraOnly   → full 16:9 frame (rectangle)

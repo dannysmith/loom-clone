@@ -6,8 +6,8 @@ import VideoToolbox
 /// Writes a single capture stream (video or audio) to a standalone
 /// MP4 / MOV / M4A file at native quality. Used for the local
 /// "high-quality master" files that live alongside the composited HLS
-/// segments — `screen.mov` (ProRes 422 Proxy, task-0A Phase 2),
-/// `camera.mp4` (H.264), `audio.m4a` (AAC).
+/// segments — `screen.mov` (ProRes 422 Proxy), `camera.mp4` (H.264),
+/// `audio.m4a` (AAC).
 ///
 /// Deliberately much simpler than `WriterActor`:
 /// - No HLS delegate, no segment stream, no `AVAssetSegmentReport`.
@@ -34,7 +34,7 @@ actor RawStreamWriter {
         /// stream off the (single, already contended) H.264 engine on
         /// M2 Pro-class hardware. ProRes is roughly CBR-per-frame based on
         /// resolution (~45 Mb/s at 1080p, ~180 Mb/s at 4K) so there's no
-        /// target bitrate to pass. See task-0A Phase 2.
+        /// target bitrate to pass.
         case videoProRes(width: Int, height: Int)
 
         case audio(bitrate: Int, sampleRate: Int, channels: Int)
@@ -72,29 +72,27 @@ actor RawStreamWriter {
         let input: AVAssetWriterInput
         switch kind {
         case .videoH264(let width, let height, let bitrate):
-            // Deliberately no `AVVideoColorPropertiesKey` here. A previous
-            // iteration declared Rec. 709 on the output, which was safe for
-            // the raw camera writer (its input buffers are tagged Rec. 709
-            // by `CameraCaptureManager`) but **dangerous for the raw screen
-            // writer** — ScreenCaptureKit delivered frames in the display's
-            // native colour space (sRGB / Display P3), and declaring Rec. 709
-            // output forced AVFoundation to spawn a `videomediaconverter`
-            // thread that did GPU-side colour conversion on every frame.
-            // Added to an already contended three-encoder pipeline on an
-            // M2 Pro's single media engine, that extra GPU work wedged the
-            // GPU and — because WindowServer shares the same GPU for display
-            // compositing — hung the whole machine (observed 2026-04-11,
-            // WindowServer watchdog timeout). Omitting the key lets the
-            // writer infer its output colour space from the first input
-            // pixel buffer's attachments, which is what we want: camera
-            // output gets Rec. 709 from the tagged buffers automatically.
-            // See task-0A Phase 1.
+            // Deliberately no `AVVideoColorPropertiesKey` here. Declaring
+            // Rec. 709 on the output is safe for the raw camera writer (its
+            // input buffers are tagged Rec. 709 by `CameraCaptureManager`)
+            // but **dangerous for the raw screen writer** — ScreenCaptureKit
+            // delivers frames in the display's native colour space (sRGB /
+            // Display P3), and declaring Rec. 709 output forces AVFoundation
+            // to spawn a `videomediaconverter` thread that does GPU-side
+            // colour conversion on every frame. Added to an already
+            // contended three-encoder pipeline on an M2 Pro's single media
+            // engine, that extra GPU work can wedge the GPU and — because
+            // WindowServer shares the same GPU for display compositing —
+            // hang the whole machine (WindowServer watchdog timeout).
+            // Omitting the key lets the writer infer its output colour
+            // space from the first input pixel buffer's attachments, which
+            // is what we want: camera output gets Rec. 709 from the tagged
+            // buffers automatically.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
-                // Task-1 tuning 6: require hardware H.264. See
-                // WriterActor for the rationale.
+                // Require hardware H.264. See WriterActor for the rationale.
                 AVVideoEncoderSpecificationKey: [
                     kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
                 ] as [String: Any],
@@ -104,39 +102,29 @@ actor RawStreamWriter {
                     AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                     AVVideoExpectedSourceFrameRateKey: 30,
                     AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-                    // Task-1 tuning 3: see WriterActor for the full
-                    // rationale (OBS #5840 convergence).
+                    // See WriterActor for the full rationale (OBS #5840
+                    // convergence — RealTime=false is what OBS/FFmpeg/
+                    // HandBrake ship on Apple Silicon).
                     kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
-                    // Task-1 tuning 4: disable B-frames. See WriterActor
-                    // for the rationale.
+                    // Disable B-frames. See WriterActor for the rationale.
                     AVVideoAllowFrameReorderingKey: false,
-                    // Task-1 tuning 5 (MaxFrameDelayCount) was deferred
-                    // — AVAssetWriter only accepts the value 3 for H.264
-                    // (anything else throws NSException). See WriterActor
-                    // for the full context.
                 ] as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 
         case .videoProRes(let width, let height):
             // ProRes 422 Proxy via the hardware ProRes engine. No
-            // `AVVideoCompressionPropertiesKey` — AVAssetWriter rejects
-            // any compression-properties dict on a ProRes output with an
-            // NSException at input construction. Confirmed 2026-04-14
-            // during task-1 tuning 5 rollout: attempting to pass
-            // `kVTCompressionPropertyKey_MaxFrameDelayCount` through the
-            // dict crashes T1.1 (prores-4k-alone) with exit code 134.
-            // Tuning 5's ProRes variant is therefore deferred — the
-            // experimental attempt is preserved in commit history and the
-            // H.264 side of tuning 5 still applies.
+            // `AVVideoCompressionPropertiesKey` — AVAssetWriter rejects any
+            // compression-properties dict on a ProRes output with an
+            // NSException at input construction.
             //
             // No `AVVideoColorPropertiesKey` either: we let AVFoundation
             // infer the output colour space from the input pixel buffers,
-            // which avoids the GPU-side colour conversion that caused the
-            // WindowServer hang on 2026-04-11 (see the H.264 case above
-            // for the full context). ScreenCaptureKit frames come tagged
-            // with the display's native colour space and that tag
-            // propagates through to the ProRes output.
+            // which avoids the GPU-side colour conversion that can cause a
+            // WindowServer hang (see the H.264 case above for the full
+            // context). ScreenCaptureKit frames come tagged with the
+            // display's native colour space and that tag propagates through
+            // to the ProRes output.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.proRes422Proxy,
                 AVVideoWidthKey: width,

@@ -22,8 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         // When the compositor's terminal-error path stops a recording on its
-        // own (task-5 Phase 1), the coordinator needs to tell us to hide the
-        // floating panel — it doesn't own it.
+        // own, the coordinator needs to tell us to hide the floating panel —
+        // it doesn't own it.
         coordinator.onTerminalRecordingStop = { [weak self] in
             self?.recordingPanel?.hide()
         }

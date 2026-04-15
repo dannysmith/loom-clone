@@ -7,9 +7,9 @@ import AVFoundation
 ///
 /// Both this view (popover preview) and `CameraOverlayWindow` (in-recording
 /// overlay) use the same `CameraPreviewLayerView` underneath, just fed by
-/// different capture sessions. An optional `CameraAdjustmentsState` (task-5
-/// Phase 2) is forwarded to the layer view so slider changes are reflected
-/// in the preview immediately.
+/// different capture sessions. An optional `CameraAdjustmentsState` is
+/// forwarded to the layer view so slider changes are reflected in the preview
+/// immediately.
 struct CameraPreviewView: NSViewRepresentable {
     let manager: CameraPreviewManager
     let adjustmentsState: CameraAdjustmentsState?

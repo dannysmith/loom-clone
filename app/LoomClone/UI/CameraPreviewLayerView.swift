@@ -24,7 +24,7 @@ private let cameraPreviewFilterQueue = DispatchQueue(
 /// - `enqueue(_:)` is thread-safe and can be called from any queue (per Apple's
 ///   contract for `AVSampleBufferDisplayLayer`)
 /// - Aspect-fill cropping
-/// - Applies camera adjustments (task-5 Phase 2) on the way through when a
+/// - Applies camera adjustments on the way through when a
 ///   `CameraAdjustmentsState` is attached and its value is non-default.
 ///   Fast-paths the original sample buffer through unchanged otherwise.
 @MainActor
@@ -32,7 +32,7 @@ final class CameraPreviewLayerView: NSView {
 
     nonisolated(unsafe) private let displayLayer = AVSampleBufferDisplayLayer()
 
-    // MARK: - Filter State (task-5 Phase 2)
+    // MARK: - Filter State
 
     nonisolated(unsafe) private var adjustmentsState: CameraAdjustmentsState?
     nonisolated private let filterContext: CIContext
@@ -42,7 +42,7 @@ final class CameraPreviewLayerView: NSView {
     override init(frame: NSRect) {
         // Separate CIContext from the compositor's — the preview/overlay
         // path must keep running even if the compositor's context is mid-
-        // rebuild (task-5 Phase 1).
+        // rebuild.
         if let device = MTLCreateSystemDefaultDevice() {
             self.filterContext = CIContext(
                 mtlDevice: device,
@@ -143,11 +143,11 @@ final class CameraPreviewLayerView: NSView {
         }
     }
 
-    /// Apply camera adjustments (task-5 Phase 2) to a sample buffer and wrap
-    /// the filtered pixel buffer in a new CMSampleBuffer with matching timing
-    /// and the same Rec. 709 attachments. Returns nil when no adjustments are
-    /// attached, the values are defaults, or any step of the wrap fails —
-    /// caller enqueues the original buffer in that case.
+    /// Apply camera adjustments to a sample buffer and wrap the filtered pixel
+    /// buffer in a new CMSampleBuffer with matching timing and the same
+    /// Rec. 709 attachments. Returns nil when no adjustments are attached, the
+    /// values are defaults, or any step of the wrap fails — caller enqueues
+    /// the original buffer in that case.
     nonisolated private func filteredSampleBuffer(from sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
         guard let state = adjustmentsState else { return nil }
         let adj = state.value

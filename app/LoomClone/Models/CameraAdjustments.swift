@@ -5,8 +5,6 @@ import Foundation
 /// master file. The raw file is always the sensor's natural output, so the
 /// user can re-process it later if they change their mind about the
 /// adjustments.
-///
-/// See task-5 Phase 2 for the full rationale.
 struct CameraAdjustments: Equatable, Sendable {
     /// Target white-balance temperature in Kelvin. The `CITemperatureAndTint`
     /// filter treats the image's current neutral as 6500 K and shifts it so

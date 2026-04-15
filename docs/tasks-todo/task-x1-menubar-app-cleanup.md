@@ -2,10 +2,6 @@
 
 Goal: Turn our macos app into a proper high-quality MVP to start building on top of.
 
-## Review for Decision
-
-Review the existing menu bar app in the context of `docs/tasks-todo/phase-0-prototype.md` and `plan.md` and `requirements.md`. Are we confident that our best approach here is to build on top of this menu bar app and turn it into the actual MVP for the mac app? This seems like it's the most sensible thing to do here since we've already put qu quite a lot of work into this.  If so...
-
 ## Developer Tooling
 
 Let's make sure that we have the `app/` project set up as well as we can for both development in XCode and specifically for Agentic development. In a typesript project I'd be looking to install linters, formatters, static analysis tools and a testing framework and make sure we've also got an AGENTS.md inside the project dir with some stuff specific to that codebase. I'd also be looking to ensure we have a good setup for consistent UI etc.

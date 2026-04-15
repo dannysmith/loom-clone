@@ -6,3 +6,5 @@ Note: This scratchpad is always "task 0", although the tasks below are not necec
 
 
 ## To Do
+
+- [ ] Audio Input indicator for selected microphone in panel

@@ -11,3 +11,5 @@ Let's get the hono server properly set up with development tools for linting, fo
 ## Auth, sessions & handshake with menubar app etc
 
 ## Add all expected API endpoints
+
+## Full Review of Serverside App

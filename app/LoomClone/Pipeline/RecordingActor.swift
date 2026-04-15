@@ -68,6 +68,28 @@ actor RecordingActor {
         onCameraSampleForOverlay = callback
     }
 
+    // MARK: - Terminal Error Callback
+    //
+    // Fired when the compositor reports a render failure that rebuild can't
+    // recover from. The coordinator uses this to surface a user-visible alert
+    // and trigger a clean stop flow from outside the actor. Not a normal event
+    // on the recording timeline — we only ever fire this at most once per
+    // recording, and only on the unhappy path.
+
+    private var onTerminalError: (@Sendable (String) async -> Void)?
+
+    /// Set by the coordinator before `commitRecording`. When invoked the
+    /// coordinator should tear down the recording via `stopRecording()` and
+    /// show the provided message to the user.
+    func setTerminalErrorCallback(_ callback: @escaping @Sendable (String) async -> Void) {
+        onTerminalError = callback
+    }
+
+    /// Guard so we only fire the terminal-error callback once per recording,
+    /// even if multiple metronome ticks observe the same failure before the
+    /// stop flow lands.
+    private var terminalErrorFired = false
+
     // MARK: - The Recording Clock
     //
     // There is exactly one clock that anchors the recording timeline:
@@ -153,6 +175,7 @@ actor RecordingActor {
         latestScreenFrame = nil
         latestCameraFrame = nil
         metronomeTickIdx = 0
+        terminalErrorFired = false
         timeline = RecordingTimelineBuilder()
 
         // Resolve devices from identifiers. SCShareableContent is only needed
@@ -915,20 +938,30 @@ actor RecordingActor {
     private func emitMetronomeFrame() async -> Bool {
         guard let start = recordingStartTime else { return false }
 
-        let output: CVPixelBuffer?
+        let result: Result<CVPixelBuffer, CompositionError>?
         switch mode {
         case .screenOnly:
             guard let screen = latestScreenFrame else { return false }
-            output = await composition.compositeFrame(screenBuffer: screen, mode: .screenOnly)
+            result = await composition.compositeFrame(screenBuffer: screen, mode: .screenOnly)
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return false }
-            output = await composition.compositeFrame(screenBuffer: screen, mode: .screenAndCamera)
+            result = await composition.compositeFrame(screenBuffer: screen, mode: .screenAndCamera)
         case .cameraOnly:
             guard latestCameraFrame != nil else { return false }
-            output = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
+            result = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
         }
 
-        guard let output else { return false }
+        // nil = transient (source raced, output pool miss). Skip, retry next tick.
+        guard let result else { return false }
+
+        let output: CVPixelBuffer
+        switch result {
+        case .success(let buffer):
+            output = buffer
+        case .failure(let compositionError):
+            await handleCompositionFailure(compositionError)
+            return false
+        }
 
         // Wall-clock-derived PTS using the single recording clock.
         // Same formula as audio: primingOffset + elapsedLogical.
@@ -950,6 +983,92 @@ actor RecordingActor {
 
         await writer.appendVideo(outputSample)
         return true
+    }
+
+    // MARK: - Debug Injection Forwarding
+    //
+    // task-5 Phase 1 validation hooks. Exposed on RecordingActor so the
+    // coordinator can poke them through the normal pipeline without needing
+    // a direct reference to CompositionActor. Compiled out of release builds.
+
+    #if DEBUG
+    func debugInjectRenderError(count: Int = 1) async {
+        await composition.debugInject(failure: .renderError, count: count)
+    }
+
+    func debugInjectStall(count: Int = 1) async {
+        await composition.debugInject(failure: .stall, count: count)
+    }
+
+    func debugFailNextRebuilds(count: Int) async {
+        await composition.debugFailNextRebuilds(count: count)
+    }
+    #endif
+
+    // MARK: - Composition Failure Recovery
+    //
+    // task-5 Phase 1: when `CompositionActor.compositeFrame` surfaces a render
+    // error or a stall, we:
+    //   1. Record the failure + counter in the timeline.
+    //   2. Ask the compositor to rebuild its CIContext + MTLCommandQueue so
+    //      the next tick renders against a fresh command queue (the old one is
+    //      assumed poisoned after the first GPU-timeout cascade — see failure
+    //      modes 1/3 in docs/m2-pro-video-pipeline-failures.md).
+    //   3. If rebuild itself fails, fire the terminal-error callback so the
+    //      coordinator can stop the recording cleanly and alert the user.
+    //
+    // The metronome returns false on any failure so this tick is skipped. The
+    // next tick runs with a fresh context (on success) or finds `isRecording`
+    // flipped false (on terminal failure, once the coordinator's stopRecording
+    // lands).
+
+    private func handleCompositionFailure(_ error: CompositionError) async {
+        let t = logicalElapsedSeconds()
+        let kind: String
+        let detail: String
+        switch error {
+        case .renderFailed(let underlying):
+            kind = "renderError"
+            detail = (underlying as NSError).localizedDescription
+        case .stallTimeout:
+            kind = "stallTimeout"
+            detail = "waitUntilCompleted exceeded 2s"
+        }
+        timeline.recordCompositionFailure(kind: kind, t: t, detail: detail)
+        print("[recording] Composition failure: \(kind) — \(detail). Attempting rebuild.")
+
+        let rebuilt = await composition.rebuildContext()
+        if rebuilt {
+            timeline.recordCompositionRebuilt(t: logicalElapsedSeconds())
+            print("[recording] Rebuild succeeded, recording continues")
+            return
+        }
+
+        // Rebuild failed — escalate.
+        print("[recording] Rebuild failed; escalating to terminal stop")
+        await escalateCompositionTerminalFailure(detail: "Rebuild failed after \(kind)")
+    }
+
+    private func escalateCompositionTerminalFailure(detail: String) async {
+        guard !terminalErrorFired else { return }
+        terminalErrorFired = true
+
+        timeline.recordCompositionTerminalFailure(
+            t: logicalElapsedSeconds(),
+            detail: detail
+        )
+
+        let message = "Recording stopped: the GPU became unresponsive. Your recording has been saved up to this point."
+
+        // Fire the callback on a detached task so we don't deadlock — the
+        // coordinator's response will call back into stopRecording(), which
+        // awaits cancelMetronome(), which awaits the metronome task we're
+        // currently running inside.
+        if let callback = onTerminalError {
+            Task { await callback(message) }
+        } else {
+            print("[recording] WARN: terminal composition failure but no onTerminalError callback wired")
+        }
     }
 
     // MARK: - Segment Handling

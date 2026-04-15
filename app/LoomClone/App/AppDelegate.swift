@@ -21,6 +21,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onStop: { [weak self] in self?.handleStop() }
         )
 
+        // When the compositor's terminal-error path stops a recording on its
+        // own (task-5 Phase 1), the coordinator needs to tell us to hide the
+        // floating panel — it doesn't own it.
+        coordinator.onTerminalRecordingStop = { [weak self] in
+            self?.recordingPanel?.hide()
+        }
+
         // Device enumeration + camera preview lifecycle are owned by
         // `popoverDidOpen()` / `popoverWillClose()`, so the camera hardware
         // (and the macOS green indicator) is only active when the popover is

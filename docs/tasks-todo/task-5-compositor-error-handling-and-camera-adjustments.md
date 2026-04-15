@@ -96,24 +96,18 @@ Define a `CompositionError` enum: `.renderFailed(Error)`, `.rebuildFailed`, `.no
 
 **Recovery telemetry** — add a `renderErrorCount` and `rebuildSuccessCount` to `RecordingTimeline` that captures the recording.json output. Zero-value in normal operation; non-zero values give us post-hoc visibility if we hit this path.
 
-### Testing in the harness
+### Validation strategy
 
-Before landing in the main app, use the test harness at `app/TestHarness/` to validate:
+**Default to validating in the main app, not the harness.** The 2026-04-14 task-2 close-out documented that the harness's synthetic Tier 3 runs do not reliably reproduce the failure modes the main app sees under real capture (the harness's real-capture path is itself broken — see `app/TestHarness/README.md` § "Active limitations"). Iterating on the main app is the more reliable signal here. Only fall back to the harness if a specific change starts producing main-app failures we can't diagnose in place.
 
-1. **Happy path**: the refactored render path produces the same output as the current one for a known-good 1080p recording. Byte-compare HLS segments if possible.
-2. **Induced render failure**: add a harness test that injects a `CIRenderTask` error after N frames (via a special CIContext subclass or a test hook) and confirms:
-   - The error is returned up to the metronome
-   - `rebuildContext()` is called
-   - Recording continues
-   - Output is clean
-3. **Induced terminal failure**: force two consecutive rebuild failures and confirm:
-   - Recording stops cleanly
-   - `stopRecording` completes
-   - Local files are intact
-   - An error is published to the coordinator
+What "validate in the main app" means concretely for Phase 1:
+
+1. **Happy path**: a normal 1080p recording end-to-end produces a clean HLS stream, no `kIOGPUCommandBufferCallback*` errors in `log stream`, segment cadence stable. Compare segment durations in `recording.json` against pre-change baseline.
+2. **Induced render failure**: temporarily inject a `CIRenderTask` error after N frames via a debug-only test hook in `CompositionActor` (e.g. a `#if DEBUG` injection point that returns a synthetic error from the next render). Confirm the metronome receives the failure, `rebuildContext()` runs, and recording continues with the rebuilt context. Remove the hook after validation, or guard it behind a build flag that's off by default.
+3. **Induced terminal failure**: force two consecutive rebuild failures via the same hook and confirm recording stops cleanly, `stopRecording` completes, the local safety-net files are intact, and a user-visible alert appears.
 4. **Stall detection**: inject a 3-second artificial delay in the render path and confirm the timeout fires, the result is `.stallTimeout`, and rebuild is attempted.
 
-These tests should all be in the harness, not in the main LoomClone app, so we can iterate on them without risking a hang in the real recording pipeline. Note the harness's real-capture path has a known bug (see `app/TestHarness/README.md` § "Active limitations") — keep these tests on synthetic sources, which is what they need anyway.
+The injection hooks (2/3/4) are a small amount of throwaway scaffolding — they can be deleted once the change has been exercised, or kept behind a debug flag if useful for future regression checks.
 
 ### Exit criteria
 
@@ -123,10 +117,10 @@ These tests should all be in the harness, not in the main LoomClone app, so we c
 - [ ] `RecordingActor.metronomeLoop` handles render errors by attempting rebuild, and handles rebuild failures by triggering a clean recording stop
 - [ ] A user-visible alert / notification surfaces when recording ends due to a terminal GPU error
 - [ ] Rebuild events and terminal errors are logged and appear in `recording.json` as telemetry counters
-- [ ] **Harness: induced render failure test** passes (recording continues through a single injected error, one rebuild event logged, final output is clean)
-- [ ] **Harness: induced terminal failure test** passes (two consecutive rebuild failures → clean stop, alert shown, local files intact)
-- [ ] **Harness: stall detection test** passes (artificial 3s delay → `.stallTimeout` returned → rebuild attempted)
-- [ ] No regression on the happy path — a normal 1080p recording in the main app matches Phase 2's validated output
+- [ ] **Main-app induced render failure** passes (recording continues through a single injected error, one rebuild event logged, final output is clean)
+- [ ] **Main-app induced terminal failure** passes (two consecutive rebuild failures → clean stop, alert shown, local files intact)
+- [ ] **Main-app stall detection** passes (artificial 3s delay → `.stallTimeout` returned → rebuild attempted)
+- [ ] No regression on the happy path — a normal 1080p recording matches the pre-change baseline (segment cadence, byte sizes within noise)
 - [ ] No new `log stream` GPU errors appear during a normal 1080p recording
 
 ---
@@ -175,27 +169,23 @@ Add a private method `applyAdjustments(_ image: CIImage) -> CIImage` that applie
 - `CITemperatureAndTint` with target neutral derived from the `temperature` slider
 - `CIExposureAdjust` with `inputEV` from the `brightness` slider
 
-Call this stage on the `latestCameraImage` path **only** — after receiving a camera frame and before storing it for composition. This way:
+Call this stage on the `latestCameraImage` path **only** — after receiving a camera frame and before storing it for composition. This gives adjusted frames to the composited HLS output, because that path reads from `latestCameraImage`. The raw `camera.mp4` writer consumes the original `CMSampleBuffer` from capture, not the CIImage, so it stays untouched. This fork is already structurally correct in `RecordingActor.handleCameraFrame` — just make sure the adjustment stage lives on the compositor side of it.
 
-- The composited HLS output gets adjusted frames (because it consumes from `latestCameraImage`)
-- The PiP overlay window — which reads from the same adjusted image — also gets adjusted frames
-- The raw `camera.mp4` writer — which consumes the original `CMSampleBuffer` from capture, not the CIImage — is untouched
+**The popover preview and the on-screen overlay both consume raw camera CMSampleBuffers, NOT the compositor's CIImage path.**
 
-Critically: the adjustments happen *after* capture buffers have been forked to the raw writer. This is already true structurally because the raw writer and the compositor are on different paths in `RecordingActor.handleCameraFrame` — just make sure the adjustment stage lives on the compositor side of that fork.
+This is a deliberate latency optimisation in the existing code:
 
-**Popover preview**
+- `CameraPreviewManager` runs its own lightweight `AVCaptureSession` and exposes raw `CMSampleBuffer`s via an `onSampleBuffer` callback that feeds an `AVSampleBufferDisplayLayer` (`CameraPreviewView` → `CameraPreviewLayerView`). Hardware path, no per-frame CPU work.
+- `CameraOverlayWindow` is fed via `RecordingActor.setOverlayCallback`, which fires from the camera capture queue *before* the actor hop, with the raw `CMSampleBuffer`. Same `AVSampleBufferDisplayLayer` underneath.
 
-The current `CameraPreviewManager` uses `AVCaptureVideoPreviewLayer` (hardware path, no CIImage). Options:
+Both bypass the compositor entirely. So Phase 2 needs an explicit second filter application path on the preview/overlay side. Two options:
 
-1. Switch the preview to a CIImage-based renderer that reads the adjusted image from the compositor.
-2. Apply the same adjustments via Core Animation filters (limited — CA doesn't expose temperature/tint the same way).
-3. Render a CIImage preview only when adjustments are non-default, fall back to `AVCaptureVideoPreviewLayer` otherwise.
+1. **Filter into a new sample buffer, feed that to the existing `AVSampleBufferDisplayLayer`.** Render the adjusted CIImage into a CVPixelBuffer (preview-sized for the popover; native for the overlay), wrap it back into a CMSampleBuffer, enqueue. Keeps the existing display layer architecture; adds per-frame CIContext work on the preview/overlay paths.
+2. **Do nothing for preview/overlay; only apply adjustments on the recording path.** The popover preview and on-screen overlay would show the unadjusted feed; the recording would have adjustments. Clearly wrong from a UX perspective ("what you see is what you get" is the whole point of the sliders).
 
-**Recommendation: option 1.** Simplicity and correctness outweigh the per-frame cost for a preview-sized image.
+**Recommendation: option 1, applied to BOTH the popover preview and the overlay.** Each path gets its own small CIContext (or shares one via a singleton helper) sized to its display surface. Per-frame cost is small at preview/overlay sizes (240×240 to ~360×202).
 
-**PiP overlay window during recording**
-
-`CameraOverlayWindow` already reads from the compositor's camera image path. As long as `applyAdjustments` runs before storage in `latestCameraImage`, this is free.
+A practical sub-decision: when `CameraAdjustments.isDefault == true`, fast-path back to enqueueing the original sample buffer. Avoids paying the filter cost when the user hasn't touched the sliders.
 
 **Slider UI**
 
@@ -203,7 +193,7 @@ Add to `MenuView` (popover): a collapsible "Camera Adjustments" section visible 
 
 ### Performance consideration
 
-Adding a new filter stage to the camera path has a measurable GPU cost per frame. The pipeline is now stable under the task-1 tunings (see `docs/m2-pro-video-pipeline-failures.md` § Resolution) — before adding filter work, run the change through the test harness's Tier 2/Tier 3 configs (especially 1440p with all writers active) and confirm no new GPU errors, no segment-cadence regression, no increased IOSurface pressure. If anything regresses, back off and investigate.
+Adding a new filter stage to the camera path has a measurable GPU cost per frame. The pipeline is now stable under the task-1 tunings (see `docs/m2-pro-video-pipeline-failures.md` § Resolution) — before merging, do a real recording at 1440p with both filters at non-default settings and confirm: no new `kIOGPUCommandBufferCallback*` errors in `log stream`, segment cadence in `recording.json` stays around 4 s ± 50 ms, no visible UI stutter. If anything regresses, fall back to the harness for finer-grained bisection.
 
 ### Why apply to the composited HLS and not the raw camera.mp4
 
@@ -216,24 +206,24 @@ The raw camera file is the master. The user might later decide the adjustments w
 - [ ] Popover shows two sliders + reset button when a camera is selected; hidden otherwise
 - [ ] Moving the white-balance slider visibly warms/cools the popover preview in real time
 - [ ] Moving the brightness slider visibly brightens/darkens the popover preview in real time
-- [ ] Reset button returns both sliders to default and the preview to unadjusted
+- [ ] Reset button returns both sliders to default and the preview to unadjusted (and fast-paths back to the unfiltered sample buffer)
 - [ ] During a recording with non-default adjustments, the PiP overlay window reflects the adjustments live
 - [ ] During a recording with non-default adjustments, the composited HLS stream uploaded to the server reflects the adjustments
 - [ ] During a recording with non-default adjustments, `raw/camera.mp4` on disk is **identical** to what the camera sensor produced (verify by recording with heavy adjustment and confirming the raw file looks normal)
 - [ ] Adjustments reset on app relaunch (no persistence)
-- [ ] **Harness validation**: a Tier 3 run of the harness with adjustments applied shows no new GPU errors, no segment cadence regression, and no IOSurface pressure increase compared to the baseline without adjustments
+- [ ] **Main-app validation**: a real 1440p recording with both adjustments at non-default values shows no new `kIOGPUCommandBufferCallback*` errors in `log stream` and segment cadence in `recording.json` stays around 4 s ± 50 ms
 
 ---
 
 ## Sequencing
 
 1. **Read the context** documents in the order specified in the briefing below.
-2. **Implement Phase 1** (compositor error handling). Validate in the harness before touching the main app.
-3. **Commit Phase 1**. Integrate into the main app. Run a normal 1080p recording to confirm happy path.
-4. **Implement Phase 2** (camera adjustments). Validate in the harness. Confirm no regression versus Phase 1 baseline.
-5. **Commit Phase 2**.
+2. **Implement Phase 1** (compositor error handling) directly in the main app. Validate the happy path with a normal 1080p recording, then exercise induced render / terminal / stall scenarios via the debug-only injection hooks described above. Only fall back to the harness if a problem appears that's awkward to bisect in-place.
+3. **Commit Phase 1.**
+4. **Implement Phase 2** (camera adjustments) directly in the main app. Validate as described in Phase 2's exit criteria. Same harness-as-fallback policy.
+5. **Commit Phase 2.**
 6. **Update** `docs/tasks-todo/task-0-scratchpad.md` — the "Camera Adjustments" entry (if it still exists) should be marked as done or removed.
-7. **Update** `docs/m2-pro-video-pipeline-failures.md` if any new observations come out of harness runs during this task.
+7. **Update** `docs/m2-pro-video-pipeline-failures.md` if any new observations come out of validation during this task.
 
 Each phase must leave the app in a shippable state so we can stop between phases if priorities change.
 
@@ -258,10 +248,10 @@ If running this task with a subagent, the briefing should include:
    - `app/LoomClone/App/RecordingCoordinator.swift` (touched by Phase 2 for adjustments state)
    - `app/LoomClone/UI/MenuView.swift` (touched by Phase 2 for slider UI)
 
-2. **Do not start with the main app.** Phase 1's first work should be implementing the refactored render path **in the harness** as a test configuration. Once it's validated there, bring it into the main app.
+2. **Default to validating in the main app.** The harness is a fallback for when a specific change resists in-place diagnosis — not the first stop. The 2026-04-14 task-2 close-out documented that the harness's synthetic Tier 3 runs do not reliably reproduce the failure modes the main app sees under real capture, and the harness's real-capture path itself has an unresolved delivery bug.
 
 3. **Commit in sequence**: Phase 1 lands first, validated and committed, before Phase 2 begins. Do not batch them into one PR.
 
 An example prompt for the subagent:
 
-> Implement task-5 (compositor error handling and camera adjustments) in the LoomClone codebase. Read the context files in the order specified in the briefing section. Implement Phase 1 (compositor error handling) first, validating each change in the isolation harness before touching the main app. Commit Phase 1. Then implement Phase 2 (camera adjustments), again validating in the harness. Do not modify the recording pipeline in ways that aren't covered by this task.
+> Implement task-5 (compositor error handling and camera adjustments) in the LoomClone codebase. Read the context files in the order specified in the briefing section. Implement Phase 1 (compositor error handling) first, validating in the main app via the debug injection hooks described in the doc. Commit Phase 1. Then implement Phase 2 (camera adjustments), again validating in the main app. Use the test harness only as a fallback for problems that are hard to bisect in place. Do not modify the recording pipeline in ways that aren't covered by this task.

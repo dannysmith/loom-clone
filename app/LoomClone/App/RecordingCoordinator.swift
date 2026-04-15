@@ -185,6 +185,17 @@ final class RecordingCoordinator {
     /// user can cancel mid-countdown by hitting Stop.
     private var startupTask: Task<Void, Never>?
 
+    /// Fired when the recording ends via a path that the AppDelegate didn't
+    /// trigger itself — currently just the task-5 Phase 1 terminal-error
+    /// escalation, where `handleTerminalRecordingError` stops the recording in
+    /// response to a GPU failure rather than a user click. AppDelegate sets
+    /// this to hide the floating RecordingPanel (which it owns) so the UI
+    /// doesn't get left in a zombie state.
+    ///
+    /// Not used by the normal `stopRecording()` / `cancelRecording()` flows —
+    /// AppDelegate hides the panel directly in its handlers for those.
+    var onTerminalRecordingStop: (@MainActor () -> Void)?
+
     // MARK: - Popover Lifecycle
 
     /// True while the menu-bar popover is visible. Used to gate camera-preview
@@ -321,6 +332,18 @@ final class RecordingCoordinator {
             let overlay = self.cameraOverlay
             await actor.setOverlayCallback { [overlay] sampleBuffer in
                 overlay?.enqueue(sampleBuffer)
+            }
+
+            // Wire the terminal-error callback. Fires at most once per
+            // recording, from a detached task inside the actor, when the
+            // compositor reports a failure that rebuild can't recover from
+            // (task-5 Phase 1). Hop to the main actor and run the normal
+            // stop flow plus a user-visible alert.
+            await actor.setTerminalErrorCallback { [weak self] message in
+                guard let self else { return }
+                await MainActor.run {
+                    self.handleTerminalRecordingError(message)
+                }
             }
 
             // 3. Kick off the slow setup (server session, capture hardware,
@@ -577,6 +600,71 @@ final class RecordingCoordinator {
     func retryScreenPermission() async {
         screenPermissionDenied = false
         await refreshDevices()
+    }
+
+    // MARK: - Debug Injection (task-5 Phase 1 validation)
+
+    #if DEBUG
+    func debugInjectSingleRenderError() {
+        Task { await recordingActor?.debugInjectRenderError(count: 1) }
+    }
+
+    func debugInjectStall() {
+        Task { await recordingActor?.debugInjectStall(count: 1) }
+    }
+
+    /// Injects a render error AND pre-arms two consecutive rebuild failures
+    /// so the recovery escalates to the terminal-stop path. Exercises the
+    /// end-to-end "rebuild failed → clean stop → alert" flow.
+    func debugInjectTerminalFailure() {
+        Task {
+            await recordingActor?.debugFailNextRebuilds(count: 2)
+            await recordingActor?.debugInjectRenderError(count: 1)
+        }
+    }
+    #endif
+
+    // MARK: - Terminal Recording Error
+
+    /// Invoked from `RecordingActor`'s terminal-error callback when the
+    /// compositor reports a render failure that rebuild can't recover from
+    /// (task-5 Phase 1). Runs the normal stop flow so local files are flushed
+    /// cleanly and then surfaces an alert to the user. No-op if we've already
+    /// moved out of the recording state (e.g. the user hit Stop between the
+    /// failure and the hop to main).
+    fileprivate func handleTerminalRecordingError(_ message: String) {
+        guard state == .recording || state == .paused else { return }
+
+        state = .stopped
+        stopTimer()
+        cameraOverlay?.hide()
+
+        // Tell AppDelegate to hide the floating RecordingPanel — we don't own
+        // it, and neither user-initiated stop nor user-initiated cancel ran
+        // here to do it for us.
+        onTerminalRecordingStop?()
+
+        if isPopoverOpen, let camera = selectedCamera {
+            Task { await cameraPreview.start(device: camera) }
+        }
+
+        Task { @MainActor in
+            let url = await recordingActor?.stopRecording()
+            self.lastVideoURL = url
+            self.recordingActor = nil
+
+            let alert = NSAlert()
+            alert.messageText = "Recording stopped"
+            alert.informativeText = message
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+
+            try? await Task.sleep(for: .seconds(8))
+            if self.state == .stopped {
+                self.state = .idle
+            }
+        }
     }
 
     // MARK: - Camera Overlay

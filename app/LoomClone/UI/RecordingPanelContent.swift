@@ -103,6 +103,38 @@ struct RecordingPanelContent: View {
                 .font(.system(.body, design: .monospaced))
                 .foregroundStyle(coordinator.state == .paused ? .secondary : .primary)
                 .frame(minWidth: 50, alignment: .trailing)
+
+            #if DEBUG
+            // task-5 Phase 1 validation. Compiled out of release builds.
+            // Each button flips an injection knob on CompositionActor; the
+            // next metronome tick observes the failure.
+            Divider()
+                .frame(height: 24)
+
+            Button(action: { coordinator.debugInjectSingleRenderError() }) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.body)
+                    .foregroundStyle(.yellow)
+            }
+            .buttonStyle(.plain)
+            .help("DEBUG: inject one render error (should rebuild and continue)")
+
+            Button(action: { coordinator.debugInjectStall() }) {
+                Image(systemName: "clock.badge.exclamationmark.fill")
+                    .font(.body)
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            .help("DEBUG: inject a 3s render stall")
+
+            Button(action: { coordinator.debugInjectTerminalFailure() }) {
+                Image(systemName: "xmark.octagon.fill")
+                    .font(.body)
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .help("DEBUG: inject a terminal failure (render error + 2 rebuild failures)")
+            #endif
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

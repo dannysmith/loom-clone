@@ -2,6 +2,23 @@ import CoreImage
 import CoreVideo
 import Metal
 
+/// Failure modes from the compositor's render path. `renderFailed` wraps any
+/// error CoreImage reports through `CIRenderTask.waitUntilCompleted` —
+/// typically `kIOGPUCommandBufferCallbackErrorTimeout` or the
+/// `SubmissionsIgnored` cascade (see failure mode 3 in
+/// `docs/m2-pro-video-pipeline-failures.md`). `stallTimeout` fires when the
+/// wrapper below gives up on `waitUntilCompleted` returning at all — a weaker
+/// signal than the GPU watchdog, but worth having in case the userspace
+/// watchdog is itself blocked.
+///
+/// Both cases are handled the same way by the metronome: rebuild the context
+/// and carry on. If rebuild itself fails, the metronome escalates to a clean
+/// user-visible stop.
+enum CompositionError: Error {
+    case renderFailed(Error)
+    case stallTimeout
+}
+
 actor CompositionActor {
 
     // MARK: - Configuration
@@ -14,14 +31,65 @@ actor CompositionActor {
 
     // MARK: - Core Image Pipeline
 
-    private let ciContext: CIContext
+    /// `var` rather than `let` so `rebuildContext()` can swap in a fresh
+    /// context after a GPU error poisons the underlying Metal command queue.
+    private var ciContext: CIContext
     private var outputPool: PixelBufferPool
     private var outputBounds: CGRect
+
+    /// How long we wait for a single `CIRenderTask` to report completion
+    /// before treating it as a stall. Generous versus a single frame's budget
+    /// (33 ms) but well below the ~5 s GPU watchdog threshold that WindowServer
+    /// enforces.
+    private let renderStallTimeoutSeconds: Double = 2.0
 
     // MARK: - Camera State
 
     private var latestCameraImage: CIImage?
     private var circleMask: CIImage
+
+    // MARK: - Debug Injection Hooks
+    //
+    // Main-app validation levers for task-5 Phase 1. Flip these before or
+    // during a recording to exercise the render-error / stall / rebuild-failure
+    // paths without having to hang the GPU for real. Compiled out of release
+    // builds. See task doc § "Validation strategy".
+
+    #if DEBUG
+    enum DebugInjectedFailure: Sendable {
+        case renderError
+        case stall
+    }
+
+    /// When set, the next render call returns the injected failure (and
+    /// consumes the injection so the subsequent render goes through cleanly).
+    /// A counter lets us inject N consecutive failures to exercise the
+    /// terminal-stop path.
+    private var debugInjectedFailure: DebugInjectedFailure?
+    private var debugInjectedFailureRemaining: Int = 0
+
+    /// When true, the next `rebuildContext()` call reports failure without
+    /// actually touching the context. Counter-style for parity with the
+    /// injected-failure path.
+    private var debugRebuildFailuresRemaining: Int = 0
+
+    func debugInject(failure: DebugInjectedFailure, count: Int = 1) {
+        debugInjectedFailure = failure
+        debugInjectedFailureRemaining = max(0, count)
+        print("[composition] DEBUG inject: \(failure) × \(count)")
+    }
+
+    func debugFailNextRebuilds(count: Int) {
+        debugRebuildFailuresRemaining = max(0, count)
+        print("[composition] DEBUG rebuild will fail × \(count)")
+    }
+
+    func debugClearInjections() {
+        debugInjectedFailure = nil
+        debugInjectedFailureRemaining = 0
+        debugRebuildFailuresRemaining = 0
+    }
+    #endif
 
     init() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -75,10 +143,18 @@ actor CompositionActor {
 
     // MARK: - Composition
 
+    /// Render one frame.
+    ///
+    /// Return values:
+    /// - `nil` — the source frame or output pixel buffer isn't available this
+    ///   tick. Transient condition; the metronome should just retry next tick.
+    /// - `.success` — a rendered buffer ready to hand to the writer.
+    /// - `.failure` — CoreImage reported an error (or the wait timed out).
+    ///   The metronome should rebuild the context before the next tick.
     func compositeFrame(
         screenBuffer: CVPixelBuffer?,
         mode: RecordingMode
-    ) -> CVPixelBuffer? {
+    ) async -> Result<CVPixelBuffer, CompositionError>? {
         guard let output = outputPool.createBuffer() else {
             print("[composition] Failed to create output buffer")
             return nil
@@ -110,14 +186,134 @@ actor CompositionActor {
             composited = overlay.composited(over: screenScaled)
         }
 
-        // Rendering into Rec. 709. This relies on the camera pipeline tagging
+        #if DEBUG
+        if let failure = debugInjectedFailure, debugInjectedFailureRemaining > 0 {
+            debugInjectedFailureRemaining -= 1
+            if debugInjectedFailureRemaining == 0 { debugInjectedFailure = nil }
+            switch failure {
+            case .renderError:
+                let err = NSError(
+                    domain: "LoomClone.CompositionActor.Debug",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Injected render error"]
+                )
+                return .failure(.renderFailed(err))
+            case .stall:
+                // Simulate the stall timeout by sleeping past the wait budget
+                // and returning the same outcome the real path would.
+                try? await Task.sleep(for: .seconds(renderStallTimeoutSeconds + 1.0))
+                return .failure(.stallTimeout)
+            }
+        }
+        #endif
+
+        // Render into Rec. 709. This relies on the camera pipeline tagging
         // every incoming pixel buffer with matching Rec. 709 colour metadata
         // (`CameraCaptureManager.captureOutput`, task-0A Phase 1). Without
         // those tags CIContext can't know the source colour space and falls
         // back to an expensive multi-stage conversion chain on every frame.
-        let colorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
-        ciContext.render(composited, to: output, bounds: outputBounds, colorSpace: colorSpace)
-        return output
+        let destination = CIRenderDestination(pixelBuffer: output)
+        destination.colorSpace = CGColorSpace(name: CGColorSpace.itur_709)
+
+        // Use the task-based render API so we can see errors and wrap the
+        // wait in a timeout. The void-return `render(to:bounds:colorSpace:)`
+        // we used previously had no feedback channel at all — a stuck
+        // command buffer silently hung the metronome until the GPU watchdog
+        // cleared it.
+        let renderTask: CIRenderTask
+        do {
+            renderTask = try ciContext.startTask(toRender: composited, to: destination)
+        } catch {
+            return .failure(.renderFailed(error))
+        }
+
+        return await waitForRenderTask(renderTask, producing: output)
+    }
+
+    /// Race `waitUntilCompleted` on a detached task against a sleep. First to
+    /// finish wins. Returns the pixel buffer on success. The underlying
+    /// CIRenderTask is not cancellable — if we time out, the render may still
+    /// land, but the metronome treats this as a stall and rebuilds the context
+    /// so any in-flight work against the old command queue is orphaned cleanly.
+    private func waitForRenderTask(
+        _ task: CIRenderTask,
+        producing output: CVPixelBuffer
+    ) async -> Result<CVPixelBuffer, CompositionError> {
+        // CIRenderTask is an Objective-C class and isn't Sendable, but its
+        // `waitUntilCompleted` is thread-safe. Wrap it for the detached task.
+        struct UnsafeRenderTask: @unchecked Sendable {
+            let task: CIRenderTask
+        }
+        let wrapped = UnsafeRenderTask(task: task)
+        let timeout = renderStallTimeoutSeconds
+
+        enum Outcome: Sendable {
+            case completed
+            case failed(Error)
+            case timedOut
+        }
+
+        return await withTaskGroup(of: Outcome.self) { group in
+            group.addTask {
+                do {
+                    _ = try await Task.detached(priority: .userInitiated) {
+                        try wrapped.task.waitUntilCompleted()
+                    }.value
+                    return .completed
+                } catch {
+                    return .failed(error)
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+                return .timedOut
+            }
+
+            let first = await group.next() ?? .timedOut
+            group.cancelAll()
+
+            switch first {
+            case .completed:
+                return .success(output)
+            case .failed(let err):
+                return .failure(.renderFailed(err))
+            case .timedOut:
+                return .failure(.stallTimeout)
+            }
+        }
+    }
+
+    // MARK: - Rebuild
+
+    /// Tear down the current `CIContext` + `MTLCommandQueue` and rebuild them.
+    /// Called by `RecordingActor` when `compositeFrame` reports a render
+    /// failure or stall — a fresh command queue shakes off the "poisoned"
+    /// state that `kIOGPUCommandBufferCallbackErrorSubmissionsIgnored`
+    /// leaves behind on the old one.
+    ///
+    /// Returns `false` if Metal itself is unavailable — at that point the
+    /// metronome escalates to a clean terminal stop.
+    func rebuildContext() -> Bool {
+        #if DEBUG
+        if debugRebuildFailuresRemaining > 0 {
+            debugRebuildFailuresRemaining -= 1
+            print("[composition] DEBUG rebuild failure injected")
+            return false
+        }
+        #endif
+
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue() else {
+            print("[composition] Rebuild failed: MTLCreateSystemDefaultDevice / makeCommandQueue returned nil")
+            return false
+        }
+
+        ciContext = CIContext(
+            mtlCommandQueue: queue,
+            options: [.cacheIntermediates: false]
+        )
+        print("[composition] Rebuilt CIContext and MTLCommandQueue")
+        return true
     }
 
     // MARK: - Private Helpers

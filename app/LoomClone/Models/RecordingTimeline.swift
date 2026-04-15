@@ -25,8 +25,22 @@ struct RecordingTimeline: Encodable {
     var preset: PresetInfo
     var encoder: EncoderInfo
     var rawStreams: RawStreams?
+    var compositionStats: CompositionStats?
     var segments: [SegmentEntry]
     var events: [Event]
+
+    /// Non-zero values here are a hint that the GPU path wobbled during the
+    /// recording — either a CoreImage render returned an error (typically
+    /// `kIOGPUCommandBufferCallbackErrorTimeout` or its `SubmissionsIgnored`
+    /// cascade, see failure mode 1/3 in `m2-pro-video-pipeline-failures.md`)
+    /// or our own wait-timeout fired. Present only when at least one of the
+    /// counters is non-zero; absent in healthy recordings.
+    struct CompositionStats: Encodable {
+        let renderErrorCount: Int
+        let stallTimeoutCount: Int
+        let rebuildSuccessCount: Int
+        let terminalFailure: Bool
+    }
 
     /// Local-only high-quality master files written alongside the HLS
     /// segments. Each entry is present only if its source was actually
@@ -174,6 +188,10 @@ final class RecordingTimelineBuilder {
     private var rawScreen: RecordingTimeline.RawStreams.VideoStream?
     private var rawCamera: RecordingTimeline.RawStreams.VideoStream?
     private var rawAudio: RecordingTimeline.RawStreams.AudioStream?
+    private var renderErrorCount: Int = 0
+    private var stallTimeoutCount: Int = 0
+    private var rebuildSuccessCount: Int = 0
+    private var terminalCompositionFailure: Bool = false
     private var segments: [RecordingTimeline.SegmentEntry] = []
     private var events: [RecordingTimeline.Event] = []
 
@@ -322,6 +340,40 @@ final class RecordingTimelineBuilder {
         appendEvent(t: t, kind: "error", data: ["message": .string(message)])
     }
 
+    /// Called by RecordingActor when the compositor reports a render failure
+    /// or a stall. `kind` is `"renderError"` or `"stallTimeout"`. Emits an
+    /// event and increments the matching counter.
+    func recordCompositionFailure(kind: String, t: Double, detail: String?) {
+        switch kind {
+        case "renderError": renderErrorCount += 1
+        case "stallTimeout": stallTimeoutCount += 1
+        default: break
+        }
+        var data: [String: JSONValue] = ["kind": .string(kind)]
+        if let detail { data["detail"] = .string(detail) }
+        appendEvent(t: t, kind: "composition.failed", data: data)
+    }
+
+    /// Called after a successful `CompositionActor.rebuildContext()`.
+    func recordCompositionRebuilt(t: Double) {
+        rebuildSuccessCount += 1
+        appendEvent(t: t, kind: "composition.rebuilt", data: nil)
+    }
+
+    /// Called once if rebuild itself fails and the recording escalates to a
+    /// clean terminal stop. The `recording.stopped` event still fires at the
+    /// usual stop-time path.
+    func recordCompositionTerminalFailure(t: Double, detail: String?) {
+        terminalCompositionFailure = true
+        var data: [String: JSONValue] = [:]
+        if let detail { data["detail"] = .string(detail) }
+        appendEvent(
+            t: t,
+            kind: "composition.terminalFailure",
+            data: data.isEmpty ? nil : data
+        )
+    }
+
     /// Seconds since t=0 (the commit anchor). Safe to call before the anchor
     /// is set — returns 0.
     func now() -> Double {
@@ -371,12 +423,29 @@ final class RecordingTimelineBuilder {
             rawStreams: (rawScreen == nil && rawCamera == nil && rawAudio == nil)
                 ? nil
                 : .init(screen: rawScreen, camera: rawCamera, audio: rawAudio),
+            compositionStats: compositionStatsIfInteresting(),
             segments: segments,
             events: sortedEvents
         )
     }
 
     // MARK: - Internals
+
+    /// Only emit compositionStats when something worth recording happened.
+    /// Healthy recordings carry no counters — the field is absent rather than
+    /// zero-valued, so the common-case JSON stays small.
+    private func compositionStatsIfInteresting() -> RecordingTimeline.CompositionStats? {
+        guard renderErrorCount > 0
+                || stallTimeoutCount > 0
+                || rebuildSuccessCount > 0
+                || terminalCompositionFailure else { return nil }
+        return .init(
+            renderErrorCount: renderErrorCount,
+            stallTimeoutCount: stallTimeoutCount,
+            rebuildSuccessCount: rebuildSuccessCount,
+            terminalFailure: terminalCompositionFailure
+        )
+    }
 
     private func appendEvent(t: Double, kind: String, data: [String: JSONValue]?) {
         events.append(

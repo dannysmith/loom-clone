@@ -10,6 +10,7 @@ import {
   DATA_DIR,
 } from "../lib/store";
 import { buildPlaylist, writePlaylist } from "../lib/playlist";
+import { scheduleDerivatives } from "../lib/derivatives";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.
@@ -114,6 +115,13 @@ videos.post("/:id/complete", async (c) => {
 
   const playlist = await buildPlaylist(video);
   await writePlaylist(id, playlist);
+
+  // Kick off derivative generation (source.mp4, thumbnail.jpg) in the
+  // background. Fire-and-forget — the client's stop flow never waits on
+  // ffmpeg. A healed recording re-hitting /complete regenerates atomically.
+  if (nextStatus === "complete") {
+    scheduleDerivatives(id);
+  }
 
   const url = `/v/${video.slug}`;
   console.log(

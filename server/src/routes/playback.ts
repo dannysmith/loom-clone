@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { getVideoBySlug } from "../lib/store";
+import { existsSync } from "fs";
+import { join } from "path";
+import { DATA_DIR, getVideoBySlug } from "../lib/store";
 
 const playback = new Hono();
 
@@ -7,6 +9,19 @@ playback.get("/v/:slug", (c) => {
   const { slug } = c.req.param();
   const video = getVideoBySlug(slug);
   if (!video) return c.text("Not found", 404);
+
+  // Prefer the single-file MP4 when the derivative exists; otherwise fall
+  // back to the HLS playlist. Checking on each request means a healing
+  // recording transparently upgrades from HLS to MP4 on the next page load
+  // without any client state.
+  const mp4Path = join(DATA_DIR, video.id, "derivatives", "source.mp4");
+  const thumbPath = join(DATA_DIR, video.id, "derivatives", "thumbnail.jpg");
+  const src = existsSync(mp4Path)
+    ? `/data/${video.id}/derivatives/source.mp4`
+    : `/data/${video.id}/stream.m3u8`;
+  const poster = existsSync(thumbPath)
+    ? `/data/${video.id}/derivatives/thumbnail.jpg`
+    : null;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -24,7 +39,7 @@ playback.get("/v/:slug", (c) => {
   </style>
 </head>
 <body>
-  <media-player src="/data/${video.id}/stream.m3u8" playsinline>
+  <media-player src="${src}"${poster ? ` poster="${poster}"` : ""} playsinline>
     <media-provider></media-provider>
     <media-video-layout></media-video-layout>
   </media-player>

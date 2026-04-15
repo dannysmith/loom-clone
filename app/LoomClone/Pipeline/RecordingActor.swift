@@ -985,26 +985,6 @@ actor RecordingActor {
         return true
     }
 
-    // MARK: - Debug Injection Forwarding
-    //
-    // task-5 Phase 1 validation hooks. Exposed on RecordingActor so the
-    // coordinator can poke them through the normal pipeline without needing
-    // a direct reference to CompositionActor. Compiled out of release builds.
-
-    #if DEBUG
-    func debugInjectRenderError(count: Int = 1) async {
-        await composition.debugInject(failure: .renderError, count: count)
-    }
-
-    func debugInjectStall(count: Int = 1) async {
-        await composition.debugInject(failure: .stall, count: count)
-    }
-
-    func debugFailNextRebuilds(count: Int) async {
-        await composition.debugFailNextRebuilds(count: count)
-    }
-    #endif
-
     // MARK: - Composition Failure Recovery
     //
     // task-5 Phase 1: when `CompositionActor.compositeFrame` surfaces a render

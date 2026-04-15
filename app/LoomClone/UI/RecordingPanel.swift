@@ -31,17 +31,8 @@ final class RecordingPanel {
     }
 
     private func createPanel() {
-        // Width accommodates the three optional DEBUG buttons at the right
-        // edge (compiled out of release builds). The panel auto-centres so the
-        // extra width just expands symmetrically — harmless when the DEBUG
-        // buttons are absent.
-        #if DEBUG
-        let width: CGFloat = 440
-        #else
-        let width: CGFloat = 320
-        #endif
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 56),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 56),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: true

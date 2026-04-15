@@ -602,28 +602,6 @@ final class RecordingCoordinator {
         await refreshDevices()
     }
 
-    // MARK: - Debug Injection (task-5 Phase 1 validation)
-
-    #if DEBUG
-    func debugInjectSingleRenderError() {
-        Task { await recordingActor?.debugInjectRenderError(count: 1) }
-    }
-
-    func debugInjectStall() {
-        Task { await recordingActor?.debugInjectStall(count: 1) }
-    }
-
-    /// Injects a render error AND pre-arms two consecutive rebuild failures
-    /// so the recovery escalates to the terminal-stop path. Exercises the
-    /// end-to-end "rebuild failed → clean stop → alert" flow.
-    func debugInjectTerminalFailure() {
-        Task {
-            await recordingActor?.debugFailNextRebuilds(count: 2)
-            await recordingActor?.debugInjectRenderError(count: 1)
-        }
-    }
-    #endif
-
     // MARK: - Terminal Recording Error
 
     /// Invoked from `RecordingActor`'s terminal-error callback when the

@@ -48,49 +48,6 @@ actor CompositionActor {
     private var latestCameraImage: CIImage?
     private var circleMask: CIImage
 
-    // MARK: - Debug Injection Hooks
-    //
-    // Main-app validation levers for task-5 Phase 1. Flip these before or
-    // during a recording to exercise the render-error / stall / rebuild-failure
-    // paths without having to hang the GPU for real. Compiled out of release
-    // builds. See task doc § "Validation strategy".
-
-    #if DEBUG
-    enum DebugInjectedFailure: Sendable {
-        case renderError
-        case stall
-    }
-
-    /// When set, the next render call returns the injected failure (and
-    /// consumes the injection so the subsequent render goes through cleanly).
-    /// A counter lets us inject N consecutive failures to exercise the
-    /// terminal-stop path.
-    private var debugInjectedFailure: DebugInjectedFailure?
-    private var debugInjectedFailureRemaining: Int = 0
-
-    /// When true, the next `rebuildContext()` call reports failure without
-    /// actually touching the context. Counter-style for parity with the
-    /// injected-failure path.
-    private var debugRebuildFailuresRemaining: Int = 0
-
-    func debugInject(failure: DebugInjectedFailure, count: Int = 1) {
-        debugInjectedFailure = failure
-        debugInjectedFailureRemaining = max(0, count)
-        print("[composition] DEBUG inject: \(failure) × \(count)")
-    }
-
-    func debugFailNextRebuilds(count: Int) {
-        debugRebuildFailuresRemaining = max(0, count)
-        print("[composition] DEBUG rebuild will fail × \(count)")
-    }
-
-    func debugClearInjections() {
-        debugInjectedFailure = nil
-        debugInjectedFailureRemaining = 0
-        debugRebuildFailuresRemaining = 0
-    }
-    #endif
-
     init() {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else {
@@ -186,27 +143,6 @@ actor CompositionActor {
             composited = overlay.composited(over: screenScaled)
         }
 
-        #if DEBUG
-        if let failure = debugInjectedFailure, debugInjectedFailureRemaining > 0 {
-            debugInjectedFailureRemaining -= 1
-            if debugInjectedFailureRemaining == 0 { debugInjectedFailure = nil }
-            switch failure {
-            case .renderError:
-                let err = NSError(
-                    domain: "LoomClone.CompositionActor.Debug",
-                    code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Injected render error"]
-                )
-                return .failure(.renderFailed(err))
-            case .stall:
-                // Simulate the stall timeout by sleeping past the wait budget
-                // and returning the same outcome the real path would.
-                try? await Task.sleep(for: .seconds(renderStallTimeoutSeconds + 1.0))
-                return .failure(.stallTimeout)
-            }
-        }
-        #endif
-
         // Render into Rec. 709. This relies on the camera pipeline tagging
         // every incoming pixel buffer with matching Rec. 709 colour metadata
         // (`CameraCaptureManager.captureOutput`, task-0A Phase 1). Without
@@ -294,14 +230,6 @@ actor CompositionActor {
     /// Returns `false` if Metal itself is unavailable — at that point the
     /// metronome escalates to a clean terminal stop.
     func rebuildContext() -> Bool {
-        #if DEBUG
-        if debugRebuildFailuresRemaining > 0 {
-            debugRebuildFailuresRemaining -= 1
-            print("[composition] DEBUG rebuild failure injected")
-            return false
-        }
-        #endif
-
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else {
             print("[composition] Rebuild failed: MTLCreateSystemDefaultDevice / makeCommandQueue returned nil")

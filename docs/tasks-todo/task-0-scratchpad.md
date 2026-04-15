@@ -4,11 +4,12 @@ Note: This scratchpad is always "task 0", although the tasks below are not necec
 
 ## Done
 
+aaa
 
 ## To Do
 
+- [ ] Audio/video sync issue - Audio is consistently about a quarter of a second ahead of the camera/screen in the composited/streamed up videos. This is true even when I have no display selected and so am only writing/streaming the camera and audio output. I would like to see if we can identify the cause of this. Because the obvious fix is simply to make like an ad an adjustment to the how those things are lined up. and then tweak that until it looks right. But obviously that doesn't seem like a brilliant solution. because then we've got a magic number that's just offsetting the audio by a certain amount. However, if that is the best thing to do, we can absolutely do that. But let's first look to see if we can find what we think is the cause or potential causes for this. 
 - [ ] Audio Input indicator for selected microphone in panel
-- [ ] Audio/video sync issue
 
 
 ## Future Ideas

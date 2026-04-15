@@ -34,6 +34,8 @@ Two principles drive the design:
 | `segments.json` | On each media-segment PUT | Per-filename duration sidecar, used by the playlist builder |
 | `stream.m3u8` | After each PUT and after `/complete` | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename |
 | `recording.json` | On `/complete` (and re-`/complete` after heal) | Server-side copy of the client's timeline, authoritative post-upload |
+| `derivatives/source.mp4` | Background task after each `complete` transition | Single-file MP4 stitched from the HLS segments with `-c copy` — the "download me" file, and what the viewer prefers over HLS when present |
+| `derivatives/thumbnail.jpg` | Same pass as `source.mp4` | Single-frame JPEG (~1280px wide) sampled at `min(1s, duration/2)`. Used as the viewer page poster when present |
 
 ## End-to-end flow of a recording
 
@@ -54,6 +56,7 @@ Two principles drive the design:
    - Sets `status: "complete"` if nothing is missing, `"healing"` otherwise.
    - Persists the received timeline as server-side `recording.json`.
    - Rebuilds the playlist.
+   - If the transition lands on `status: "complete"`, schedules derivative generation (`source.mp4` + `thumbnail.jpg`) as a background task. Fire-and-forget — the response is not delayed. See [Derivatives](#derivatives).
 5. **URL on clipboard.** Client receives the URL. The UI copies it to the clipboard ~1 second after stop — the user is done.
 6. **Heal (if needed).** If `missing` was non-empty, the client hands off to `HealAgent`. See below.
 
@@ -84,6 +87,25 @@ For each video being healed:
    - On any other failure, log and move on — the recording will be picked up again at next startup.
 5. **Final `/complete`.** Re-POST with the updated timeline so the server's `recording.json` mirrors the healed local state. Server transitions `status: "healing"` → `"complete"` when there's nothing missing.
 
+## Derivatives
+
+After every transition to `status: "complete"`, the server generates a set of derivative files in `data/<id>/derivatives/`. Today that's `source.mp4` (HLS segments stitched via `ffmpeg -c copy` with `+faststart`) and `thumbnail.jpg` (single frame ~1s in, scaled to 1280px wide). Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.
+
+A few properties worth keeping in mind:
+
+- **Disk is truth.** Readiness of a derivative is the presence of its final file. No new fields in `video.json`.
+- **Atomic writes.** Each recipe writes `<filename>.tmp` and renames to `<filename>` on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written final.
+- **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one ffmpeg run per recipe.
+- **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites the previous derivatives atomically.
+- **Failures are independent.** If `source.mp4` fails, `thumbnail.jpg` still runs against whatever `source.mp4` exists (or fails quietly). Failures never surface to `/complete` and never invalidate the m3u8.
+- **Recipe list is the extension point.** Future variants (`1080p.mp4`, `720p.mp4`, adaptive-bitrate master playlist) append to the recipe array in `server/src/lib/derivatives.ts`. No orchestrator changes, no directory reshuffling.
+
+## Viewer
+
+The playback page at `/v/:slug` checks `data/<id>/derivatives/source.mp4` on each request. If present, the Vidstack `<media-player>` `src` is the MP4 and the `poster` attribute is set to `thumbnail.jpg` when that's also present. If absent, the page falls back to the HLS playlist with no poster.
+
+The check is per-request with no state tracked client-side: a freshly-stopped recording serves HLS for a second or two, then upgrades to MP4 on the next page load. A recording still healing stays on HLS for as long as healing takes and upgrades once derivatives land.
+
 ## Corner cases worth knowing about
 
 - **`.orphaned` sidecar.** Only written when the server returns 404 — meaning the video record was deleted upstream (e.g. user cancelled, someone pruned `data/`). Prevents HealAgent from retrying a ghost forever. If a recording *should* be healed and has `.orphaned`, delete the sidecar by hand.
@@ -101,3 +123,5 @@ For each video being healed:
 - Segment / complete / delete routes: `server/src/routes/videos.ts`
 - Video record persistence: `server/src/lib/store.ts`
 - Playlist builder: `server/src/lib/playlist.ts`
+- Derivative generation (recipes, promise cache, ffmpeg): `server/src/lib/derivatives.ts`
+- Viewer page (MP4-vs-HLS selection): `server/src/routes/playback.ts`

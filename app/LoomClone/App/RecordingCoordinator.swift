@@ -73,7 +73,24 @@ final class RecordingCoordinator {
             }
         }
     }
-    var selectedMicrophone: AVCaptureDevice?
+    var selectedMicrophone: AVCaptureDevice? {
+        didSet {
+            // Mirror the camera-preview pattern: only act if a preview is
+            // already running (or the user just cleared the selection). The
+            // popover-lifecycle path in `updatePreviewsForCurrentState()` owns
+            // starting the preview, so the mic hardware (and macOS's orange
+            // indicator) is only live while the popover is open.
+            guard microphonePreview.isActive || selectedMicrophone == nil else { return }
+            let mic = selectedMicrophone
+            Task { @MainActor in
+                if let mic {
+                    await microphonePreview.start(device: mic)
+                } else {
+                    await microphonePreview.stop()
+                }
+            }
+        }
+    }
 
     /// If `mode` is no longer in `availableModes` (because a source went
     /// away), pick the first available mode. If none are available, leave
@@ -121,6 +138,7 @@ final class RecordingCoordinator {
 
     let cameraPreview = CameraPreviewManager()
     let screenPreview = ScreenPreviewManager()
+    let microphonePreview = MicrophonePreviewManager()
     private var cameraOverlay: CameraOverlayWindow?
 
     // MARK: - Camera Adjustments
@@ -280,6 +298,7 @@ final class RecordingCoordinator {
         if state == .idle {
             Task { @MainActor in
                 await cameraPreview.stop()
+                await microphonePreview.stop()
             }
             screenPreview.stop()
         }
@@ -307,6 +326,15 @@ final class RecordingCoordinator {
             screenPreview.start(display: display)
         } else {
             screenPreview.stop()
+        }
+
+        // Microphone preview: drives the input-level meter. Runs whenever a
+        // mic is selected and the popover is open — independent of mode.
+        let wantsMic = idleInPopover && selectedMicrophone != nil
+        if wantsMic, let mic = selectedMicrophone {
+            Task { @MainActor in await microphonePreview.start(device: mic) }
+        } else {
+            Task { @MainActor in await microphonePreview.stop() }
         }
     }
 
@@ -349,8 +377,10 @@ final class RecordingCoordinator {
             // 1. Stop the previews. Camera preview must be AWAITED — the
             // recording session can't start until CMIO has fully released
             // the device. Screen preview is a fire-and-forget snapshot task,
-            // just cancel it.
+            // just cancel it. Mic preview is awaited so the recording path
+            // can take ownership of the audio device cleanly.
             await cameraPreview.stop()
+            await microphonePreview.stop()
             screenPreview.stop()
 
             // 2. Wire the overlay frame callback before starting captures.
@@ -451,6 +481,9 @@ final class RecordingCoordinator {
         if isPopoverOpen, let camera = selectedCamera {
             Task { await cameraPreview.start(device: camera) }
         }
+        if isPopoverOpen, let mic = selectedMicrophone {
+            Task { await microphonePreview.start(device: mic) }
+        }
     }
 
     func stopRecording() {
@@ -471,6 +504,9 @@ final class RecordingCoordinator {
         // usually the popover has been closed since before recording started).
         if isPopoverOpen, let camera = selectedCamera {
             Task { await cameraPreview.start(device: camera) }
+        }
+        if isPopoverOpen, let mic = selectedMicrophone {
+            Task { await microphonePreview.start(device: mic) }
         }
 
         Task {

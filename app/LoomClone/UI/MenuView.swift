@@ -95,6 +95,13 @@ struct MenuView: View {
                 previewArea
             }
 
+            // Mic input-level meter. Only when a microphone is selected —
+            // otherwise there's nothing for it to show, and the capture
+            // session wouldn't be running anyway.
+            if coordinator.selectedMicrophone != nil && coordinator.state == .idle {
+                AudioMeterView(manager: coordinator.microphonePreview)
+            }
+
             Divider()
 
             // Camera adjustments. Only shown when a camera is selected — the

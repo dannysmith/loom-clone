@@ -42,9 +42,9 @@ Two principles drive the design:
    - Client writes it to the local recordings dir as a safety net.
    - Client PUTs it to `/api/videos/<id>/segments/<filename>` with an `x-segment-duration` header.
    - Server writes the bytes, updates the durations sidecar, rebuilds the playlist. Idempotent — re-PUTting the same filename is safe.
-   - If the PUT fails, the client retries 3 times with linear backoff (~6s total tolerance today; Phase 3 will replace this with unbounded reachability-gated backoff). After that the segment is "dropped" for the live upload — but the local copy is intact.
+   - If the PUT fails, the client retries with exponential backoff (1s → 2s → 4s → 8s → 16s → 30s, then 30s indefinitely). No hard retry cap while the recording is active — the client keeps trying until it succeeds or stop-flow cancellation fires. A `ReachabilityMonitor` (backed by `NWPathMonitor`) pauses attempts while the network path reports `.unsatisfied`, so a Wi-Fi drop doesn't burn retry budget on attempts that can't plausibly succeed.
 3. **Stop.** User hits stop. Client:
-   - Finishes the writer and drains the upload queue (no more live PUTs after this line).
+   - Finishes the writer and waits up to 10 seconds for the upload queue to drain. Anything still pending after that window is cancelled and left on local disk for the heal path — the stop flow never hangs on a long outage.
    - Snapshots the timeline and writes `recording.json` locally.
    - POSTs `/api/videos/<id>/complete` with the timeline in the body.
 4. **Complete & diff.** Server:

@@ -3,14 +3,21 @@ import Foundation
 actor UploadActor {
 
     private let serverBaseURL: String
+    private let reachability: ReachabilityMonitor
     private(set) var videoId: String?
     private(set) var slug: String?
     private var pendingSegments: [VideoSegment] = []
-    private var isUploading = false
 
-    /// Fired after each segment upload attempt finishes (success or final
-    /// failure). Used by RecordingActor to fold results into the timeline.
-    /// `error` is nil on success.
+    /// The queue-processing Task. Non-nil while segments are being uploaded
+    /// or waiting on reachability. Held as a handle so the stop flow can
+    /// cancel outstanding work after its grace window expires.
+    private var queueTask: Task<Void, Never>?
+
+    /// Fired after each segment upload that reaches a terminal outcome.
+    /// Success paths always fire. Failure paths fire only for
+    /// non-retryable errors (local file missing, etc.) — network failures
+    /// retry forever until either success or the queue task is cancelled,
+    /// in which case no callback fires and the segment is left for heal.
     private var onUploadResult: (@Sendable (_ filename: String, _ success: Bool, _ error: String?) -> Void)?
 
     func setOnUploadResult(
@@ -21,6 +28,21 @@ actor UploadActor {
 
     init(serverBaseURL: String = "http://localhost:3000") {
         self.serverBaseURL = serverBaseURL
+        self.reachability = ReachabilityMonitor()
+    }
+
+    // MARK: - Read-only status (plumbing for future UI)
+
+    /// True if the network path is currently satisfied. Reflects only
+    /// physical reachability, not server availability.
+    func isReachable() -> Bool {
+        reachability.isOnline
+    }
+
+    /// True if the queue currently has work — either segments pending or
+    /// an in-flight upload.
+    func hasPendingUploads() -> Bool {
+        !pendingSegments.isEmpty || queueTask != nil
     }
 
     // MARK: - Session Management
@@ -49,63 +71,119 @@ actor UploadActor {
 
     func enqueue(_ segment: VideoSegment) {
         pendingSegments.append(segment)
-        if !isUploading {
-            Task { await processQueue() }
+        if queueTask == nil {
+            queueTask = Task { await processQueue() }
         }
     }
 
     private func processQueue() async {
-        isUploading = true
-
         while !pendingSegments.isEmpty {
+            if Task.isCancelled { break }
             let segment = pendingSegments.removeFirst()
             await uploadSegment(segment)
         }
-
-        isUploading = false
+        queueTask = nil
     }
 
-    private func uploadSegment(_ segment: VideoSegment, attempt: Int = 1) async {
+    /// Upload a single segment with unbounded exponential backoff (capped at
+    /// 30s between attempts) and a reachability gate. Returns when the
+    /// upload succeeds, when the local file can't be read, or when the
+    /// encompassing queue task is cancelled.
+    private func uploadSegment(_ segment: VideoSegment) async {
         guard let videoId else {
             print("[upload] No video session — dropping segment \(segment.filename)")
             onUploadResult?(segment.filename, false, "no session")
             return
         }
 
-        let url = URL(string: "\(serverBaseURL)/api/videos/\(videoId)/segments/\(segment.filename)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.setValue(String(segment.duration), forHTTPHeaderField: "x-segment-duration")
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
 
-        do {
-            let (_, response) = try await URLSession.shared.upload(for: request, from: segment.data)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+            // Reachability gate: don't burn retries on a destination we
+            // can't plausibly reach. Poll rather than block indefinitely so
+            // cancellation propagates cleanly.
+            while !reachability.isOnline {
+                if Task.isCancelled { return }
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return
+                }
             }
-            print("[upload] Uploaded \(segment.filename) (\(segment.data.count) bytes)")
-            onUploadResult?(segment.filename, true, nil)
-        } catch {
-            if attempt < 3 {
-                print("[upload] Retry \(attempt) for \(segment.filename): \(error)")
-                try? await Task.sleep(for: .seconds(Double(attempt)))
-                await uploadSegment(segment, attempt: attempt + 1)
-            } else {
-                print("[upload] Failed to upload \(segment.filename) after 3 attempts: \(error)")
-                onUploadResult?(segment.filename, false, "\(error)")
+
+            // Load bytes from local disk on each attempt. Segments that
+            // queue up during a long outage don't retain payloads in memory.
+            let data: Data
+            do {
+                data = try Data(contentsOf: segment.localURL)
+            } catch {
+                print("[upload] Cannot read \(segment.filename) from \(segment.localURL.path): \(error)")
+                onUploadResult?(segment.filename, false, "local read failed: \(error)")
+                return
+            }
+
+            let url = URL(string: "\(serverBaseURL)/api/videos/\(videoId)/segments/\(segment.filename)")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "PUT"
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            request.setValue(String(segment.duration), forHTTPHeaderField: "x-segment-duration")
+
+            do {
+                let (_, response) = try await URLSession.shared.upload(for: request, from: data)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                }
+                print("[upload] Uploaded \(segment.filename) (\(data.count) bytes)")
+                onUploadResult?(segment.filename, true, nil)
+                return
+            } catch {
+                // Cooperative cancellation from the stop-flow grace timeout
+                // surfaces as CancellationError here. Leave the segment for
+                // heal to pick up rather than logging as a failure.
+                if Task.isCancelled { return }
+
+                let delay = min(30.0, pow(2.0, Double(attempt - 1)))
+                print("[upload] Retry for \(segment.filename) in \(Int(delay))s (attempt \(attempt)): \(error)")
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
             }
         }
     }
 
-    // MARK: - Complete
+    // MARK: - Drain / Complete
 
     /// Block until every enqueued segment has finished uploading (success or
-    /// final failure). Call this before building the timeline snapshot so
-    /// that upload-result callbacks have had a chance to fold every segment's
-    /// outcome into the builder.
+    /// non-retryable failure). No timeout — waits forever. Use only when you
+    /// have a reason to be certain the queue will drain (e.g. after the user
+    /// stops and network is healthy).
     func drainQueue() async {
-        while isUploading || !pendingSegments.isEmpty {
+        while let task = queueTask {
+            _ = await task.value
+            // Re-check: a post-cancellation enqueue could spawn a new task.
+            if queueTask == nil { break }
+        }
+    }
+
+    /// Drain variant used by the stop flow. Waits up to `timeoutSeconds` for
+    /// the queue to empty naturally; if it doesn't, cancels the queue task so
+    /// any pending segments are released and returns. Cancelled segments are
+    /// left on local disk for Phase 2 healing to reconcile.
+    func drainQueue(timeoutSeconds: Double) async {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while queueTask != nil, Date() < deadline {
             try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        if let task = queueTask {
+            print("[upload] Drain timeout after \(Int(timeoutSeconds))s — cancelling queue, \(pendingSegments.count) segment(s) left for heal")
+            task.cancel()
+            _ = await task.value
+            pendingSegments.removeAll()
+            queueTask = nil
         }
     }
 
@@ -114,18 +192,11 @@ actor UploadActor {
         let missing: [String]
     }
 
-    /// Signal recording complete. Assumes `drainQueue()` has already been
-    /// awaited so all uploads are accounted for. If `timeline` is non-nil
-    /// it's sent as the JSON body under a `timeline` key — the server
-    /// persists it alongside the segments and uses it to diff expected vs
-    /// on-disk segments. The response's `missing` is the gap the caller
-    /// should heal in the background; empty means fully converged.
-    ///
-    /// Safe to call repeatedly — each call re-diffs server-side.
+    /// Signal recording complete. Assumes the caller has already drained
+    /// (or timed out) the upload queue. Sends the timeline JSON so the server
+    /// can diff expected vs on-disk and return any `missing` segments.
+    /// Idempotent — safe to call repeatedly as heal progresses.
     func complete(timeline: Data? = nil) async throws -> CompleteResult {
-        // Belt-and-braces: drain again in case anything slipped in.
-        await drainQueue()
-
         guard let videoId else {
             throw UploadError.noSession
         }
@@ -161,6 +232,9 @@ actor UploadActor {
     /// Abandon the recording: drop any pending segments and tell the server
     /// to delete the video. Safe to call even if no session was created.
     func cancel() async {
+        queueTask?.cancel()
+        _ = await queueTask?.value
+        queueTask = nil
         pendingSegments.removeAll()
 
         guard let videoId else { return }

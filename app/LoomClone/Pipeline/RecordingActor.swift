@@ -300,8 +300,8 @@ actor RecordingActor {
         // `writer.finish()` can wait for every trailing segment to be
         // fully recorded in the timeline and enqueued for upload before
         // it returns. This is what prevents the stop-flow race.
-        await writer.setOnSegmentReady { [weak self] segment in
-            await self?.handleSegment(segment)
+        await writer.setOnSegmentReady { [weak self] emission in
+            await self?.handleSegment(emission)
         }
 
         // 4. Warm up writers BEFORE opening any capture source.
@@ -546,11 +546,12 @@ actor RecordingActor {
         await writer.finish()
         print("[recording] Composited writer done")
 
-        // Drain the upload queue so every segment's upload result (success
-        // or final failure) has fired its callback and updated the timeline
-        // builder. Without this, trailing segments would be snapshotted as
-        // `uploaded: false` before they'd actually had a chance to upload.
-        await upload.drainQueue()
+        // Drain the upload queue, but only up to a grace window. With Phase 3's
+        // unbounded retry policy, waiting forever here would hang the stop flow
+        // for the entire duration of a network outage. After the window,
+        // anything still pending is left on local disk and Phase 2's healing
+        // reconciles it silently in the background.
+        await upload.drainQueue(timeoutSeconds: 10)
 
         // Wait for raw writers to finish flushing. They've been running in
         // parallel with the composited finish; this is the join point.
@@ -1088,31 +1089,42 @@ actor RecordingActor {
 
     // MARK: - Segment Handling
 
-    private func handleSegment(_ segment: VideoSegment) async {
+    private func handleSegment(_ emission: WriterActor.Emission) async {
         // Record in the timeline before uploading so the emit event is
         // definitely ordered before any upload result event.
-        if segment.type == .media {
+        if emission.type == .media {
             timeline.recordSegment(
-                index: segment.index,
-                filename: segment.filename,
-                bytes: segment.data.count,
-                duration: segment.duration,
+                index: emission.index,
+                filename: emission.filename,
+                bytes: emission.data.count,
+                duration: emission.duration,
                 emittedAt: logicalElapsedSeconds()
             )
         }
 
-        // Upload to server
-        await upload.enqueue(segment)
-
-        // Save locally as safety net
-        if let localDir = localSavePath {
-            let filePath = localDir.appendingPathComponent(segment.filename)
-            do {
-                try segment.data.write(to: filePath)
-            } catch {
-                print("[recording] Failed to save local segment: \(error)")
-            }
+        // Write to local disk FIRST — the upload path reads bytes from this
+        // file on every attempt, so the file must exist before enqueuing.
+        // The local copy is also the safety net that Phase 2 healing relies on.
+        guard let localDir = localSavePath else {
+            print("[recording] No local dir, dropping segment \(emission.filename)")
+            return
         }
+        let filePath = localDir.appendingPathComponent(emission.filename)
+        do {
+            try emission.data.write(to: filePath)
+        } catch {
+            print("[recording] Failed to save local segment \(emission.filename): \(error)")
+            return
+        }
+
+        let segment = VideoSegment(
+            index: emission.index,
+            filename: emission.filename,
+            localURL: filePath,
+            duration: emission.duration,
+            type: emission.type
+        )
+        await upload.enqueue(segment)
     }
 
     // MARK: - Helpers
@@ -1152,7 +1164,7 @@ actor RecordingActor {
 // MARK: - WriterActor Extension for Callback
 
 extension WriterActor {
-    func setOnSegmentReady(_ handler: @escaping @Sendable (VideoSegment) async -> Void) {
+    func setOnSegmentReady(_ handler: @escaping @Sendable (Emission) async -> Void) {
         onSegmentReady = handler
     }
 }

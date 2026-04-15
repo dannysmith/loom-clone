@@ -7,11 +7,24 @@ actor WriterActor {
 
     // MARK: - Segment Callback
 
+    /// Raw emit shape: segment bytes plus metadata. Carries `Data` because the
+    /// writer receives bytes from the AVAssetWriter delegate. Downstream
+    /// (RecordingActor) writes the payload to local disk and then builds a
+    /// URL-based `VideoSegment` to enqueue for upload — bytes aren't retained
+    /// in memory past that write.
+    struct Emission: Sendable {
+        let index: Int
+        let filename: String
+        let data: Data
+        let duration: Double
+        let type: VideoSegment.SegmentType
+    }
+
     /// Called once per finalised segment. Awaited by the writer's consumer
     /// loop so that `finish()` can guarantee every segment has been fully
     /// processed downstream (timeline recorded, upload enqueued) before it
     /// returns. Making this `async` is load-bearing for stop-flow correctness.
-    var onSegmentReady: (@Sendable (VideoSegment) async -> Void)?
+    var onSegmentReady: (@Sendable (Emission) async -> Void)?
 
     // MARK: - State
 
@@ -320,10 +333,10 @@ actor WriterActor {
     /// the downstream handler so `finish()` can be sure a segment is fully
     /// processed end-to-end before it reports completion.
     private func handlePendingSegment(_ pending: PendingSegment) async {
-        let segment: VideoSegment
+        let emission: Emission
 
         if pending.isInitialization {
-            segment = VideoSegment(
+            emission = Emission(
                 index: 0,
                 filename: "init.mp4",
                 data: pending.data,
@@ -342,7 +355,7 @@ actor WriterActor {
 
             segmentIndex += 1
             let filename = String(format: "seg_%03d.m4s", segmentIndex - 1)
-            segment = VideoSegment(
+            emission = Emission(
                 index: segmentIndex,
                 filename: filename,
                 data: pending.data,
@@ -352,7 +365,7 @@ actor WriterActor {
             print("[writer] Segment \(filename): \(pending.data.count) bytes, \(String(format: "%.3f", duration))s")
         }
 
-        await onSegmentReady?(segment)
+        await onSegmentReady?(emission)
     }
 
     // MARK: - Errors

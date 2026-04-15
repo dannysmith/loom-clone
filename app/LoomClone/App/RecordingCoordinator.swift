@@ -123,6 +123,32 @@ final class RecordingCoordinator {
     let screenPreview = ScreenPreviewManager()
     private var cameraOverlay: CameraOverlayWindow?
 
+    // MARK: - Camera Adjustments (task-5 Phase 2)
+
+    /// Live white-balance + brightness for the camera feed. Applied to every
+    /// live preview surface and the composited HLS stream, but never to the
+    /// raw `camera.mp4` master file. Session-only state — intentionally not
+    /// persisted in UserDefaults, matching the existing stance on source
+    /// selection.
+    ///
+    /// Mutations flow through to the shared `cameraAdjustmentsState` box in
+    /// `didSet` so the compositor and every preview layer pick up the new
+    /// value without an actor hop.
+    var cameraAdjustments: CameraAdjustments = .default {
+        didSet {
+            cameraAdjustmentsState.value = cameraAdjustments
+        }
+    }
+
+    /// Shared reference handed to `CompositionActor`, the popover
+    /// `CameraPreviewLayerView`, and the on-screen overlay's layer view. All
+    /// three read from it on every frame; none mutate it.
+    let cameraAdjustmentsState = CameraAdjustmentsState()
+
+    func resetCameraAdjustments() {
+        cameraAdjustments = .default
+    }
+
     // MARK: - Permissions
 
     private(set) var screenPermissionDenied = false
@@ -345,6 +371,11 @@ final class RecordingCoordinator {
                     self.handleTerminalRecordingError(message)
                 }
             }
+
+            // Wire the camera-adjustments state box (task-5 Phase 2). The
+            // compositor reads from it on every frame so slider moves take
+            // effect immediately on the composited HLS output.
+            await actor.setCameraAdjustmentsState(self.cameraAdjustmentsState)
 
             // 3. Kick off the slow setup (server session, capture hardware,
             // audio wait) IN PARALLEL with the visible countdown.
@@ -666,6 +697,9 @@ final class RecordingCoordinator {
             if cameraOverlay == nil {
                 cameraOverlay = CameraOverlayWindow()
             }
+            // Task-5 Phase 2: pass the shared adjustments state so the
+            // overlay picks up slider moves live.
+            cameraOverlay?.setAdjustmentsState(cameraAdjustmentsState)
             // Match the overlay shape to the compositor's output:
             //   - cameraOnly   → full 16:9 frame (rectangle)
             //   - screenAndCamera → circular PiP (circle)

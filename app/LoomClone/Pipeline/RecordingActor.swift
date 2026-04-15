@@ -90,6 +90,14 @@ actor RecordingActor {
     /// stop flow lands.
     private var terminalErrorFired = false
 
+    /// Forward the shared camera-adjustments box (task-5 Phase 2) into the
+    /// compositor so its camera-frame path picks up slider moves on the next
+    /// tick. Called once during `startRecording` — the box is reference-typed
+    /// so mutations flow through without needing to re-invoke this.
+    func setCameraAdjustmentsState(_ state: CameraAdjustmentsState) async {
+        await composition.setCameraAdjustmentsState(state)
+    }
+
     // MARK: - The Recording Clock
     //
     // There is exactly one clock that anchors the recording timeline:

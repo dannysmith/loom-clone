@@ -46,6 +46,17 @@ final class CameraOverlayWindow: @unchecked Sendable {
     @MainActor private var currentStyle: Style = .circle
     nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
+    /// Optional shared camera-adjustments state (task-5 Phase 2). Forwarded
+    /// into the preview layer on every `show()` so the overlay reflects
+    /// slider moves live.
+    @MainActor private var adjustmentsState: CameraAdjustmentsState?
+
+    @MainActor
+    func setAdjustmentsState(_ state: CameraAdjustmentsState?) {
+        adjustmentsState = state
+        previewView?.setAdjustmentsState(state)
+    }
+
     /// Show (or reconfigure) the overlay with the given style. If the overlay
     /// is already visible with the same style, just brings it to front. If
     /// it's visible with a different style, rebuilds in place — the outer
@@ -92,6 +103,7 @@ final class CameraOverlayWindow: @unchecked Sendable {
 
         let preview = CameraPreviewLayerView(frame: container.bounds)
         preview.autoresizingMask = [.width, .height]
+        preview.setAdjustmentsState(adjustmentsState)
         container.addSubview(preview)
 
         panel.contentView = container

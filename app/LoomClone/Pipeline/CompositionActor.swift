@@ -48,6 +48,21 @@ actor CompositionActor {
     private var latestCameraImage: CIImage?
     private var circleMask: CIImage
 
+    // MARK: - Camera Adjustments (task-5 Phase 2)
+    //
+    // Optional reference to the shared state box owned by RecordingCoordinator.
+    // nil means "no adjustments" — identical behaviour to the pre-Phase-2
+    // code. When set, `updateCameraFrame` wraps incoming camera frames in the
+    // filter chain declared by the state box's current value. Because the
+    // filter chain is built lazily as a CIImage graph, the per-frame cost is
+    // paid only at render time inside `compositeFrame`.
+
+    private var cameraAdjustmentsState: CameraAdjustmentsState?
+
+    func setCameraAdjustmentsState(_ state: CameraAdjustmentsState?) {
+        cameraAdjustmentsState = state
+    }
+
     init() {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else {
@@ -95,7 +110,38 @@ actor CompositionActor {
     // MARK: - Camera Frame Update
 
     func updateCameraFrame(_ pixelBuffer: CVPixelBuffer) {
-        latestCameraImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let base = CIImage(cvPixelBuffer: pixelBuffer)
+        latestCameraImage = applyCameraAdjustments(to: base)
+    }
+
+    /// Task-5 Phase 2: add CITemperatureAndTint + CIExposureAdjust onto the
+    /// camera-only path. Cheap when the state box is unset or the current
+    /// values are defaults — returns the input image unchanged so CoreImage
+    /// doesn't build a trivial passthrough graph every frame.
+    ///
+    /// The raw `camera.mp4` writer is untouched because it consumes the
+    /// original CMSampleBuffer upstream of the compositor — see
+    /// `RecordingActor.handleCameraFrame`.
+    private func applyCameraAdjustments(to image: CIImage) -> CIImage {
+        guard let state = cameraAdjustmentsState else { return image }
+        let adj = state.value
+        guard !adj.isDefault else { return image }
+
+        // CITemperatureAndTint: inputNeutral declares what the filter should
+        // treat as the image's current neutral (6500 K, the Rec. 709 white
+        // point we're tagging camera buffers with in CameraCaptureManager);
+        // inputTargetNeutral is the temperature we want the new neutral to
+        // be. Slider value below 6500 warms the image, above cools it.
+        let neutral = CIVector(x: CameraAdjustments.defaultTemperature, y: 0)
+        let target = CIVector(x: adj.temperature, y: 0)
+        var adjusted = image.applyingFilter("CITemperatureAndTint", parameters: [
+            "inputNeutral": neutral,
+            "inputTargetNeutral": target,
+        ])
+        adjusted = adjusted.applyingFilter("CIExposureAdjust", parameters: [
+            kCIInputEVKey: adj.brightness,
+        ])
+        return adjusted
     }
 
     // MARK: - Composition

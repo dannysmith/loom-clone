@@ -97,6 +97,13 @@ struct MenuView: View {
 
             Divider()
 
+            // Camera adjustments (task-5 Phase 2). Only shown when a camera
+            // is selected — the sliders affect nothing if there's no camera
+            // feed to filter.
+            if coordinator.selectedCamera != nil {
+                cameraAdjustmentsSection
+            }
+
             // Mode picker — only shown when more than one mode is reachable.
             // With one source selected, the mode is implicit.
             if coordinator.availableModes.count > 1 {
@@ -222,7 +229,10 @@ struct MenuView: View {
             // Camera layer — full-frame or PiP circle.
             if coordinator.mode == .cameraOnly {
                 if coordinator.cameraPreview.isActive {
-                    CameraPreviewView(manager: coordinator.cameraPreview)
+                    CameraPreviewView(
+                    manager: coordinator.cameraPreview,
+                    adjustmentsState: coordinator.cameraAdjustmentsState
+                )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
                 } else {
@@ -230,7 +240,10 @@ struct MenuView: View {
                 }
             } else if coordinator.mode == .screenAndCamera
                         && coordinator.cameraPreview.isActive {
-                CameraPreviewView(manager: coordinator.cameraPreview)
+                CameraPreviewView(
+                    manager: coordinator.cameraPreview,
+                    adjustmentsState: coordinator.cameraAdjustmentsState
+                )
                     .frame(width: 54, height: 54)
                     .clipShape(Circle())
                     .overlay(
@@ -243,6 +256,60 @@ struct MenuView: View {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Camera Adjustments (task-5 Phase 2)
+
+    @ViewBuilder
+    private var cameraAdjustmentsSection: some View {
+        let tempBinding = Binding<Double>(
+            get: { Double(coordinator.cameraAdjustments.temperature) },
+            set: { coordinator.cameraAdjustments.temperature = CGFloat($0) }
+        )
+        let brightnessBinding = Binding<Double>(
+            get: { Double(coordinator.cameraAdjustments.brightness) },
+            set: { coordinator.cameraAdjustments.brightness = CGFloat($0) }
+        )
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Camera")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !coordinator.cameraAdjustments.isDefault {
+                    Button("Reset") {
+                        coordinator.resetCameraAdjustments()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "thermometer.sun")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Slider(value: tempBinding, in: 2500...10000)
+                Text("\(Int(coordinator.cameraAdjustments.temperature))K")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 52, alignment: .trailing)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "sun.max")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Slider(value: brightnessBinding, in: -2...2)
+                Text(String(format: "%+.1f EV", coordinator.cameraAdjustments.brightness))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 52, alignment: .trailing)
+            }
+        }
     }
 
     // MARK: - Quality Picker

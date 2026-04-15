@@ -489,9 +489,20 @@ actor RecordingActor {
 
     // MARK: - Stop
 
+    /// What the stop flow hands back to the coordinator. `url` drives the
+    /// clipboard copy; the rest lets HealAgent pick up any segments the
+    /// server didn't have at stop time without blocking the foreground flow.
+    struct StopResult: Sendable {
+        let url: String
+        let videoId: String
+        let localDir: URL
+        let timelineData: Data
+        let missing: [String]
+    }
+
     /// Stop a committed recording. Cancels the metronome, stops captures,
     /// finishes the writer, completes the upload session.
-    func stopRecording() async -> String? {
+    func stopRecording() async -> StopResult? {
         isRecording = false
 
         // Finalise the timeline BEFORE finishing the writer so the stop event
@@ -606,9 +617,26 @@ actor RecordingActor {
 
         // Complete upload (includes the timeline in the payload)
         do {
-            let url = try await upload.complete(timeline: timelineData)
-            print("[recording] Stopped, URL: \(url)")
-            return url
+            let result = try await upload.complete(timeline: timelineData)
+            print("[recording] Stopped, URL: \(result.url) (missing=\(result.missing.count))")
+            guard let videoId = await upload.videoId,
+                  let localDir = localSavePath else {
+                // No way to schedule healing without these — still return the URL.
+                return StopResult(
+                    url: result.url,
+                    videoId: "",
+                    localDir: URL(fileURLWithPath: "/"),
+                    timelineData: timelineData ?? Data(),
+                    missing: []
+                )
+            }
+            return StopResult(
+                url: result.url,
+                videoId: videoId,
+                localDir: localDir,
+                timelineData: timelineData ?? Data(),
+                missing: result.missing
+            )
         } catch {
             print("[recording] Complete failed: \(error)")
             return nil

@@ -109,11 +109,20 @@ actor UploadActor {
         }
     }
 
+    struct CompleteResult: Sendable {
+        let url: String
+        let missing: [String]
+    }
+
     /// Signal recording complete. Assumes `drainQueue()` has already been
     /// awaited so all uploads are accounted for. If `timeline` is non-nil
     /// it's sent as the JSON body under a `timeline` key — the server
-    /// persists it alongside the segments.
-    func complete(timeline: Data? = nil) async throws -> String {
+    /// persists it alongside the segments and uses it to diff expected vs
+    /// on-disk segments. The response's `missing` is the gap the caller
+    /// should heal in the background; empty means fully converged.
+    ///
+    /// Safe to call repeatedly — each call re-diffs server-side.
+    func complete(timeline: Data? = nil) async throws -> CompleteResult {
         // Belt-and-braces: drain again in case anything slipped in.
         await drainQueue()
 
@@ -137,13 +146,14 @@ actor UploadActor {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw UploadError.serverError("Failed to complete")
+            throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
 
         let json = try JSONDecoder().decode(CompleteResponse.self, from: data)
         let fullURL = "\(serverBaseURL)\(json.url)"
-        print("[upload] Complete: \(fullURL)")
-        return fullURL
+        let missing = json.missing ?? []
+        print("[upload] Complete: \(fullURL) (missing: \(missing.count))")
+        return CompleteResult(url: fullURL, missing: missing)
     }
 
     // MARK: - Cancel
@@ -188,5 +198,7 @@ actor UploadActor {
     private struct CompleteResponse: Decodable {
         let url: String
         let slug: String
+        // Absent in pre-Phase-2 servers; treat as empty when missing.
+        let missing: [String]?
     }
 }

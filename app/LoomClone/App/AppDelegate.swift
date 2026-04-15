@@ -10,10 +10,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingPanel: RecordingPanel?
     private let shortcutManager = KeyboardShortcutManager()
     let coordinator = RecordingCoordinator()
+    private let healAgent = HealAgent()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         setupPopover()
+
+        // Hand the heal agent to the coordinator so post-stop handoffs work,
+        // and kick off the startup scan for any previously unhealed recordings.
+        coordinator.healAgent = healAgent
+        Task { await healAgent.runStartupScan() }
 
         shortcutManager.register(
             coordinator: coordinator,

@@ -6,7 +6,10 @@ export const DATA_DIR = "data";
 export interface VideoRecord {
   id: string;
   slug: string;
-  status: "recording" | "complete";
+  // "healing" means complete() was called but the server was still missing
+  // some segments. Viewers can play the partial playlist; a background client
+  // task is uploading the gap and will re-call complete() to transition.
+  status: "recording" | "healing" | "complete";
   createdAt: string;
 }
 
@@ -86,12 +89,20 @@ export function getSegmentDurations(id: string): Map<string, number> {
   return durations.get(id) ?? new Map();
 }
 
-export async function completeVideo(id: string): Promise<VideoRecord> {
+export async function setVideoStatus(
+  id: string,
+  status: VideoRecord["status"]
+): Promise<VideoRecord> {
   const video = videos.get(id);
   if (!video) throw new Error(`Video ${id} not found`);
-  video.status = "complete";
+  video.status = status;
   await persistVideo(video);
   return video;
+}
+
+// Back-compat shim — most callers just want "this is done".
+export async function completeVideo(id: string): Promise<VideoRecord> {
+  return setVideoStatus(id, "complete");
 }
 
 export async function deleteVideo(id: string): Promise<VideoRecord | undefined> {

@@ -36,6 +36,10 @@ Three layers: a native macOS desktop app for recording, a server for processing 
 - Server (Hono + Bun + SQLite, Hetzner)
 - Viewer Layer (Cloudflare Workers + KV)
 
+## Developer Docs
+
+- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/videos.ts`.
+
 ## Task Management
 
 - Uncompleted tasks live in `docs/tasks-todo/`. Tasks with a number that starts with `x` (eg `task-x-thing.md` or `task-x3-thing.md`) are unprioritised.

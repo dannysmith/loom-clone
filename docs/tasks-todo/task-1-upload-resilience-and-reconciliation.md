@@ -130,7 +130,7 @@ Phase 1 makes re-uploading safe. Phase 2 actually uses that safety to close the 
 
 **Client: `RecordingActor` startup-time heal**
 
-- On app launch, `RecordingCoordinator` (or a new `HealAgent` actor) scans `~/Library/Application Support/LoomClone/recordings/` for `recording.json` files where at least one segment has `uploaded: false` AND the recording ended within the last N days (suggested: 7).
+- On app launch, `RecordingCoordinator` (or a new `HealAgent` actor) scans `~/Library/Application Support/LoomClone/recordings/` for `recording.json` files where at least one segment has `uploaded: false` AND the recording ended within the last 3 days.
 - For each, re-run the heal flow: call `/complete` to get the `missing` list, upload what's needed, re-complete. Silent unless the server 404s (record gone) in which case mark the local recording as "orphaned" and move on.
 
 **Client: dedicated heal path vs. reusing `UploadActor`**

@@ -203,6 +203,10 @@ final class RecordingCoordinator {
 
     private(set) var lastVideoURL: String?
 
+    /// Set by `AppDelegate` at launch. Owned there because heal work spans
+    /// app lifetime (startup scan + post-stop handoff).
+    var healAgent: HealAgent?
+
     // MARK: - Pipeline
 
     private var recordingActor: RecordingActor?
@@ -470,9 +474,20 @@ final class RecordingCoordinator {
         }
 
         Task {
-            let url = await recordingActor?.stopRecording()
-            self.lastVideoURL = url
+            let result = await recordingActor?.stopRecording()
+            self.lastVideoURL = result?.url
             self.recordingActor = nil
+
+            // Hand off any missing segments to HealAgent. Fire-and-forget —
+            // the user's clipboard already has the URL by now.
+            if let result, !result.missing.isEmpty, let heal = self.healAgent {
+                heal.scheduleHeal(
+                    videoId: result.videoId,
+                    localDir: result.localDir,
+                    timelineData: result.timelineData,
+                    missing: result.missing
+                )
+            }
 
             try? await Task.sleep(for: .seconds(8))
             if self.state == .stopped {
@@ -658,9 +673,18 @@ final class RecordingCoordinator {
         }
 
         Task { @MainActor in
-            let url = await recordingActor?.stopRecording()
-            self.lastVideoURL = url
+            let result = await recordingActor?.stopRecording()
+            self.lastVideoURL = result?.url
             self.recordingActor = nil
+
+            if let result, !result.missing.isEmpty, let heal = self.healAgent {
+                heal.scheduleHeal(
+                    videoId: result.videoId,
+                    localDir: result.localDir,
+                    timelineData: result.timelineData,
+                    missing: result.missing
+                )
+            }
 
             let alert = NSAlert()
             alert.messageText = "Recording stopped"

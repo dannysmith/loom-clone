@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { join } from "path";
-import { mkdir, rm } from "fs/promises";
+import { rm } from "fs/promises";
 import {
   createVideo,
   getVideo,
   addSegment,
   completeVideo,
   deleteVideo,
+  DATA_DIR,
 } from "../lib/store";
 import { buildPlaylist, writePlaylist } from "../lib/playlist";
 
@@ -14,29 +15,27 @@ const videos = new Hono();
 
 // Create a new video record
 videos.post("/", async (c) => {
-  const video = createVideo();
-  await mkdir(join("data", video.id), { recursive: true });
-
+  const video = await createVideo();
   console.log(`[video] created ${video.id} (slug: ${video.slug})`);
   return c.json({ id: video.id, slug: video.slug });
 });
 
-// Receive a segment
+// Receive a segment. Idempotent — re-uploads overwrite cleanly and the
+// playlist is rebuilt from the on-disk directory listing.
 videos.put("/:id/segments/:filename", async (c) => {
   const { id, filename } = c.req.param();
   const video = getVideo(id);
   if (!video) return c.json({ error: "Video not found" }, 404);
 
   const body = await c.req.arrayBuffer();
-  const path = join("data", id, filename);
+  const path = join(DATA_DIR, id, filename);
   await Bun.write(path, new Uint8Array(body));
 
-  const duration = parseFloat(c.req.header("x-segment-duration") ?? "4.0");
-  addSegment(id, filename, duration);
-
-  // Rebuild playlist after each media segment (skip init)
   if (filename !== "init.mp4") {
-    const playlist = buildPlaylist(video);
+    const duration = parseFloat(c.req.header("x-segment-duration") ?? "4.0");
+    await addSegment(id, filename, duration);
+
+    const playlist = await buildPlaylist(video);
     await writePlaylist(id, playlist);
   }
 
@@ -48,20 +47,17 @@ videos.put("/:id/segments/:filename", async (c) => {
 // Finalize recording
 videos.post("/:id/complete", async (c) => {
   const { id } = c.req.param();
-  const video = completeVideo(id);
+  const video = await completeVideo(id);
 
-  const playlist = buildPlaylist(video);
+  const playlist = await buildPlaylist(video);
   await writePlaylist(id, playlist);
 
-  // If a timeline JSON was sent in the body, persist it alongside the
-  // segments. The client writes this file locally too; the server copy is
-  // the authoritative one post-upload.
   const contentType = c.req.header("content-type") ?? "";
   if (contentType.includes("application/json")) {
     try {
       const body = (await c.req.json()) as { timeline?: unknown };
       if (body.timeline) {
-        const path = join("data", id, "recording.json");
+        const path = join(DATA_DIR, id, "recording.json");
         await Bun.write(path, JSON.stringify(body.timeline, null, 2));
         console.log(`[complete] timeline saved: ${id}/recording.json`);
       }
@@ -78,10 +74,10 @@ videos.post("/:id/complete", async (c) => {
 // Cancel/delete a recording
 videos.delete("/:id", async (c) => {
   const { id } = c.req.param();
-  const video = deleteVideo(id);
+  const video = await deleteVideo(id);
   if (!video) return c.json({ error: "Video not found" }, 404);
 
-  await rm(join("data", id), { recursive: true, force: true });
+  await rm(join(DATA_DIR, id), { recursive: true, force: true });
 
   console.log(`[delete] ${id} (slug: ${video.slug})`);
   return c.json({ ok: true });

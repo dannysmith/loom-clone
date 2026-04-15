@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import videos from "./routes/videos";
 import playback from "./routes/playback";
+import { loadAllVideos } from "./lib/store";
+
+const restored = await loadAllVideos();
+console.log(`[store] rehydrated ${restored} video record(s) from data/`);
 
 const app = new Hono();
 

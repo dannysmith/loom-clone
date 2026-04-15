@@ -108,9 +108,9 @@ actor RecordingActor {
     //   PTS = primingOffset + (sampleHostTime - recordingStartTime) - pauseAccumulator
     //
     // Audio uses each sample's own host-clock PTS. Video (from the metronome)
-    // uses wall-clock-now at the moment of emit. Because they share the same
-    // anchor and the same accumulator, they cannot be out of sync with each
-    // other regardless of when each source's hardware comes online.
+    // uses the capture PTS of the cached source frame it composites. Both
+    // therefore stamp content at the moment it hit the hardware, which keeps
+    // audio and video aligned regardless of capture pipeline latency.
 
     /// Host clock time at which `frameIdx = 0` on the recording timeline.
     /// nil until `commitRecording()` runs.
@@ -130,13 +130,30 @@ actor RecordingActor {
 
     // MARK: - Frame Cache
 
+    /// A cached source frame with the sample buffer's original presentation
+    /// timestamp preserved. The metronome stamps composited frames with
+    /// `capturePTS` so the emitted video PTS reflects when the visible
+    /// content was actually captured — not when the metronome happened to
+    /// emit. This keeps video aligned with audio (whose PTS is likewise the
+    /// hardware capture time).
+    private struct CachedFrame {
+        let pixelBuffer: CVPixelBuffer
+        let capturePTS: CMTime
+    }
+
     /// Latest valid screen frame received from ScreenCaptureKit.
     /// The metronome reads this on every tick — so an idle screen produces
     /// correctly-encoded static frames at 30fps instead of gaps.
-    private var latestScreenFrame: CVPixelBuffer?
+    private var latestScreenFrame: CachedFrame?
 
     /// Latest camera frame received from AVCaptureSession.
-    private var latestCameraFrame: CVPixelBuffer?
+    private var latestCameraFrame: CachedFrame?
+
+    // MARK: - A/V sync diagnostics (temporary)
+    private var avsyncCameraLogsRemaining = 30
+    private var avsyncScreenLogsRemaining = 30
+    private var avsyncAudioLogsRemaining = 30
+    private var avsyncVideoEmitLogsRemaining = 30
 
     // MARK: - Metronome
 
@@ -438,9 +455,46 @@ actor RecordingActor {
     /// Phase 2: anchor the recording clock and start the encoder.
     /// All capture hardware is already live; this is the moment T = 0.
     func commitRecording() async {
-        // Anchor the recording clock to NOW. Every audio and video PTS from
-        // this point on is computed relative to this single host-clock value.
-        recordingStartTime = CMClockGetTime(CMClockGetHostTimeClock())
+        // Anchor the recording clock to the most recent cached source
+        // frame's hardware capture time — not CMClockGetTime() at commit.
+        //
+        // Why: camera capture has a pipeline latency (~40-80ms on built-in
+        // cameras, more on USB). The freshest cached camera frame at commit
+        // time has a capturePTS that's already ~40ms in the past. If we
+        // anchor to "now", that cached frame's elapsed is negative → it's
+        // rejected → the metronome has to wait for the next capture cycle
+        // before it can emit anything. Meanwhile audio's first sample has
+        // a hardware PTS very close to now, so it lands near t=0 on the
+        // timeline. Net effect: audio starts ~70ms before video in the
+        // output. Anchoring to the camera's capturePTS eliminates that
+        // wait — the cached frame is accepted immediately with elapsed=0.
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        // Safety bound on how far "in the past" the anchor can be. If the
+        // cached source frame is unusually stale (e.g., USB camera hiccup
+        // right at commit), a very old capturePTS would make audio samples
+        // land far ahead of the anchor in the output — we'd swap an
+        // audio-leads-video bug for a video-leads-audio bug, potentially
+        // larger. Capping at ~100ms preserves the fix for the normal
+        // ~40-80ms capture-pipeline case while bounding the worst case.
+        let maxAnchorAge = CMTime(value: 100, timescale: 1000)
+        let cachedPTS: CMTime?
+        switch mode {
+        case .screenOnly:
+            cachedPTS = latestScreenFrame?.capturePTS
+        case .cameraOnly, .screenAndCamera:
+            cachedPTS = latestCameraFrame?.capturePTS
+        }
+        let anchor: CMTime
+        if let cachedPTS, cachedPTS.isValid, (now - cachedPTS) <= maxAnchorAge {
+            anchor = cachedPTS
+        } else {
+            anchor = now - maxAnchorAge
+            if let cachedPTS, cachedPTS.isValid {
+                let ageMS = (now - cachedPTS).seconds * 1000
+                print(String(format: "[avsync] cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms", ageMS, maxAnchorAge.seconds * 1000))
+            }
+        }
+        recordingStartTime = anchor
         pauseAccumulator = .zero
         pauseStartHostTime = nil
         lastEmittedVideoPTS = .invalid
@@ -782,7 +836,15 @@ actor RecordingActor {
     /// reach the raw file.
     private func handleScreenFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        latestScreenFrame = pixelBuffer
+        let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        latestScreenFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
+
+        if avsyncScreenLogsRemaining > 0, capturePTS.isValid {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let ageMS = (now - capturePTS).seconds * 1000
+            print(String(format: "[avsync] screen capture age: %.1f ms", ageMS))
+            avsyncScreenLogsRemaining -= 1
+        }
 
         if let screenRawWriter,
            let retimed = retimedSampleForRawWriter(sampleBuffer) {
@@ -796,8 +858,16 @@ actor RecordingActor {
     /// itself (see `onCameraSampleForOverlay`).
     private func handleCameraFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        latestCameraFrame = pixelBuffer
+        let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        latestCameraFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
         await composition.updateCameraFrame(pixelBuffer)
+
+        if avsyncCameraLogsRemaining > 0, capturePTS.isValid {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let ageMS = (now - capturePTS).seconds * 1000
+            print(String(format: "[avsync] camera capture age: %.1f ms", ageMS))
+            avsyncCameraLogsRemaining -= 1
+        }
 
         if let cameraRawWriter,
            let retimed = retimedSampleForRawWriter(sampleBuffer) {
@@ -859,6 +929,13 @@ actor RecordingActor {
         // Drop samples captured before the recording was committed.
         // These can occur briefly during the prepare→commit transition.
         guard relativePTS >= .zero else { return }
+
+        if avsyncAudioLogsRemaining > 0 {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let ageMS = (now - originalPTS).seconds * 1000
+            print(String(format: "[avsync] audio capture age: %.1f ms", ageMS))
+            avsyncAudioLogsRemaining -= 1
+        }
 
         let duration = CMSampleBufferGetDuration(sampleBuffer)
 
@@ -976,15 +1053,27 @@ actor RecordingActor {
         guard let start = recordingStartTime else { return false }
 
         let result: Result<CVPixelBuffer, CompositionError>?
+        // `sourcePTS` is the capture time of the visible content. We stamp
+        // the emitted video frame with this (not wall-clock-now) so audio
+        // and video share the same notion of "when the content was at the
+        // hardware" — otherwise camera/screen capture latency shows up as
+        // audio-leads-video in the output.
+        let sourcePTS: CMTime
         switch mode {
         case .screenOnly:
             guard let screen = latestScreenFrame else { return false }
-            result = await composition.compositeFrame(screenBuffer: screen, mode: .screenOnly)
+            sourcePTS = screen.capturePTS
+            result = await composition.compositeFrame(screenBuffer: screen.pixelBuffer, mode: .screenOnly)
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return false }
-            result = await composition.compositeFrame(screenBuffer: screen, mode: .screenAndCamera)
+            guard let camera = latestCameraFrame else { return false }
+            // Camera latency dominates sync perception (lip-sync), so we
+            // align to the camera's capture time in composite mode.
+            sourcePTS = camera.capturePTS
+            result = await composition.compositeFrame(screenBuffer: screen.pixelBuffer, mode: .screenAndCamera)
         case .cameraOnly:
-            guard latestCameraFrame != nil else { return false }
+            guard let camera = latestCameraFrame else { return false }
+            sourcePTS = camera.capturePTS
             result = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
         }
 
@@ -1000,17 +1089,31 @@ actor RecordingActor {
             return false
         }
 
-        // Wall-clock-derived PTS using the single recording clock.
-        // Same formula as audio: primingOffset + elapsedLogical.
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-        let elapsedLogical = (now - start) - pauseAccumulator
+        // Source-capture-derived PTS using the single recording clock.
+        // Same shape as audio: primingOffset + (captureTime - start) - pauseAcc.
+        // Using the source's capture PTS (rather than wall-clock-now) aligns
+        // the video timeline with the audio timeline: both stamp content at
+        // the moment it hit the hardware.
+        guard sourcePTS.isValid else { return false }
+        let elapsedLogical = (sourcePTS - start) - pauseAccumulator
+        // Source frames captured before the recording anchor can briefly
+        // exist in the cache during the prepare→commit transition — skip.
+        guard elapsedLogical >= .zero else { return false }
         let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
 
-        // Strict monotonicity guard. Wall clock is monotonic but the
-        // pause-accumulator update could in theory produce a duplicate PTS at
-        // the exact instant of resume — drop those.
+        // Strict monotonicity guard. If the same cached source frame is
+        // re-read by the next metronome tick (capture rate < metronome
+        // rate), the PTS won't have advanced — drop the duplicate rather
+        // than emitting with a synthesized PTS.
         if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS { return false }
         lastEmittedVideoPTS = pts
+
+        if avsyncVideoEmitLogsRemaining > 0 {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let emitAgeMS = (now - sourcePTS).seconds * 1000
+            print(String(format: "[avsync] video emit: source_age_at_emit=%.1f ms, pts=%.3f s", emitAgeMS, pts.seconds))
+            avsyncVideoEmitLogsRemaining -= 1
+        }
 
         guard let outputSample = createSampleBuffer(
             from: output,

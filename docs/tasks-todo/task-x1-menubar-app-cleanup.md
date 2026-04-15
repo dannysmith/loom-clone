@@ -12,6 +12,10 @@ I don't know what the e equivalent of this kind of thing is for workingwith Swif
 
 Now let's conduct a full review of the entire macOS app codebase, as an expert in building strong performant apps like this. Let's look at the code quality. Let's look at the overall architecture and naming conventions how we're splitting our code up either into different files or different functions, whether we're following standard/common "best practices" etc.
 
+## Tests
+
+I don't know what the normal pattern for testing is. But we should probably make sure that we have whatever nor automated tests would be normal in a mac OS app like this. 
+
 ## Performance & Video Review
 
 Now let's conduct another full review of the code base, but this time purely focused on two things:

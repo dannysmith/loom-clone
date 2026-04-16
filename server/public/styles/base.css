@@ -1,0 +1,61 @@
+/* Element-level styles. Consume tokens from tokens.css.
+   Wrapped into the `base` layer by app.css's @import. */
+
+html {
+  font-family: var(--font-sans, sans-serif);
+  font-weight: var(--font-weight-normal, 400);
+  font-variant-ligatures: common-ligatures;
+  hanging-punctuation: first allow-end last;
+  accent-color: var(--color-accent, #06f);
+  color: var(--color-fg, #111);
+  background-color: var(--color-bg, #fff);
+}
+
+body {
+  font-size: var(--font-size-base, 1rem);
+  line-height: var(--line-height-normal, 1.5);
+}
+
+h1, h2, h3, h4, h5, h6,
+button, input, label, select, textarea {
+  line-height: var(--line-height-tight, 1.15);
+}
+
+h1 { font-size: var(--font-size-2xl, 2rem); font-weight: var(--font-weight-bold, 700); letter-spacing: -0.02em; }
+h2 { font-size: var(--font-size-xl, 1.5rem); font-weight: var(--font-weight-bold, 700); letter-spacing: -0.01em; }
+h3 { font-size: var(--font-size-lg, 1.125rem); font-weight: var(--font-weight-medium, 500); }
+
+a {
+  color: var(--color-accent, #06f);
+  text-decoration-thickness: max(0.08em, 1px);
+  text-underline-offset: 0.15em;
+  text-decoration-skip-ink: auto;
+}
+
+a:not(:hover, :focus-visible) {
+  text-decoration-color: color-mix(in srgb, currentColor, transparent 70%);
+}
+
+a:hover {
+  color: var(--color-accent-hover, #04d);
+}
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.95em;
+}
+
+abbr[title] {
+  cursor: help;
+  text-decoration: underline dotted;
+}
+
+summary {
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:focus-within {
+    scroll-behavior: smooth;
+  }
+}

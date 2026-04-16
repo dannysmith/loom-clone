@@ -29,6 +29,33 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 - **Foreign keys**: `PRAGMA foreign_keys = ON` is set per-connection in `createDb()`. Without it, SQLite silently ignores `ON DELETE CASCADE`.
 - **Tests**: `setupTestEnv()` creates a fresh `:memory:` DB per test with migrations applied. No shared state.
 
+## Views & Static Assets
+
+Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. No build step; Bun handles `.tsx` natively, browsers fetch CSS as-is.
+
+**Layout**:
+
+```
+src/views/
+  layouts/   RootLayout, ViewerLayout, AdminLayout — shared <html>/<head>/body shells
+  viewer/    public-facing pages (VideoPage today; embed/etc. later)
+  admin/     admin UI components (stub today, fleshed out in Phase 6)
+public/
+  styles/    CSS — see below
+```
+
+- **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.
+- **DOCTYPE**: `RootLayout` emits `<!DOCTYPE html>` via `raw()` from `hono/html`. Don't repeat it elsewhere.
+- **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
+- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media stays on the Range-aware `/data/*` handler in `routes/static.ts`.
+
+**CSS**:
+
+- Single entry point `public/styles/app.css` declares `@layer reset, tokens, base, components, utilities;` then `@import`s modular files into named layers.
+- `tokens.css` holds all design tokens (colours in OKLCH, type/spacing scales, radii, transitions). Change values here; everything downstream uses `var(--…)`.
+- Page-/section-specific styles (`viewer.css`, `admin.css`) get linked via the `head` slot of their respective layout, not from `app.css`. Keeps page payloads small.
+- Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`. All Baseline.
+
 ## Testing
 
 Tests live in `__tests__/` directories co-located with the modules they test. Follow the patterns in the existing tests — notably the `setupTestEnv`/`teardownTestEnv` helpers in `src/test-utils.ts` for per-test filesystem isolation.
@@ -46,7 +73,7 @@ Preferences:
 
 ## Gotchas
 
-- **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory is the side-effect-free entry for tests — do not import `index.ts` from tests.
+- **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory in `src/app.ts` is the side-effect-free entry — import that from tests, not `index.ts`.
 - **`DATA_DIR = "data"`** is relative. Tests depend on this. When deployment comes it'll likely become env-configurable; until then, don't hard-code absolute paths.
 - **Segment filename allowlist** in `routes/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists.
 - **Derivatives are fire-and-forget.** `scheduleDerivatives(id)` returns immediately; the `/complete` response never waits on ffmpeg. Tests use `_inFlightPromise(id)` to await completion.

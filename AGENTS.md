@@ -92,11 +92,15 @@ Direct commands (for reference or when you need different flags):
 ├── server/                               # Hono + Bun server (see server/CLAUDE.md)
 │   ├── CLAUDE.md                         #   scripts, layout, testing conventions
 │   ├── biome.json                        #   lint + format config
+│   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
+│   │   └── styles/                       #     vanilla CSS with @layer + custom properties
 │   └── src/
-│       ├── index.ts                      #   createApp() factory + entry
+│       ├── index.ts                      #   entry — initDb() + boots createApp()
+│       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)
 │       ├── test-utils.ts                 #   temp-dir test isolation helpers
 │       ├── lib/                          #   store, playlist, derivatives, constants — co-located __tests__/
-│       └── routes/                       #   /api/videos, /v/:slug, /data/* — co-located __tests__/
+│       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
+│       └── routes/                       #   /api/videos, /v/:slug, /admin, /data/* — co-located __tests__/
 ├── docs/
 │   ├── developer/                        # living developer docs
 │   │   └── streaming-and-healing.md

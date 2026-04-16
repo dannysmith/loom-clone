@@ -33,8 +33,11 @@ describe("GET /v/:slug", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
+    expect(html).toMatch(/^<!DOCTYPE html>/i);
     expect(html).toContain("<media-player");
     expect(html).toContain(video.slug);
+    expect(html).toContain("/static/styles/app.css");
+    expect(html).toContain("/static/styles/viewer.css");
   });
 
   test("falls back to HLS playlist when source.mp4 is absent", async () => {

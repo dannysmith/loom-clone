@@ -10,7 +10,7 @@ Let's get the hono server properly set up with development tools for linting, fo
 
 Let's get an automated testing framework set up in here and add tests for anything which we already have, which we should definitely have unit tests or any other types of tests for. 
 
-## Phase 3 - SQLite + Drizzle ORM and Data Models etc
+## Phase 3 - SQLite + Drizzle ORM and Data Models etc [DONE]
 
 Okay, up to now we have just been using files on the server to manage recordings and everything. We should now transition to a proper data model using SQLite and Drizzle ORM. This may also be an opportunity for us to potentially look at some validation both in the API layer and the data layer. And also potentially look at some sensible refactorings or abstractions to make this stuff easier to work with in the code base.
 
@@ -120,7 +120,71 @@ One standalone correctness fix was pulled out of this phase and applied: `x-segm
 
 ## Phase 4 - Styling System
 
-We need to decide on our approach to templating and CSS and set up a suitable structure for templating and serving HTML pages, as well as a sensible CSS reset/base/global CSS vars etc. Although at the moment the only HTML we need to style is the user-facing video page, we will eventually have an Admin side to this Hono app too, which will need a proper system of reusable components and the like. Let's at least get ready for that and make our life easier.
+Set up the templating + CSS foundation that both the viewer page (today) and the admin panel (Phase 6 / task-x5) will sit on top of. Today the only HTML is the inline string in `playback.ts`; we want a proper structure before admin work multiplies the surface area.
+
+**Decisions locked in during planning:**
+- **Templating**: Hono JSX (`hono/jsx`). Built-in, type-safe, zero new deps. Components port cleanly to Cloudflare Workers if/when the viewer layer moves there (task-x6).
+- **CSS**: vanilla CSS with `@layer` + custom properties. No framework, no build step. Bun serves static files directly.
+- **CSS organisation**: a single `app.css` that declares layer order once and `@import`s smaller files into named layers. One `<link>` in the layout, modular files in dev. Round-trip cost is irrelevant at single-user scale.
+- **Asset location**: `server/public/` for static files (CSS, future fonts/images), served by `serveStatic` from `hono/bun` at `/static/*`. `src/` stays code-only.
+- **Brand starter**: system font stack (swap later via `--font-sans`), neutrals + one accent in OKLCH, 4px-base spacing, ~5-step type scale. Everything as `--vars` in one tokens file.
+- **Admin interactivity**: deferred to Phase 6. Phase 4 ships HTML scaffolding only.
+
+### Sub-phases
+
+#### 4.1 JSX setup
+
+- Configure `tsconfig.json`: `"jsx": "react-jsx"`, `"jsxImportSource": "hono/jsx"`.
+- Smoke-test by rendering a trivial component via `c.html(<Foo/>)` from a throwaway route, verify no runtime/type errors.
+
+#### 4.2 Static asset pipeline
+
+- Mount `serveStatic({ root: "./public" })` from `hono/bun` at `/static/*` in `createApp()`.
+- Create `server/public/styles/` with empty stubs for the CSS files in 4.3.
+- Add a `public/` subsection to `server/CLAUDE.md`.
+
+#### 4.3 CSS foundation
+
+- `app.css` — declares `@layer reset, tokens, base, components, utilities;` and `@import`s the rest into the right layers.
+- `reset.css` — minimal modern reset (box-sizing, margin zeroing, body/html, focus-visible).
+- `tokens.css` — CSS custom properties: colours (OKLCH), type scale, spacing scale, radii, transition timing.
+- `base.css` — element-level styles (body type, headings, links, form baseline).
+- `components.css` — empty for now; populated as components arrive.
+
+#### 4.4 Layouts
+
+- `src/views/layouts/RootLayout.tsx` — `<html>`/`<head>`/meta/title shell linking `app.css`, `children` slot.
+- `src/views/layouts/ViewerLayout.tsx` — content-centred shell for `/v/:slug`, wraps `RootLayout`.
+- `src/views/layouts/AdminLayout.tsx` — sidebar+main shell stub for future admin, wraps `RootLayout`.
+
+#### 4.5 Migrate viewer page
+
+- Move the HTML in `playback.ts` into `src/views/viewer/VideoPage.tsx`.
+- Drop the inline `<style>` — viewer styling lives in `base.css` plus a small page-specific `viewer.css` if needed.
+- Vidstack stays on the CDN for now (revisit in Phase 7).
+
+#### 4.6 Admin shell stub
+
+- Add `GET /admin` route rendering an empty `AdminLayout` with a "Phase 6 lives here" placeholder.
+- Proves the system end-to-end without committing to admin features.
+
+#### 4.7 Tests
+
+- Render test for `VideoPage` (asserts title, video source, poster behaviour).
+- Static-asset route returns 200 + correct content-type for `/static/styles/app.css`.
+- `/admin` returns 200.
+
+#### 4.8 Docs
+
+- New "Views & Styling" section in `server/CLAUDE.md` (where layouts/components live, CSS layer order, how tokens work).
+- Cross-cutting note in `AGENTS.md` if anything beyond the server is affected.
+
+### Out of scope (deliberately)
+
+- A full component library (no `Button`/`Card` until something needs them).
+- htmx vs forms decision — deferred to Phase 6.
+- SEO / OG / oEmbed — Phase 7.
+- Vidstack self-hosting / theming overhaul — Phase 7.
 
 ## Phase 5 - Auth for menubar app
 
@@ -128,7 +192,7 @@ We need to set up a Auth system for the API endpoints and change the macOs menub
 
 ## Phase 6 - Add all expected endpoints
 
-This is the point to map out all of our current API endpoints and also think about the other API endpoints we know we are going to need going forward. This should include:
+This is the point to map out all of our current API endpoints & routes and also think about the other endpoints we know we are going to need going forward. This should include:
 
 - API endpoints for use by the macOS app (all of which will be authenticated eventually)
 - User-facing "Web" endpoints (see below)

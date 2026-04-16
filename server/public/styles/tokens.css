@@ -1,0 +1,78 @@
+/* Design tokens. Change values here; everything downstream consumes var(--…).
+   Two tiers: primitive scales then semantic mappings via light-dark(). */
+
+:root {
+  color-scheme: light dark;
+
+  /* Type — system stack, swap --font-sans later if you want a custom face. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  /* Type scale — modest 1.2 ratio, 5 steps + base. */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.15;
+  --line-height-normal: 1.5;
+
+  /* Spacing — 4px base, doubled-ish scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* Radii. */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-full: 9999px;
+
+  /* Transitions. */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Layout. */
+  --content-max: 72rem;
+
+  /* Primitive colours — neutrals + one accent. OKLCH for perceptual evenness.
+     Tweak the accent's hue (third arg, 250 ≈ blue) to rebrand. */
+  --neutral-0: oklch(99% 0.005 250);
+  --neutral-50: oklch(96% 0.008 250);
+  --neutral-100: oklch(92% 0.01 250);
+  --neutral-200: oklch(85% 0.012 250);
+  --neutral-400: oklch(60% 0.018 250);
+  --neutral-600: oklch(42% 0.02 250);
+  --neutral-800: oklch(22% 0.018 250);
+  --neutral-900: oklch(15% 0.015 250);
+
+  --accent-500: oklch(60% 0.18 250);
+  --accent-600: oklch(52% 0.18 250);
+  --accent-fg: oklch(99% 0.005 250);
+
+  /* Semantic mappings — auto light/dark via prefers-color-scheme. */
+  --color-bg: light-dark(var(--neutral-0), var(--neutral-900));
+  --color-surface: light-dark(var(--neutral-50), var(--neutral-800));
+  --color-fg: light-dark(var(--neutral-900), var(--neutral-50));
+  --color-fg-muted: light-dark(var(--neutral-600), var(--neutral-400));
+  --color-border: light-dark(var(--neutral-200), var(--neutral-800));
+  --color-accent: var(--accent-500);
+  --color-accent-hover: var(--accent-600);
+  --color-accent-fg: var(--accent-fg);
+}

@@ -1,0 +1,29 @@
+/* Admin-only styles. Linked via <AdminLayout> head slot.
+   Phase 6 (task-x5) builds out nav, lists, forms, etc. */
+
+body.admin {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-block-size: 100vh;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  padding-block: var(--space-3);
+  padding-inline: var(--space-5);
+  border-block-end: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+}
+
+.admin-brand {
+  font-weight: var(--font-weight-bold);
+  text-decoration: none;
+}
+
+.admin-main {
+  padding: var(--space-6);
+  max-inline-size: var(--content-max);
+  margin-inline: auto;
+  inline-size: 100%;
+}

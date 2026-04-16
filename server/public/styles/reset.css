@@ -1,0 +1,80 @@
+/* Modern minimal reset.
+   Adapted from https://www.joshwcomeau.com/css/custom-css-reset/.
+   Wrapped into the `reset` layer by app.css's @import.
+   Selectors use :where() so cascade priority comes from layer order, not specificity. */
+
+:where(*, *::before, *::after) {
+  box-sizing: border-box;
+}
+
+:where(*) {
+  margin: 0;
+}
+
+:where(:focus-visible) {
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where(html) {
+    interpolate-size: allow-keywords;
+  }
+}
+
+:where(html) {
+  -moz-text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  scrollbar-gutter: stable;
+}
+
+:where(body) {
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+:where(img, picture, video, canvas, svg) {
+  display: block;
+  max-width: 100%;
+}
+
+:where(img, picture) {
+  height: auto;
+}
+
+:where(input, button, textarea, select) {
+  font: inherit;
+}
+
+:where(textarea) {
+  field-sizing: content;
+}
+
+:where(fieldset) {
+  min-inline-size: 0;
+}
+
+:where(iframe) {
+  border: 0;
+}
+
+:where(p, h1, h2, h3, h4, h5, h6) {
+  overflow-wrap: break-word;
+}
+
+:where(h1, h2, h3, h4, h5, h6) {
+  text-wrap: balance;
+}
+
+:where(:target) {
+  scroll-margin-block: 5ex;
+}
+
+:where(pre) {
+  white-space: pre-wrap;
+}
+
+:where([hidden]:not([hidden="until-found"])) {
+  display: none !important;
+}

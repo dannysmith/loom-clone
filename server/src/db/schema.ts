@@ -118,6 +118,19 @@ export const videoEvents = sqliteTable(
   (t) => [index("video_events_video_id_created_at_idx").on(t.videoId, t.createdAt)],
 );
 
+// API keys — bearer tokens for the macOS app and any future programmatic
+// clients. Plaintext is never stored: `hashedToken` holds sha256(token).
+// `name` is a human label ("macbook M2 Pro") to make `keys:list` useful.
+// The unique constraint on hashed_token doubles as the lookup index.
+export const apiKeys = sqliteTable("api_keys", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  hashedToken: text("hashed_token").notNull().unique(),
+  createdAt: text("created_at").notNull().$defaultFn(nowIso),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+});
+
 // Inferred types — export for use in store and routes.
 export type Video = typeof videos.$inferSelect;
 export type VideoInsert = typeof videos.$inferInsert;
@@ -126,3 +139,4 @@ export type SlugRedirect = typeof slugRedirects.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type VideoTag = typeof videoTags.$inferSelect;
 export type VideoEvent = typeof videoEvents.$inferSelect;
+export type ApiKey = typeof apiKeys.$inferSelect;

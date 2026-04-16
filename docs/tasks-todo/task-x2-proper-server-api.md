@@ -188,7 +188,79 @@ Set up the templating + CSS foundation that both the viewer page (today) and the
 
 ## Phase 5 - Auth for menubar app
 
-We need to set up a Auth system for the API endpoints and change the macOs menubar app so it sends authenticated requests. I'd suggest that a simple API key and Bearer tokens is probably the best way to go here, considering it's only me who's gonna be using this. But we obviously want to consider security best practice here as well. 
+Gate the `/api/videos/*` routes behind API-key auth and make the macOS app send authenticated requests. Single-user tool; the right primitive is a long-lived bearer token, not sessions or JWTs.
+
+**Decisions locked in during planning:**
+- **Credential**: random 32-byte API key, transmitted as `Authorization: Bearer <token>`. Format: `lck_<base64url>` (prefix makes leaked tokens identifiable in logs / scans).
+- **Server stores SHA-256 hashes only**, never plaintext. SHA-256 (not bcrypt/argon2) — API keys are high-entropy; password-hashing functions are the wrong tool here.
+- **Multiple keys allowed** (one per device + revocation graveyard). Schema: `api_keys(id, name, hashed_token, created_at, last_used_at, revoked_at)`.
+- **Bootstrap via CLI**: `bun run keys:create <name>` prints the token once, then stores only the hash. No chicken-and-egg with an admin UI.
+- **Middleware scope**: `/api/videos/*` only. `/api/health`, `/v/*`, `/data/*`, `/static/*`, `/admin` stay open.
+- **macOS storage**: Keychain, never UserDefaults. Thin wrapper (`APIKeyStore`) + a centralised `APIClient` that owns base URL + auth header injection. The three existing call sites (`UploadActor`, `HealAgent`, `RecordingCoordinator`) route through it.
+- **macOS settings UI**: SwiftUI `Settings` scene (standard Cmd+, window), not a popover sheet. More Mac-native, same effort.
+- **Server bind**: switch to `127.0.0.1` for local dev. Cheap insurance against plaintext bearer tokens leaking over LAN.
+- **Transport**: plaintext over HTTP is acceptable for localhost dev only. task-x3 (Hetzner deploy) **must** enforce HTTPS — bearer tokens over HTTP on the open internet are trivially interceptable.
+
+### Sub-phases
+
+#### 5.1 Schema + key lib + CLI
+
+- Add `api_keys` table to `src/db/schema.ts` (`id` UUID PK, `name` text, `hashedToken` text unique, `createdAt`/`lastUsedAt`/`revokedAt` ISO text). Index on `hashedToken`.
+- Generate + commit migration.
+- `src/lib/api-keys.ts`: `createApiKey(name)` returns `{ id, plaintext }` (plaintext returned once, never stored), `verifyApiKey(token)` returns the key row or null, `listApiKeys()`, `revokeApiKey(id)`, `touchLastUsed(id)`.
+- `scripts/keys.ts` — tiny CLI dispatching on argv: `create <name>`, `list`, `revoke <id>`. Wire into `package.json` as `keys:create` / `keys:list` / `keys:revoke`.
+- Token generation uses `crypto.getRandomValues` (Bun has it natively). Prefix `lck_` + `base64url(32 random bytes)`.
+
+#### 5.2 Auth middleware
+
+- `src/lib/auth.ts` — `requireApiKey()` Hono middleware factory. Reads `Authorization: Bearer <token>`, hashes, looks up, checks `revokedAt IS NULL`. On success, fires `touchLastUsed(id)` (fire-and-forget; don't block the response). On any failure, return 401 with `WWW-Authenticate: Bearer realm="loom-clone"`.
+- Mount on `/api/videos` sub-app only. Leave `/api/health` untouched.
+- Lookup is `WHERE hashed_token = ?` against an indexed column — no constant-time comparison needed. With 256-bit token entropy the practical timing leak is negligible; if we ever add auth rate-limiting this is the place to revisit.
+
+#### 5.3 Server tests
+
+- Middleware unit tests: missing header → 401, malformed bearer → 401, unknown token → 401, revoked key → 401, valid key → passes through + `lastUsedAt` updated.
+- Integration: each `/api/videos*` route returns 401 without a key and the usual 2xx/4xx shape with a key.
+- `/api/health` still 200 without a key.
+- Add a `createTestApiKey()` helper to `test-utils.ts` so existing integration tests keep working with minimal churn.
+
+#### 5.4 Server bind + env
+
+- `src/index.ts`: read `PORT` (default 3000) and `HOST` (default `127.0.0.1`) from `Bun.env`.
+- `.env.example` with those + a comment about `DATABASE_URL` being a future concern.
+- Add `.env*` to `server/.gitignore` except `.env.example`.
+
+#### 5.5 macOS Keychain wrapper
+
+- `app/LoomClone/Helpers/APIKeyStore.swift` — `kSecClassGenericPassword`, service ID = bundle id + `.apikey`. Three entry points: `read() -> String?`, `write(_:) throws`, `delete() throws`.
+- No async needed — Keychain reads are effectively instant.
+
+#### 5.6 macOS APIClient centralisation
+
+- New `app/LoomClone/Pipeline/APIClient.swift` — actor or `struct` owning base URL (`http://127.0.0.1:3000` for now, env-driven later) and an `authorizedRequest(url:method:)` builder that reads the key from `APIKeyStore` and attaches `Authorization: Bearer <token>`.
+- Refactor `UploadActor`, `HealAgent`, `RecordingCoordinator` to construct requests through it. Keep each call site's error handling specific — but surface 401s as a distinct "API key invalid or revoked" state instead of the generic failure path.
+- Health check (`/api/health`) stays unauthenticated and keeps its own direct path; auth failure there would just be noise.
+
+#### 5.7 macOS Settings UI
+
+- `SettingsScene` in `App/` with one `TextField` (masked) + Save/Clear. Writes to Keychain via `APIKeyStore`.
+- Popover "no API key configured" empty state when `APIKeyStore.read() == nil` — replaces the Record button with a "Open Settings" button.
+- Record button remains gated on `/api/health` reachability AND a stored key.
+
+#### 5.8 Docs
+
+- New `server/CLAUDE.md` auth section: token format, where hashes live, CLI commands, constant-time comparison, env vars.
+- Brief `docs/developer/auth.md` — single-page tour of the system end to end (schema, hashing, key lifecycle, macOS storage, rotation).
+- `AGENTS.md` project-tree update for new files.
+
+### Out of scope (deliberately)
+
+- Rate limiting — different concern. Single user, defer to a later phase if we ever hit a real need.
+- Per-key scopes/permissions — YAGNI for single user.
+- Admin-panel web auth — Phase 6 concern, different mechanism (sessions, probably). Do not conflate.
+- HTTPS enforcement — task-x3 (deploy).
+- CORS — irrelevant until delivery moves cross-origin (task-x6).
+- Key rotation automation — manual `revoke` + `create` is fine at this scale.
 
 ## Phase 6 - Add all expected endpoints
 

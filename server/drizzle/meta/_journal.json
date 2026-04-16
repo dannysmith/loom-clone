@@ -8,6 +8,13 @@
       "when": 1776313320275,
       "tag": "0000_worthless_doctor_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1776359183562,
+      "tag": "0001_normal_angel",
+      "breakpoints": true
     }
   ]
 }

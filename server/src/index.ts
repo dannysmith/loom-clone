@@ -6,9 +6,16 @@ console.log("[db] ready at data/app.db");
 
 const app = createApp();
 
-console.log("Server running at http://localhost:3000");
+// Bind to loopback by default — bearer tokens travel in plaintext over
+// HTTP locally, so don't expose them on the LAN. Override with HOST=0.0.0.0
+// only after task-x3 lands HTTPS termination in front of the server.
+const port = Number(Bun.env.PORT ?? 3000);
+const hostname = Bun.env.HOST ?? "127.0.0.1";
+
+console.log(`Server running at http://${hostname}:${port}`);
 
 export default {
-  port: 3000,
+  port,
+  hostname,
   fetch: app.fetch,
 };

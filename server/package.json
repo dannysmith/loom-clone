@@ -4,18 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "lint": "biome lint src/",
-    "lint:fix": "biome lint --write src/",
-    "format": "biome format --write src/",
-    "format:check": "biome format src/",
-    "check": "biome check src/",
-    "check:fix": "biome check --write src/",
+    "lint": "biome lint src/ scripts/",
+    "lint:fix": "biome lint --write src/ scripts/",
+    "format": "biome format --write src/ scripts/",
+    "format:check": "biome format src/ scripts/",
+    "check": "biome check src/ scripts/",
+    "check:fix": "biome check --write src/ scripts/",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "keys:create": "bun scripts/keys.ts create",
+    "keys:list": "bun scripts/keys.ts list",
+    "keys:revoke": "bun scripts/keys.ts revoke"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

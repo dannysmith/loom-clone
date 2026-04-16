@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createApp } from "../app";
-import { setupTestEnv, type TestEnv, teardownTestEnv } from "../test-utils";
+import { authHeaders, setupTestEnv, type TestEnv, teardownTestEnv } from "../test-utils";
 
 let env: TestEnv;
 
@@ -42,5 +42,60 @@ describe("createApp", () => {
     const res = await app.request("/api/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
+  });
+
+  test("/api/health is unauthenticated", async () => {
+    // Sanity: the health check must return 200 with no Authorization
+    // header, or the desktop app's reachability ping conflates "server
+    // down" with "bad credentials".
+    const app = createApp();
+    const res = await app.request("/api/health");
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("auth gate on /api/videos/*", () => {
+  test("POST /api/videos returns 401 without an API key", async () => {
+    const app = createApp();
+    const res = await app.request("/api/videos", { method: "POST" });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toContain("Bearer");
+  });
+
+  test("POST /api/videos succeeds with a valid key", async () => {
+    const app = createApp();
+    const res = await app.request("/api/videos", {
+      method: "POST",
+      headers: await authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; slug: string };
+    expect(body.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.slug).toBeTruthy();
+  });
+
+  test("PUT /api/videos/:id/segments/:filename gated", async () => {
+    const app = createApp();
+    const res = await app.request("/api/videos/anyid/segments/init.mp4", {
+      method: "PUT",
+      body: new Uint8Array([0]),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("POST /api/videos/:id/complete gated", async () => {
+    const app = createApp();
+    const res = await app.request("/api/videos/anyid/complete", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("DELETE /api/videos/:id gated", async () => {
+    const app = createApp();
+    const res = await app.request("/api/videos/anyid", { method: "DELETE" });
+    expect(res.status).toBe(401);
   });
 });

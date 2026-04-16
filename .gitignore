@@ -4,6 +4,11 @@ node_modules/
 # Runtime data
 server/data/
 
+# Local env (commit only .env.example)
+server/.env
+server/.env.*
+!server/.env.example
+
 # Bun
 server/bun.lock
 

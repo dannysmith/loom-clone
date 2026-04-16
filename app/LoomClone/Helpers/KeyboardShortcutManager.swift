@@ -2,6 +2,11 @@ import AppKit
 
 @MainActor
 final class KeyboardShortcutManager {
+    // Virtual key codes (Carbon/Events.h)
+    private static let keyR: UInt16 = 15
+    private static let keyP: UInt16 = 35
+    private static let keyM: UInt16 = 46
+
     private var globalMonitor: Any?
     private weak var coordinator: RecordingCoordinator?
     private var onToggleRecord: (() -> Void)?
@@ -39,21 +44,21 @@ final class KeyboardShortcutManager {
         guard modifiers == cmdShift else { return }
 
         switch event.keyCode {
-        case 15: // R key
+        case Self.keyR:
             if coordinator.state == .idle {
                 onToggleRecord?()
             } else if coordinator.state == .recording || coordinator.state == .paused {
                 onStop?()
             }
 
-        case 35: // P key
+        case Self.keyP:
             if coordinator.state == .recording {
                 coordinator.pauseRecording()
             } else if coordinator.state == .paused {
                 coordinator.resumeRecording()
             }
 
-        case 46: // M key
+        case Self.keyM:
             if coordinator.state == .recording || coordinator.state == .paused {
                 coordinator.cycleMode()
             }

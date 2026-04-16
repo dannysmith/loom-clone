@@ -174,9 +174,10 @@ enum JSONValue: Encodable {
 
 // MARK: - Builder
 
-/// Mutable accumulator used during recording. Single-threaded access from
-/// inside `RecordingActor`. Produces an immutable `RecordingTimeline` on `build()`.
-final class RecordingTimelineBuilder {
+/// Mutable accumulator used during recording. Confined to `RecordingActor` —
+/// all access is serialised by the actor. `@unchecked Sendable` so the builder
+/// can be stored as actor state without tripping strict concurrency checks.
+final class RecordingTimelineBuilder: @unchecked Sendable {
     private var sessionId: String = ""
     private var slug: String = ""
     private var initialMode: RecordingMode = .screenAndCamera

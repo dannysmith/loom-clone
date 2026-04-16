@@ -55,7 +55,12 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
                 continuation.resume()
             }
         }
-        print("[mic] Capture started: \(device.localizedName)")
+        let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(device.activeFormat.formatDescription)
+        if let asbd {
+            print("[mic] Capture started: \(device.localizedName) — \(Int(asbd.pointee.mChannelsPerFrame))ch, \(Int(asbd.pointee.mSampleRate)) Hz")
+        } else {
+            print("[mic] Capture started: \(device.localizedName)")
+        }
     }
 
     func stopCapture() async {

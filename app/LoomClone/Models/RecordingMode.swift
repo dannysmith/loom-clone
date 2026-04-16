@@ -23,6 +23,7 @@ enum RecordingMode: String, CaseIterable {
 
     func next() -> RecordingMode {
         let all = RecordingMode.allCases
+        // Safe: self is always a member of allCases
         let idx = all.firstIndex(of: self)!
         return all[(idx + 1) % all.count]
     }

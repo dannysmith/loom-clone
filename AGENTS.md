@@ -2,7 +2,7 @@
 
 ## About This Project
 
-Building a personal Loom replacement — a native macOS recording app, backend server, and CDN-backed video delivery system. Self-hosted on Hetzner + Cloudflare R2. See `requirements.md` for full context.
+Building a personal Loom replacement — a native macOS recording app, backend server, and video delivery system. See `docs/requirements.md` for full context.
 
 ## What This Is
 
@@ -30,15 +30,26 @@ These are the real-world situations this tool needs to serve:
 
 ## Architecture Overview
 
-Three layers: a native macOS desktop app for recording, a server for processing and management, and a viewer/cache layer that serves the videos to actual users.
+Three components exist today, plus a diagnostic tool:
 
-- macOS Desktop App (Swift & SwiftUI)
-- Server (Hono + Bun + SQLite, Hetzner)
-- Viewer Layer (Cloudflare Workers + KV?)
+- **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
+- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves the viewer page. Currently also serves static files (segments, derivatives) with Range-request support. `server/data/` holds per-video directories.
+- **Viewer Layer** — not yet built as a separate component. Currently the server handles playback directly at `/v/:slug` using Vidstack. Future plan is Cloudflare Workers + KV for CDN-backed delivery.
+- **Test Harness** (`app/TestHarness/`, `test-runs/`) — diagnostic tool for probing AVFoundation/VideoToolbox/Metal configurations in isolation, without going through the real recording pipeline. Separate Xcode target (`LoomCloneTestHarness`), not a shipping component. Has its own `README.md` and `CLAUDE.md` with detailed usage instructions.
 
 ## Developer Docs
 
-- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works.
+- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/videos.ts`.
+- `docs/requirements.md` — refined requirements for the whole system.
+- `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
+- `docs/archive/` — incident records and completed research audits. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
+
+## Building & Running
+
+- **macOS app**: `xcodebuild -project app/LoomClone.xcodeproj -scheme LoomClone -configuration Debug -destination 'platform=macOS' build`. Do NOT run `bun run dev` or start the dev server unless explicitly asked.
+- **Server**: `cd server && bun run dev` (runs on `http://localhost:3000` with `--hot` reload).
+- **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
+- **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` to regenerate `LoomClone.xcodeproj`.
 
 ## Task Management
 
@@ -49,29 +60,37 @@ Three layers: a native macOS desktop app for recording, a server for processing 
 ## Project Structure
 
 ```
-├── app                                   # macOS Menubar app
-│   ├── LoomClone
-│   │   ├── App/
-│   │   ├── Capture/
-│   │   ├── Helpers/
-│   │   ├── Info.plist
-│   │   ├── Models/
-│   │   ├── Pipeline/
-│   │   └── UI/
-    └── TestHarness/                      # Harness for testing various things for the macOS app
-├── docs
-│   ├── archive                           # Archived docs
-│   │   └── initial-requirements.md.      # Original Requirements before refinement
-│   ├── requirements.md                   # Refine overall requirements docs for whole system
-│   ├── research/                         # Research Notes
-│   ├── tasks-done/                       # Completed tasks
-│   └── tasks-todo/                       # Uncompleted tasks
-├── README.md
-└── server                                # Hono Server
-    ├── data                              # Data for each recording
-    ├── src
-    │   ├── index.ts
-    │   ├── lib
-    │   └── routes
-    └── tsconfig.json
+├── app/
+│   ├── LoomClone/                        # macOS menubar app
+│   │   ├── App/                          #   coordinator, app entry
+│   │   ├── Capture/                      #   screen, camera, mic capture managers
+│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, utilities
+│   │   ├── Models/                       #   recording timeline, presets, modes
+│   │   ├── Pipeline/                     #   RecordingActor, WriterActor, CompositionActor, UploadActor, HealAgent
+│   │   └── UI/                           #   SwiftUI views, overlay window, popover
+│   ├── TestHarness/                      # diagnostic tool (separate Xcode target)
+│   │   ├── Scripts/                      #   tier runner scripts + test-configs/
+│   │   ├── Sources/                      #   synthetic frame sources
+│   │   ├── Compositor/                   #   isolated CIContext compositor
+│   │   ├── Writers/                      #   isolated writer implementations
+│   │   ├── Observability/                #   event log, watchdog, system snapshots
+│   │   └── README.md                     #   full usage docs
+│   ├── LoomClone.xcodeproj/             # generated — do not edit directly
+│   └── project.yml                       # XcodeGen source of truth
+├── server/                               # Hono + Bun server
+│   └── src/
+│       ├── index.ts                      #   app entry, /data/* static handler with Range support
+│       ├── lib/                          #   store, playlist builder, derivatives (ffmpeg)
+│       └── routes/                       #   /api/videos, /v/:slug viewer page
+├── docs/
+│   ├── developer/                        # living developer docs
+│   │   └── streaming-and-healing.md
+│   ├── tasks-todo/                       # active/upcoming work
+│   ├── tasks-done/                       # completed task write-ups
+│   ├── research/                         # historical: initial research (pre-prototype)
+│   ├── archive/                          # incident records, completed audits
+│   └── requirements.md                   # refined system requirements
+├── test-runs/                            # test harness output (gitignored except *.md summaries)
+├── AGENTS.md                             # this file (also referenced by CLAUDE.md)
+└── CLAUDE.md                             # points at AGENTS.md
 ```

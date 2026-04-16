@@ -16,9 +16,6 @@ Now let's conduct a full review of the entire macOS app codebase, as an expert i
 
 I don't know what the normal pattern for testing is. But we should probably make sure that we have whatever nor automated tests would be normal in a mac OS app like this. 
 
-## Phase 4 - Performance & Video Review
+## Phase 4 - Performance Review
 
-Now let's conduct another full review of the code base, but this time purely focused on two things:
-
-- Performance
-- How we handle all of the video capture, encoding, timestamping, generation etc etc. 
+Now let's conduct another full review of the code base, but this time purely focused on finding any glaring performance issues or low-hanging fruit.

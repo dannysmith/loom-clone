@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import { createVideo, DATA_DIR, type VideoRecord } from "../../lib/store";
+import { createVideo, DATA_DIR, trashVideo, updateSlug, type VideoRecord } from "../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import playback from "../playback";
 
@@ -67,5 +67,41 @@ describe("GET /v/:slug", () => {
     const res = await playback.request(`/v/${video.slug}`);
     const html = await res.text();
     expect(html).not.toContain("poster=");
+  });
+
+  test("old slug 301-redirects to current slug after rename", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    await updateSlug(video.id, "welcome");
+
+    const res = await playback.request(`/v/${oldSlug}`, { redirect: "manual" });
+    expect(res.status).toBe(301);
+    expect(res.headers.get("location")).toBe("/v/welcome");
+  });
+
+  test("current slug returns 200 (not a redirect) after rename", async () => {
+    const video = await createVideo();
+    await updateSlug(video.id, "fresh");
+
+    const res = await playback.request(`/v/fresh`);
+    expect(res.status).toBe(200);
+  });
+
+  test("trashed video returns 404 on its current slug", async () => {
+    const video = await createVideo();
+    await trashVideo(video.id);
+
+    const res = await playback.request(`/v/${video.slug}`);
+    expect(res.status).toBe(404);
+  });
+
+  test("trashed video returns 404 on an old redirect slug too", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    await updateSlug(video.id, "renamed");
+    await trashVideo(video.id);
+
+    const res = await playback.request(`/v/${oldSlug}`);
+    expect(res.status).toBe(404);
   });
 });

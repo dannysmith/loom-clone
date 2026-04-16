@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
-import { DATA_DIR, getSegmentDurations, getVideo } from "../../lib/store";
+import { DATA_DIR, getSegmentDurations, getVideo, trashVideo } from "../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
 
@@ -208,6 +208,28 @@ describe("DELETE /:id", () => {
 
   test("returns 404 for unknown id", async () => {
     const res = await videos.request(`/nope`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("trashed video handling", () => {
+  test("segment upload to trashed video returns 404", async () => {
+    const { id } = await createVideoViaApi();
+    await trashVideo(id);
+
+    const res = await videos.request(`/${id}/segments/seg_000.m4s`, {
+      method: "PUT",
+      headers: { "x-segment-duration": "4.0" },
+      body: new Uint8Array([0, 1, 2]),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("/complete on a trashed video returns 404", async () => {
+    const { id } = await createVideoViaApi();
+    await trashVideo(id);
+
+    const res = await videos.request(`/${id}/complete`, { method: "POST" });
     expect(res.status).toBe(404);
   });
 });

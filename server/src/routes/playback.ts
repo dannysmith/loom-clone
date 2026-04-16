@@ -1,13 +1,21 @@
 import { Hono } from "hono";
 import { join } from "path";
-import { DATA_DIR, getVideoBySlug } from "../lib/store";
+import { DATA_DIR, resolveSlug } from "../lib/store";
 
 const playback = new Hono();
 
 playback.get("/v/:slug", async (c) => {
   const { slug } = c.req.param();
-  const video = await getVideoBySlug(slug);
-  if (!video) return c.text("Not found", 404);
+  const resolved = await resolveSlug(slug);
+  if (!resolved) return c.text("Not found", 404);
+
+  // Renamed slugs 301 to the current URL so viewers and embedders always
+  // land on the canonical page. Search engines treat this as a permanent
+  // move and collapse link equity onto the new URL.
+  if (resolved.redirected) {
+    return c.redirect(`/v/${resolved.video.slug}`, 301);
+  }
+  const { video } = resolved;
 
   // Prefer the single-file MP4 when the derivative exists; otherwise fall
   // back to the HLS playlist. Checking on each request means a healing

@@ -28,21 +28,22 @@ These are the real-world situations this tool needs to serve:
 - **Evergreen learning content** — Screen shares and talking-head videos embedded in Notion, Google Docs, GitHub docs, and internal knowledge bases. Tutorials, process explanations, "why we do things this way" content. These are permanent — they'll still be in those knowledge bases years from now. Some of these I've historically exported and uploaded to YouTube just to ensure they remain publicly available long-term.
 - **Longer assembled videos** — Product demos, detailed tutorials, help documents. These often involve recording multiple segments and assembling them into a single video. With good pause and mode-switching in the desktop app, the need for post-recording assembly is reduced — but it remains a use case for more polished content down the line.
 
-## Probable Architecture
+## Architecture Overview
 
-Three layers: a native macOS desktop app for recording, a server for processing and management, and a viewer layer that operates independently of the server.
+Three layers: a native macOS desktop app for recording, a server for processing and management, and a viewer/cache layer that serves the videos to actual users.
 
 - macOS Desktop App (Swift & SwiftUI)
 - Server (Hono + Bun + SQLite, Hetzner)
-- Viewer Layer (Cloudflare Workers + KV)
+- Viewer Layer (Cloudflare Workers + KV?)
 
 ## Developer Docs
 
-- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/videos.ts`.
+- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works.
 
 ## Task Management
 
-- Uncompleted tasks live in `docs/tasks-todo/`. Tasks with a number that starts with `x` (eg `task-x-thing.md` or `task-x3-thing.md`) are unprioritised.
+- Uncompleted tasks live in `docs/tasks-todo/`. Tasks with a number that is or starts with `x` (eg `task-x-thing.md` or `task-x3-thing.md`) are unprioritised.
+- Completed tasks are moved to `docs/tasks-done/` and have today's ISO date added to their title so `task-2-thing.md` → `task-2026-01-01-2-thing.md`.
 - `task-0-scratchpad.md` is never completed and is a running scratchpad for smaller tasks and checklists. Never edit this file unless specifically asked to - leave that to the user.
 
 ## Project Structure

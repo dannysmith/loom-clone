@@ -252,7 +252,7 @@ The page should have appropriate SEO metadata etc.
 
 When someone embeds the URL in an iframe, they should get just the video player with no surrounding page chrome. This makes embedding in documentation, blog posts, and other tools straightforward.
 
-An explicit embed URL (e.g. `v.danny.is/embed/welcome-to-the-team`) should be available for this purpose, but if possible we should try to detect when requests are coming from this kinda context and server this instead of the video page.
+An explicit embed URL (e.g. `v.danny.is/welcome-to-the-team/embed`) should be available for this purpose, but if possible we should try to detect when requests are coming from this kinda context and server this instead of the video page.
 
 ### Unfurling & Link Previews
 
@@ -276,17 +276,6 @@ This is where the "delivery" layer earns its keep:
 - **Fast loading**: Videos should start playing quickly. Adaptive bitrate streaming (HLS) helps here — the player starts with a lower quality and steps up as bandwidth allows.
 - **Handles traffic spikes**: If a LinkedIn post goes mildly viral and a few thousand people hit the same video URL in an hour, it should be fine. We're not designing for YouTube scale, but we're not designing for "falls over at 50 concurrent viewers" either.
 
-### URL Behaviour
-
-- `v.danny.is/{slug}` — The video page (HTML with player, meta tags, etc.).
-- `v.danny.is/embed/{slug}` — Just the video player, for iframe embedding.
-- Old slugs 301-redirect to current slugs.
-
-### Nice-to-Haves (Delivery)
-
-- **Adaptive quality**: The player automatically adjusts quality based on the viewer's connection speed. (If we're using HLS with multiple renditions, this comes naturally.)
-- **Format suffixes**: `v.danny.is/{slug}.mp4` returns the raw MP4 file. `v.danny.is/{slug}.json` returns metadata (URL, raw video URL, transcript, duration, etc.). `v.danny.is/{slug}.md` returns similar in Markdown format.
-
 ---
 
 ## Inspiration & Prior Art
@@ -305,16 +294,3 @@ This is where the "delivery" layer earns its keep:
 - **Video editor**: A web-based or desktop editor for trimming, cutting, stitching, and assembling videos. Remotion is a potential foundation for a browser-based editor. Tella's text-based editing (edit the transcript to edit the video) is a compelling pattern to study.
 - **Basic view analytics**: Simple per-video view counts. Not a dashboards-and-funnels analytics product — just enough to know which videos are being watched. Planned for Phase 3.
 - **Automatic zoom and cursor effects**: Screen Studio-style post-processing (auto-zoom into click targets, cursor smoothing). Aspirational for polished content.
-
----
-
-## Technical Direction
-
-Architecture decisions have been made based on the research phase. The full architecture is documented in `docs/architecture-synthesis.md`. In summary:
-
-- **Desktop app**: Native Swift, macOS 14+. ScreenCaptureKit + AVCaptureSession + Core Image compositing + AVAssetWriter (fMP4 HLS segments).
-- **Server**: Hono + Bun + SQLite + React admin SPA, deployed on Hetzner. FFmpeg for multi-bitrate transcoding.
-- **Storage**: Cloudflare R2 (zero egress).
-- **Viewer layer**: Cloudflare Workers + KV for backend-independent video pages. Vidstack player.
-- **Self-hosted throughout**: No managed video services. FFmpeg + R2 + Cloudflare CDN. ~$6-8/mo.
-- **Research**: 10 research documents in `docs/research/`, covering macOS APIs, streaming upload architecture, Cap codebase analysis, competitive landscape, video processing, cost modelling, server stack, viewer experience, and open-source tools.

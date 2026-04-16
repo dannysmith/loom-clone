@@ -5,12 +5,12 @@ import Foundation
 /// This is what the encoder produces and what viewers stream — independent of
 /// capture resolution. Capture sources (screen, camera) run at their native
 /// resolution and the compositor scales down to this preset.
-struct OutputPreset: Equatable, Hashable, Sendable, Identifiable {
+struct OutputPreset: Equatable, Hashable, Identifiable {
     let id: String
     let label: String
     let width: Int
     let height: Int
-    let bitrate: Int  // bits per second
+    let bitrate: Int // bits per second
 
     static let p720 = OutputPreset(
         id: "720p",

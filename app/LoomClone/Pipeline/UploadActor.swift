@@ -1,7 +1,6 @@
 import Foundation
 
 actor UploadActor {
-
     private let serverBaseURL: String
     private let reachability: ReachabilityMonitor
     private(set) var videoId: String?
@@ -179,7 +178,9 @@ actor UploadActor {
         }
 
         if let task = queueTask {
-            print("[upload] Drain timeout after \(Int(timeoutSeconds))s — cancelling queue, \(pendingSegments.count) segment(s) left for heal")
+            print(
+                "[upload] Drain timeout after \(Int(timeoutSeconds))s — cancelling queue, \(pendingSegments.count) segment(s) left for heal"
+            )
             task.cancel()
             _ = await task.value
             pendingSegments.removeAll()
@@ -187,7 +188,7 @@ actor UploadActor {
         }
     }
 
-    struct CompleteResult: Sendable {
+    struct CompleteResult {
         let url: String
         let missing: [String]
     }
@@ -272,7 +273,7 @@ actor UploadActor {
     private struct CompleteResponse: Decodable {
         let url: String
         let slug: String
-        // Absent in pre-Phase-2 servers; treat as empty when missing.
+        /// Absent in pre-Phase-2 servers; treat as empty when missing.
         let missing: [String]?
     }
 }

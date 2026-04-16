@@ -1,13 +1,13 @@
 import Foundation
 
 // MARK: - HarnessResult
+
 //
 // What the harness writes to result.json after a run completes (or
 // fails). The runner script reads this to decide pass/fail and whether
 // to keep running subsequent configs.
 
-struct HarnessResult: Codable, Sendable {
-
+struct HarnessResult: Codable {
     /// "pass", "degraded", "fail-recorded", "fail-killed", "dry-run".
     /// Kept as a string rather than enum so older runs stay decodable
     /// if we add new outcome classes later.
@@ -38,7 +38,7 @@ struct HarnessResult: Codable, Sendable {
     let config: HarnessConfig
 }
 
-struct WriterResult: Codable, Sendable {
+struct WriterResult: Codable {
     let name: String
     let kind: String
     /// AVAssetWriter.status rawValue ("unknown", "writing", "completed",
@@ -52,7 +52,7 @@ struct WriterResult: Codable, Sendable {
     let segmentDurations: [Double]
 }
 
-struct FrameStats: Codable, Sendable {
+struct FrameStats: Codable {
     let framesSubmitted: Int
     let framesDropped: Int
     let firstFrameAt: Double?

@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 
 // MARK: - WatchdogTimer
+
 //
 // Hard wall-clock kill-switch. Fires on a pthread that is completely
 // separate from the Swift concurrency runtime and the main dispatch
@@ -15,7 +16,6 @@ import Foundation
 // case, which is the main failure shape the task-0C doc describes.
 
 final class WatchdogTimer: @unchecked Sendable {
-
     /// Wall-clock seconds from arm() until fire.
     private let deadlineSeconds: Double
 
@@ -108,6 +108,6 @@ final class WatchdogTimer: @unchecked Sendable {
     }
 
     var didFire: Bool {
-        return OSAtomicCompareAndSwap32(1, 1, fired)
+        OSAtomicCompareAndSwap32(1, 1, fired)
     }
 }

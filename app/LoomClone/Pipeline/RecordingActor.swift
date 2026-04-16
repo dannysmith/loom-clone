@@ -4,7 +4,6 @@ import ScreenCaptureKit
 
 /// Coordinates the full recording pipeline: capture → composite → encode → upload.
 actor RecordingActor {
-
     // MARK: - Capture Sources
 
     private let screenCapture = ScreenCaptureManager()
@@ -18,6 +17,7 @@ actor RecordingActor {
     private let upload = UploadActor()
 
     // MARK: - Raw Stream Writers
+
     //
     // High-quality master files written locally alongside the composited HLS
     // segments. Created in `prepareRecording` for whichever sources the user
@@ -69,6 +69,7 @@ actor RecordingActor {
     }
 
     // MARK: - Terminal Error Callback
+
     //
     // Fired when the compositor reports a render failure that rebuild can't
     // recover from. The coordinator uses this to surface a user-visible alert
@@ -99,6 +100,7 @@ actor RecordingActor {
     }
 
     // MARK: - The Recording Clock
+
     //
     // There is exactly one clock that anchors the recording timeline:
     // `recordingStartTime`. It is set in `commitRecording()` after every
@@ -178,6 +180,7 @@ actor RecordingActor {
     private var metronomeTickIdx: Int64 = 0
 
     // MARK: - Two-Phase Start
+
     //
     // Recording start is split into prepare + commit so the coordinator can run
     // the slow setup (server session, capture hardware coming online, audio
@@ -198,7 +201,7 @@ actor RecordingActor {
     ) async throws -> (id: String, slug: String) {
         self.mode = mode
         self.preset = preset
-        isRecording = false  // not recording yet — set true in commit
+        isRecording = false // not recording yet — set true in commit
         recordingStartTime = nil
         pauseAccumulator = .zero
         pauseStartHostTime = nil
@@ -306,7 +309,7 @@ actor RecordingActor {
 
         if microphone != nil, let localDir = localSavePath {
             let bitrate = 192_000
-            let sampleRate = 48_000
+            let sampleRate = 48000
             let channels = 2
             let url = localDir.appendingPathComponent("audio.m4a")
             let w = RawStreamWriter(url: url, kind: .audio(bitrate: bitrate, sampleRate: sampleRate, channels: channels))
@@ -422,7 +425,7 @@ actor RecordingActor {
                 let nativeSize = cameraCapture.nativePixelSize
                 let width = Int(nativeSize.width)
                 let height = Int(nativeSize.height)
-                if width > 0 && height > 0 {
+                if width > 0, height > 0 {
                     let bitrate = 12_000_000
                     let url = localDir.appendingPathComponent("camera.mp4")
                     let w = RawStreamWriter(url: url, kind: .videoH264(width: width, height: height, bitrate: bitrate))
@@ -447,7 +450,7 @@ actor RecordingActor {
         // arrive in our handler. The session is running but the first sample
         // can take an extra 50-200ms.
         if microphone != nil {
-            for _ in 0..<100 {
+            for _ in 0 ..< 100 {
                 if audioHasArrived { break }
                 try? await Task.sleep(for: .milliseconds(10))
             }
@@ -483,12 +486,11 @@ actor RecordingActor {
         // larger. Capping at ~100ms preserves the fix for the normal
         // ~40-80ms capture-pipeline case while bounding the worst case.
         let maxAnchorAge = CMTime(value: 100, timescale: 1000)
-        let cachedPTS: CMTime?
-        switch mode {
+        let cachedPTS: CMTime? = switch mode {
         case .screenOnly:
-            cachedPTS = latestScreenFrame?.capturePTS
+            latestScreenFrame?.capturePTS
         case .cameraOnly, .screenAndCamera:
-            cachedPTS = cameraFrameQueue.last?.capturePTS
+            cameraFrameQueue.last?.capturePTS
         }
         let anchor: CMTime
         if let cachedPTS, cachedPTS.isValid, (now - cachedPTS) <= maxAnchorAge {
@@ -497,7 +499,11 @@ actor RecordingActor {
             anchor = now - maxAnchorAge
             if let cachedPTS, cachedPTS.isValid {
                 let ageMS = (now - cachedPTS).seconds * 1000
-                print(String(format: "[recording] Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms", ageMS, maxAnchorAge.seconds * 1000))
+                print(String(
+                    format: "[recording] Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms",
+                    ageMS,
+                    maxAnchorAge.seconds * 1000
+                ))
             }
         }
         recordingStartTime = anchor
@@ -552,7 +558,7 @@ actor RecordingActor {
     /// What the stop flow hands back to the coordinator. `url` drives the
     /// clipboard copy; the rest lets HealAgent pick up any segments the
     /// server didn't have at stop time without blocking the foreground flow.
-    struct StopResult: Sendable {
+    struct StopResult {
         let url: String
         let videoId: String
         let localDir: URL
@@ -681,7 +687,8 @@ actor RecordingActor {
             let result = try await upload.complete(timeline: timelineData)
             print("[recording] Stopped, URL: \(result.url) (missing=\(result.missing.count))")
             guard let videoId = await upload.videoId,
-                  let localDir = localSavePath else {
+                  let localDir = localSavePath
+            else {
                 // No way to schedule healing without these — still return the URL.
                 return StopResult(
                     url: result.url,
@@ -755,7 +762,7 @@ actor RecordingActor {
         await screenCapture.stopCapture()
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
-        await writer.finish()  // no-op when hasStartedSession == false
+        await writer.finish() // no-op when hasStartedSession == false
 
         // Same for raw writers — they were configured but never started.
         // RawStreamWriter.finish() handles the unstarted case by removing
@@ -792,7 +799,7 @@ actor RecordingActor {
         var pauseSeconds: Double = 0
         if let pauseStart = pauseStartHostTime {
             let pauseDuration = now - pauseStart
-            pauseAccumulator = pauseAccumulator + pauseDuration
+            pauseAccumulator = pauseAccumulator + pauseDuration // swiftlint:disable:this shorthand_operator
             pauseSeconds = pauseDuration.seconds
         }
         pauseStartHostTime = nil
@@ -846,7 +853,8 @@ actor RecordingActor {
         latestScreenFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
 
         if let screenRawWriter,
-           let retimed = retimedSampleForRawWriter(sampleBuffer) {
+           let retimed = retimedSampleForRawWriter(sampleBuffer)
+        {
             await screenRawWriter.append(retimed)
         }
     }
@@ -864,7 +872,8 @@ actor RecordingActor {
         }
 
         if let cameraRawWriter,
-           let retimed = retimedSampleForRawWriter(sampleBuffer) {
+           let retimed = retimedSampleForRawWriter(sampleBuffer)
+        {
             await cameraRawWriter.append(retimed)
         }
     }
@@ -999,7 +1008,7 @@ actor RecordingActor {
     /// The sleep schedule is drift-corrected against `recordingStartTime`
     /// so ticks fire at steady 1/30s intervals.
     private func metronomeLoop() async {
-        while !Task.isCancelled && isRecording {
+        while !Task.isCancelled, isRecording {
             let emitted = await emitMetronomeFrame()
 
             if !emitted {
@@ -1085,9 +1094,9 @@ actor RecordingActor {
 
         let output: CVPixelBuffer
         switch result {
-        case .success(let buffer):
+        case let .success(buffer):
             output = buffer
-        case .failure(let compositionError):
+        case let .failure(compositionError):
             await handleCompositionFailure(compositionError)
             return false
         }
@@ -1122,6 +1131,7 @@ actor RecordingActor {
     }
 
     // MARK: - Composition Failure Recovery
+
     //
     // When `CompositionActor.compositeFrame` surfaces a render error or a
     // stall, we:
@@ -1142,7 +1152,7 @@ actor RecordingActor {
         let kind: String
         let detail: String
         switch error {
-        case .renderFailed(let underlying):
+        case let .renderFailed(underlying):
             kind = "renderError"
             detail = (underlying as NSError).localizedDescription
         case .stallTimeout:

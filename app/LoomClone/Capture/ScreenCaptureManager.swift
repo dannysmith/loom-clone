@@ -1,10 +1,9 @@
+import AppKit
+import CoreMedia
 import Foundation
 import ScreenCaptureKit
-import CoreMedia
-import AppKit
 
 final class ScreenCaptureManager: NSObject, @unchecked Sendable {
-
     /// Native pixel dimensions of the display currently being captured.
     /// Set by `startCapture` after resolving the backing scale factor.
     /// Used by the coordinator for preset-availability gating.
@@ -85,7 +84,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
 }
 
 extension ScreenCaptureManager: SCStreamOutput {
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    func stream(_: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sampleBuffer.isValid else { return }
 
         // SCStream delivers sample buffers with a status attachment. Only
@@ -93,7 +92,10 @@ extension ScreenCaptureManager: SCStreamOutput {
         // `.suspended` etc. should be dropped. See SCFrameStatus docs and
         // Apple's "Capturing screen content in macOS" sample code.
         guard
-            let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+            let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(
+                sampleBuffer,
+                createIfNecessary: false
+            ) as? [[SCStreamFrameInfo: Any]],
             let attachments = attachmentsArray.first,
             let statusRaw = attachments[SCStreamFrameInfo.status] as? Int,
             let status = SCFrameStatus(rawValue: statusRaw),
@@ -105,7 +107,7 @@ extension ScreenCaptureManager: SCStreamOutput {
 }
 
 extension ScreenCaptureManager: SCStreamDelegate {
-    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+    func stream(_: SCStream, didStopWithError error: any Error) {
         print("[screen] Stream stopped with error: \(error)")
     }
 }

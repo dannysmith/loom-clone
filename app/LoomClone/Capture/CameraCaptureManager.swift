@@ -1,9 +1,8 @@
-import Foundation
 @preconcurrency import AVFoundation
 import CoreMedia
+import Foundation
 
 final class CameraCaptureManager: NSObject, @unchecked Sendable {
-
     var onCameraFrame: (@Sendable (CMSampleBuffer) -> Void)?
 
     private var session: AVCaptureSession?
@@ -105,8 +104,13 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
                 let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                print(String(format: "[camera] Selected format: %dx%d @ %.2ffps (cap: %d)",
-                             dims.width, dims.height, min(rate, 30.0), maxHeight))
+                print(String(
+                    format: "[camera] Selected format: %dx%d @ %.2ffps (cap: %d)",
+                    dims.width,
+                    dims.height,
+                    min(rate, 30.0),
+                    maxHeight
+                ))
             } catch {
                 print("[camera] Could not set activeFormat: \(error) — falling back to .high")
                 session.sessionPreset = .high
@@ -127,7 +131,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
 
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
         ]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: captureQueue)
@@ -171,13 +175,14 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         let subType = CMFormatDescriptionGetMediaSubType(fmtDesc)
         let subTypeStr = String(
             format: "%c%c%c%c",
-            (subType >> 24) & 0xff,
-            (subType >> 16) & 0xff,
-            (subType >> 8) & 0xff,
-            subType & 0xff
+            (subType >> 24) & 0xFF,
+            (subType >> 16) & 0xFF,
+            (subType >> 8) & 0xFF,
+            subType & 0xFF
         )
         let primaries = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String ?? "none"
-        let transfer = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String ?? "none"
+        let transfer = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String ??
+            "none"
         let matrix = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String ?? "none"
         print("[camera] Format introspection: subType=\(subTypeStr) primaries=\(primaries) transfer=\(transfer) matrix=\(matrix)")
     }
@@ -197,9 +202,9 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
 
 extension CameraCaptureManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(
-        _ output: AVCaptureOutput,
+        _: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         // Tag the pixel buffer with explicit Rec. 709 colour metadata before
         // forwarding. Many USB cameras (ZV-1, generic

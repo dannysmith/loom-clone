@@ -3,6 +3,7 @@ import CoreMedia
 import Foundation
 
 // MARK: - HarnessWriter
+
 //
 // Common surface area for all writer types inside the harness. Each
 // concrete writer is a minimal analogue of the main-app WriterActor /
@@ -19,7 +20,6 @@ import Foundation
 // objects.
 
 protocol HarnessWriter: AnyObject {
-
     /// Unique display name from the config. Used in event log lines
     /// and in the result summary.
     var name: String { get }
@@ -63,11 +63,10 @@ protocol HarnessWriter: AnyObject {
 // MARK: - Helpers
 
 extension HarnessWriter {
-
     /// True if finish() has been called at least once. Concrete writers
     /// maintain their own `didFinish` flag; this is a fallback for
     /// callers who only care that "the writer has been shut down".
     func hasFinished() -> Bool {
-        return finalStatus == .completed || finalStatus == .failed || finalStatus == .cancelled
+        finalStatus == .completed || finalStatus == .failed || finalStatus == .cancelled
     }
 }

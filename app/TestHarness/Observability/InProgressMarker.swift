@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - InProgressMarker
+
 //
 // Last-known-good marker from the task-0C safety plan. Before a run
 // starts, we write `test-runs/_in-progress.json` with the name + full
@@ -13,7 +14,6 @@ import Foundation
 // the file around the run.
 
 enum InProgressMarker {
-
     static func url(inTestRunsRoot root: URL) -> URL {
         root.appendingPathComponent("_in-progress.json")
     }
@@ -21,9 +21,11 @@ enum InProgressMarker {
     /// Write the marker. Called right before the harness does anything
     /// that could hang. If writing the marker itself fails, the run
     /// aborts — a missing marker is not an acceptable safety gap.
-    static func write(config: HarnessConfig,
-                      runDirectory: URL,
-                      testRunsRoot: URL) throws {
+    static func write(
+        config: HarnessConfig,
+        runDirectory: URL,
+        testRunsRoot: URL
+    ) throws {
         struct Marker: Codable {
             let name: String
             let runDirectory: String

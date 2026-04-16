@@ -20,8 +20,7 @@ import VideoToolbox
 ///   don't take video. Audio is a single-source recording so it's
 ///   captured into its own file rather than embedded in both video files.
 actor RawStreamWriter {
-
-    enum Kind: Sendable {
+    enum Kind {
         /// H.264 via VideoToolbox on the hardware H.264/HEVC media engine.
         /// Used for the raw camera writer. Target bitrate, H.264 High Profile,
         /// 2 s keyframe interval.
@@ -60,18 +59,17 @@ actor RawStreamWriter {
         // — it will refuse to overwrite. Belt-and-braces remove.
         try? FileManager.default.removeItem(at: url)
 
-        let fileType: AVFileType
-        switch kind {
-        case .videoH264: fileType = .mp4
-        case .videoProRes: fileType = .mov
-        case .audio: fileType = .m4a
+        let fileType: AVFileType = switch kind {
+        case .videoH264: .mp4
+        case .videoProRes: .mov
+        case .audio: .m4a
         }
 
         let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
 
         let input: AVAssetWriterInput
         switch kind {
-        case .videoH264(let width, let height, let bitrate):
+        case let .videoH264(width, height, bitrate):
             // Deliberately no `AVVideoColorPropertiesKey` here. Declaring
             // Rec. 709 on the output is safe for the raw camera writer (its
             // input buffers are tagged Rec. 709 by `CameraCaptureManager`)
@@ -94,7 +92,7 @@ actor RawStreamWriter {
                 AVVideoHeightKey: height,
                 // Require hardware H.264. See WriterActor for the rationale.
                 AVVideoEncoderSpecificationKey: [
-                    kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+                    kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any,
                 ] as [String: Any],
                 AVVideoCompressionPropertiesKey: [
                     AVVideoAverageBitRateKey: bitrate,
@@ -112,7 +110,7 @@ actor RawStreamWriter {
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 
-        case .videoProRes(let width, let height):
+        case let .videoProRes(width, height):
             // ProRes 422 Proxy via the hardware ProRes engine. No
             // `AVVideoCompressionPropertiesKey` — AVAssetWriter rejects any
             // compression-properties dict on a ProRes output with an
@@ -132,7 +130,7 @@ actor RawStreamWriter {
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 
-        case .audio(let bitrate, let sampleRate, let channels):
+        case let .audio(bitrate, sampleRate, channels):
             let audioSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: sampleRate,

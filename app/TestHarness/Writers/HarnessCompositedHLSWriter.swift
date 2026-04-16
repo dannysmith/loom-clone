@@ -4,6 +4,7 @@ import Foundation
 import VideoToolbox
 
 // MARK: - HarnessCompositedHLSWriter
+
 //
 // Minimal analogue of WriterActor. AVAssetWriter with HLS profile,
 // 4-second automatic segment interval, H.264 High. Captures the
@@ -20,7 +21,6 @@ import VideoToolbox
 // trigger a conversion — that's a tunable we can flip off via config.
 
 final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
-
     let name: String
     let kind = "composited-hls"
     let outputURL: URL?
@@ -41,18 +41,20 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
     private(set) var finalError: Error?
     private(set) var segmentDurations: [Double] = []
 
-    // Serialises segment-duration append from the delegate callback
-    // (which fires on an arbitrary AVFoundation queue) against the
-    // main consumer.
+    /// Serialises segment-duration append from the delegate callback
+    /// (which fires on an arbitrary AVFoundation queue) against the
+    /// main consumer.
     private let segmentLock = NSLock()
 
-    init(name: String,
-         width: Int,
-         height: Int,
-         bitrate: Int,
-         outputURL: URL,
-         tunings: [String: JSONValue] = [:],
-         events: EventLog) {
+    init(
+        name: String,
+        width: Int,
+        height: Int,
+        bitrate: Int,
+        outputURL: URL,
+        tunings: [String: JSONValue] = [:],
+        events: EventLog
+    ) {
         self.name = name
         self.width = width
         self.height = height
@@ -129,10 +131,10 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             // to do so would crash the harness run at configure time.
         ]
         switch tunings["realTime"] {
-        case .some(.bool(let b)):
+        case let .some(.bool(b)):
             compression[kVTCompressionPropertyKey_RealTime as String] = (b ? kCFBooleanTrue : kCFBooleanFalse) as Any
         case .some(.null):
-            break  // explicit opt-out — leave RealTime unset (default state)
+            break // explicit opt-out — leave RealTime unset (default state)
         case .none:
             compression[kVTCompressionPropertyKey_RealTime as String] = kCFBooleanFalse as Any
         default:
@@ -147,7 +149,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             // Task-1 tuning 6: require hardware H.264. See
             // HarnessRawH264Writer for the rationale.
             AVVideoEncoderSpecificationKey: [
-                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any,
             ] as [String: Any],
         ]
 
@@ -193,7 +195,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
         videoInput.append(sample)
     }
 
-    func appendAudio(_ sample: CMSampleBuffer) {}
+    func appendAudio(_: CMSampleBuffer) {}
 
     func finish() async {
         guard !didFinish else { return }
@@ -206,7 +208,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             finalError = writer.error
             events.log("writer.failed-before-finish", [
                 "name": name,
-                "error": writer.error?.localizedDescription ?? "unknown"
+                "error": writer.error?.localizedDescription ?? "unknown",
             ])
             return
         }
@@ -220,17 +222,20 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
         events.log("writer.finished", [
             "name": name,
             "status": writer.status.rawValue,
-            "error": writer.error?.localizedDescription ?? ""
+            "error": writer.error?.localizedDescription ?? "",
         ])
     }
 
     /// HLS writer doesn't write to a single file on disk — segments
     /// come through the delegate. Total bytes is the sum of segment
     /// sizes we saw in the callback, approximated as "not tracked here".
-    var bytesOnDisk: Int64? { nil }
+    var bytesOnDisk: Int64? {
+        nil
+    }
 }
 
 // MARK: - Delegate proxy
+
 //
 // AVAssetWriterDelegate is @objc; Swift classes can conform but we
 // isolate it into a small proxy to keep the writer itself Sendable-ish.
@@ -238,10 +243,12 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
 private final class HLSDelegateProxy: NSObject, AVAssetWriterDelegate, @unchecked Sendable {
     var onSegment: ((Data, AVAssetSegmentType, AVAssetSegmentReport?) -> Void)?
 
-    func assetWriter(_ writer: AVAssetWriter,
-                     didOutputSegmentData segmentData: Data,
-                     segmentType: AVAssetSegmentType,
-                     segmentReport: AVAssetSegmentReport?) {
+    func assetWriter(
+        _: AVAssetWriter,
+        didOutputSegmentData segmentData: Data,
+        segmentType: AVAssetSegmentType,
+        segmentReport: AVAssetSegmentReport?
+    ) {
         onSegment?(segmentData, segmentType, segmentReport)
     }
 }

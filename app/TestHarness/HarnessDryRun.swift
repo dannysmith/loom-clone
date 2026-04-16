@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - HarnessDryRun
+
 //
 // Validates a config and prints what the harness WOULD do, without
 // calling any AVFoundation entry point. The first thing a new test
@@ -14,7 +15,6 @@ import Foundation
 // in a way we'd want to know about before running it for real.
 
 enum HarnessDryRun {
-
     static func describe(config: HarnessConfig) {
         print("=== DRY RUN: \(config.name) ===")
         if let d = config.description { print("description: \(d)") }
@@ -52,7 +52,7 @@ enum HarnessDryRun {
             if let width = w.width, let height = w.height {
                 parts.append("\(width)x\(height)")
             }
-            if let b = w.bitrate { parts.append("\(b/1_000_000)Mbps") }
+            if let b = w.bitrate { parts.append("\(b / 1_000_000)Mbps") }
             print("  [\(i)] \(parts.joined(separator: " "))")
             if let tunings = w.tunings, !tunings.isEmpty {
                 for (k, _) in tunings {

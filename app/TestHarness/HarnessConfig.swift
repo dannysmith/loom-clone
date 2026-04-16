@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - HarnessConfig
+
 //
 // JSON-serialised test configuration. Decoded from the --config file on
 // launch. Every field that affects the test must be here so the config
@@ -13,8 +14,7 @@ import Foundation
 // - Nothing here calls into AVFoundation. Building a HarnessConfig is
 //   cheap and safe, so it can be done in --dry-run mode.
 
-struct HarnessConfig: Codable, Sendable {
-
+struct HarnessConfig: Codable {
     /// Short name shown in logs and result summary. e.g. "T1.1-prores-4k-alone".
     let name: String
 
@@ -63,15 +63,15 @@ struct HarnessConfig: Codable, Sendable {
     /// Values: "pass", "degraded", "fail", "fail-killed", "unknown".
     var expected: String = "unknown"
 
-    // Swift's synthesised Codable treats defaulted `var` properties as
-    // required at decode time — the Swift default only fires at
-    // struct-construction time, not when decoding from JSON. That means
-    // adding a new defaulted field to this schema would silently break
-    // every existing config on disk. This custom decoder uses
-    // `decodeIfPresent` for every defaulted field so new optional fields
-    // can be added without a JSON migration, which is the "tolerant to
-    // growth" property the file header calls out. `encode(to:)` is still
-    // auto-synthesised.
+    /// Swift's synthesised Codable treats defaulted `var` properties as
+    /// required at decode time — the Swift default only fires at
+    /// struct-construction time, not when decoding from JSON. That means
+    /// adding a new defaulted field to this schema would silently break
+    /// every existing config on disk. This custom decoder uses
+    /// `decodeIfPresent` for every defaulted field so new optional fields
+    /// can be added without a JSON migration, which is the "tolerant to
+    /// growth" property the file header calls out. `encode(to:)` is still
+    /// auto-synthesised.
     enum CodingKeys: String, CodingKey {
         case name, description, tier
         case durationSeconds, watchdogGraceSeconds
@@ -98,8 +98,7 @@ struct HarnessConfig: Codable, Sendable {
 
 // MARK: - SourceConfig
 
-struct SourceConfig: Codable, Sendable {
-
+struct SourceConfig: Codable {
     /// "synthetic-screen" (420v YCbCr, matches main-app SCStream),
     /// "synthetic-screen-bgra" (32BGRA — explicit BGRA exception case),
     /// "synthetic-camera" (420v YCbCr),
@@ -130,6 +129,7 @@ struct SourceConfig: Codable, Sendable {
     var additional: [SourceConfig]?
 
     // MARK: Real-capture device selection
+
     //
     // Ignored for synthetic sources. For real-capture sources, these
     // pin the test to a specific physical device so results are
@@ -187,8 +187,7 @@ struct SourceConfig: Codable, Sendable {
 
 // MARK: - CompositorConfig
 
-struct CompositorConfig: Codable, Sendable {
-
+struct CompositorConfig: Codable {
     let outputWidth: Int
     let outputHeight: Int
 
@@ -208,8 +207,7 @@ struct CompositorConfig: Codable, Sendable {
 
 // MARK: - WriterConfig
 
-struct WriterConfig: Codable, Sendable {
-
+struct WriterConfig: Codable {
     /// "composited-hls", "raw-h264", "raw-prores", "raw-audio".
     let kind: String
 
@@ -236,12 +234,13 @@ struct WriterConfig: Codable, Sendable {
 }
 
 // MARK: - JSONValue
+
 //
 // Minimal Codable type for "any JSON scalar / array / object" used in
 // the tunings field. Swift's built-in [String: Any] isn't Codable; this
 // fills the gap without pulling in a third-party package.
 
-enum JSONValue: Codable, Sendable {
+enum JSONValue: Codable {
     case bool(Bool)
     case int(Int)
     case double(Double)
@@ -268,23 +267,29 @@ enum JSONValue: Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
-        case .bool(let b): try c.encode(b)
-        case .int(let i): try c.encode(i)
-        case .double(let d): try c.encode(d)
-        case .string(let s): try c.encode(s)
-        case .array(let a): try c.encode(a)
-        case .object(let o): try c.encode(o)
+        case let .bool(b): try c.encode(b)
+        case let .int(i): try c.encode(i)
+        case let .double(d): try c.encode(d)
+        case let .string(s): try c.encode(s)
+        case let .array(a): try c.encode(a)
+        case let .object(o): try c.encode(o)
         case .null: try c.encodeNil()
         }
     }
 
-    var asBool: Bool? { if case .bool(let b) = self { return b }; return nil }
+    var asBool: Bool? {
+        if case let .bool(b) = self { return b }; return nil
+    }
+
     var asInt: Int? {
-        if case .int(let i) = self { return i }
-        if case .double(let d) = self { return Int(d) }
+        if case let .int(i) = self { return i }
+        if case let .double(d) = self { return Int(d) }
         return nil
     }
-    var asString: String? { if case .string(let s) = self { return s }; return nil }
+
+    var asString: String? {
+        if case let .string(s) = self { return s }; return nil
+    }
 }
 
 // MARK: - Loading

@@ -4,6 +4,7 @@ import Foundation
 import VideoToolbox
 
 // MARK: - HarnessRawH264Writer
+
 //
 // Minimal analogue of RawStreamWriter .videoH264. Writes H.264 High
 // Profile to a plain .mp4. No HLS segmentation, no audio input.
@@ -12,7 +13,6 @@ import VideoToolbox
 // full context and failure mode 2 in m2-pro-video-pipeline-failures.
 
 final class HarnessRawH264Writer: HarnessWriter {
-
     let name: String
     let kind = "raw-h264"
     let outputURL: URL?
@@ -30,15 +30,19 @@ final class HarnessRawH264Writer: HarnessWriter {
 
     private(set) var finalStatus: AVAssetWriter.Status = .unknown
     private(set) var finalError: Error?
-    var segmentDurations: [Double] { [] }
+    var segmentDurations: [Double] {
+        []
+    }
 
-    init(name: String,
-         width: Int,
-         height: Int,
-         bitrate: Int,
-         outputURL: URL,
-         tunings: [String: JSONValue] = [:],
-         events: EventLog) {
+    init(
+        name: String,
+        width: Int,
+        height: Int,
+        bitrate: Int,
+        outputURL: URL,
+        tunings: [String: JSONValue] = [:],
+        events: EventLog
+    ) {
         self.name = name
         self.width = width
         self.height = height
@@ -72,7 +76,7 @@ final class HarnessRawH264Writer: HarnessWriter {
         // leaves the property unset (matching the macOS default of
         // "unknown") for the comparison against an explicit bool.
         switch tunings["realTime"] {
-        case .some(.bool(let b)):
+        case let .some(.bool(b)):
             compression[kVTCompressionPropertyKey_RealTime as String] = (b ? kCFBooleanTrue : kCFBooleanFalse) as Any
         case .some(.null):
             break
@@ -109,7 +113,7 @@ final class HarnessRawH264Writer: HarnessWriter {
             // fallback fails loudly at startWriting() instead of dragging
             // the GPU into a deadlock.
             AVVideoEncoderSpecificationKey: [
-                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any,
             ] as [String: Any],
         ]
 
@@ -145,7 +149,7 @@ final class HarnessRawH264Writer: HarnessWriter {
         input.append(sample)
     }
 
-    func appendAudio(_ sample: CMSampleBuffer) {}
+    func appendAudio(_: CMSampleBuffer) {}
 
     func finish() async {
         guard !didFinish else { return }
@@ -161,7 +165,7 @@ final class HarnessRawH264Writer: HarnessWriter {
             finalError = writer.error
             events.log("writer.failed-before-finish", [
                 "name": name,
-                "error": writer.error?.localizedDescription ?? "unknown"
+                "error": writer.error?.localizedDescription ?? "unknown",
             ])
             return
         }
@@ -175,13 +179,14 @@ final class HarnessRawH264Writer: HarnessWriter {
         events.log("writer.finished", [
             "name": name,
             "status": writer.status.rawValue,
-            "error": writer.error?.localizedDescription ?? ""
+            "error": writer.error?.localizedDescription ?? "",
         ])
     }
 
     var bytesOnDisk: Int64? {
         guard let url = outputURL,
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        else {
             return nil
         }
         return (attrs[.size] as? NSNumber)?.int64Value

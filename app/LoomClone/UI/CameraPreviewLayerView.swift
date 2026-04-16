@@ -29,7 +29,6 @@ private let cameraPreviewFilterQueue = DispatchQueue(
 ///   Fast-paths the original sample buffer through unchanged otherwise.
 @MainActor
 final class CameraPreviewLayerView: NSView {
-
     nonisolated(unsafe) private let displayLayer = AVSampleBufferDisplayLayer()
 
     // MARK: - Filter State

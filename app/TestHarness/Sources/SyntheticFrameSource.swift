@@ -3,6 +3,7 @@ import CoreVideo
 import Foundation
 
 // MARK: - SyntheticFrameSource
+
 //
 // Produces CVPixelBuffer + CMSampleBuffer frames without touching any
 // capture API. This is the default frame source for the harness
@@ -23,24 +24,23 @@ import Foundation
 // fetch-frame cadence. The source just vends a frame when asked.
 
 final class SyntheticFrameSource: @unchecked Sendable {
-
     // MARK: - Configuration
 
-    enum Kind: Sendable {
-        case screenBGRA      // 32BGRA, full range
-        case screen420v      // 420YpCbCr8BiPlanarVideoRange — matches main-app SCStream
-        case camera420v      // 420YpCbCr8BiPlanarVideoRange (video range)
-        case audioSilentPCM  // stereo f32 silence
+    enum Kind {
+        case screenBGRA // 32BGRA, full range
+        case screen420v // 420YpCbCr8BiPlanarVideoRange — matches main-app SCStream
+        case camera420v // 420YpCbCr8BiPlanarVideoRange (video range)
+        case audioSilentPCM // stereo f32 silence
     }
 
-    enum Pattern: Sendable {
+    enum Pattern {
         case solid
         case gradient
         case moving
         case noise
     }
 
-    enum ColorSpaceTag: Sendable {
+    enum ColorSpaceTag {
         case srgb
         case p3
         case rec709
@@ -57,17 +57,19 @@ final class SyntheticFrameSource: @unchecked Sendable {
     private var pool: CVPixelBufferPool?
     private var frameIndex: Int64 = 0
 
-    // Monotonic generation counter exposed to HarnessFrameSource's
-    // `generation` requirement. Synthetic sources produce a new buffer
-    // on every `makePixelBuffer` call, so we bump this per-call and
-    // the metronome observes "different" every tick.
+    /// Monotonic generation counter exposed to HarnessFrameSource's
+    /// `generation` requirement. Synthetic sources produce a new buffer
+    /// on every `makePixelBuffer` call, so we bump this per-call and
+    /// the metronome observes "different" every tick.
     private(set) var syntheticGeneration: Int64 = 0
 
-    init(kind: Kind,
-         width: Int,
-         height: Int,
-         pattern: Pattern = .moving,
-         colorSpace: ColorSpaceTag = .srgb) {
+    init(
+        kind: Kind,
+        width: Int,
+        height: Int,
+        pattern: Pattern = .moving,
+        colorSpace: ColorSpaceTag = .srgb
+    ) {
         self.kind = kind
         self.width = width
         self.height = height
@@ -89,7 +91,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
             return nil
         }
         let poolAttrs: [String: Any] = [
-            kCVPixelBufferPoolMinimumBufferCountKey as String: 4
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 4,
         ]
         let bufferAttrs: [String: Any] = [
             kCVPixelBufferWidthKey as String: width,
@@ -114,7 +116,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
     /// for the configured pattern. Returns nil if the pool is
     /// exhausted or the kind is audio-only.
     func makePixelBuffer(index: Int64) -> CVPixelBuffer? {
-        guard let pool = pool else { return nil }
+        guard let pool else { return nil }
         var buffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(
             kCFAllocatorDefault, pool, &buffer
@@ -130,9 +132,11 @@ final class SyntheticFrameSource: @unchecked Sendable {
     /// Build a CMSampleBuffer around the pixel buffer at the requested
     /// presentation time. The PTS is computed from `index / frameRate`
     /// so every call with the same index produces the same timestamp.
-    func makeSampleBuffer(pixelBuffer: CVPixelBuffer,
-                          index: Int64,
-                          frameRate: Int) -> CMSampleBuffer? {
+    func makeSampleBuffer(
+        pixelBuffer: CVPixelBuffer,
+        index: Int64,
+        frameRate: Int
+    ) -> CMSampleBuffer? {
         let scale = CMTimeScale(frameRate * 100)
         let duration = CMTime(value: 100, timescale: scale)
         let pts = CMTime(value: index * 100, timescale: scale)
@@ -214,7 +218,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
         case .gradient:
             // Vertical gradient. One memset_pattern4 call per row,
             // varying the colour per row. Still fast.
-            for y in 0..<h {
+            for y in 0 ..< h {
                 let shade = UInt8((y * 255 / max(h - 1, 1)) & 0xFF)
                 let px: [UInt8] = [shade, shade, phase, 0xFF]
                 let row = base.advanced(by: y * stride)
@@ -231,7 +235,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
             let offset = Int(frameIndex) % (stripeHeight * 2)
             let dark: [UInt8] = [0x22, 0x22, phase, 0xFF]
             let light: [UInt8] = [0xDD, 0xDD, phase, 0xFF]
-            for y in 0..<h {
+            for y in 0 ..< h {
                 let useDark = ((y + offset) / stripeHeight) % 2 == 0
                 let row = base.advanced(by: y * stride)
                 if useDark {
@@ -250,9 +254,9 @@ final class SyntheticFrameSource: @unchecked Sendable {
             // pick 8 random-ish colours per frame and cycle through
             // them per row. Not real noise, but non-trivial content
             // for the encoder and O(h) memset_pattern4 calls per frame.
-            var state = UInt32(truncatingIfNeeded: frameIndex &* 2654435761)
-            for y in 0..<h {
-                state = state &* 1664525 &+ 1013904223
+            var state = UInt32(truncatingIfNeeded: frameIndex &* 2_654_435_761)
+            for y in 0 ..< h {
+                state = state &* 1_664_525 &+ 1_013_904_223
                 let r = UInt8(truncatingIfNeeded: state >> 24)
                 let g = UInt8(truncatingIfNeeded: state >> 16)
                 let b = UInt8(truncatingIfNeeded: state >> 8)
@@ -275,9 +279,9 @@ final class SyntheticFrameSource: @unchecked Sendable {
         if let yBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) {
             let yStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
             let phase = Int(frameIndex % 220)
-            for row in 0..<h {
+            for row in 0 ..< h {
                 let line = yBase.advanced(by: row * yStride).assumingMemoryBound(to: UInt8.self)
-                let y: UInt8 = UInt8(16 + ((row + phase) % 220))
+                let y = UInt8(16 + ((row + phase) % 220))
                 memset(line, Int32(y), yStride)
             }
         }
@@ -286,7 +290,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
         let chromaH = CVPixelBufferGetHeightOfPlane(buffer, 1)
         if let cBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) {
             let cStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
-            for row in 0..<chromaH {
+            for row in 0 ..< chromaH {
                 let line = cBase.advanced(by: row * cStride).assumingMemoryBound(to: UInt8.self)
                 // 128 / 128 = neutral chroma. Adjust slightly per frame
                 // so the encoder sees non-static content.
@@ -324,21 +328,28 @@ final class SyntheticFrameSource: @unchecked Sendable {
             transfer = kCVImageBufferTransferFunction_ITU_R_709_2
             matrix = kCVImageBufferYCbCrMatrix_ITU_R_709_2
         }
-        CVBufferSetAttachment(buffer,
-                              kCVImageBufferColorPrimariesKey,
-                              primaries,
-                              .shouldPropagate)
-        CVBufferSetAttachment(buffer,
-                              kCVImageBufferTransferFunctionKey,
-                              transfer,
-                              .shouldPropagate)
-        CVBufferSetAttachment(buffer,
-                              kCVImageBufferYCbCrMatrixKey,
-                              matrix,
-                              .shouldPropagate)
+        CVBufferSetAttachment(
+            buffer,
+            kCVImageBufferColorPrimariesKey,
+            primaries,
+            .shouldPropagate
+        )
+        CVBufferSetAttachment(
+            buffer,
+            kCVImageBufferTransferFunctionKey,
+            transfer,
+            .shouldPropagate
+        )
+        CVBufferSetAttachment(
+            buffer,
+            kCVImageBufferYCbCrMatrixKey,
+            matrix,
+            .shouldPropagate
+        )
     }
 
     // MARK: - Audio helper
+
     //
     // For the audio-only synthetic source we produce short CMSampleBuffers
     // of silent float32 stereo PCM at 48 kHz, matching what the main app's
@@ -347,7 +358,7 @@ final class SyntheticFrameSource: @unchecked Sendable {
     static func makeSilentAudioSampleBuffer(
         index: Int64,
         samplesPerBuffer: Int = 1024,
-        sampleRate: Double = 48_000.0,
+        sampleRate: Double = 48000.0,
         channels: Int = 2
     ) -> CMSampleBuffer? {
         var asbd = AudioStreamBasicDescription(
@@ -396,8 +407,10 @@ final class SyntheticFrameSource: @unchecked Sendable {
             return nil
         }
 
-        let pts = CMTime(value: index * Int64(samplesPerBuffer),
-                         timescale: CMTimeScale(sampleRate))
+        let pts = CMTime(
+            value: index * Int64(samplesPerBuffer),
+            timescale: CMTimeScale(sampleRate)
+        )
 
         var sample: CMSampleBuffer?
         CMAudioSampleBufferCreateWithPacketDescriptions(

@@ -5,7 +5,7 @@ final class PixelBufferPool: @unchecked Sendable {
 
     init(width: Int, height: Int, pixelFormat: OSType = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
         let poolAttrs: [String: Any] = [
-            kCVPixelBufferPoolMinimumBufferCountKey as String: 3
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 3,
         ]
         let bufferAttrs: [String: Any] = [
             kCVPixelBufferWidthKey as String: width,

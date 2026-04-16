@@ -1,6 +1,6 @@
 import Foundation
 
-enum RecordingState: Sendable, Equatable {
+enum RecordingState: Equatable {
     case idle
     case countingDown
     case recording

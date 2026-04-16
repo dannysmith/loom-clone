@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// A native `NSPopUpButton` wrapped in `NSViewRepresentable` so that SwiftUI
 /// frame modifiers actually stretch the button.
@@ -19,7 +19,6 @@ import AppKit
 /// lets SwiftUI frame modifiers (and `Form`'s columns layout) actually
 /// resize the button.
 struct NativePopUpPicker<ID: Hashable>: NSViewRepresentable {
-
     struct Option {
         let id: ID
         let label: String
@@ -79,7 +78,8 @@ struct NativePopUpPicker<ID: Hashable>: NSViewRepresentable {
         button.addItems(withTitles: options.map(\.label))
 
         if let selection,
-           let index = options.firstIndex(where: { $0.id == selection }) {
+           let index = options.firstIndex(where: { $0.id == selection })
+        {
             button.selectItem(at: index + (includeNone ? 1 : 0))
         } else if includeNone {
             // selection == nil → None row is at index 0

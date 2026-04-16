@@ -20,7 +20,6 @@ enum CompositionError: Error {
 }
 
 actor CompositionActor {
-
     // MARK: - Configuration
 
     private(set) var outputWidth: Int = OutputPreset.default.width
@@ -48,6 +47,7 @@ actor CompositionActor {
     private var circleMask: CIImage
 
     // MARK: - Camera Adjustments
+
     //
     // Optional reference to the shared state box owned by RecordingCoordinator.
     // nil means "no adjustments" — camera frames pass through unchanged. When
@@ -64,7 +64,8 @@ actor CompositionActor {
 
     init() {
         guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue() else {
+              let queue = device.makeCommandQueue()
+        else {
             fatalError("Metal not available")
         }
 
@@ -262,7 +263,7 @@ actor CompositionActor {
             switch first {
             case .completed:
                 return .success(output)
-            case .failed(let err):
+            case let .failed(err):
                 return .failure(.renderFailed(err))
             case .timedOut:
                 return .failure(.stallTimeout)
@@ -282,7 +283,8 @@ actor CompositionActor {
     /// metronome escalates to a clean terminal stop.
     func rebuildContext() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue() else {
+              let queue = device.makeCommandQueue()
+        else {
             print("[composition] Rebuild failed: MTLCreateSystemDefaultDevice / makeCommandQueue returned nil")
             return false
         }
@@ -308,16 +310,15 @@ actor CompositionActor {
         let scaleY = CGFloat(outputHeight) / extent.height
         let scale = max(scaleX, scaleY)
 
-        let scaled: CIImage
-        if scale < 0.95 {
+        let scaled: CIImage = if scale < 0.95 {
             // Downscale: use Lanczos for quality (sharper text).
-            scaled = image.applyingFilter("CILanczosScaleTransform", parameters: [
+            image.applyingFilter("CILanczosScaleTransform", parameters: [
                 kCIInputScaleKey: scale,
                 kCIInputAspectRatioKey: 1.0,
             ])
         } else {
             // Upscale or near-identity: cheap affine.
-            scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
         // Center crop to output size

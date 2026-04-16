@@ -10,7 +10,6 @@ import CoreMedia
 @MainActor
 @Observable
 final class CameraPreviewManager: NSObject {
-
     /// Observable presence flag — true when the preview session is live.
     /// SwiftUI views read this to decide whether to show the preview area.
     private(set) var isActive: Bool = false
@@ -53,7 +52,7 @@ final class CameraPreviewManager: NSObject {
 
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
         ]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: captureQueue)
@@ -95,9 +94,9 @@ final class CameraPreviewManager: NSObject {
 
 extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(
-        _ output: AVCaptureOutput,
+        _: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         // Tag the pixel buffer with explicit Rec. 709 colour metadata before
         // forwarding, matching what `CameraCaptureManager` does on the

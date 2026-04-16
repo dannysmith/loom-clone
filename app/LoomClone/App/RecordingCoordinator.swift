@@ -1,6 +1,6 @@
+import AVFoundation
 import Foundation
 import ScreenCaptureKit
-import AVFoundation
 
 /// UI-observable state for the recording pipeline.
 /// Lives on the main actor so SwiftUI views can bind directly.
@@ -8,7 +8,6 @@ import AVFoundation
 @MainActor
 @Observable
 final class RecordingCoordinator {
-
     // MARK: - Recording State
 
     private(set) var state: RecordingState = .idle
@@ -40,7 +39,7 @@ final class RecordingCoordinator {
         var modes: [RecordingMode] = []
         if hasScreen { modes.append(.screenOnly) }
         if hasCamera { modes.append(.cameraOnly) }
-        if hasScreen && hasCamera { modes.append(.screenAndCamera) }
+        if hasScreen, hasCamera { modes.append(.screenAndCamera) }
         return modes
     }
 
@@ -54,6 +53,7 @@ final class RecordingCoordinator {
             }
         }
     }
+
     var selectedCamera: AVCaptureDevice? {
         didSet {
             demoteModeIfUnavailable()
@@ -73,6 +73,7 @@ final class RecordingCoordinator {
             }
         }
     }
+
     var selectedMicrophone: AVCaptureDevice? {
         didSet {
             // Mirror the camera-preview pattern: only act if a preview is
@@ -109,7 +110,7 @@ final class RecordingCoordinator {
     /// native resolution regardless; this controls what the compositor
     /// renders into and what the encoder produces.
     private static let outputPresetDefaultsKey = "outputPresetID"
-    var outputPreset: OutputPreset = OutputPreset.fromID(
+    var outputPreset: OutputPreset = .fromID(
         UserDefaults.standard.string(forKey: "outputPresetID") ?? OutputPreset.default.id
     ) {
         didSet {
@@ -620,12 +621,13 @@ final class RecordingCoordinator {
             // If the previously-selected display has gone away, fall back
             // to the first available one.
             if let current = selectedDisplay,
-               !availableDisplays.contains(where: { $0.displayID == current.displayID }) {
+               !availableDisplays.contains(where: { $0.displayID == current.displayID })
+            {
                 selectedDisplay = availableDisplays.first
             }
         } catch let error as NSError {
             // TCC denial: Code -3801
-            if error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && error.code == -3801 {
+            if error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain", error.code == -3801 {
                 screenPermissionDenied = true
                 print("[devices] Screen recording permission denied — user must grant in System Settings")
             } else {
@@ -641,7 +643,8 @@ final class RecordingCoordinator {
         )
         availableCameras = cameraDiscovery.devices
         if let current = selectedCamera,
-           !availableCameras.contains(where: { $0.uniqueID == current.uniqueID }) {
+           !availableCameras.contains(where: { $0.uniqueID == current.uniqueID })
+        {
             selectedCamera = availableCameras.first
         }
 
@@ -653,7 +656,8 @@ final class RecordingCoordinator {
         )
         availableMicrophones = micDiscovery.devices
         if let current = selectedMicrophone,
-           !availableMicrophones.contains(where: { $0.uniqueID == current.uniqueID }) {
+           !availableMicrophones.contains(where: { $0.uniqueID == current.uniqueID })
+        {
             selectedMicrophone = availableMicrophones.first
         }
 
@@ -692,7 +696,7 @@ final class RecordingCoordinator {
     /// surfaces an alert to the user. No-op if we've already moved out of the
     /// recording state (e.g. the user hit Stop between the failure and the
     /// hop to main).
-    fileprivate func handleTerminalRecordingError(_ message: String) {
+    private func handleTerminalRecordingError(_ message: String) {
         guard state == .recording || state == .paused else { return }
 
         state = .stopped

@@ -55,7 +55,7 @@ struct TimestampAdjuster {
     mutating func markResume(at time: CMTime) {
         guard let start = pauseStartTime else { return }
         let duration = time - start
-        pauseAccumulator = pauseAccumulator + duration
+        pauseAccumulator = pauseAccumulator + duration // swiftlint:disable:this shorthand_operator
         pauseStartTime = nil
     }
 }

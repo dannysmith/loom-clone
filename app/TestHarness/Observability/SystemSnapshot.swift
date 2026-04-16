@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - SystemSnapshot
+
 //
 // Captures a before / after picture of kernel-visible state around a
 // test run. Uses subprocess shell-outs to standard macOS tools. The
@@ -17,7 +18,6 @@ import Foundation
 // block the harness.
 
 enum SystemSnapshot {
-
     /// Run all snapshot commands and write results to
     /// `<run-dir>/system-snapshot-<label>.txt`.
     static func capture(runDirectory: URL, label: String) {
@@ -26,38 +26,71 @@ enum SystemSnapshot {
 
         buffer += section("uname -a", run: ["/usr/bin/uname", "-a"])
         buffer += section("sw_vers", run: ["/usr/bin/sw_vers"])
-        buffer += section("sysctl hw.model hw.cpufrequency hw.memsize hw.physicalcpu hw.logicalcpu",
-                          run: ["/usr/sbin/sysctl",
-                                "hw.model", "hw.cpufrequency", "hw.memsize",
-                                "hw.physicalcpu", "hw.logicalcpu"])
+        buffer += section(
+            "sysctl hw.model hw.cpufrequency hw.memsize hw.physicalcpu hw.logicalcpu",
+            run: [
+                "/usr/sbin/sysctl",
+                "hw.model",
+                "hw.cpufrequency",
+                "hw.memsize",
+                "hw.physicalcpu",
+                "hw.logicalcpu",
+            ]
+        )
         buffer += section("vm_stat", run: ["/usr/bin/vm_stat"])
-        buffer += section("ps -o pid,rss,vsz,%cpu,%mem,command (harness process)",
-                          run: ["/bin/ps", "-o", "pid,rss,vsz,%cpu,%mem,command",
-                                "-p", String(ProcessInfo.processInfo.processIdentifier)])
-        buffer += section("ps -M (harness threads)",
-                          run: ["/bin/ps", "-M",
-                                "-p", String(ProcessInfo.processInfo.processIdentifier)])
-        buffer += section("ioreg -c IOSurfaceRoot -l (truncated)",
-                          run: ["/usr/sbin/ioreg", "-c", "IOSurfaceRoot", "-l"],
-                          maxBytes: 64 * 1024)
+        buffer += section(
+            "ps -o pid,rss,vsz,%cpu,%mem,command (harness process)",
+            run: [
+                "/bin/ps",
+                "-o",
+                "pid,rss,vsz,%cpu,%mem,command",
+                "-p",
+                String(ProcessInfo.processInfo.processIdentifier),
+            ]
+        )
+        buffer += section(
+            "ps -M (harness threads)",
+            run: [
+                "/bin/ps",
+                "-M",
+                "-p",
+                String(ProcessInfo.processInfo.processIdentifier),
+            ]
+        )
+        buffer += section(
+            "ioreg -c IOSurfaceRoot -l (truncated)",
+            run: ["/usr/sbin/ioreg", "-c", "IOSurfaceRoot", "-l"],
+            maxBytes: 64 * 1024
+        )
         // powermetrics needs root; if it fails the stderr capture still
         // tells us what happened. We skip the --samplers gpu_power flag
         // if powermetrics is unavailable at all.
-        buffer += section("powermetrics --samplers gpu_power -n 1 -i 100 (may require sudo)",
-                          run: ["/usr/bin/powermetrics", "--samplers", "gpu_power",
-                                "-n", "1", "-i", "100"],
-                          maxBytes: 8 * 1024,
-                          timeout: 3.0)
+        buffer += section(
+            "powermetrics --samplers gpu_power -n 1 -i 100 (may require sudo)",
+            run: [
+                "/usr/bin/powermetrics",
+                "--samplers",
+                "gpu_power",
+                "-n",
+                "1",
+                "-i",
+                "100",
+            ],
+            maxBytes: 8 * 1024,
+            timeout: 3.0
+        )
 
         try? buffer.write(to: outURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Section runner
 
-    private static func section(_ title: String,
-                                run argv: [String],
-                                maxBytes: Int = 32 * 1024,
-                                timeout: TimeInterval = 2.0) -> String {
+    private static func section(
+        _ title: String,
+        run argv: [String],
+        maxBytes: Int = 32 * 1024,
+        timeout: TimeInterval = 2.0
+    ) -> String {
         var body = "## \(title)\n"
         let result = spawn(argv, timeout: timeout)
         if let out = result.stdout, !out.isEmpty {
@@ -81,7 +114,7 @@ enum SystemSnapshot {
     private static func truncate(_ s: String, to max: Int) -> String {
         if s.utf8.count <= max { return s }
         let idx = s.index(s.startIndex, offsetBy: max, limitedBy: s.endIndex) ?? s.endIndex
-        return String(s[s.startIndex..<idx]) + "\n... [truncated to \(max) bytes]\n"
+        return String(s[s.startIndex ..< idx]) + "\n... [truncated to \(max) bytes]\n"
     }
 
     // MARK: - Bounded subprocess
@@ -109,16 +142,18 @@ enum SystemSnapshot {
         do {
             try task.run()
         } catch {
-            return SpawnResult(stdout: nil,
-                               stderr: "launch failed: \(error)",
-                               exitCode: nil,
-                               timedOut: false)
+            return SpawnResult(
+                stdout: nil,
+                stderr: "launch failed: \(error)",
+                exitCode: nil,
+                timedOut: false
+            )
         }
 
         // Wait with a deadline. Process doesn't take a timeout directly,
         // so we spin briefly and terminate if it runs long.
         let deadline = Date().addingTimeInterval(timeout)
-        while task.isRunning && Date() < deadline {
+        while task.isRunning, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.02)
         }
         if task.isRunning {
@@ -133,10 +168,14 @@ enum SystemSnapshot {
             )
         }
 
-        let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(),
-                         encoding: .utf8)
-        let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                         encoding: .utf8)
+        let out = String(
+            data: outPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        )
+        let err = String(
+            data: errPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        )
         return SpawnResult(stdout: out, stderr: err, exitCode: task.terminationStatus, timedOut: false)
     }
 }

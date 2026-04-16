@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 import VideoToolbox
 
 actor WriterActor {
-
     // MARK: - Segment Callback
 
     /// Raw emit shape: segment bytes plus metadata. Carries `Data` because the
@@ -12,7 +11,7 @@ actor WriterActor {
     /// (RecordingActor) writes the payload to local disk and then builds a
     /// URL-based `VideoSegment` to enqueue for upload — bytes aren't retained
     /// in memory past that write.
-    struct Emission: Sendable {
+    struct Emission {
         let index: Int
         let filename: String
         let data: Data
@@ -38,6 +37,7 @@ actor WriterActor {
     private var hasStartedSession = false
 
     // MARK: - Segment Pipeline
+
     //
     // AVAssetWriterDelegate fires `didOutputSegmentData` on an unknown dispatch
     // queue. We can't do any async work from there directly, and spawning
@@ -58,7 +58,7 @@ actor WriterActor {
     /// Sendable payload yielded by the delegate. We extract everything we need
     /// synchronously (duration from the report) so the stream element is a
     /// fully-Sendable value type — `AVAssetSegmentReport` is not Sendable.
-    private struct PendingSegment: Sendable {
+    private struct PendingSegment {
         let data: Data
         let isInitialization: Bool
         let duration: Double?
@@ -144,7 +144,7 @@ actor WriterActor {
             // isn't implementable because AVAssetWriter doesn't expose its
             // internal VTCompressionSession — we rely on enforcement only.
             AVVideoEncoderSpecificationKey: [
-                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any,
             ] as [String: Any],
             AVVideoColorPropertiesKey: [
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
@@ -383,7 +383,7 @@ private final class WriterDelegate: NSObject, AVAssetWriterDelegate, @unchecked 
     var onSegment: ((Data, AVAssetSegmentType, AVAssetSegmentReport?) -> Void)?
 
     func assetWriter(
-        _ writer: AVAssetWriter,
+        _: AVAssetWriter,
         didOutputSegmentData segmentData: Data,
         segmentType: AVAssetSegmentType,
         segmentReport: AVAssetSegmentReport?

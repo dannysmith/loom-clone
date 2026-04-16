@@ -17,7 +17,6 @@ import Foundation
 /// upstream — we write a `.orphaned` sidecar in the local dir and stop
 /// retrying that recording forever.
 actor HealAgent {
-
     /// Recordings older than this are not heal-scanned at startup. In
     /// practice a recording that didn't heal on the day it was made is
     /// unlikely to ever heal cleanly.
@@ -89,7 +88,8 @@ actor HealAgent {
             // for when the session ended.
             if let attrs = try? fm.attributesOfItem(atPath: recordingJSON.path),
                let modDate = attrs[.modificationDate] as? Date,
-               modDate < cutoff {
+               modDate < cutoff
+            {
                 continue
             }
 
@@ -124,12 +124,12 @@ actor HealAgent {
         // healed some we weren't told about.
         let missing: [String]
         switch await postComplete(videoId: videoId, timelineData: timelineData) {
-        case .ok(_, let list):
+        case let .ok(_, list):
             missing = list
         case .orphaned:
             markOrphaned(localDir: localDir)
             return
-        case .failure(let err):
+        case let .failure(err):
             print("[heal] \(videoId): initial /complete failed: \(err) — will retry next launch")
             return
         }
@@ -198,13 +198,13 @@ actor HealAgent {
         // status transitions healing → complete.
         let updatedTimeline = (try? Data(contentsOf: localDir.appendingPathComponent("recording.json"))) ?? timelineData
         switch await postComplete(videoId: videoId, timelineData: updatedTimeline) {
-        case .ok(_, let finalMissing) where finalMissing.isEmpty:
+        case let .ok(_, finalMissing) where finalMissing.isEmpty:
             print("[heal] \(videoId): complete")
-        case .ok(_, let finalMissing):
+        case let .ok(_, finalMissing):
             print("[heal] \(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
         case .orphaned:
             markOrphaned(localDir: localDir)
-        case .failure(let err):
+        case let .failure(err):
             print("[heal] \(videoId): final /complete failed: \(err) — will retry next launch")
         }
     }
@@ -272,6 +272,7 @@ actor HealAgent {
     }
 
     // MARK: - Timeline parsing & patching
+
     //
     // recording.json is a versioned Encodable on the Swift side; we only need
     // to read a handful of fields and patch flags, so JSONSerialization into

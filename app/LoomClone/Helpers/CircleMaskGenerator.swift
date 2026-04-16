@@ -1,10 +1,10 @@
-import CoreImage
 import CoreGraphics
+import CoreImage
 
 /// Generates and caches circle masks for camera overlays.
 /// Used exclusively from CompositionActor, so access is serialized.
 enum CircleMaskGenerator {
-    // nonisolated(unsafe) is fine — only accessed from CompositionActor (a single actor)
+    /// nonisolated(unsafe) is fine — only accessed from CompositionActor (a single actor)
     nonisolated(unsafe) private static var cache: [Int: CIImage] = [:]
 
     static func mask(diameter: Int) -> CIImage {

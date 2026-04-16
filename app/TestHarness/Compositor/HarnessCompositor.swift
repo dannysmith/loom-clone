@@ -1,9 +1,10 @@
 import CoreImage
 import CoreVideo
-import Metal
 import Foundation
+import Metal
 
 // MARK: - HarnessCompositor
+
 //
 // Minimal analogue of the main-app CompositionActor. CIContext-based,
 // renders a composited frame into a CVPixelBuffer that feeds the
@@ -21,7 +22,6 @@ import Foundation
 // from the metronome.
 
 final class HarnessCompositor {
-
     private let ciContext: CIContext
     private let outputWidth: Int
     private let outputHeight: Int
@@ -36,13 +36,16 @@ final class HarnessCompositor {
     private let overlayDiameter: CGFloat
     private let overlayPadding: CGFloat
 
-    init(outputWidth: Int,
-         outputHeight: Int,
-         useLanczos: Bool,
-         renderMode: String,
-         events: EventLog) throws {
+    init(
+        outputWidth: Int,
+        outputHeight: Int,
+        useLanczos: Bool,
+        renderMode: String,
+        events: EventLog
+    ) throws {
         guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue() else {
+              let queue = device.makeCommandQueue()
+        else {
             throw HarnessCompositorError.metalUnavailable
         }
 
@@ -71,7 +74,7 @@ final class HarnessCompositor {
             kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
         ]
         let poolAttrs: [String: Any] = [
-            kCVPixelBufferPoolMinimumBufferCountKey as String: 4
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 4,
         ]
         var pool: CVPixelBufferPool?
         let status = CVPixelBufferPoolCreate(
@@ -80,7 +83,7 @@ final class HarnessCompositor {
             bufferAttrs as CFDictionary,
             &pool
         )
-        guard status == kCVReturnSuccess, let pool = pool else {
+        guard status == kCVReturnSuccess, let pool else {
             throw HarnessCompositorError.poolCreateFailed
         }
         self.outputPool = pool
@@ -140,10 +143,12 @@ final class HarnessCompositor {
             }
         } else {
             // Current main-app path: render(to:bounds:colorSpace:).
-            ciContext.render(composited,
-                             to: outputBuffer,
-                             bounds: outputBounds,
-                             colorSpace: colorSpace)
+            ciContext.render(
+                composited,
+                to: outputBuffer,
+                bounds: outputBounds,
+                colorSpace: colorSpace
+            )
         }
 
         return outputBuffer
@@ -159,14 +164,13 @@ final class HarnessCompositor {
         let scaleY = CGFloat(outputHeight) / extent.height
         let scale = max(scaleX, scaleY)
 
-        let scaled: CIImage
-        if useLanczos, scale < 0.95 {
-            scaled = image.applyingFilter("CILanczosScaleTransform", parameters: [
+        let scaled: CIImage = if useLanczos, scale < 0.95 {
+            image.applyingFilter("CILanczosScaleTransform", parameters: [
                 kCIInputScaleKey: scale,
                 kCIInputAspectRatioKey: 1.0,
             ])
         } else {
-            scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
         let se = scaled.extent

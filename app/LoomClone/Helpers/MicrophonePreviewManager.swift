@@ -12,7 +12,6 @@ import Foundation
 @MainActor
 @Observable
 final class MicrophonePreviewManager {
-
     /// Observable presence flag — true when the preview session is live.
     private(set) var isActive: Bool = false
 
@@ -31,7 +30,7 @@ final class MicrophonePreviewManager {
     private static let silenceFloorDB: Float = -50
 
     /// Poll interval for reading averagePowerLevel.
-    private static let pollInterval: TimeInterval = 0.05  // 20 Hz
+    private static let pollInterval: TimeInterval = 0.05 // 20 Hz
 
     /// Envelope smoothing — fast attack so peaks register, slower release so
     /// the bar doesn't jitter back to zero on every quiet frame.
@@ -127,7 +126,7 @@ final class MicrophonePreviewManager {
         let normalised = Self.normalise(db: peakDB)
         // Fast attack, slow release — keeps the meter lively but not jittery.
         let coeff: Float = normalised > level ? Self.attack : Self.release
-        level = level + (normalised - level) * coeff
+        level += (normalised - level) * coeff
     }
 
     private static func normalise(db: Float) -> Float {

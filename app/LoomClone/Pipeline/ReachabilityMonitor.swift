@@ -14,7 +14,6 @@ import Network
 /// Accepted rough edge for dev — the gate behaves correctly once the
 /// server moves to a remote host.
 final class ReachabilityMonitor: @unchecked Sendable {
-
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "ReachabilityMonitor")
     private let lock = NSLock()

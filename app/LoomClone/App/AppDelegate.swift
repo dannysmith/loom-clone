@@ -3,7 +3,6 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var eventMonitor: Any?
@@ -12,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let coordinator = RecordingCoordinator()
     private let healAgent = HealAgent()
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         setupStatusItem()
         setupPopover()
 
@@ -40,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // visible or a recording is in progress.
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationWillTerminate(_: Notification) {
         shortcutManager.unregister()
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -82,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePopover(_ sender: NSStatusBarButton) {
+    @objc private func togglePopover(_: NSStatusBarButton) {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp {
             // Right click: show quit menu
@@ -176,11 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - NSPopoverDelegate
 
 extension AppDelegate: NSPopoverDelegate {
-    func popoverWillShow(_ notification: Notification) {
+    func popoverWillShow(_: Notification) {
         coordinator.popoverDidOpen()
     }
 
-    func popoverDidClose(_ notification: Notification) {
+    func popoverDidClose(_: Notification) {
         coordinator.popoverWillClose()
     }
 }

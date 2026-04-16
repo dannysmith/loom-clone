@@ -1,6 +1,6 @@
 import Foundation
 
-enum RecordingMode: String, CaseIterable, Sendable {
+enum RecordingMode: String, CaseIterable {
     case cameraOnly
     case screenOnly
     case screenAndCamera

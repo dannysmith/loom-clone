@@ -4,6 +4,7 @@ import CoreVideo
 import Foundation
 
 // MARK: - HarnessRunner
+
 //
 // Orchestrates a single test run. One config in, one result.json out.
 // The runner is deliberately linear: set up, start writers, spin a
@@ -21,7 +22,6 @@ import Foundation
 // implemented yet — bail at configure time if requested).
 
 final class HarnessRunner {
-
     private let config: HarnessConfig
     private let testRunsRoot: URL
     private let runDirectory: URL
@@ -48,8 +48,8 @@ final class HarnessRunner {
     // Composited HLS still gets fed every tick because the compositor's
     // output changes even when the raw screen buffer is stale (camera
     // overlay updates, etc.).
-    private var lastFedScreenGen: Int64 = Int64.min
-    private var lastFedCameraGen: Int64 = Int64.min
+    private var lastFedScreenGen: Int64 = .min
+    private var lastFedCameraGen: Int64 = .min
 
     private var runtimeIssues: [String] = []
 
@@ -80,7 +80,7 @@ final class HarnessRunner {
             // least finish cleanly.
             let devNull = URL(fileURLWithPath: "/dev/null")
             self.events = (try? EventLog(runDirectory: devNull.deletingLastPathComponent()))
-                ?? (try! EventLog(runDirectory: devNull.deletingLastPathComponent()))
+                ?? (try! EventLog(runDirectory: devNull.deletingLastPathComponent())) // swiftlint:disable:this force_try
         }
 
         // Arm the watchdog FIRST, before any AVFoundation work.
@@ -131,8 +131,10 @@ final class HarnessRunner {
             try buildWriters()
         } catch {
             events.log("run.setup-failed", ["error": error.localizedDescription])
-            return await finalise(outcome: "fail-recorded",
-                                  summary: "setup failed: \(error.localizedDescription)")
+            return await finalise(
+                outcome: "fail-recorded",
+                summary: "setup failed: \(error.localizedDescription)"
+            )
         }
 
         // Start the writers. Default is serial — each writer's startWriting()
@@ -163,8 +165,10 @@ final class HarnessRunner {
         } catch {
             events.log("run.capture-start-failed", ["error": "\(error)"])
             await stopRealCaptureSources()
-            return await finalise(outcome: "fail-recorded",
-                                  summary: "capture failed to start: \(error)")
+            return await finalise(
+                outcome: "fail-recorded",
+                summary: "capture failed to start: \(error)"
+            )
         }
 
         // Drive the metronome for the configured duration.
@@ -343,7 +347,7 @@ final class HarnessRunner {
             let url = outputsDir.appendingPathComponent("\(wc.name).m4a")
             return HarnessRawAudioWriter(
                 name: wc.name,
-                sampleRate: wc.sampleRate ?? 48_000,
+                sampleRate: wc.sampleRate ?? 48000,
                 channels: wc.channels ?? 2,
                 bitrate: wc.bitrate ?? 128_000,
                 outputURL: url,
@@ -370,18 +374,18 @@ final class HarnessRunner {
 
     private func parsePattern(_ s: String) -> SyntheticFrameSource.Pattern {
         switch s {
-        case "solid": return .solid
-        case "gradient": return .gradient
-        case "noise": return .noise
-        default: return .moving
+        case "solid": .solid
+        case "gradient": .gradient
+        case "noise": .noise
+        default: .moving
         }
     }
 
     private func parseColorSpace(_ s: String) -> SyntheticFrameSource.ColorSpaceTag {
         switch s {
-        case "p3": return .p3
-        case "rec709": return .rec709
-        default: return .srgb
+        case "p3": .p3
+        case "rec709": .rec709
+        default: .srgb
         }
     }
 
@@ -392,7 +396,7 @@ final class HarnessRunner {
         let frameDurationSeconds = 1.0 / Double(frameRate)
         let totalFrames = Int(config.durationSeconds * Double(frameRate))
         let audioSamplesPerBuffer = 1024
-        let audioBuffersPerFrame = max(1, 48_000 / frameRate / audioSamplesPerBuffer)
+        let audioBuffersPerFrame = max(1, 48000 / frameRate / audioSamplesPerBuffer)
 
         // Does this run have any video path at all? Audio-only configs
         // have no screen or camera source and no compositor — we still
@@ -411,7 +415,7 @@ final class HarnessRunner {
 
         var audioIndex: Int64 = 0
 
-        for frameIndex in 0..<totalFrames {
+        for frameIndex in 0 ..< totalFrames {
             if hasVideoPath {
                 // Snapshot source generations before pulling buffers so
                 // we can decide whether each source has produced
@@ -424,7 +428,8 @@ final class HarnessRunner {
                 let screenBuffer = screenSource?.makePixelBuffer(index: Int64(frameIndex))
                 var cameraFedSomeWriter = false
                 if let cs = cameraSource,
-                   let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex)) {
+                   let cameraBuffer = cs.makePixelBuffer(index: Int64(frameIndex))
+                {
                     compositor?.updateCameraFrame(cameraBuffer)
                     // Feed the raw camera writer only when the camera
                     // source has produced a new buffer since last feed.
@@ -467,14 +472,13 @@ final class HarnessRunner {
                             frameRate: frameRate
                         )
                     }
-                    let compositedBuffer: CVPixelBuffer?
-                    if let compositor {
-                        compositedBuffer = compositor.compositeFrame(
+                    let compositedBuffer: CVPixelBuffer? = if let compositor {
+                        compositor.compositeFrame(
                             screen: screenBuffer,
                             includeCameraOverlay: config.compositor?.includeCameraOverlay ?? false
                         )
                     } else {
-                        compositedBuffer = screenBuffer
+                        screenBuffer
                     }
                     if compositor != nil {
                         compositedSample = compositedBuffer.flatMap {
@@ -490,8 +494,10 @@ final class HarnessRunner {
                 }
 
                 if rawScreenSample != nil || compositedSample != nil {
-                    feedVideoWriters(rawScreen: rawScreenSample,
-                                     composited: compositedSample)
+                    feedVideoWriters(
+                        rawScreen: rawScreenSample,
+                        composited: compositedSample
+                    )
                     if firstFrameAt == nil { firstFrameAt = events.elapsed() }
                     lastFrameAt = events.elapsed()
                     framesSubmitted += 1
@@ -516,7 +522,7 @@ final class HarnessRunner {
 
             // Audio (silent PCM) — emit enough buffers per video frame
             // to roughly match real-time pacing at the target sample rate.
-            for _ in 0..<audioBuffersPerFrame {
+            for _ in 0 ..< audioBuffersPerFrame {
                 if let audioSample = SyntheticFrameSource.makeSilentAudioSampleBuffer(
                     index: audioIndex,
                     samplesPerBuffer: audioSamplesPerBuffer
@@ -537,7 +543,7 @@ final class HarnessRunner {
                 usleep(UInt32(sleepSeconds * 1_000_000))
             }
 
-            if frameIndex % (frameRate * 5) == 0 && frameIndex > 0 {
+            if frameIndex % (frameRate * 5) == 0, frameIndex > 0 {
                 events.log("metronome.progress", [
                     "frame": frameIndex,
                     "elapsed": events.elapsed(),
@@ -558,8 +564,10 @@ final class HarnessRunner {
     ///                       → the rawScreen sample.
     ///   - `raw-h264` (camera side) → fed separately via
     ///     `feedCameraWriters`. Ignored here.
-    private func feedVideoWriters(rawScreen: CMSampleBuffer?,
-                                  composited: CMSampleBuffer?) {
+    private func feedVideoWriters(
+        rawScreen: CMSampleBuffer?,
+        composited: CMSampleBuffer?
+    ) {
         for w in writers {
             switch w.kind {
             case "composited-hls":
@@ -584,9 +592,11 @@ final class HarnessRunner {
     /// Returns true if at least one writer was fed, so the metronome
     /// can account for the frame without double-counting.
     private func feedCameraWriters(_ camera: CVPixelBuffer, frameIndex: Int64, frameRate: Int) -> Bool {
-        guard let sample = Self.makeSampleBuffer(from: camera,
-                                                 index: frameIndex,
-                                                 frameRate: frameRate) else { return false }
+        guard let sample = Self.makeSampleBuffer(
+            from: camera,
+            index: frameIndex,
+            frameRate: frameRate
+        ) else { return false }
         var fedAny = false
         for w in writers where w.kind == "raw-h264" && w.name.lowercased().contains("camera") {
             w.appendVideo(sample)
@@ -601,9 +611,11 @@ final class HarnessRunner {
         }
     }
 
-    private static func makeSampleBuffer(from buffer: CVPixelBuffer,
-                                         index: Int64,
-                                         frameRate: Int) -> CMSampleBuffer? {
+    private static func makeSampleBuffer(
+        from buffer: CVPixelBuffer,
+        index: Int64,
+        frameRate: Int
+    ) -> CMSampleBuffer? {
         let scale = CMTimeScale(frameRate * 100)
         let duration = CMTime(value: 100, timescale: scale)
         let pts = CMTime(value: index * 100, timescale: scale)
@@ -692,8 +704,7 @@ final class HarnessRunner {
         let interior = durations.dropFirst().dropLast()
         guard !interior.isEmpty else { return nil }
         let target = 4.0
-        let worst = interior.map { abs($0 - target) / target }.max() ?? 0
-        return worst
+        return interior.map { abs($0 - target) / target }.max() ?? 0
     }
 
     private func buildSummary() -> String {
@@ -784,8 +795,8 @@ enum HarnessRunnerError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedSource(let k): return "unsupported source kind: \(k)"
-        case .unsupportedWriter(let k): return "unsupported writer kind: \(k)"
+        case let .unsupportedSource(k): "unsupported source kind: \(k)"
+        case let .unsupportedWriter(k): "unsupported writer kind: \(k)"
         }
     }
 }

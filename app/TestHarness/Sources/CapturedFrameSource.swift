@@ -6,6 +6,7 @@ import Foundation
 import ScreenCaptureKit
 
 // MARK: - HarnessFrameSource
+
 //
 // Common interface for both synthetic and real-capture frame sources.
 // HarnessRunner holds frame sources by protocol so the metronome loop
@@ -45,18 +46,21 @@ protocol HarnessFrameSource: AnyObject, Sendable {
 }
 
 extension SyntheticFrameSource: HarnessFrameSource {
-    // Synthetic sources produce a new buffer on every makePixelBuffer
-    // call; the metronome's tick index is the natural generation. We
-    // expose the source's internal frame counter so the metronome sees
-    // a new generation per tick and feeds writers every tick — matching
-    // the pre-real-capture behaviour exactly.
-    var generation: Int64 { syntheticGeneration }
+    /// Synthetic sources produce a new buffer on every makePixelBuffer
+    /// call; the metronome's tick index is the natural generation. We
+    /// expose the source's internal frame counter so the metronome sees
+    /// a new generation per tick and feeds writers every tick — matching
+    /// the pre-real-capture behaviour exactly.
+    var generation: Int64 {
+        syntheticGeneration
+    }
 
     func start() async throws {}
     func stop() async {}
 }
 
 // MARK: - CapturedScreenSource
+
 //
 // SCStream-backed frame source. Mirrors the main-app ScreenCaptureManager's
 // shape (filter, pixel format, native-pixel-resolution capture) but is a
@@ -65,7 +69,6 @@ extension SyntheticFrameSource: HarnessFrameSource {
 // either surface a difference worth investigating.
 
 final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Sendable {
-
     struct Config {
         var displayID: CGDirectDisplayID?
         var displayName: String?
@@ -96,9 +99,9 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
     private var totalAccepted = 0
     private var totalRejected = 0
 
-    // Generation counter — incremented on each accepted delivery so
-    // the metronome can tell "new buffer arrived since my last feed"
-    // from "still the old buffer".
+    /// Generation counter — incremented on each accepted delivery so
+    /// the metronome can tell "new buffer arrived since my last feed"
+    /// from "still the old buffer".
     private var generationCounter: Int64 = 0
 
     private(set) var nativePixelSize: CGSize = .zero
@@ -169,7 +172,7 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
         ])
     }
 
-    func makePixelBuffer(index: Int64) -> CVPixelBuffer? {
+    func makePixelBuffer(index _: Int64) -> CVPixelBuffer? {
         lock.lock()
         let s = latestSample
         lock.unlock()
@@ -227,7 +230,7 @@ final class CapturedScreenSource: NSObject, HarnessFrameSource, @unchecked Senda
 }
 
 extension CapturedScreenSource: SCStreamOutput {
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    func stream(_: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sampleBuffer.isValid else {
             accountFrame(accepted: false)
             return
@@ -237,7 +240,8 @@ extension CapturedScreenSource: SCStreamOutput {
         // feed stale content to the encoders and skew the test.
         guard
             let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(
-                sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+                sampleBuffer, createIfNecessary: false
+            ) as? [[SCStreamFrameInfo: Any]],
             let attachments = attachmentsArray.first,
             let statusRaw = attachments[SCStreamFrameInfo.status] as? Int,
             let status = SCFrameStatus(rawValue: statusRaw),
@@ -283,7 +287,7 @@ extension CapturedScreenSource: SCStreamOutput {
 }
 
 extension CapturedScreenSource: SCStreamDelegate {
-    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+    func stream(_: SCStream, didStopWithError error: any Error) {
         events?.log("source.screen-stopped-with-error", [
             "error": "\(error)",
         ])
@@ -291,17 +295,17 @@ extension CapturedScreenSource: SCStreamDelegate {
 }
 
 // MARK: - CapturedCameraSource
+
 //
 // AVCaptureSession-backed frame source. Mirrors the main-app
 // CameraCaptureManager — permission check, bestFormat selection, explicit
 // Rec. 709 colour tagging on delivery.
 
 final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Sendable {
-
     struct Config {
         var deviceUniqueID: String?
         var deviceName: String?
-        var maxHeight: Int = Int.max
+        var maxHeight: Int = .max
     }
 
     private let config: Config
@@ -317,7 +321,7 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
     private var lastLogAt = Date()
     private var totalAccepted = 0
 
-    // Generation counter — see CapturedScreenSource for rationale.
+    /// Generation counter — see CapturedScreenSource for rationale.
     private var generationCounter: Int64 = 0
 
     private(set) var nativePixelSize: CGSize = .zero
@@ -375,7 +379,7 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String:
-                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
         ]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: captureQueue)
@@ -409,7 +413,7 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
         events?.log("source.camera-totals", ["accepted": totalAccepted])
     }
 
-    func makePixelBuffer(index: Int64) -> CVPixelBuffer? {
+    func makePixelBuffer(index _: Int64) -> CVPixelBuffer? {
         lock.lock()
         let s = latestSample
         lock.unlock()
@@ -466,9 +470,9 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
 
 extension CapturedCameraSource: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(
-        _ output: AVCaptureOutput,
+        _: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
             // Tag Rec. 709 explicitly. Many USB cameras deliver buffers with
@@ -514,19 +518,19 @@ enum CapturedFrameSourceError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .screenRecordingPermissionDenied:
-            return "Screen Recording permission is not granted. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LoomCloneTestHarness, then re-run. macOS cannot trigger this dialog from code after the first refusal."
+            "Screen Recording permission is not granted. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable LoomCloneTestHarness, then re-run. macOS cannot trigger this dialog from code after the first refusal."
         case .cameraPermissionDenied:
-            return "Camera permission is not granted. Open System Settings → Privacy & Security → Camera, enable LoomCloneTestHarness, then re-run."
-        case .displayNotFound(let id):
-            return "No SCDisplay found for displayID \(id). Run `--list-devices` to see available displays."
-        case .displayNameNotFound(let name):
-            return "No display found whose name contains '\(name)'. Run `--list-devices` to see available displays."
-        case .cameraDeviceNotFound(let id):
-            return "No camera device found with uniqueID '\(id)'. Run `--list-devices` to see available cameras."
-        case .cameraDeviceNameNotFound(let name):
-            return "No camera device found whose name contains '\(name)'. Run `--list-devices` to see available cameras."
+            "Camera permission is not granted. Open System Settings → Privacy & Security → Camera, enable LoomCloneTestHarness, then re-run."
+        case let .displayNotFound(id):
+            "No SCDisplay found for displayID \(id). Run `--list-devices` to see available displays."
+        case let .displayNameNotFound(name):
+            "No display found whose name contains '\(name)'. Run `--list-devices` to see available displays."
+        case let .cameraDeviceNotFound(id):
+            "No camera device found with uniqueID '\(id)'. Run `--list-devices` to see available cameras."
+        case let .cameraDeviceNameNotFound(name):
+            "No camera device found whose name contains '\(name)'. Run `--list-devices` to see available cameras."
         case .noDefaultCamera:
-            return "No default camera device found. Run `--list-devices` to see what's attached."
+            "No default camera device found. Run `--list-devices` to see what's attached."
         }
     }
 }

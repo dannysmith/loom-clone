@@ -1,5 +1,5 @@
-import SwiftUI
 import AVFoundation
+import SwiftUI
 
 /// SwiftUI wrapper around `CameraPreviewLayerView`. Wires the supplied
 /// `CameraPreviewManager`'s sample buffer callback to the underlying display
@@ -19,7 +19,7 @@ struct CameraPreviewView: NSViewRepresentable {
         self.adjustmentsState = adjustmentsState
     }
 
-    func makeNSView(context: Context) -> CameraPreviewLayerView {
+    func makeNSView(context _: Context) -> CameraPreviewLayerView {
         let view = CameraPreviewLayerView()
         view.setAdjustmentsState(adjustmentsState)
         manager.onSampleBuffer = { [weak view] sampleBuffer in
@@ -28,7 +28,7 @@ struct CameraPreviewView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: CameraPreviewLayerView, context: Context) {
+    func updateNSView(_ nsView: CameraPreviewLayerView, context _: Context) {
         // Re-wire the callback every update in case SwiftUI swaps the manager.
         nsView.setAdjustmentsState(adjustmentsState)
         manager.onSampleBuffer = { [weak nsView] sampleBuffer in
@@ -36,7 +36,7 @@ struct CameraPreviewView: NSViewRepresentable {
         }
     }
 
-    static func dismantleNSView(_ nsView: CameraPreviewLayerView, coordinator: ()) {
+    static func dismantleNSView(_ nsView: CameraPreviewLayerView, coordinator _: ()) {
         nsView.flush()
     }
 }

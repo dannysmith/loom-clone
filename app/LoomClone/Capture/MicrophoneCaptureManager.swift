@@ -1,9 +1,8 @@
-import Foundation
 @preconcurrency import AVFoundation
 import CoreMedia
+import Foundation
 
 final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
-
     var onAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
 
     private var session: AVCaptureSession?
@@ -74,9 +73,9 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
 
 extension MicrophoneCaptureManager: AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(
-        _ output: AVCaptureOutput,
+        _: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         onAudioSample?(sampleBuffer)
     }

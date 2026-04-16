@@ -3,12 +3,12 @@ import CoreMedia
 import Foundation
 
 // MARK: - HarnessRawAudioWriter
+
 //
 // Minimal analogue of RawStreamWriter .audio. Writes AAC-LC to a .m4a.
 // Mirrors the main-app settings; no surprises.
 
 final class HarnessRawAudioWriter: HarnessWriter {
-
     let name: String
     let kind = "raw-audio"
     let outputURL: URL?
@@ -25,14 +25,18 @@ final class HarnessRawAudioWriter: HarnessWriter {
 
     private(set) var finalStatus: AVAssetWriter.Status = .unknown
     private(set) var finalError: Error?
-    var segmentDurations: [Double] { [] }
+    var segmentDurations: [Double] {
+        []
+    }
 
-    init(name: String,
-         sampleRate: Int,
-         channels: Int,
-         bitrate: Int,
-         outputURL: URL,
-         events: EventLog) {
+    init(
+        name: String,
+        sampleRate: Int,
+        channels: Int,
+        bitrate: Int,
+        outputURL: URL,
+        events: EventLog
+    ) {
         self.name = name
         self.sampleRate = sampleRate
         self.channels = channels
@@ -75,7 +79,7 @@ final class HarnessRawAudioWriter: HarnessWriter {
         events.log("writer.started", ["name": name])
     }
 
-    func appendVideo(_ sample: CMSampleBuffer) {}
+    func appendVideo(_: CMSampleBuffer) {}
 
     func appendAudio(_ sample: CMSampleBuffer) {
         guard hasStartedSession, let input, input.isReadyForMoreMediaData else { return }
@@ -96,7 +100,7 @@ final class HarnessRawAudioWriter: HarnessWriter {
             finalError = writer.error
             events.log("writer.failed-before-finish", [
                 "name": name,
-                "error": writer.error?.localizedDescription ?? "unknown"
+                "error": writer.error?.localizedDescription ?? "unknown",
             ])
             return
         }
@@ -110,13 +114,14 @@ final class HarnessRawAudioWriter: HarnessWriter {
         events.log("writer.finished", [
             "name": name,
             "status": writer.status.rawValue,
-            "error": writer.error?.localizedDescription ?? ""
+            "error": writer.error?.localizedDescription ?? "",
         ])
     }
 
     var bytesOnDisk: Int64? {
         guard let url = outputURL,
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        else {
             return nil
         }
         return (attrs[.size] as? NSNumber)?.int64Value

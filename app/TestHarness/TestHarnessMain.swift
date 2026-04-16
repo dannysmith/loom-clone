@@ -5,6 +5,7 @@ import Foundation
 import ScreenCaptureKit
 
 // MARK: - TestHarnessMain
+
 //
 // The harness is an app bundle (not a CLI) because screen capture and
 // camera access require a signed, bundled app with entitlements. See
@@ -23,7 +24,6 @@ import ScreenCaptureKit
 
 @main
 enum TestHarnessMain {
-
     static func main() {
         // Must install the shared app BEFORE calling run(). setActivationPolicy
         // to .accessory keeps us out of the Dock and command-tab switcher.
@@ -39,8 +39,7 @@ enum TestHarnessMain {
 // MARK: - AppDelegate
 
 private final class HarnessAppDelegate: NSObject, NSApplicationDelegate {
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         // Kick off the run on a background task so we don't block the
         // main run loop. The main loop stays alive so AVFoundation's own
         // main-thread work (delegate callbacks, etc.) can proceed.
@@ -143,6 +142,7 @@ struct HarnessArgs {
 }
 
 // MARK: - Device listing (--list-devices)
+
 //
 // Prints displays (via SCShareableContent) and cameras (via
 // AVCaptureDevice.DiscoverySession) with their stable IDs so the user
@@ -160,7 +160,9 @@ private func listDevicesAndExit() async -> Never {
         let content = try await SCShareableContent.current
         if content.displays.isEmpty {
             print("  (no displays returned by SCShareableContent — Screen Recording permission likely denied)")
-            print("  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness")
+            print(
+                "  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness"
+            )
         } else {
             for d in content.displays {
                 let name = CapturedScreenSource.localizedName(for: d.displayID)
@@ -176,12 +178,14 @@ private func listDevicesAndExit() async -> Never {
         }
     } catch {
         let err = error as NSError
-        if err.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && err.code == -3801 {
+        if err.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain", err.code == -3801 {
             print("  Screen Recording permission DENIED (SCStreamError -3801).")
         } else {
             print("  error querying SCShareableContent: \(error)")
         }
-        print("  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness, then re-run.")
+        print(
+            "  grant permission: System Settings → Privacy & Security → Screen & System Audio Recording → enable LoomCloneTestHarness, then re-run."
+        )
     }
 
     print()
@@ -215,10 +219,10 @@ private func listDevicesAndExit() async -> Never {
                 let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
                 let subStr = String(
                     format: "%c%c%c%c",
-                    (subType >> 24) & 0xff,
-                    (subType >> 16) & 0xff,
-                    (subType >> 8) & 0xff,
-                    subType & 0xff
+                    (subType >> 24) & 0xFF,
+                    (subType >> 16) & 0xFF,
+                    (subType >> 8) & 0xFF,
+                    subType & 0xFF
                 )
                 print("      [\(i)] \(dims.width)x\(dims.height) \(subStr) @ \(ranges)")
             }

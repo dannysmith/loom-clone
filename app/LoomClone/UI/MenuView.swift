@@ -1,6 +1,6 @@
-import SwiftUI
-import ScreenCaptureKit
 import AVFoundation
+import ScreenCaptureKit
+import SwiftUI
 
 struct MenuView: View {
     @Bindable var coordinator: RecordingCoordinator
@@ -8,7 +8,6 @@ struct MenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-
             // Server health banner (shown if the server isn't reachable)
             if !coordinator.serverReachable {
                 serverUnavailableBanner
@@ -27,7 +26,7 @@ struct MenuView: View {
             // SwiftUI frame modifiers work as expected and `Form.columns`
             // is able to give all three controls a uniform width.
             Form {
-                if !coordinator.screenPermissionDenied && !coordinator.availableDisplays.isEmpty {
+                if !coordinator.screenPermissionDenied, !coordinator.availableDisplays.isEmpty {
                     LabeledContent("Display") {
                         NativePopUpPicker(
                             selection: coordinator.selectedDisplay?.displayID,
@@ -98,7 +97,7 @@ struct MenuView: View {
             // Mic input-level meter. Only when a microphone is selected —
             // otherwise there's nothing for it to show, and the capture
             // session wouldn't be running anyway.
-            if coordinator.selectedMicrophone != nil && coordinator.state == .idle {
+            if coordinator.selectedMicrophone != nil, coordinator.state == .idle {
                 AudioMeterView(manager: coordinator.microphonePreview)
             }
 
@@ -201,7 +200,6 @@ struct MenuView: View {
         }
     }
 
-    @ViewBuilder
     private var previewContent: some View {
         ZStack(alignment: .bottomTrailing) {
             // Invisible flexible base layer. The ZStack's width is the max
@@ -236,27 +234,28 @@ struct MenuView: View {
             if coordinator.mode == .cameraOnly {
                 if coordinator.cameraPreview.isActive {
                     CameraPreviewView(
-                    manager: coordinator.cameraPreview,
-                    adjustmentsState: coordinator.cameraAdjustmentsState
-                )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
+                        manager: coordinator.cameraPreview,
+                        adjustmentsState: coordinator.cameraAdjustmentsState
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 } else {
                     Color.black.opacity(0.4)
                 }
-            } else if coordinator.mode == .screenAndCamera
-                        && coordinator.cameraPreview.isActive {
+            } else if coordinator.mode == .screenAndCamera,
+                      coordinator.cameraPreview.isActive
+            {
                 CameraPreviewView(
                     manager: coordinator.cameraPreview,
                     adjustmentsState: coordinator.cameraAdjustmentsState
                 )
-                    .frame(width: 54, height: 54)
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(.white.opacity(0.7), lineWidth: 1.5)
-                    )
-                    .padding(8)
+                .frame(width: 54, height: 54)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(0.7), lineWidth: 1.5)
+                )
+                .padding(8)
             }
         }
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
@@ -297,7 +296,7 @@ struct MenuView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
-                Slider(value: tempBinding, in: 2500...10000)
+                Slider(value: tempBinding, in: 2500 ... 10000)
                 Text("\(Int(coordinator.cameraAdjustments.temperature))K")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -309,7 +308,7 @@ struct MenuView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
-                Slider(value: brightnessBinding, in: -2...2)
+                Slider(value: brightnessBinding, in: -2 ... 2)
                 Text(String(format: "%+.1f EV", coordinator.cameraAdjustments.brightness))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -347,7 +346,7 @@ struct MenuView: View {
     /// feed it (e.g. they switched from a 1440p+ display to 1080p, or to
     /// cameraOnly with a 720p webcam), fall back to 1080p silently.
     private func downgradeIf1440pUnavailable() {
-        if coordinator.outputPreset == .p1440 && !coordinator.is1440pAvailable {
+        if coordinator.outputPreset == .p1440, !coordinator.is1440pAvailable {
             coordinator.outputPreset = .p1080
         }
     }

@@ -13,7 +13,6 @@ struct RecordingPanelContent: View {
         }
     }
 
-    @ViewBuilder
     private var countdownView: some View {
         HStack(spacing: 12) {
             // Cancel during countdown
@@ -44,7 +43,6 @@ struct RecordingPanelContent: View {
         .padding(.vertical, 12)
     }
 
-    @ViewBuilder
     private var recordingControls: some View {
         HStack(spacing: 12) {
             // Stop button

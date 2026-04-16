@@ -22,22 +22,21 @@ import CoreMedia
 /// case during a style change is that one frame gets enqueued into the
 /// outgoing preview view, which is harmless.
 final class CameraOverlayWindow: @unchecked Sendable {
-
     enum Style: Equatable {
         case circle
         case rectangle
 
         var size: NSSize {
             switch self {
-            case .circle: return NSSize(width: 240, height: 240)
-            case .rectangle: return NSSize(width: 360, height: 202)  // 16:9
+            case .circle: NSSize(width: 240, height: 240)
+            case .rectangle: NSSize(width: 360, height: 202) // 16:9
             }
         }
 
         var cornerRadius: CGFloat {
             switch self {
-            case .circle: return 120   // half of 240 → circle
-            case .rectangle: return 12
+            case .circle: 120 // half of 240 → circle
+            case .rectangle: 12
             }
         }
     }
@@ -63,7 +62,7 @@ final class CameraOverlayWindow: @unchecked Sendable {
     /// it keep working.
     @MainActor
     func show(on screen: NSScreen?, style: Style) {
-        if panel != nil && currentStyle == style {
+        if panel != nil, currentStyle == style {
             panel?.orderFrontRegardless()
             return
         }
@@ -163,7 +162,9 @@ final class CameraOverlayWindow: @unchecked Sendable {
     }
 
     @MainActor
-    var isVisible: Bool { panel != nil }
+    var isVisible: Bool {
+        panel != nil
+    }
 
     @MainActor
     private func positionPanel(on screen: NSScreen?) {

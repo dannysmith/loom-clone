@@ -4,6 +4,7 @@ import Foundation
 import VideoToolbox
 
 // MARK: - HarnessRawProResWriter
+
 //
 // Minimal analogue of RawStreamWriter .videoProRes from the main app.
 // Writes ProRes 422 Proxy to a .mov on the hardware ProRes engine.
@@ -19,7 +20,6 @@ import VideoToolbox
 //   use the H.264 dictionary shape.
 
 final class HarnessRawProResWriter: HarnessWriter {
-
     let name: String
     let kind = "raw-prores"
     let outputURL: URL?
@@ -37,14 +37,18 @@ final class HarnessRawProResWriter: HarnessWriter {
 
     private(set) var finalStatus: AVAssetWriter.Status = .unknown
     private(set) var finalError: Error?
-    var segmentDurations: [Double] { [] }
+    var segmentDurations: [Double] {
+        []
+    }
 
-    init(name: String,
-         width: Int,
-         height: Int,
-         outputURL: URL,
-         tunings: [String: JSONValue] = [:],
-         events: EventLog) {
+    init(
+        name: String,
+        width: Int,
+        height: Int,
+        outputURL: URL,
+        tunings: [String: JSONValue] = [:],
+        events: EventLog
+    ) {
         self.name = name
         self.width = width
         self.height = height
@@ -107,7 +111,7 @@ final class HarnessRawProResWriter: HarnessWriter {
         input.append(sample)
     }
 
-    func appendAudio(_ sample: CMSampleBuffer) { /* video-only */ }
+    func appendAudio(_: CMSampleBuffer) { /* video-only */ }
 
     func finish() async {
         guard !didFinish else { return }
@@ -123,7 +127,7 @@ final class HarnessRawProResWriter: HarnessWriter {
             finalError = writer.error
             events.log("writer.failed-before-finish", [
                 "name": name,
-                "error": writer.error?.localizedDescription ?? "unknown"
+                "error": writer.error?.localizedDescription ?? "unknown",
             ])
             return
         }
@@ -137,13 +141,14 @@ final class HarnessRawProResWriter: HarnessWriter {
         events.log("writer.finished", [
             "name": name,
             "status": writer.status.rawValue,
-            "error": writer.error?.localizedDescription ?? ""
+            "error": writer.error?.localizedDescription ?? "",
         ])
     }
 
     var bytesOnDisk: Int64? {
         guard let url = outputURL,
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        else {
             return nil
         }
         return (attrs[.size] as? NSNumber)?.int64Value

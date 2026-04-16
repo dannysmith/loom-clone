@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - EventLog
+
 //
 // Timestamped JSONL of everything notable that happens during a run.
 // One file per run at `<run-dir>/events.jsonl`. Each line is a single
@@ -17,7 +18,6 @@ import Foundation
 // them.
 
 final class EventLog: @unchecked Sendable {
-
     private let url: URL
     private let handle: FileHandle
     private let lock = NSLock()
@@ -48,7 +48,9 @@ final class EventLog: @unchecked Sendable {
             "t": elapsed(),
             "kind": kind,
         ]
-        for (k, v) in fields { obj[k] = v }
+        for (k, v) in fields {
+            obj[k] = v
+        }
 
         guard let data = serialize(obj) else { return }
         lock.lock()
@@ -88,7 +90,9 @@ final class EventLog: @unchecked Sendable {
         case let a as [Any]: return a.map(jsonFriendly)
         case let d as [String: Any]:
             var out: [String: Any] = [:]
-            for (k, v) in d { out[k] = jsonFriendly(v) }
+            for (k, v) in d {
+                out[k] = jsonFriendly(v)
+            }
             return out
         default:
             return String(describing: v)

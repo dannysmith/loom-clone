@@ -1,5 +1,5 @@
-import Foundation
 import CoreGraphics
+import Foundation
 import ScreenCaptureKit
 
 /// Captures periodic still snapshots of a display for the popover preview.
@@ -11,7 +11,6 @@ import ScreenCaptureKit
 @MainActor
 @Observable
 final class ScreenPreviewManager {
-
     /// The latest captured image of the selected display. `nil` while the
     /// first capture is in flight or while no display is selected.
     private(set) var image: CGImage?

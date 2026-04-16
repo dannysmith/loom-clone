@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #endif
 
 /// Structured, self-describing record of what happened during a recording.
@@ -83,8 +83,8 @@ struct RecordingTimeline: Encodable {
         let id: String
         let slug: String
         var initialMode: String
-        var startedAt: String       // ISO8601, set at commit
-        var endedAt: String?         // ISO8601, set at stop
+        var startedAt: String // ISO8601, set at commit
+        var endedAt: String? // ISO8601, set at stop
         var durationSeconds: Double? // logical duration (minus pauses)
     }
 
@@ -164,10 +164,10 @@ enum JSONValue: Encodable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
-        case .string(let v): try c.encode(v)
-        case .int(let v): try c.encode(v)
-        case .double(let v): try c.encode(v)
-        case .bool(let v): try c.encode(v)
+        case let .string(v): try c.encode(v)
+        case let .int(v): try c.encode(v)
+        case let .double(v): try c.encode(v)
+        case let .bool(v): try c.encode(v)
         }
     }
 }
@@ -436,9 +436,9 @@ final class RecordingTimelineBuilder {
     /// zero-valued, so the common-case JSON stays small.
     private func compositionStatsIfInteresting() -> RecordingTimeline.CompositionStats? {
         guard renderErrorCount > 0
-                || stallTimeoutCount > 0
-                || rebuildSuccessCount > 0
-                || terminalCompositionFailure else { return nil }
+            || stallTimeoutCount > 0
+            || rebuildSuccessCount > 0
+            || terminalCompositionFailure else { return nil }
         return .init(
             renderErrorCount: renderErrorCount,
             stallTimeoutCount: stallTimeoutCount,
@@ -480,11 +480,11 @@ final class RecordingTimelineBuilder {
         let modelName = String(cString: model)
 
         #if arch(arm64)
-        let arch = "arm64"
+            let arch = "arm64"
         #elseif arch(x86_64)
-        let arch = "x86_64"
+            let arch = "x86_64"
         #else
-        let arch = "unknown"
+            let arch = "unknown"
         #endif
 
         return .init(model: modelName, arch: arch)

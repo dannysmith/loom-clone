@@ -5,13 +5,19 @@ import { videoEvents, videos as videosTable } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import {
   addSegment,
+  ConflictError,
   completeVideo,
   createVideo,
   deleteVideo,
   getSegmentDurations,
   getVideo,
   getVideoBySlug,
+  listVideos,
+  resolveSlug,
   setVideoStatus,
+  trashVideo,
+  updateSlug,
+  updateVideo,
 } from "../store";
 
 let env: TestEnv;
@@ -203,5 +209,203 @@ describe("deleteVideo", () => {
       .insert(videosTable)
       .values({ id: "v2", slug: video.slug, createdAt: "x", updatedAt: "x" });
     expect(await getVideoBySlug(video.slug)).toBeDefined();
+  });
+});
+
+describe("updateSlug / resolveSlug", () => {
+  test("no-op when new slug equals current", async () => {
+    const video = await createVideo();
+    const result = await updateSlug(video.id, video.slug);
+    expect(result.slug).toBe(video.slug);
+  });
+
+  test("updates slug and old slug becomes a redirect", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    const updated = await updateSlug(video.id, "welcome-to-the-team");
+    expect(updated.slug).toBe("welcome-to-the-team");
+
+    // Old slug resolves as a redirect
+    const resolved = await resolveSlug(oldSlug);
+    expect(resolved?.redirected).toBe(true);
+    expect(resolved?.video.id).toBe(video.id);
+
+    // New slug resolves direct
+    const direct = await resolveSlug("welcome-to-the-team");
+    expect(direct?.redirected).toBe(false);
+    expect(direct?.video.id).toBe(video.id);
+  });
+
+  test("logs slug_changed event with from/to", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    await updateSlug(video.id, "readable-slug");
+
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    const slugEvent = events.find((e) => e.type === "slug_changed");
+    expect(slugEvent).toBeDefined();
+    const data = JSON.parse(slugEvent?.data ?? "{}");
+    expect(data).toEqual({ from: oldSlug, to: "readable-slug" });
+  });
+
+  test("rejects ConflictError if new slug is another video's current slug", async () => {
+    const a = await createVideo();
+    const b = await createVideo();
+    expect(updateSlug(a.id, b.slug)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("rejects ConflictError if new slug is already a redirect", async () => {
+    const video = await createVideo();
+    const originalSlug = video.slug;
+    await updateSlug(video.id, "first-slug"); // originalSlug now a redirect
+    const other = await createVideo();
+    expect(updateSlug(other.id, originalSlug)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("redirect chain — multiple renames, all old slugs still resolve", async () => {
+    const video = await createVideo();
+    const first = video.slug;
+    await updateSlug(video.id, "second");
+    await updateSlug(video.id, "third");
+
+    expect((await resolveSlug(first))?.video.id).toBe(video.id);
+    expect((await resolveSlug("second"))?.video.id).toBe(video.id);
+    expect((await resolveSlug("third"))?.video.id).toBe(video.id);
+    expect((await resolveSlug("third"))?.redirected).toBe(false);
+    expect((await resolveSlug(first))?.redirected).toBe(true);
+  });
+
+  test("resolveSlug returns null for unknown slug", async () => {
+    expect(await resolveSlug("does-not-exist")).toBeNull();
+  });
+});
+
+describe("updateVideo", () => {
+  test("updates title and logs title_changed", async () => {
+    const video = await createVideo();
+    const updated = await updateVideo(video.id, { title: "My Tutorial" });
+    expect(updated.title).toBe("My Tutorial");
+
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    const event = events.find((e) => e.type === "title_changed");
+    expect(event).toBeDefined();
+    expect(JSON.parse(event?.data ?? "{}")).toEqual({ from: null, to: "My Tutorial" });
+  });
+
+  test("updates visibility and logs visibility_changed", async () => {
+    const video = await createVideo();
+    const updated = await updateVideo(video.id, { visibility: "public" });
+    expect(updated.visibility).toBe("public");
+
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    const event = events.find((e) => e.type === "visibility_changed");
+    expect(JSON.parse(event?.data ?? "{}")).toEqual({ from: "unlisted", to: "public" });
+  });
+
+  test("updating multiple fields emits one event per changed field", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, {
+      title: "T",
+      description: "D",
+      visibility: "public",
+    });
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    const types = events.map((e) => e.type);
+    expect(types).toContain("title_changed");
+    expect(types).toContain("description_changed");
+    expect(types).toContain("visibility_changed");
+  });
+
+  test("no-op when value unchanged — no event, no updatedAt churn", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { title: "Hello" });
+    const afterFirst = await getVideo(video.id);
+    expect(afterFirst).toBeDefined();
+
+    await new Promise((r) => setTimeout(r, 5));
+    const result = await updateVideo(video.id, { title: "Hello" });
+    expect(result.updatedAt).toBe(afterFirst!.updatedAt);
+
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    const titleEvents = events.filter((e) => e.type === "title_changed");
+    expect(titleEvents).toHaveLength(1); // only the first call produced an event
+  });
+});
+
+describe("trashVideo", () => {
+  test("sets trashedAt and logs `trashed` event", async () => {
+    const video = await createVideo();
+    const trashed = await trashVideo(video.id);
+    expect(trashed.trashedAt).not.toBeNull();
+
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    expect(events.map((e) => e.type)).toContain("trashed");
+  });
+
+  test("no-op when already trashed", async () => {
+    const video = await createVideo();
+    const first = await trashVideo(video.id);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await trashVideo(video.id);
+    expect(second.trashedAt).toBe(first.trashedAt);
+  });
+
+  test("public lookups exclude trashed videos by default", async () => {
+    const video = await createVideo();
+    await trashVideo(video.id);
+
+    expect(await getVideo(video.id)).toBeUndefined();
+    expect(await getVideoBySlug(video.slug)).toBeUndefined();
+    expect(await resolveSlug(video.slug)).toBeNull();
+  });
+
+  test("includeTrashed opt-in surfaces trashed videos", async () => {
+    const video = await createVideo();
+    await trashVideo(video.id);
+
+    expect((await getVideo(video.id, { includeTrashed: true }))?.id).toBe(video.id);
+    expect((await getVideoBySlug(video.slug, { includeTrashed: true }))?.id).toBe(video.id);
+    expect((await resolveSlug(video.slug, { includeTrashed: true }))?.video.id).toBe(video.id);
+  });
+});
+
+describe("listVideos", () => {
+  test("returns newest-first, excludes trashed by default", async () => {
+    const a = await createVideo();
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await createVideo();
+    await new Promise((r) => setTimeout(r, 5));
+    const c = await createVideo();
+    await trashVideo(b.id);
+
+    const list = await listVideos();
+    expect(list.map((v) => v.id)).toEqual([c.id, a.id]);
+  });
+
+  test("includeTrashed returns everything", async () => {
+    const a = await createVideo();
+    const b = await createVideo();
+    await trashVideo(a.id);
+
+    const list = await listVideos({ includeTrashed: true });
+    expect(list.map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
   });
 });

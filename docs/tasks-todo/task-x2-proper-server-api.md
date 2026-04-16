@@ -42,7 +42,7 @@ Six tables. Schema decisions locked in during planning: ISO-text timestamps (mat
 
 **`video_events`** — audit log
 - `id`, `videoId` FK cascade, `type` (open string), `data` (JSON text), `createdAt`
-- Types include: `created`, `healed`, `completed`, `slug_changed`, `title_changed`, `description_changed`, `tag_added`, `tag_removed`, `trashed`, `restored`, `visibility_changed`, `derivative_generated`, `derivative_failed`
+- Types include: `created`, `healed`, `completed`, `slug_changed`, `title_changed`, `description_changed`, `tag_added`, `tag_removed`, `trashed`, `visibility_changed`, `derivative_generated`, `derivative_failed`
 - Deliberately *not* logged: per-segment uploads. 150 segments per recording is noise, not an audit trail.
 
 **What moves, what stays**
@@ -85,7 +85,7 @@ Six tables. Schema decisions locked in during planning: ISO-text timestamps (mat
 - **Slug change**: `updateSlug(videoId, newSlug)` — validates, inserts old slug into `slug_redirects`, updates `videos.slug`. Rejects if `newSlug` is already in `videos.slug` or `slug_redirects.oldSlug` (any other record). Conflict surfaces as **409 Conflict** at the API boundary, not 400.
 - **Visibility + metadata edits**: `updateVideo(videoId, patch)` with a narrow patch type (title/description/visibility).
 - **Tags**: `createTag`, `renameTag`, `deleteTag`, `addTagToVideo`, `removeTagFromVideo`, `listTags`.
-- **Soft delete**: `trashVideo(videoId)`, `restoreVideo(videoId)` set/clear `trashedAt`. All list/get queries filter out trashed by default with an `includeTrashed` opt-in.
+- **Soft delete**: `trashVideo(videoId)` sets `trashedAt`. All list/get queries filter out trashed by default with an `includeTrashed` opt-in. No `restoreVideo` — if a manual un-trash is ever needed, update the DB by hand.
 
 #### 3.5 Route updates
 

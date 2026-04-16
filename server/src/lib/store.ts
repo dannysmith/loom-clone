@@ -1,4 +1,4 @@
-import { readdir, mkdir } from "fs/promises";
+import { mkdir, readdir } from "fs/promises";
 import { join } from "path";
 
 export const DATA_DIR = "data";
@@ -41,10 +41,9 @@ async function persistDurations(id: string): Promise<void> {
 
 export async function createVideo(): Promise<VideoRecord> {
   const id = crypto.randomUUID();
-  const slug = crypto.getRandomValues(new Uint8Array(4)).reduce(
-    (s, b) => s + b.toString(16).padStart(2, "0"),
-    ""
-  );
+  const slug = crypto
+    .getRandomValues(new Uint8Array(4))
+    .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
 
   const video: VideoRecord = {
     id,
@@ -70,11 +69,7 @@ export function getVideoBySlug(slug: string): VideoRecord | undefined {
 }
 
 // Idempotent: same filename overwrites its duration, sidecar rewritten atomically.
-export async function addSegment(
-  id: string,
-  filename: string,
-  duration: number
-): Promise<void> {
+export async function addSegment(id: string, filename: string, duration: number): Promise<void> {
   if (!videos.has(id)) throw new Error(`Video ${id} not found`);
   let map = durations.get(id);
   if (!map) {
@@ -91,7 +86,7 @@ export function getSegmentDurations(id: string): Map<string, number> {
 
 export async function setVideoStatus(
   id: string,
-  status: VideoRecord["status"]
+  status: VideoRecord["status"],
 ): Promise<VideoRecord> {
   const video = videos.get(id);
   if (!video) throw new Error(`Video ${id} not found`);
@@ -112,6 +107,15 @@ export async function deleteVideo(id: string): Promise<VideoRecord | undefined> 
   slugIndex.delete(video.slug);
   durations.delete(id);
   return video;
+}
+
+// Test-only: clear in-memory state between test cases. Not called in
+// production code. Named with a leading underscore to discourage accidental
+// use outside tests.
+export function _resetForTests(): void {
+  videos.clear();
+  slugIndex.clear();
+  durations.clear();
 }
 
 // Scan data/*/video.json at startup and rehydrate in-memory state.

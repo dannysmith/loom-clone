@@ -23,21 +23,16 @@ async function runFfmpeg(args: string[]): Promise<void> {
   if (!Bun.which("ffmpeg")) {
     if (!ffmpegMissingLogged) {
       ffmpegMissingLogged = true;
-      console.warn(
-        "[derivatives] ffmpeg not found on PATH — derivative generation will fail"
-      );
+      console.warn("[derivatives] ffmpeg not found on PATH — derivative generation will fail");
     }
     throw new Error("ffmpeg not found on PATH");
   }
 
-  const proc = Bun.spawn(
-    ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", ...args],
-    { stderr: "pipe", stdout: "pipe" }
-  );
-  const [stderr, exitCode] = await Promise.all([
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+  const proc = Bun.spawn(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", ...args], {
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (exitCode !== 0) {
     throw new Error(`ffmpeg exited ${exitCode}: ${stderr.trim()}`);
   }
@@ -62,15 +57,20 @@ const sourceMp4Recipe: Recipe = {
     await runFfmpeg([
       // m3u8 references init.mp4 and seg_*.m4s — allow all extensions so the
       // HLS demuxer doesn't reject .m4s sources.
-      "-allowed_extensions", "ALL",
-      "-i", playlist,
-      "-c", "copy",
+      "-allowed_extensions",
+      "ALL",
+      "-i",
+      playlist,
+      "-c",
+      "copy",
       // Put the moov atom at the front so `<video>` can begin playback before
       // the whole file is downloaded.
-      "-movflags", "+faststart",
+      "-movflags",
+      "+faststart",
       // Explicit format — the `.tmp` output filename defeats ffmpeg's
       // extension-based format detection.
-      "-f", "mp4",
+      "-f",
+      "mp4",
       out,
     ]);
   },
@@ -84,11 +84,16 @@ const thumbnailRecipe: Recipe = {
     const duration = await totalDurationFromSegments(videoId);
     const t = duration > 0 ? Math.min(1.0, duration / 2) : 0;
     await runFfmpeg([
-      "-ss", t.toFixed(3),
-      "-i", source,
-      "-vframes", "1",
-      "-vf", "scale=1280:-1",
-      "-f", "image2",
+      "-ss",
+      t.toFixed(3),
+      "-i",
+      source,
+      "-vframes",
+      "1",
+      "-vf",
+      "scale=1280:-1",
+      "-f",
+      "image2",
       out,
     ]);
   },
@@ -112,6 +117,12 @@ export function scheduleDerivatives(videoId: string): void {
   });
 }
 
+// Test-only: returns the in-flight promise for a given video id so tests can
+// await fire-and-forget generation. Undefined if nothing is running.
+export function _inFlightPromise(videoId: string): Promise<void> | undefined {
+  return inFlight.get(videoId);
+}
+
 async function generateDerivatives(videoId: string): Promise<void> {
   const dir = derivativesDir(videoId);
   await mkdir(dir, { recursive: true });
@@ -128,7 +139,7 @@ async function generateDerivatives(videoId: string): Promise<void> {
     } catch (err) {
       console.error(
         `[derivatives] ${videoId}/${recipe.filename} failed:`,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
       await rm(tmp, { force: true }).catch(() => {});
     }

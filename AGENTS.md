@@ -58,7 +58,7 @@ A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to
 Direct commands (for reference or when you need different flags):
 
 - **macOS app**: `xcodebuild -project app/LoomClone.xcodeproj -scheme LoomClone -configuration Debug -destination 'platform=macOS' build`. Do NOT run `bun run dev` or start the dev server unless explicitly asked.
-- **Server**: `cd server && bun run dev` (runs on `http://localhost:3000` with `--hot` reload).
+- **Server**: see `server/CLAUDE.md` for scripts (lint, format, typecheck, test, dev) and testing conventions. `cd server && bun run dev` runs the hot-reload server on `http://localhost:3000`.
 - **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
 - **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`.
 
@@ -89,11 +89,14 @@ Direct commands (for reference or when you need different flags):
 │   ├── LoomCloneTests/                   # XCTest unit tests for pure-logic layers
 │   ├── LoomClone.xcodeproj/             # generated — do not edit directly
 │   └── project.yml                       # XcodeGen source of truth
-├── server/                               # Hono + Bun server
+├── server/                               # Hono + Bun server (see server/CLAUDE.md)
+│   ├── CLAUDE.md                         #   scripts, layout, testing conventions
+│   ├── biome.json                        #   lint + format config
 │   └── src/
-│       ├── index.ts                      #   app entry, /data/* static handler with Range support
-│       ├── lib/                          #   store, playlist builder, derivatives (ffmpeg)
-│       └── routes/                       #   /api/videos, /v/:slug viewer page
+│       ├── index.ts                      #   createApp() factory + entry
+│       ├── test-utils.ts                 #   temp-dir test isolation helpers
+│       ├── lib/                          #   store, playlist, derivatives, constants — co-located __tests__/
+│       └── routes/                       #   /api/videos, /v/:slug, /data/* — co-located __tests__/
 ├── docs/
 │   ├── developer/                        # living developer docs
 │   │   └── streaming-and-healing.md

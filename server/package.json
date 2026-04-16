@@ -3,12 +3,22 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "bun run --hot src/index.ts",
+    "lint": "biome lint src/",
+    "lint:fix": "biome lint --write src/",
+    "format": "biome format --write src/",
+    "format:check": "biome format src/",
+    "check": "biome check src/",
+    "check:fix": "biome check --write src/",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "hono": "^4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
     "@types/bun": "latest",
     "typescript": "^5"
   }

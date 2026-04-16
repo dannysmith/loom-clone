@@ -1,16 +1,17 @@
-import { Hono } from "hono";
-import { join } from "path";
 import { readdir, rm } from "fs/promises";
-import {
-  createVideo,
-  getVideo,
-  addSegment,
-  setVideoStatus,
-  deleteVideo,
-  DATA_DIR,
-} from "../lib/store";
-import { buildPlaylist, writePlaylist } from "../lib/playlist";
+import { Hono } from "hono";
+import { join, resolve } from "path";
+import { DEFAULT_SEGMENT_DURATION } from "../lib/constants";
 import { scheduleDerivatives } from "../lib/derivatives";
+import { buildPlaylist, writePlaylist } from "../lib/playlist";
+import {
+  addSegment,
+  createVideo,
+  DATA_DIR,
+  deleteVideo,
+  getVideo,
+  setVideoStatus,
+} from "../lib/store";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.
@@ -21,7 +22,7 @@ interface TimelineLike {
   segments?: unknown;
 }
 
-function expectedFilenamesFromTimeline(timeline: TimelineLike): string[] {
+export function expectedFilenamesFromTimeline(timeline: TimelineLike): string[] {
   const segs = Array.isArray(timeline.segments) ? timeline.segments : [];
   const names = new Set<string>();
   // init.mp4 is implicit — it's never in timeline.segments but is always
@@ -33,6 +34,12 @@ function expectedFilenamesFromTimeline(timeline: TimelineLike): string[] {
   }
   return [...names];
 }
+
+// Conservative filename allowlist for segment uploads. init.mp4 is the HLS
+// initialization segment; seg_NNN.m4s are the media segments emitted by the
+// writer. Anything else is rejected so a malicious or buggy client can't
+// traverse out of the video directory or overwrite metadata files.
+const SEGMENT_FILENAME = /^(init\.mp4|seg_\d+\.m4s)$/;
 
 async function onDiskFilenames(id: string): Promise<Set<string>> {
   try {
@@ -59,12 +66,25 @@ videos.put("/:id/segments/:filename", async (c) => {
   const video = getVideo(id);
   if (!video) return c.json({ error: "Video not found" }, 404);
 
+  if (!SEGMENT_FILENAME.test(filename)) {
+    return c.json({ error: "Invalid segment filename" }, 400);
+  }
+
+  // Belt-and-braces: even with the allowlist, resolve the destination and
+  // confirm it stays inside the video's directory before writing.
+  const videoDir = resolve(join(DATA_DIR, id));
+  const path = resolve(join(videoDir, filename));
+  if (!path.startsWith(`${videoDir}/`)) {
+    return c.json({ error: "Invalid segment filename" }, 400);
+  }
+
   const body = await c.req.arrayBuffer();
-  const path = join(DATA_DIR, id, filename);
   await Bun.write(path, new Uint8Array(body));
 
   if (filename !== "init.mp4") {
-    const duration = parseFloat(c.req.header("x-segment-duration") ?? "4.0");
+    const duration = Number.parseFloat(
+      c.req.header("x-segment-duration") ?? String(DEFAULT_SEGMENT_DURATION),
+    );
     await addSegment(id, filename, duration);
 
     const playlist = await buildPlaylist(video);
@@ -109,8 +129,7 @@ videos.post("/:id/complete", async (c) => {
     missing = expected.filter((f) => !present.has(f)).sort();
   }
 
-  const nextStatus: "healing" | "complete" =
-    missing.length === 0 ? "complete" : "healing";
+  const nextStatus: "healing" | "complete" = missing.length === 0 ? "complete" : "healing";
   const video = await setVideoStatus(id, nextStatus);
 
   const playlist = await buildPlaylist(video);
@@ -125,7 +144,7 @@ videos.post("/:id/complete", async (c) => {
 
   const url = `/v/${video.slug}`;
   console.log(
-    `[complete] ${video.slug} -> ${url} (status=${nextStatus}, missing=${missing.length})`
+    `[complete] ${video.slug} -> ${url} (status=${nextStatus}, missing=${missing.length})`,
   );
   return c.json({ url, slug: video.slug, missing });
 });

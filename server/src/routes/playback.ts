@@ -1,11 +1,10 @@
 import { Hono } from "hono";
-import { existsSync } from "fs";
 import { join } from "path";
 import { DATA_DIR, getVideoBySlug } from "../lib/store";
 
 const playback = new Hono();
 
-playback.get("/v/:slug", (c) => {
+playback.get("/v/:slug", async (c) => {
   const { slug } = c.req.param();
   const video = getVideoBySlug(slug);
   if (!video) return c.text("Not found", 404);
@@ -16,12 +15,12 @@ playback.get("/v/:slug", (c) => {
   // without any client state.
   const mp4Path = join(DATA_DIR, video.id, "derivatives", "source.mp4");
   const thumbPath = join(DATA_DIR, video.id, "derivatives", "thumbnail.jpg");
-  const src = existsSync(mp4Path)
-    ? `/data/${video.id}/derivatives/source.mp4`
-    : `/data/${video.id}/stream.m3u8`;
-  const poster = existsSync(thumbPath)
-    ? `/data/${video.id}/derivatives/thumbnail.jpg`
-    : null;
+  const [hasMp4, hasThumb] = await Promise.all([
+    Bun.file(mp4Path).exists(),
+    Bun.file(thumbPath).exists(),
+  ]);
+  const src = hasMp4 ? `/data/${video.id}/derivatives/source.mp4` : `/data/${video.id}/stream.m3u8`;
+  const poster = hasThumb ? `/data/${video.id}/derivatives/thumbnail.jpg` : null;
 
   const html = `<!DOCTYPE html>
 <html lang="en">

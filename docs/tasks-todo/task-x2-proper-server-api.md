@@ -2,11 +2,11 @@
 
 Goal: Turn the prorotype Hono app into a proper backend server API which accepts videos from the macOS app and can be deployed to Hertzner. We are not trying to be feature complete here, just have a good, well set up, secure system, which can be run locally and deployed. 
 
-## Phase 1 - Developer Tooling and Cleanup
+## Phase 1 - Developer Tooling and Cleanup [DONE]
 
 Let's get the hono server properly set up with development tools for linting, formatting, checking, testing etc. We can also take this opportunity to do a little bit of clean up and refactoring and re architecture to get us ready for what we know we're gonna be doing. 
 
-## Phase 2 - Test Setup & Tests
+## Phase 2 - Test Setup & Tests [DONE]
 
 Let's get an automated testing framework set up in here and add tests for anything which we already have, which we should definitely have unit tests or any other types of tests for. 
 

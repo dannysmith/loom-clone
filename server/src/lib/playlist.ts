@@ -1,5 +1,6 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
+import { DEFAULT_SEGMENT_DURATION } from "./constants";
 import { DATA_DIR, getSegmentDurations, type VideoRecord } from "./store";
 
 // Build the playlist from the filesystem: directory listing sorted by filename
@@ -14,16 +15,13 @@ export async function buildPlaylist(video: VideoRecord): Promise<string> {
     // No directory yet — empty playlist.
   }
 
-  const mediaSegments = files
-    .filter((f) => f.endsWith(".m4s"))
-    .sort();
+  const mediaSegments = files.filter((f) => f.endsWith(".m4s")).sort();
 
   const durations = getSegmentDurations(video.id);
-  const fallbackDuration = 4;
 
   const maxDuration = mediaSegments.reduce(
-    (max, f) => Math.max(max, durations.get(f) ?? fallbackDuration),
-    fallbackDuration
+    (max, f) => Math.max(max, durations.get(f) ?? DEFAULT_SEGMENT_DURATION),
+    DEFAULT_SEGMENT_DURATION,
   );
   const targetDuration = Math.ceil(maxDuration);
 
@@ -35,7 +33,7 @@ export async function buildPlaylist(video: VideoRecord): Promise<string> {
 `;
 
   for (const filename of mediaSegments) {
-    const duration = durations.get(filename) ?? fallbackDuration;
+    const duration = durations.get(filename) ?? DEFAULT_SEGMENT_DURATION;
     m3u8 += `\n#EXTINF:${duration.toFixed(3)},\n${filename}`;
   }
 
@@ -47,10 +45,7 @@ export async function buildPlaylist(video: VideoRecord): Promise<string> {
   return m3u8;
 }
 
-export async function writePlaylist(
-  videoId: string,
-  content: string
-): Promise<void> {
+export async function writePlaylist(videoId: string, content: string): Promise<void> {
   const path = join(DATA_DIR, videoId, "stream.m3u8");
   await Bun.write(path, content);
 }

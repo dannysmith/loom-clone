@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import { createVideo, DATA_DIR, trashVideo, updateSlug, type VideoRecord } from "../../lib/store";
-import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import playback from "../playback";
+import {
+  createVideo,
+  DATA_DIR,
+  trashVideo,
+  updateSlug,
+  type VideoRecord,
+} from "../../../lib/store";
+import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
+import page from "../page";
 
 let env: TestEnv;
 
@@ -23,13 +29,13 @@ async function writeDerivative(video: VideoRecord, filename: string): Promise<vo
 
 describe("GET /v/:slug", () => {
   test("returns 404 for unknown slug", async () => {
-    const res = await playback.request("/v/deadbeef");
+    const res = await page.request("/v/deadbeef");
     expect(res.status).toBe(404);
   });
 
   test("returns HTML page with video player for valid slug", async () => {
     const video = await createVideo();
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
@@ -42,7 +48,7 @@ describe("GET /v/:slug", () => {
 
   test("falls back to HLS playlist when source.mp4 is absent", async () => {
     const video = await createVideo();
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
     expect(html).toContain(`/data/${video.id}/stream.m3u8`);
     expect(html).not.toContain(`/data/${video.id}/derivatives/source.mp4`);
@@ -51,7 +57,7 @@ describe("GET /v/:slug", () => {
   test("prefers source.mp4 when the derivative exists", async () => {
     const video = await createVideo();
     await writeDerivative(video, "source.mp4");
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
     expect(html).toContain(`/data/${video.id}/derivatives/source.mp4`);
     expect(html).not.toContain(`stream.m3u8`);
@@ -60,14 +66,14 @@ describe("GET /v/:slug", () => {
   test("sets poster attribute when thumbnail.jpg exists", async () => {
     const video = await createVideo();
     await writeDerivative(video, "thumbnail.jpg");
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
     expect(html).toContain(`poster="/data/${video.id}/derivatives/thumbnail.jpg"`);
   });
 
   test("no poster attribute when thumbnail is absent", async () => {
     const video = await createVideo();
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
     expect(html).not.toContain("poster=");
   });
@@ -77,7 +83,7 @@ describe("GET /v/:slug", () => {
     const oldSlug = video.slug;
     await updateSlug(video.id, "welcome");
 
-    const res = await playback.request(`/v/${oldSlug}`, { redirect: "manual" });
+    const res = await page.request(`/v/${oldSlug}`, { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe("/v/welcome");
   });
@@ -86,7 +92,7 @@ describe("GET /v/:slug", () => {
     const video = await createVideo();
     await updateSlug(video.id, "fresh");
 
-    const res = await playback.request(`/v/fresh`);
+    const res = await page.request(`/v/fresh`);
     expect(res.status).toBe(200);
   });
 
@@ -94,7 +100,7 @@ describe("GET /v/:slug", () => {
     const video = await createVideo();
     await trashVideo(video.id);
 
-    const res = await playback.request(`/v/${video.slug}`);
+    const res = await page.request(`/v/${video.slug}`);
     expect(res.status).toBe(404);
   });
 
@@ -104,7 +110,7 @@ describe("GET /v/:slug", () => {
     await updateSlug(video.id, "renamed");
     await trashVideo(video.id);
 
-    const res = await playback.request(`/v/${oldSlug}`);
+    const res = await page.request(`/v/${oldSlug}`);
     expect(res.status).toBe(404);
   });
 });

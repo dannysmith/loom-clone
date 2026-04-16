@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { join } from "path";
-import { DATA_DIR, resolveSlug } from "../lib/store";
-import { VideoPage } from "../views/viewer/VideoPage";
+import { DATA_DIR, resolveSlug } from "../../lib/store";
+import { VideoPage } from "../../views/viewer/VideoPage";
 
-const playback = new Hono();
+const page = new Hono();
 
-playback.get("/v/:slug", async (c) => {
+page.get("/v/:slug", async (c) => {
   const { slug } = c.req.param();
   const resolved = await resolveSlug(slug);
   if (!resolved) return c.text("Not found", 404);
@@ -34,4 +34,4 @@ playback.get("/v/:slug", async (c) => {
   return c.html(<VideoPage slug={video.slug} src={src} poster={poster} />);
 });
 
-export default playback;
+export default page;

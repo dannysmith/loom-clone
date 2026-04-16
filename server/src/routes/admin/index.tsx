@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { AdminHome } from "../views/admin/AdminHome";
+import { AdminHome } from "../../views/admin/AdminHome";
 
 const admin = new Hono();
 

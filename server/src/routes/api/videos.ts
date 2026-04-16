@@ -1,9 +1,9 @@
 import { readdir, rm } from "fs/promises";
 import { Hono } from "hono";
 import { join, resolve } from "path";
-import { DEFAULT_SEGMENT_DURATION } from "../lib/constants";
-import { scheduleDerivatives } from "../lib/derivatives";
-import { buildPlaylist, writePlaylist } from "../lib/playlist";
+import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
+import { scheduleDerivatives } from "../../lib/derivatives";
+import { buildPlaylist, writePlaylist } from "../../lib/playlist";
 import {
   addSegment,
   createVideo,
@@ -11,7 +11,7 @@ import {
   deleteVideo,
   getVideo,
   setVideoStatus,
-} from "../lib/store";
+} from "../../lib/store";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.

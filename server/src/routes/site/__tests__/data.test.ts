@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import staticRoutes, { parseRange } from "../static";
+import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
+import data, { parseRange } from "../data";
 
 let env: TestEnv;
 
@@ -54,18 +54,18 @@ describe("parseRange", () => {
 
 describe("/data/* handler", () => {
   test("returns 404 for missing file", async () => {
-    const res = await staticRoutes.request("/data/nope.txt");
+    const res = await data.request("/data/nope.txt");
     expect(res.status).toBe(404);
   });
 
   test("returns 404 for path traversal attempts", async () => {
-    const res = await staticRoutes.request("/data/../../../etc/passwd");
+    const res = await data.request("/data/../../../etc/passwd");
     expect(res.status).toBe(404);
   });
 
   test("serves file with correct MIME type for .m3u8", async () => {
     await writeDataFile("v1/stream.m3u8", "#EXTM3U\n");
-    const res = await staticRoutes.request("/data/v1/stream.m3u8");
+    const res = await data.request("/data/v1/stream.m3u8");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/vnd.apple.mpegurl");
     expect(res.headers.get("accept-ranges")).toBe("bytes");
@@ -74,19 +74,19 @@ describe("/data/* handler", () => {
 
   test("serves file with correct MIME type for .m4s", async () => {
     await writeDataFile("v1/seg.m4s", new Uint8Array([0, 1, 2, 3]));
-    const res = await staticRoutes.request("/data/v1/seg.m4s");
+    const res = await data.request("/data/v1/seg.m4s");
     expect(res.headers.get("content-type")).toBe("video/iso.segment");
   });
 
   test("falls back to octet-stream for unknown extension", async () => {
     await writeDataFile("v1/blob.xyz", "data");
-    const res = await staticRoutes.request("/data/v1/blob.xyz");
+    const res = await data.request("/data/v1/blob.xyz");
     expect(res.headers.get("content-type")).toBe("application/octet-stream");
   });
 
   test("full GET returns 200 with content-length and accept-ranges", async () => {
     await writeDataFile("v1/source.mp4", "x".repeat(100));
-    const res = await staticRoutes.request("/data/v1/source.mp4");
+    const res = await data.request("/data/v1/source.mp4");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-length")).toBe("100");
     expect(res.headers.get("accept-ranges")).toBe("bytes");
@@ -94,7 +94,7 @@ describe("/data/* handler", () => {
 
   test("Range request returns 206 with correct Content-Range and body slice", async () => {
     await writeDataFile("v1/source.mp4", "0123456789");
-    const res = await staticRoutes.request("/data/v1/source.mp4", {
+    const res = await data.request("/data/v1/source.mp4", {
       headers: { Range: "bytes=2-5" },
     });
     expect(res.status).toBe(206);
@@ -105,7 +105,7 @@ describe("/data/* handler", () => {
 
   test("suffix Range request works", async () => {
     await writeDataFile("v1/source.mp4", "0123456789");
-    const res = await staticRoutes.request("/data/v1/source.mp4", {
+    const res = await data.request("/data/v1/source.mp4", {
       headers: { Range: "bytes=-3" },
     });
     expect(res.status).toBe(206);
@@ -115,7 +115,7 @@ describe("/data/* handler", () => {
 
   test("invalid Range returns 416", async () => {
     await writeDataFile("v1/source.mp4", "0123456789");
-    const res = await staticRoutes.request("/data/v1/source.mp4", {
+    const res = await data.request("/data/v1/source.mp4", {
       headers: { Range: "bytes=abc" },
     });
     expect(res.status).toBe(416);
@@ -124,7 +124,7 @@ describe("/data/* handler", () => {
 
   test("Range exceeding file size returns 416", async () => {
     await writeDataFile("v1/source.mp4", "0123456789");
-    const res = await staticRoutes.request("/data/v1/source.mp4", {
+    const res = await data.request("/data/v1/source.mp4", {
       headers: { Range: "bytes=0-999" },
     });
     expect(res.status).toBe(416);

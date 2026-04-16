@@ -44,6 +44,28 @@ All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <to
 - **Env**: `HOST` (default `127.0.0.1`) and `PORT` (default `3000`) in `.env`. Bun auto-loads. See `.env.example`.
 - **Transport**: plaintext bearer over HTTP is acceptable on localhost only. task-x3 (Hetzner) must enforce HTTPS before `HOST` gets widened.
 
+## Route modules
+
+`src/routes/` is split into four modules, each with its own auth profile. Mount order in `app.ts` matches the list below; the wildcard `videos` module is mounted last as documentation of intent (Hono's trie router prefers specific routes regardless).
+
+```
+routes/
+  api/      bearer auth on /videos/* (mount-point), /health open
+    index.ts        mounts /health + /videos
+    videos.ts       PUT segment, POST complete, POST/DELETE
+  admin/    web/session auth at the mount (placeholder until task-x5)
+    index.tsx       /admin stub
+  site/     open — root, well-known files, /data/* (drops in 6.5)
+    index.ts        aggregator
+    data.ts         Range-aware /data/* handler
+  videos/   /:slug{...}/* viewer surface — mounted last
+    index.ts        aggregator
+    page.tsx        /v/:slug HTML page (slug-namespaced routes land in 6.4)
+```
+
+- **Auth at the mount**: bearer middleware is applied in `app.ts` to `/api/videos/*` only, keeping the api router itself auth-agnostic and easy to test.
+- **Co-located tests**: each module has its own `__tests__/` next to its handlers. App-level integration tests live at `src/__tests__/app.test.ts`.
+
 ## Views & Static Assets
 
 Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. No build step; Bun handles `.tsx` natively, browsers fetch CSS as-is.
@@ -62,7 +84,7 @@ public/
 - **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.
 - **DOCTYPE**: `RootLayout` emits `<!DOCTYPE html>` via `raw()` from `hono/html`. Don't repeat it elsewhere.
 - **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
-- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media stays on the Range-aware `/data/*` handler in `routes/static.ts`.
+- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is on the Range-aware `/data/*` handler in `routes/site/data.ts` (slated to drop in Phase 6.5).
 
 **CSS**:
 

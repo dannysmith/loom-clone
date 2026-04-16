@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
-import { DATA_DIR, getSegmentDurations, getVideo, trashVideo } from "../../lib/store";
-import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { DATA_DIR, getSegmentDurations, getVideo, trashVideo } from "../../../lib/store";
+import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
 
 let env: TestEnv;

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { extname, resolve } from "path";
-import { DATA_DIR } from "../lib/store";
+import { DATA_DIR } from "../../lib/store";
 
 // Static file serving for /data. Hono's `serveStatic` doesn't honor
 // HTTP Range requests, which breaks scrubbing in MP4 playback: the
@@ -20,9 +20,9 @@ const MIME_TYPES: Record<string, string> = {
   ".json": "application/json",
 };
 
-const staticRoutes = new Hono();
+const data = new Hono();
 
-staticRoutes.get("/data/*", async (c) => {
+data.get("/data/*", async (c) => {
   const relPath = c.req.path.replace(/^\/data\//, "");
   // Resolve + guard against path traversal. After resolve() the path
   // must still live under DATA_ROOT, otherwise refuse. Resolved lazily
@@ -96,5 +96,5 @@ function parseRange(header: string, size: number): { start: number; end: number 
   return { start, end };
 }
 
-export default staticRoutes;
+export default data;
 export { parseRange };

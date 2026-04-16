@@ -37,6 +37,7 @@ final class CameraPreviewLayerView: NSView {
     nonisolated private let filterContext: CIContext
     nonisolated(unsafe) private var filterOutputPool: CVPixelBufferPool?
     nonisolated(unsafe) private var filterPoolDims: (Int, Int) = (0, 0)
+    nonisolated private static let rec709ColorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
 
     override init(frame: NSRect) {
         // Separate CIContext from the compositor's — the preview/overlay
@@ -176,7 +177,7 @@ final class CameraPreviewLayerView: NSView {
         let filtered = Self.applyFilters(to: base, adjustments: adj)
 
         let destination = CIRenderDestination(pixelBuffer: output)
-        destination.colorSpace = CGColorSpace(name: CGColorSpace.itur_709)
+        destination.colorSpace = Self.rec709ColorSpace
         do {
             let task = try filterContext.startTask(toRender: filtered, to: destination)
             try task.waitUntilCompleted()

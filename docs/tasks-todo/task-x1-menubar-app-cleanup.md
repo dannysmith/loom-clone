@@ -8,7 +8,20 @@ Let's make sure that we have the `app/` project set up as well as we can for bot
 
 I don't know what the e equivalent of this kind of thing is for workingwith Swift/SwiftUI - It may be that we already have all of that stuff sorted and we're basically good to go. But if not then there's stuff that a really experienced Swift and Swift UI developer building an app like this would include in order to make development less error prone and easier for humans and agents, then let's make sure that we've got the right tooling set up, the right config, the right stuff for all of that. 
 
-## Phase 2 - Full Review and Architecture Review
+### Additions
+
+- Add SwiftLint, SwiftFormat, and stricter build settings (1282f4e94c990201ad05e7534a41178015f66f4b)
+  - SwiftLint config (.swiftlint.yml) with post-compile build phase in both targets
+  - SwiftFormat config (.swiftformat) with consistent style rules
+  - Upgrade SWIFT_STRICT_CONCURRENCY from targeted to complete
+  - Enable SWIFT_TREAT_WARNINGS_AS_ERRORS and GCC_TREAT_WARNINGS_AS_ERRORS
+  - Add settingGroups in project.yml so both targets share quality settings
+  - Enable createIntermediateGroups for cleaner Xcode navigator
+  - Document tooling in app CLAUDE.md
+- Added Makefile for common commands
+- Formatted codebase and fixed linting errors etc
+
+## Phase 2 - Full Review and Architecture Review [DONE]
 
 Now let's conduct a full review of the entire macOS app codebase, as an expert in building strong performant apps like this. Let's look at the code quality. Let's look at the overall architecture and naming conventions how we're splitting our code up either into different files or different functions, whether we're following standard/common "best practices" etc.
 
@@ -46,6 +59,29 @@ The main file keeps the two-phase start, stop, pause/resume, mode switch, and se
 
 I don't know what the normal pattern for testing is. But we should probably make sure that we have whatever nor automated tests would be normal in a mac OS app like this. 
 
+Added tests:
+
+- RecordingTimelineBuilderTests (20 tests) — the heaviest coverage: segment tracking, upload result patching, event ordering, stable sort, composition stats, raw streams, JSON encoding
+- TimestampAdjusterTests (6 tests) — priming offset, single/multi pause cycles, resume-without-pause safety
+- OutputPresetTests (5 tests) — fromID lookup/fallback, uniqueness, ordering
+- RecordingModeTests (4 tests) — cycle, wrap-around, display names, system images
+- H264SettingsTests (4 tests) — factory keys, bitrate variation, Rec. 709 properties
+- JSONValueTests (4 tests) — encoding round-trip for all four cases
+
 ## Phase 4 - Performance Review
 
 Now let's conduct another full review of the code base, but this time purely focused on finding any glaring performance issues or low-hanging fruit.
+
+### Improvements
+
+#### 1. Avoid redundant SwiftUI re-renders from device polling
+
+`refreshDevices()` in `RecordingCoordinator` unconditionally assigns `availableDisplays`, `availableCameras`, and `availableMicrophones` every 2 seconds. With `@Observable`, every assignment fires observation even if the list hasn't changed — and these are arrays of reference types with no value equality. This causes `MenuView` to re-evaluate its entire body and rebuild all three `NativePopUpPicker` menus every 2 seconds for no reason. Fix by comparing device IDs before assigning.
+
+#### 2. Cache CGColorSpace on the 30fps composition path
+
+`CompositionActor` line 204 and `CameraPreviewLayerView` line 179 both call `CGColorSpace(name: CGColorSpace.itur_709)` on every frame. The CompositionActor call runs at 30fps during recording. Cache as a static to avoid the CoreFoundation registry lookup per frame.
+
+#### 3. Cache CIImage extent in overlay creation
+
+`CompositionActor.createCircularOverlay` reads `.extent` on the camera CIImage, then again on the scaled result, then again for the translation. Store extent in a local variable to avoid redundant lazy-graph metadata queries.

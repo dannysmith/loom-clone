@@ -617,9 +617,10 @@ final class RecordingCoordinator {
                 false, onScreenWindowsOnly: true
             )
             screenPermissionDenied = false
-            availableDisplays = content.displays
-            // If the previously-selected display has gone away, fall back
-            // to the first available one.
+            let newDisplays = content.displays
+            if newDisplays.map(\.displayID) != availableDisplays.map(\.displayID) {
+                availableDisplays = newDisplays
+            }
             if let current = selectedDisplay,
                !availableDisplays.contains(where: { $0.displayID == current.displayID })
             {
@@ -641,7 +642,10 @@ final class RecordingCoordinator {
             mediaType: .video,
             position: .unspecified
         )
-        availableCameras = cameraDiscovery.devices
+        let newCameras = cameraDiscovery.devices
+        if newCameras.map(\.uniqueID) != availableCameras.map(\.uniqueID) {
+            availableCameras = newCameras
+        }
         if let current = selectedCamera,
            !availableCameras.contains(where: { $0.uniqueID == current.uniqueID })
         {
@@ -654,7 +658,10 @@ final class RecordingCoordinator {
             mediaType: .audio,
             position: .unspecified
         )
-        availableMicrophones = micDiscovery.devices
+        let newMics = micDiscovery.devices
+        if newMics.map(\.uniqueID) != availableMicrophones.map(\.uniqueID) {
+            availableMicrophones = newMics
+        }
         if let current = selectedMicrophone,
            !availableMicrophones.contains(where: { $0.uniqueID == current.uniqueID })
         {

@@ -41,6 +41,7 @@ actor CompositionActor {
     /// (33 ms) but well below the ~5 s GPU watchdog threshold that WindowServer
     /// enforces.
     private let renderStallTimeoutSeconds: Double = 2.0
+    private static let rec709ColorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
 
     // MARK: - Camera State
 
@@ -201,7 +202,7 @@ actor CompositionActor {
         // CIContext can't know the source colour space and falls back to an
         // expensive multi-stage conversion chain on every frame.
         let destination = CIRenderDestination(pixelBuffer: output)
-        destination.colorSpace = CGColorSpace(name: CGColorSpace.itur_709)
+        destination.colorSpace = Self.rec709ColorSpace
 
         // Use the task-based render API so we can see errors and wrap the
         // wait in a timeout. The void-return `render(to:bounds:colorSpace:)`
@@ -359,9 +360,10 @@ actor CompositionActor {
             height: diameter
         ))
         // Move origin to (0,0) for mask alignment
+        let croppedExtent = scaled.extent
         scaled = scaled.transformed(by: CGAffineTransform(
-            translationX: -scaled.extent.minX,
-            y: -scaled.extent.minY
+            translationX: -croppedExtent.minX,
+            y: -croppedExtent.minY
         ))
 
         // Regenerate mask if diameter changed

@@ -105,17 +105,24 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = best
-                // Lock to the fastest rate the format supports, but cap at
-                // 30fps. NTSC cameras: range.minFrameDuration is 1001/30000
-                // (29.97fps) — we use that. True 30fps cameras: 1/30. 60fps
-                // formats: clamped to 1/30 so we don't emit faster than the
-                // encoder targets. `max` on durations picks the larger
-                // (slower) of the two.
+                // Only lock the frame rate when 1/30 is within the format's
+                // supported duration range. UVC cameras like the ZV-1
+                // advertise fixed-rate ranges whose min and max duration
+                // are both `1000000/30000030` (essentially-but-not-exactly
+                // 30fps — UVC intervals are stored in 100ns units, which
+                // doesn't hit 1/30 on the nose). Setting
+                // activeVideoMinFrameDuration to CMTime(1, 30) in that
+                // case throws NSInvalidArgumentException — an ObjC
+                // exception Swift's `try/catch` can't catch, which
+                // crashes the app. When 1/30 isn't in range, the format's
+                // own rate applies (30.00003 fps on the ZV-1, 30 exactly
+                // on cameras that report it that way) — leave it alone.
                 let thirtyDur = CMTime(value: 1, timescale: 30)
-                if let fastest = best.videoSupportedFrameRateRanges.map(\.minFrameDuration).min() {
-                    let chosenDur = max(fastest, thirtyDur)
-                    device.activeVideoMinFrameDuration = chosenDur
-                    device.activeVideoMaxFrameDuration = chosenDur
+                if best.videoSupportedFrameRateRanges.contains(where: {
+                    $0.minFrameDuration <= thirtyDur && thirtyDur <= $0.maxFrameDuration
+                }) {
+                    device.activeVideoMinFrameDuration = thirtyDur
+                    device.activeVideoMaxFrameDuration = thirtyDur
                 }
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)

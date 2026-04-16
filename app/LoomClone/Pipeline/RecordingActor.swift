@@ -146,8 +146,20 @@ actor RecordingActor {
     /// correctly-encoded static frames at 30fps instead of gaps.
     private var latestScreenFrame: CachedFrame?
 
-    /// Latest camera frame received from AVCaptureSession.
-    private var latestCameraFrame: CachedFrame?
+    /// Bounded FIFO of camera frames. A single-slot cache previously lost
+    /// frames whenever the camera delivered faster than the metronome
+    /// consumed (measured: ~25% of frames dropped on a 30fps camera). The
+    /// queue lets bursts wait instead of being overwritten. Drop-oldest
+    /// keeps memory bounded if the metronome stalls.
+    ///
+    /// - `cameraOnly`: the metronome pops one frame per emit, so every
+    ///   captured frame lands in the output in order.
+    /// - `screenAndCamera`: the metronome peeks the most recent frame as
+    ///   the PiP backdrop without popping; older entries age out via the
+    ///   capacity cap.
+    /// - `screenOnly`: queue unused.
+    private var cameraFrameQueue: [CachedFrame] = []
+    private static let cameraFrameQueueCapacity = 4
 
     // MARK: - A/V sync diagnostics (temporary)
     private var avsyncCameraLogsRemaining = 30
@@ -210,7 +222,7 @@ actor RecordingActor {
         pauseStartHostTime = nil
         lastEmittedVideoPTS = .invalid
         latestScreenFrame = nil
-        latestCameraFrame = nil
+        cameraFrameQueue.removeAll(keepingCapacity: true)
         metronomeTickIdx = 0
         terminalErrorFired = false
         timeline = RecordingTimelineBuilder()
@@ -494,7 +506,7 @@ actor RecordingActor {
         case .screenOnly:
             cachedPTS = latestScreenFrame?.capturePTS
         case .cameraOnly, .screenAndCamera:
-            cachedPTS = latestCameraFrame?.capturePTS
+            cachedPTS = cameraFrameQueue.last?.capturePTS
         }
         let anchor: CMTime
         if let cachedPTS, cachedPTS.isValid, (now - cachedPTS) <= maxAnchorAge {
@@ -864,16 +876,18 @@ actor RecordingActor {
         }
     }
 
-    /// Camera frames are cached for the metronome, forwarded to the
-    /// composition actor, AND retimed + appended to the raw camera writer.
-    /// The on-screen overlay is fed separately from the capture queue
-    /// itself (see `onCameraSampleForOverlay`).
+    /// Camera frames are enqueued for the metronome to consume, AND
+    /// retimed + appended to the raw camera writer. The on-screen overlay
+    /// is fed separately from the capture queue itself (see
+    /// `onCameraSampleForOverlay`).
     private func handleCameraFrame(_ sampleBuffer: CMSampleBuffer) async {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        latestCameraFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
+        cameraFrameQueue.append(CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS))
+        if cameraFrameQueue.count > Self.cameraFrameQueueCapacity {
+            cameraFrameQueue.removeFirst()
+        }
         if isRecording { statsCameraFrames += 1 }
-        await composition.updateCameraFrame(pixelBuffer)
 
         if avsyncCameraLogsRemaining > 0, capturePTS.isValid {
             let now = CMClockGetTime(CMClockGetHostTimeClock())
@@ -1112,18 +1126,37 @@ actor RecordingActor {
         case .screenOnly:
             guard let screen = latestScreenFrame else { return false }
             sourcePTS = screen.capturePTS
-            result = await composition.compositeFrame(screenBuffer: screen.pixelBuffer, mode: .screenOnly)
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: nil,
+                mode: .screenOnly
+            )
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return false }
-            guard let camera = latestCameraFrame else { return false }
+            // Peek the most recent camera frame as the PiP backdrop.
+            // Don't pop — the metronome ticks at its own cadence; older
+            // camera frames age out via the queue's capacity cap.
+            guard let camera = cameraFrameQueue.last else { return false }
             // Camera latency dominates sync perception (lip-sync), so we
             // align to the camera's capture time in composite mode.
             sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(screenBuffer: screen.pixelBuffer, mode: .screenAndCamera)
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: camera.pixelBuffer,
+                mode: .screenAndCamera
+            )
         case .cameraOnly:
-            guard let camera = latestCameraFrame else { return false }
+            // Pop one frame per emit so every captured frame reaches the
+            // output in order. If the queue is empty (metronome ran
+            // before the camera delivered), skip this tick.
+            guard !cameraFrameQueue.isEmpty else { return false }
+            let camera = cameraFrameQueue.removeFirst()
             sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(screenBuffer: nil, mode: .cameraOnly)
+            result = await composition.compositeFrame(
+                screenBuffer: nil,
+                cameraBuffer: camera.pixelBuffer,
+                mode: .cameraOnly
+            )
         }
 
         // nil = transient (source raced, output pool miss). Skip, retry next tick.

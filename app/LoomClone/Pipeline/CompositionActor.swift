@@ -45,14 +45,13 @@ actor CompositionActor {
 
     // MARK: - Camera State
 
-    private var latestCameraImage: CIImage?
     private var circleMask: CIImage
 
     // MARK: - Camera Adjustments
     //
     // Optional reference to the shared state box owned by RecordingCoordinator.
     // nil means "no adjustments" — camera frames pass through unchanged. When
-    // set, `updateCameraFrame` wraps incoming camera frames in the filter
+    // set, `compositeFrame` wraps the incoming camera buffer in the filter
     // chain declared by the state box's current value. Because the filter
     // chain is built lazily as a CIImage graph, the per-frame cost is paid
     // only at render time inside `compositeFrame`.
@@ -107,12 +106,7 @@ actor CompositionActor {
         print("[composition] Configured: \(preset.width)x\(preset.height), PiP=\(Int(overlayDiameter))px")
     }
 
-    // MARK: - Camera Frame Update
-
-    func updateCameraFrame(_ pixelBuffer: CVPixelBuffer) {
-        let base = CIImage(cvPixelBuffer: pixelBuffer)
-        latestCameraImage = applyCameraAdjustments(to: base)
-    }
+    // MARK: - Camera Frame Adjustments
 
     /// Add CITemperatureAndTint + CIExposureAdjust onto the camera-only path.
     /// Cheap when the state box is unset or the current values are defaults —
@@ -156,6 +150,7 @@ actor CompositionActor {
     ///   The metronome should rebuild the context before the next tick.
     func compositeFrame(
         screenBuffer: CVPixelBuffer?,
+        cameraBuffer: CVPixelBuffer?,
         mode: RecordingMode
     ) async -> Result<CVPixelBuffer, CompositionError>? {
         guard let output = outputPool.createBuffer() else {
@@ -163,11 +158,21 @@ actor CompositionActor {
             return nil
         }
 
+        // Build the adjusted camera image from the explicit buffer the
+        // caller passed in — not from internal state. This ensures the
+        // pixels we render match the PTS that the caller will stamp on
+        // the output (the cameraFrameQueue can hold multiple frames at
+        // once, so "latest" here must mean the specific one the caller
+        // popped, not whatever has arrived at the compositor since).
+        let cameraImage: CIImage? = cameraBuffer.map {
+            applyCameraAdjustments(to: CIImage(cvPixelBuffer: $0))
+        }
+
         let composited: CIImage
 
         switch mode {
         case .cameraOnly:
-            guard let camera = latestCameraImage else { return nil }
+            guard let camera = cameraImage else { return nil }
             composited = scaledToFill(camera)
 
         case .screenOnly:
@@ -180,7 +185,7 @@ actor CompositionActor {
             let screen = CIImage(cvPixelBuffer: screenBuffer)
             let screenScaled = scaledToFill(screen)
 
-            guard let camera = latestCameraImage else {
+            guard let camera = cameraImage else {
                 composited = screenScaled
                 break
             }

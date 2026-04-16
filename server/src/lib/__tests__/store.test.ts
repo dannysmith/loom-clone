@@ -17,11 +17,14 @@ import {
   getVideo,
   getVideoBySlug,
   listVideos,
+  RESERVED_SLUGS,
   resolveSlug,
+  SLUG_MAX_LENGTH,
   setVideoStatus,
   trashVideo,
   updateSlug,
   updateVideo,
+  validateSlugFormat,
 } from "../store";
 
 let env: TestEnv;
@@ -311,6 +314,54 @@ describe("updateSlug / resolveSlug", () => {
 
   test("resolveSlug returns null for unknown slug", async () => {
     expect(await resolveSlug("does-not-exist")).toBeNull();
+  });
+
+  test("rejects ConflictError if new slug fails format validation", async () => {
+    const video = await createVideo();
+    expect(updateSlug(video.id, "BadCASE")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "with.dot")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "trailing-")).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("rejects ConflictError if new slug is reserved", async () => {
+    const video = await createVideo();
+    expect(updateSlug(video.id, "admin")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "api")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "favicon")).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe("validateSlugFormat", () => {
+  test("accepts well-formed slugs", () => {
+    const ok = ["a", "a1", "abc", "abc-def", "a-b-c-1-2-3", "welcome-to-the-team", "deadbeef"];
+    for (const slug of ok) {
+      expect(() => validateSlugFormat(slug)).not.toThrow();
+    }
+  });
+
+  test("rejects empty, too-long, or wrong-shape slugs", () => {
+    const bad = [
+      "", // empty
+      "A", // uppercase
+      "ABC", // uppercase
+      "a_b", // underscore
+      "a b", // space
+      "a.b", // dot
+      "a/b", // slash
+      "-leading", // leading dash
+      "trailing-", // trailing dash
+      "double--dash", // consecutive dashes
+      "a".repeat(SLUG_MAX_LENGTH + 1), // too long
+    ];
+    for (const slug of bad) {
+      expect(() => validateSlugFormat(slug)).toThrow(ConflictError);
+    }
+  });
+
+  test("rejects every reserved word", () => {
+    for (const slug of RESERVED_SLUGS) {
+      expect(() => validateSlugFormat(slug)).toThrow(ConflictError);
+    }
   });
 });
 

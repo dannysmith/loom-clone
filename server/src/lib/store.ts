@@ -13,11 +13,69 @@ export const DATA_DIR = "data";
 export type VideoRecord = Video;
 
 // Thrown by mutating ops when the requested change would violate uniqueness
-// expectations (e.g. slug already in use). Routes map this to HTTP 409.
+// expectations (e.g. slug already in use) or slug format/reservation rules.
+// Routes map this to HTTP 409.
 export class ConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ConflictError";
+  }
+}
+
+// Slug format: lowercase alphanumeric + single dashes, no leading/trailing/double dashes.
+// Deliberately excludes dots and slashes so `.json`/`.md`/`.mp4` suffix routes and
+// nested paths can never collide with a real slug.
+export const SLUG_REGEX = /^[a-z0-9](-?[a-z0-9])*$/;
+export const SLUG_MAX_LENGTH = 64;
+
+// Slugs that would shadow a top-level route or well-known file. Names are
+// stored without their extension because the regex already forbids dots —
+// `robots.txt` can't be a slug, but `robots` could without this list.
+// Keep this list close to the route mounts in `app.ts`.
+export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
+  // Current and near-future module mounts
+  "admin",
+  "api",
+  "static",
+  "data",
+  "v",
+  // Well-known root files
+  "robots",
+  "favicon",
+  "sitemap",
+  "humans",
+  "manifest",
+  "apple-touch-icon",
+  // Likely future top-level routes
+  "health",
+  "login",
+  "logout",
+  "auth",
+  "signup",
+  // Currently slug sub-paths; reserved in case they ever go top-level
+  "embed",
+  "raw",
+  "stream",
+  "poster",
+  "feed",
+  "rss",
+  "search",
+]);
+
+// Validates a user-supplied slug's format and reservation status. Throws
+// ConflictError on failure so routes get a uniform 409 mapping. Uniqueness
+// is checked separately by the caller against the DB.
+export function validateSlugFormat(slug: string): void {
+  if (slug.length === 0 || slug.length > SLUG_MAX_LENGTH) {
+    throw new ConflictError(`Slug must be 1-${SLUG_MAX_LENGTH} characters`);
+  }
+  if (!SLUG_REGEX.test(slug)) {
+    throw new ConflictError(
+      `Slug "${slug}" must be lowercase alphanumeric with single dashes (no dots, slashes, leading/trailing dashes)`,
+    );
+  }
+  if (RESERVED_SLUGS.has(slug)) {
+    throw new ConflictError(`Slug "${slug}" is reserved`);
   }
 }
 
@@ -36,9 +94,15 @@ function nowIso(): string {
 }
 
 function generateSlug(): string {
-  return crypto
-    .getRandomValues(new Uint8Array(4))
-    .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+  // 8 hex chars from 4 random bytes. Re-roll if it lands on a reserved word —
+  // none currently match the 8-char hex shape, but the loop costs nothing and
+  // means the reserved list can grow without revisiting this function.
+  while (true) {
+    const slug = crypto
+      .getRandomValues(new Uint8Array(4))
+      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+    if (!RESERVED_SLUGS.has(slug)) return slug;
+  }
 }
 
 export async function createVideo(): Promise<Video> {
@@ -229,6 +293,9 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
   const existing = await getVideo(id, { includeTrashed: true });
   if (!existing) throw new Error(`Video ${id} not found`);
   if (existing.slug === newSlug) return existing;
+
+  // Format + reservation checks before hitting the DB.
+  validateSlugFormat(newSlug);
 
   const slugTaken = await db
     .select()

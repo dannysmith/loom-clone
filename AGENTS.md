@@ -46,10 +46,20 @@ Three components exist today, plus a diagnostic tool:
 
 ## Building & Running
 
+A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
+
+- `make build` — build the main app (Debug)
+- `make build-harness` — build the test harness (Debug)
+- `make regen` — regenerate Xcode project from `project.yml`
+- `make format` — run SwiftFormat on all Swift files
+- `make lint` / `make lint-fix` — run SwiftLint / auto-fix violations
+
+Direct commands (for reference or when you need different flags):
+
 - **macOS app**: `xcodebuild -project app/LoomClone.xcodeproj -scheme LoomClone -configuration Debug -destination 'platform=macOS' build`. Do NOT run `bun run dev` or start the dev server unless explicitly asked.
 - **Server**: `cd server && bun run dev` (runs on `http://localhost:3000` with `--hot` reload).
 - **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
-- **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` to regenerate `LoomClone.xcodeproj`.
+- **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`.
 
 ## Task Management
 

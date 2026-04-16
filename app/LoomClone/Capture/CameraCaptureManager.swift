@@ -72,28 +72,6 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             return
         }
 
-        // Enumerate every format + supported frame-rate range the device
-        // advertises. Temporary diagnostic for the A/V sync investigation —
-        // specifically to tell us whether the ZV-1 is advertising 30fps
-        // formats at all (if not, it's a hardware menu setting, not code).
-        // Safe to remove once camera fps is understood.
-        print("[camera-diag] \(device.localizedName) advertises \(device.formats.count) formats:")
-        for (idx, fmt) in device.formats.enumerated() {
-            let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-            let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
-            let subTypeStr = String(
-                format: "%c%c%c%c",
-                (subType >> 24) & 0xff,
-                (subType >> 16) & 0xff,
-                (subType >> 8) & 0xff,
-                subType & 0xff
-            )
-            let ranges = fmt.videoSupportedFrameRateRanges
-                .map { String(format: "%.0f-%.0f", $0.minFrameRate, $0.maxFrameRate) }
-                .joined(separator: ", ")
-            print("[camera-diag]   [\(idx)] \(dims.width)x\(dims.height) \(subTypeStr) fps=[\(ranges)]")
-        }
-
         let session = AVCaptureSession()
         session.beginConfiguration()
 

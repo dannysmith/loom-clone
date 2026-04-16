@@ -161,24 +161,6 @@ actor RecordingActor {
     private var cameraFrameQueue: [CachedFrame] = []
     private static let cameraFrameQueueCapacity = 4
 
-    // MARK: - A/V sync diagnostics (temporary)
-    private var avsyncCameraLogsRemaining = 30
-    private var avsyncScreenLogsRemaining = 30
-    private var avsyncAudioLogsRemaining = 30
-    private var avsyncVideoEmitLogsRemaining = 30
-
-    // Per-second rolling counters — answers the question "is the metronome
-    // actually emitting 30fps, or is it dropping to 25fps because the
-    // camera and metronome drift out of phase?"
-    private var statsWindowStart: CMTime = .invalid
-    private var statsCameraFrames: Int = 0
-    private var statsMetronomeIters: Int = 0
-    private var statsVideoEmits: Int = 0
-    private var statsVideoSkips: Int = 0
-    private var statsMinGapMS: Double = .infinity
-    private var statsMaxGapMS: Double = 0
-    private var statsLastEmitPTS: CMTime = .invalid
-
     // MARK: - Metronome
 
     /// Target frame rate for the output video timeline. The encoder's keyframe
@@ -515,7 +497,7 @@ actor RecordingActor {
             anchor = now - maxAnchorAge
             if let cachedPTS, cachedPTS.isValid {
                 let ageMS = (now - cachedPTS).seconds * 1000
-                print(String(format: "[avsync] cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms", ageMS, maxAnchorAge.seconds * 1000))
+                print(String(format: "[recording] Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms", ageMS, maxAnchorAge.seconds * 1000))
             }
         }
         recordingStartTime = anchor
@@ -863,13 +845,6 @@ actor RecordingActor {
         let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         latestScreenFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
 
-        if avsyncScreenLogsRemaining > 0, capturePTS.isValid {
-            let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let ageMS = (now - capturePTS).seconds * 1000
-            print(String(format: "[avsync] screen capture age: %.1f ms", ageMS))
-            avsyncScreenLogsRemaining -= 1
-        }
-
         if let screenRawWriter,
            let retimed = retimedSampleForRawWriter(sampleBuffer) {
             await screenRawWriter.append(retimed)
@@ -886,14 +861,6 @@ actor RecordingActor {
         cameraFrameQueue.append(CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS))
         if cameraFrameQueue.count > Self.cameraFrameQueueCapacity {
             cameraFrameQueue.removeFirst()
-        }
-        if isRecording { statsCameraFrames += 1 }
-
-        if avsyncCameraLogsRemaining > 0, capturePTS.isValid {
-            let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let ageMS = (now - capturePTS).seconds * 1000
-            print(String(format: "[avsync] camera capture age: %.1f ms", ageMS))
-            avsyncCameraLogsRemaining -= 1
         }
 
         if let cameraRawWriter,
@@ -956,13 +923,6 @@ actor RecordingActor {
         // Drop samples captured before the recording was committed.
         // These can occur briefly during the prepare→commit transition.
         guard relativePTS >= .zero else { return }
-
-        if avsyncAudioLogsRemaining > 0 {
-            let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let ageMS = (now - originalPTS).seconds * 1000
-            print(String(format: "[avsync] audio capture age: %.1f ms", ageMS))
-            avsyncAudioLogsRemaining -= 1
-        }
 
         let duration = CMSampleBufferGetDuration(sampleBuffer)
 
@@ -1030,56 +990,17 @@ actor RecordingActor {
         metronomeTask = nil
     }
 
-    /// The 30fps encoding loop. On each tick: compose a frame from the latest
-    /// cached buffers and append with `pts = primingOffset + elapsedLogical`,
-    /// where `elapsedLogical = (now - recordingStartTime) - pauseAccumulator`.
+    /// The 30fps encoding loop. Each tick composes one output frame using
+    /// the cached source buffer(s) and stamps it with the source's own
+    /// capture PTS (see `emitMetronomeFrame`), which is the same clock
+    /// audio samples are stamped with — so A/V stay aligned regardless
+    /// of capture pipeline latency.
     ///
-    /// PTS is derived from wall-clock-now at emit time, not from a frame
-    /// counter, so the metronome shares its clock with the audio path and
-    /// A/V cannot drift apart.
-    ///
-    /// The sleep schedule is drift-corrected against `recordingStartTime` so
-    /// ticks fire at steady 1/30s intervals (with small wiggle from sleep
-    /// imprecision, which is invisible because PTS comes from wall clock).
-    /// Emit a per-second rolling summary of the capture/emit pipeline so we
-    /// can see at a glance whether camera frames are being dropped, whether
-    /// the metronome is actually keeping 30fps, and how jittery the emitted
-    /// PTS spacing is.
-    private func flushAVSyncStatsIfDue() {
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-        guard statsWindowStart.isValid else {
-            statsWindowStart = now
-            return
-        }
-        let elapsed = (now - statsWindowStart).seconds
-        guard elapsed >= 1.0 else { return }
-        let gapMin = statsMinGapMS.isFinite ? statsMinGapMS : 0
-        print(String(
-            format: "[avsync-stats] cam_recv=%d metro_iters=%d emits=%d skips=%d emit_fps=%.1f gap=[%.1f-%.1f]ms",
-            statsCameraFrames,
-            statsMetronomeIters,
-            statsVideoEmits,
-            statsVideoSkips,
-            Double(statsVideoEmits) / elapsed,
-            gapMin,
-            statsMaxGapMS
-        ))
-        statsWindowStart = now
-        statsCameraFrames = 0
-        statsMetronomeIters = 0
-        statsVideoEmits = 0
-        statsVideoSkips = 0
-        statsMinGapMS = .infinity
-        statsMaxGapMS = 0
-    }
-
+    /// The sleep schedule is drift-corrected against `recordingStartTime`
+    /// so ticks fire at steady 1/30s intervals.
     private func metronomeLoop() async {
-        statsWindowStart = CMClockGetTime(CMClockGetHostTimeClock())
         while !Task.isCancelled && isRecording {
-            statsMetronomeIters += 1
             let emitted = await emitMetronomeFrame()
-            if emitted { statsVideoEmits += 1 } else { statsVideoSkips += 1 }
-            flushAVSyncStatsIfDue()
 
             if !emitted {
                 // Source for the current mode hasn't delivered its first frame
@@ -1189,21 +1110,6 @@ actor RecordingActor {
         // than emitting with a synthesized PTS.
         if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS { return false }
         lastEmittedVideoPTS = pts
-
-        if avsyncVideoEmitLogsRemaining > 0 {
-            let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let emitAgeMS = (now - sourcePTS).seconds * 1000
-            print(String(format: "[avsync] video emit: source_age_at_emit=%.1f ms, pts=%.3f s", emitAgeMS, pts.seconds))
-            avsyncVideoEmitLogsRemaining -= 1
-        }
-
-        // Per-second rolling stats: track inter-emit gap distribution.
-        if statsLastEmitPTS.isValid {
-            let gapMS = (pts - statsLastEmitPTS).seconds * 1000
-            statsMinGapMS = min(statsMinGapMS, gapMS)
-            statsMaxGapMS = max(statsMaxGapMS, gapMS)
-        }
-        statsLastEmitPTS = pts
 
         guard let outputSample = createSampleBuffer(
             from: output,

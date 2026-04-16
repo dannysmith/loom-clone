@@ -1,7 +1,6 @@
 import AVFoundation
 import CoreMedia
 import Foundation
-import VideoToolbox
 
 /// Writes a single capture stream (video or audio) to a standalone
 /// MP4 / MOV / M4A file at native quality. Used for the local
@@ -70,43 +69,18 @@ actor RawStreamWriter {
         let input: AVAssetWriterInput
         switch kind {
         case let .videoH264(width, height, bitrate):
-            // Deliberately no `AVVideoColorPropertiesKey` here. Declaring
-            // Rec. 709 on the output is safe for the raw camera writer (its
-            // input buffers are tagged Rec. 709 by `CameraCaptureManager`)
-            // but **dangerous for the raw screen writer** — ScreenCaptureKit
-            // delivers frames in the display's native colour space (sRGB /
-            // Display P3), and declaring Rec. 709 output forces AVFoundation
-            // to spawn a `videomediaconverter` thread that does GPU-side
-            // colour conversion on every frame. Added to an already
-            // contended three-encoder pipeline on an M2 Pro's single media
-            // engine, that extra GPU work can wedge the GPU and — because
-            // WindowServer shares the same GPU for display compositing —
-            // hang the whole machine (WindowServer watchdog timeout).
-            // Omitting the key lets the writer infer its output colour
-            // space from the first input pixel buffer's attachments, which
-            // is what we want: camera output gets Rec. 709 from the tagged
-            // buffers automatically.
+            // No AVVideoColorPropertiesKey — colour space is inferred from
+            // pixel buffer attachments. Declaring Rec. 709 explicitly would
+            // force GPU-side colour conversion on screen-capture frames
+            // (which arrive in Display P3 / sRGB), risking a GPU wedge on
+            // contended pipelines. See H264Settings.rec709ColorProperties
+            // for when it IS safe to declare.
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
-                // Require hardware H.264. See WriterActor for the rationale.
-                AVVideoEncoderSpecificationKey: [
-                    kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: kCFBooleanTrue as Any,
-                ] as [String: Any],
-                AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: bitrate,
-                    AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
-                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                    AVVideoExpectedSourceFrameRateKey: 30,
-                    AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-                    // See WriterActor for the full rationale (OBS #5840
-                    // convergence — RealTime=false is what OBS/FFmpeg/
-                    // HandBrake ship on Apple Silicon).
-                    kVTCompressionPropertyKey_RealTime as String: kCFBooleanFalse as Any,
-                    // Disable B-frames. See WriterActor for the rationale.
-                    AVVideoAllowFrameReorderingKey: false,
-                ] as [String: Any],
+                AVVideoEncoderSpecificationKey: H264Settings.encoderSpecification as [String: Any],
+                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate) as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 

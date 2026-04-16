@@ -38,7 +38,9 @@ targets:
         DEVELOPMENT_TEAM: XT349SJG9U
     postCompileScripts:
       - script: |
-          if command -v swiftlint >/dev/null 2>&1; then
+          if [ -x /opt/homebrew/bin/swiftlint ]; then
+            /opt/homebrew/bin/swiftlint lint --quiet
+          elif command -v swiftlint >/dev/null 2>&1; then
             swiftlint lint --quiet
           else
             echo "warning: SwiftLint not installed — install with 'brew install swiftlint'"
@@ -72,7 +74,9 @@ targets:
         DEVELOPMENT_TEAM: XT349SJG9U
     postCompileScripts:
       - script: |
-          if command -v swiftlint >/dev/null 2>&1; then
+          if [ -x /opt/homebrew/bin/swiftlint ]; then
+            /opt/homebrew/bin/swiftlint lint --quiet
+          elif command -v swiftlint >/dev/null 2>&1; then
             swiftlint lint --quiet
           else
             echo "warning: SwiftLint not installed — install with 'brew install swiftlint'"

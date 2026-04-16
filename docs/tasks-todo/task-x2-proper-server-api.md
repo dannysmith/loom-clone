@@ -97,17 +97,20 @@ Six tables. Schema decisions locked in during planning: ISO-text timestamps (mat
 
 Existing `data/` is expendable — not production, nuke it before running the new schema. No migration script.
 
-#### 3.6 Validation
+#### 3.6 Validation — DEFERRED
 
-- Add `zod` at the API boundary. Validate path params, query params, body on every mutating route.
-- Use `drizzle-zod` to derive insert/update schemas where it fits; hand-written for anything else.
-- Validation failures return 400 with structured error bodies.
+Skipped for this phase. Current routes have almost no user input worth validating (malformed IDs already 404 via the store lookup; the segment filename allowlist is a one-line regex; the `/complete` timeline body is intentionally loose). A global error handler mapping `ConflictError → 409` would be dead code because no current route exposes the store functions that throw it.
+
+Defer to whenever the first admin/edit route is built (Phase 6 or task-x5). At that point: install `zod` + `@hono/zod-validator` + optionally `drizzle-zod`, add schemas against real user input shapes, register the error handler. ~20 minutes once there's a consumer.
+
+One standalone correctness fix was pulled out of this phase and applied: `x-segment-duration` parsing now guards against `NaN`/non-positive values and falls back to the default.
 
 #### 3.7 Tests
 
-- Rewrite tests that exercised the in-memory store to work against the DB. The per-test `:memory:` db keeps them fast.
-- New tests: slug history + redirect lookup, slug-change conflict (409), tag CRUD and assignment, trash/restore + filtering, event logging on each state change, validation rejections, FK cascade (deleting a video removes its segments/tags/events/redirects).
-- Keep the real-filesystem-and-ffmpeg integration tests as-is.
+- Rewrite tests that exercised the in-memory store to work against the DB. The per-test `:memory:` db keeps them fast. **Done in 3.3.**
+- New tests: slug history + redirect lookup, slug-change conflict, tag CRUD and assignment, trash + filtering, event logging on each state change, FK cascade (deleting a video removes its segments/tags/events/redirects). **Mostly done in 3.3-3.5**; remaining gap is an explicit test for the `slug_redirects` cascade.
+- Validation rejection tests — skipped with 3.6.
+- Keep the real-filesystem-and-ffmpeg integration tests as-is. **Done.**
 
 #### 3.8 Cleanup
 

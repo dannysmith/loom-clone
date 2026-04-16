@@ -138,6 +138,28 @@ describe("PUT /:id/segments/:filename", () => {
     const durations = await getSegmentDurations(id);
     expect(durations.get("seg_000.m4s")).toBe(4);
   });
+
+  test("unparseable x-segment-duration falls back to default (no NaN in DB)", async () => {
+    const { id } = await createVideoViaApi();
+    await videos.request(`/${id}/segments/seg_000.m4s`, {
+      method: "PUT",
+      headers: { "x-segment-duration": "not-a-number" },
+      body: new Uint8Array([0]),
+    });
+    const durations = await getSegmentDurations(id);
+    expect(durations.get("seg_000.m4s")).toBe(4);
+  });
+
+  test("negative or zero x-segment-duration falls back to default", async () => {
+    const { id } = await createVideoViaApi();
+    await videos.request(`/${id}/segments/seg_000.m4s`, {
+      method: "PUT",
+      headers: { "x-segment-duration": "-1.5" },
+      body: new Uint8Array([0]),
+    });
+    const durations = await getSegmentDurations(id);
+    expect(durations.get("seg_000.m4s")).toBe(4);
+  });
 });
 
 describe("POST /:id/complete", () => {

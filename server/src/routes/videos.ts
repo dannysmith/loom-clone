@@ -82,9 +82,12 @@ videos.put("/:id/segments/:filename", async (c) => {
   await Bun.write(path, new Uint8Array(body));
 
   if (filename !== "init.mp4") {
-    const duration = Number.parseFloat(
-      c.req.header("x-segment-duration") ?? String(DEFAULT_SEGMENT_DURATION),
-    );
+    const header = c.req.header("x-segment-duration");
+    // Fall back to the default for missing or unparseable headers. Without the
+    // finiteness guard, parseFloat("abc") = NaN would end up in the segments
+    // table and then in the HLS playlist's EXTINF line.
+    const parsed = header !== undefined ? Number.parseFloat(header) : DEFAULT_SEGMENT_DURATION;
+    const duration = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SEGMENT_DURATION;
     await addSegment(id, filename, duration);
 
     const playlist = await buildPlaylist(video);

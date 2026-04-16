@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../db/client";
-import { videoEvents, videos as videosTable } from "../../db/schema";
+import {
+  slugRedirects as slugRedirectsTable,
+  videoEvents,
+  videos as videosTable,
+} from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import {
   addSegment,
@@ -209,6 +213,33 @@ describe("deleteVideo", () => {
       .insert(videosTable)
       .values({ id: "v2", slug: video.slug, createdAt: "x", updatedAt: "x" });
     expect(await getVideoBySlug(video.slug)).toBeDefined();
+  });
+
+  test("hard delete cascades slug_redirects rows for the deleted video", async () => {
+    const video = await createVideo();
+    const originalSlug = video.slug;
+    await updateSlug(video.id, "v1-renamed"); // creates a redirect row
+    await updateSlug(video.id, "v1-final"); // another redirect row
+
+    // Two redirect rows should exist for this video.
+    const before = await getDb()
+      .select()
+      .from(slugRedirectsTable)
+      .where(eq(slugRedirectsTable.videoId, video.id));
+    expect(before).toHaveLength(2);
+
+    await deleteVideo(video.id);
+
+    // After cascade, no redirects remain — and the freed slugs can be reused.
+    const after = await getDb()
+      .select()
+      .from(slugRedirectsTable)
+      .where(eq(slugRedirectsTable.videoId, video.id));
+    expect(after).toHaveLength(0);
+
+    // Resolving either freed slug returns null (no dangling redirect to nowhere).
+    expect(await resolveSlug(originalSlug)).toBeNull();
+    expect(await resolveSlug("v1-renamed")).toBeNull();
   });
 });
 

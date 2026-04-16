@@ -48,6 +48,19 @@ targets:
         name: SwiftLint
         basedOnDependencyAnalysis: false
 
+  LoomCloneTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: LoomCloneTests
+    dependencies:
+      - target: LoomClone
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danny.loomclone.tests
+        GENERATE_INFOPLIST_FILE: true
+        DEVELOPMENT_TEAM: XT349SJG9U
+
   LoomCloneTestHarness:
     # Diagnostic tool for AVFoundation/VideoToolbox/CIContext configurations.
     # See docs/tasks-todo/task-0C-isolation-test-harness.md. NOT shipped.

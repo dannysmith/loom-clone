@@ -1,4 +1,4 @@
-.PHONY: build build-harness regen format lint lint-fix clean help
+.PHONY: build build-harness test regen format lint lint-fix clean help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -8,6 +8,9 @@ build: ## Build the main app (Debug)
 
 build-harness: ## Build the test harness (Debug)
 	xcodebuild -project LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build
+
+test: ## Run unit tests
+	xcodebuild test -project LoomClone.xcodeproj -scheme LoomCloneTests -destination 'platform=macOS'
 
 regen: ## Regenerate Xcode project from project.yml
 	xcodegen generate

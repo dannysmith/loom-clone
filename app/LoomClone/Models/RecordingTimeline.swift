@@ -155,7 +155,7 @@ struct RecordingTimeline: Encodable {
 
 /// Tiny JSON value enum so events can carry arbitrary small payloads without
 /// dragging `Any` through Codable. Covers the shapes we actually need.
-enum JSONValue: Encodable {
+enum JSONValue: Encodable, Equatable {
     case string(String)
     case int(Int)
     case double(Double)

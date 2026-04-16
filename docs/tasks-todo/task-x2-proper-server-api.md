@@ -118,7 +118,7 @@ One standalone correctness fix was pulled out of this phase and applied: `x-segm
 - Add a "Database" section to `server/CLAUDE.md` (location, scripts, test isolation).
 - Update `docs/developer/streaming-and-healing.md` — the file inventory table loses `video.json` and `segments.json`, gains a pointer to the DB.
 
-## Phase 4 - Styling System
+## Phase 4 - Styling System [DONE]
 
 Set up the templating + CSS foundation that both the viewer page (today) and the admin panel (Phase 6 / task-x5) will sit on top of. Today the only HTML is the inline string in `playback.ts`; we want a proper structure before admin work multiplies the surface area.
 
@@ -186,7 +186,7 @@ Set up the templating + CSS foundation that both the viewer page (today) and the
 - SEO / OG / oEmbed — Phase 7.
 - Vidstack self-hosting / theming overhaul — Phase 7.
 
-## Phase 5 - Auth for menubar app
+## Phase 5 - Auth for menubar app [DONE]
 
 Gate the `/api/videos/*` routes behind API-key auth and make the macOS app send authenticated requests. Single-user tool; the right primitive is a long-lived bearer token, not sessions or JWTs.
 
@@ -262,15 +262,235 @@ Gate the `/api/videos/*` routes behind API-key auth and make the macOS app send 
 - CORS — irrelevant until delivery moves cross-origin (task-x6).
 - Key rotation automation — manual `revoke` + `create` is fine at this scale.
 
-## Phase 6 - Add all expected endpoints
+## Phase 6 - API restructure + route surface
 
-This is the point to map out all of our current API endpoints & routes and also think about the other endpoints we know we are going to need going forward. This should include:
+This phase rationalises the URL surface so it's predictable, future-proof, and easy to extend. Three concrete things happen:
 
-- API endpoints for use by the macOS app (all of which will be authenticated eventually)
-- User-facing "Web" endpoints (see below)
-- A web endpoint for the admin panel (eventually will be authed via web login)
+1. The Hono app is reorganised into four route modules (`api` / `admin` / `site` / `videos`), each with its own auth profile.
+2. Viewer-facing URLs move from `/v/:slug` to `/:slug` with all video resources (HTML page, embed, raw MP4, HLS stream, thumbnail, JSON, Markdown) namespaced under the slug.
+3. The `/api/*` surface for the macOS app is tightened (response envelope, DELETE rules) and rounded out (list/get/patch endpoints).
 
-Where we have the data and information to populate and actually do these endpoints, we can do them now (if they're simple). where we don't, we should just create stub endpoints, which we will then build out later. The admin pages is a good example of this.
+Phase 7 builds on the new viewer routes (real HTML quality, SEO, OG, embed UX, JSON/MD content). Phase 6 is the structural rearrangement that makes Phase 7 cheap.
+
+Admin panel functionality (CRUD UI, session auth, `/admin/api/*` surface) is **out of scope** here — that's task-x5. Phase 6 only establishes the admin module mount so the structure is ready for it.
+
+### Decisions locked in during planning
+
+- **Four route modules**, mounted in `app.ts`:
+  - `api` — bearer auth at the mount, `health` excepted. Public/external contract for the macOS app and any future programmatic clients.
+  - `admin` — web/session auth at the mount, `login` excepted. Wide internal surface (CRUD, bulk, settings). Built out in task-x5.
+  - `site` — root, well-known files (`/robots.txt`, `/favicon.ico`, `/sitemap.xml`). Open.
+  - `videos` — the `/:slug{...}/*` wildcard catch-all. Mounted last as documentation of intent.
+- **Viewer URLs at root.** `/:slug` replaces `/v/:slug`. `/v/:slug` stays mounted as a permanent 301 to the new path forever — never to be removed.
+- **Slug constraints become load-bearing.** Regex `^[a-z0-9](-?[a-z0-9])*$` (no dots, no slashes, no leading/trailing/double dashes). Reserved-word list (`admin`, `api`, `static`, `health`, `login`, `embed`, `raw`, `stream`, `data`, plus root well-known names) checked at create/rename time. Surfaces as **409 Conflict** at the API boundary.
+- **Drop `/data/*`.** All per-video media moves under `/:slug/...` paths. The UUID stops being a public identifier; `recording.json` stops being world-readable.
+- **HLS lives at `/:slug/stream/*`**, not `/data/*`. Per-segment slug→id lookup is cheap (indexed unique slug column); the playlist uses relative segment URLs so no rewriting is needed.
+- **Raw video lives at `/:slug/raw/<filename>`** where `<filename>` mirrors the on-disk derivative name (`source.mp4`, future `720p.mp4`, `1080p.mp4`). Path-based, cacheable, mirrors the eventual R2 object key.
+- **`/:slug.mp4` is a 302 redirect** to whatever the canonical raw is today (currently `source.mp4`). 302 not 301 because the canonical default may change as new derivatives arrive.
+- **API and admin APIs are separated.** `/api/*` is the small, stable, bearer-authed contract for the macOS app and external clients. `/admin/api/*` is the wide, session-authed internal surface for the admin panel. Both sit on top of the same `lib/store.ts`.
+- **Response envelope**: success returns the resource (or `{ ok: true }` for action endpoints with no return value); errors always return `{ error: "<message>", code: "<MACHINE_CODE>" }`. Lock the shape in now; populate codes as endpoints are touched.
+- **`PUBLIC_URL` env var.** Server returns full URLs (clipboard URL, etc.) so the macOS app stops reconstructing them.
+- **Skip URL versioning.** No `/api/v1/*` prefix. Single-controlled-client tool — additive evolution + a documented "we don't break field shapes" rule is enough until proven otherwise.
+
+### Final route map
+
+```
+/                           → small landing or 302 → /admin
+/robots.txt, /favicon.ico   → served at root via `site` module
+/sitemap.xml                → stub (filled in Phase 7)
+/static/*                   → app CSS/JS/fonts (unchanged)
+
+/admin                      → web-authed admin app (stub today; task-x5)
+/admin/login                → exception, unauthed
+/admin/api/*                → internal admin JSON API (task-x5)
+
+/api/health                 → unauthed
+/api/videos                 → GET (list), POST (create)
+/api/videos/:id             → GET, PATCH, DELETE (409 if complete)
+/api/videos/:id/segments/:filename   → PUT (idempotent)
+/api/videos/:id/complete    → POST (idempotent, doubles as heal-sync)
+
+/v/:slug                    → permanent 301 → /:slug
+/:slug                      → HTML video page
+/:slug/embed                → chromeless player
+/:slug/raw/<file>           → MP4 / future variants, with HTTP Range
+/:slug/stream/<file>        → HLS playlist + segments, with HTTP Range
+/:slug/poster.jpg           → thumbnail
+/:slug.mp4                  → 302 → /:slug/raw/source.mp4 (or canonical)
+/:slug.json                 → JSON metadata (stub here, fleshed out in Phase 7)
+/:slug.md                   → Markdown metadata (stub here, fleshed out in Phase 7)
+```
+
+### Current routes
+
+Baseline inventory.
+
+#### macOS app / JSON API
+
+| Verb | Path | Auth | Response type | Status codes |
+|---|---|---|---|---|
+| `POST` | `/api/videos` | Bearer | `application/json` — `{ id, slug }` | 200, 401 |
+| `PUT` | `/api/videos/:id/segments/:filename` | Bearer | `application/json` — `{ ok: true }` | 200, 400 (bad filename), 404 (unknown/trashed video), 401 |
+| `POST` | `/api/videos/:id/complete` | Bearer | `application/json` — `{ url, slug, missing }` | 200, 404 (unknown video), 401 |
+| `DELETE` | `/api/videos/:id` | Bearer | `application/json` — `{ ok: true }` | 200, 404 (unknown video), 401 |
+| `GET` | `/api/health` | — (deliberately open) | `application/json` — `{ ok: true }` | 200 |
+
+- `/api/health` is **deliberately unauthed** — the macOS app pings it before it has a token; 401s here would confuse "server down" with "bad credentials".
+- `PUT .../segments/:filename` enforces a strict allowlist: `init.mp4` or `seg_NNN.m4s`. Anything else → 400. Custom header `x-segment-duration` carries the segment length (NaN-guarded; falls back to the default).
+- `POST .../complete` accepts an `application/json` body with `{ timeline: {...} }` — the server diffs expected vs on-disk to populate `missing`. Idempotent (safe to call repeatedly as heal progresses). The response's `url` is the path only (e.g. `/v/abc123`); the client prepends the base URL.
+- 401 responses always include `WWW-Authenticate: Bearer realm="loom-clone"` and a JSON body `{ error: "<message>" }` with one of: `Missing Authorization header`, `Malformed Authorization header`, `Empty bearer token`, `Invalid or revoked API key`.
+
+#### Viewer-facing (public web)
+
+| Verb | Path | Auth | Response type | Status codes |
+|---|---|---|---|---|
+| `GET` | `/v/:slug` | — | `text/html` | 200, 301 (slug renamed → redirect to canonical), 404 (unknown/trashed) |
+
+- 301 redirect location = `/v/<current-slug>`, sourced from the `slug_redirects` table. Trashed videos return 404 on both their current slug and any old redirect slug.
+
+#### Static asset routes
+
+| Verb | Path | Auth | Response type | Status codes |
+|---|---|---|---|---|
+| `GET` | `/static/*` | — | per-file (`text/css`, etc.) | 200, 404 |
+| `GET` | `/data/*` | — | varies (see below) | 200, 206 (partial), 404, 416 (unsatisfiable range) |
+
+- `/static/*` serves `server/public/` (CSS, future fonts/images) via `serveStatic` from `hono/bun`.
+- `/data/*` serves per-video media with **HTTP Range support** (video seeking). Content-Types: `application/vnd.apple.mpegurl` (`.m3u8`), `video/iso.segment` (`.m4s`), `video/mp4`, `image/jpeg`, `image/png`, `application/json`, `application/octet-stream` fallback. Always emits `Accept-Ranges: bytes`; 206 on Range requests.
+
+#### Admin (stub)
+
+| Verb | Path | Auth | Response type | Status codes |
+|---|---|---|---|---|
+| `GET` | `/admin` | — (will change — Phase 6 / task-x5) | `text/html` | 200 |
+
+- Empty `AdminLayout` placeholder today. Phase 6 (task-x5) fleshes this out and adds session-based auth — deliberately **not** the same mechanism as the API bearer tokens.
+
+### Coverage note
+
+- No route currently returns 409 (Conflict) — the store's `ConflictError` is thrown on slug collisions but none of today's routes expose that path. Phase 6 admin edit routes will be the first to need the mapping.
+- No route currently returns 400 for body validation — the one existing 400 is the segment-filename allowlist in `PUT .../segments/:filename`. If/when `zod` lands (deferred per 3.6), request-body 400s join the inventory.
+- No route emits CORS headers. Irrelevant until delivery goes cross-origin (task-x6).
+- No 5xx is currently intentional — all paths either return a specific 4xx or let Hono's default handler surface a 500. That's probably fine until task-x5/admin needs better error UX.
+
+### Sub-phases
+
+#### 6.1 Slug constraints + reserved words
+
+- Add slug regex (`^[a-z0-9](-?[a-z0-9])*$`) and `RESERVED_SLUGS` const to `src/lib/store.ts`.
+- `createVideo` (slug auto-generation must produce conformant slugs and avoid reserved words) and any future `updateSlug` validate against both. Conflicts surface as **409 Conflict** at the route layer (existing `ConflictError` mapping — first route to expose it lands in 6.13).
+- Tests: regex acceptance/rejection table, reserved-word rejection, conflict on rename.
+
+#### 6.2 Route module reorganisation
+
+- Restructure `src/routes/` into four modules: `api/`, `admin/`, `site/`, `videos/`. Each owns its own sub-router.
+- Auth middleware applied at the mount point in `app.ts` for `api` (bearer, existing `requireApiKey()`) and `admin` (placeholder pass-through until task-x5).
+- Move existing handlers without behaviour change: `videos.ts` → `api/videos.ts`, `playback.tsx` → `videos/page.tsx`, `static.ts` → `site/data.ts` for one phase (drops in 6.5), `admin.tsx` → `admin/index.tsx`.
+- `videos/` module mounted last in `app.ts`.
+- Co-located `__tests__/` move with their handlers.
+
+#### 6.3 Site module — root and well-known files
+
+- `GET /` — minimal landing (one line + link to admin) OR 302 to `/admin`. Pick one in implementation; both are fine.
+- `GET /robots.txt` — `User-agent: *\nDisallow: /admin\n`.
+- `GET /favicon.ico` — placeholder until brand work.
+- `GET /sitemap.xml` — empty stub; populated in Phase 7.
+- All served from `site/` module, no auth.
+
+#### 6.4 Slug-namespaced viewer routes
+
+Additive: existing `/v/:slug` keeps working through 6.6.
+
+- `/:slug` — HTML video page. Port from `playback.tsx`. Goes through `resolveSlug` → 301 if redirect.
+- `/:slug/embed` — chromeless `<media-player>` only (full UX is Phase 7).
+- `/:slug/raw/:file` — serves `derivatives/<file>` from disk with HTTP Range. Filename allowlist (`source.mp4`, future `*.mp4`) prevents traversal and arbitrary derivative reads.
+- `/:slug/stream/:file` — serves `init.mp4`, `seg_NNN.m4s`, `stream.m3u8` from disk with HTTP Range. Same allowlist regex as the segment-upload route, plus `stream.m3u8`.
+- `/:slug/poster.jpg` — serves `derivatives/thumbnail.jpg`. 404 until derivative lands.
+- `/:slug.mp4` — 302 to `/:slug/raw/source.mp4` (or whichever raw is canonical at request time).
+- `/:slug.json` — minimal `{ id, slug, title, description, durationSeconds, urls: { page, raw, hls, poster } }`. Phase 7 expands.
+- `/:slug.md` — minimal Markdown stub: `# <title or slug>\n\n[Watch](url)\n`. Phase 7 expands.
+- All routes go through the slug-with-redirect resolver. Range support reuses `parseRange` from current `static.ts`.
+
+#### 6.5 Update viewer HTML to use slug-namespaced media URLs
+
+- `VideoPage` `src` becomes `/:slug/raw/source.mp4` or `/:slug/stream/stream.m3u8` (same `hasMp4` check as today).
+- `poster` becomes `/:slug/poster.jpg` when present.
+- Drop the `/data/*` handler entirely. No client should reference `/data/` after this.
+
+#### 6.6 Backward-compat redirects
+
+- `/v/:slug` and `/v/:slug/*` → 301 → `/:slug` (and `/:slug/*`). Permanent. Document as "do not remove".
+- macOS app's older `complete` responses and any cached client URLs use `/v/...`; the redirect catches them. The next phases fix the source.
+
+#### 6.7 API: response envelope + error codes
+
+- Success: resource or `{ ok: true }`. No new wrapper.
+- Errors: always `{ error: "<message>", code: "<MACHINE_CODE>" }`. Add codes for current 4xx paths: `VIDEO_NOT_FOUND`, `INVALID_SEGMENT_FILENAME`, `VIDEO_ALREADY_COMPLETE` (new in 6.8), plus the existing 401 codes (`MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOKEN`, `INVALID_API_KEY`).
+- Document the envelope in `server/CLAUDE.md`.
+- Tests for shape on each error path.
+
+#### 6.8 API: tighten DELETE
+
+- `DELETE /api/videos/:id` returns **409 Conflict** with `code: "VIDEO_ALREADY_COMPLETE"` if status is `complete`.
+- Allowed for `recording`, `healing`, `failed`. Hard delete behaviour preserved for those.
+- Tests covering each status.
+
+#### 6.9 API: beef up /api/health
+
+- Return `{ ok: true, version: "<from package.json>", time: "<ISO>" }`.
+- macOS app reachability check unchanged in shape — it already only looks at HTTP 200.
+
+#### 6.10 API: PUBLIC_URL + full URL in complete
+
+- Add `PUBLIC_URL` to `.env.example` (default constructed from `${HOST}:${PORT}` if unset).
+- `POST /api/videos/:id/complete` response becomes `{ path, url, slug, missing }` where `path` is `/:slug` and `url` is the absolute URL.
+- macOS app side: stop reconstructing the URL client-side — use `url` directly.
+
+#### 6.11 API: GET /api/videos (list)
+
+- Cursor-based pagination: `?limit=20&cursor=<id>`. Default limit 20, max 100.
+- Returns `{ items: [...], nextCursor: string | null }`.
+- Default excludes trashed; `?includeTrashed=1` opt-in (admin will use it; macOS app won't).
+- Sort: `createdAt DESC`.
+- Items are the same shape as `GET /api/videos/:id`.
+- Tests: pagination boundaries, trashed exclusion, ordering.
+
+#### 6.12 API: GET /api/videos/:id
+
+- Returns `{ id, slug, status, visibility, title, description, durationSeconds, width, height, source, createdAt, updatedAt, completedAt, url, urls: { page, raw, hls, poster } }`.
+- 404 + `VIDEO_NOT_FOUND` for unknown / trashed (do not leak existence of trashed videos).
+- Tests.
+
+#### 6.13 API: PATCH /api/videos/:id
+
+- Patch type: `{ title?, description?, visibility? }`. No slug change here — that's an admin act (deferred to task-x5).
+- Logs `title_changed` / `description_changed` / `visibility_changed` events as appropriate.
+- Returns the updated resource (same shape as GET).
+- This is the first route worth installing `zod` + `@hono/zod-validator` for (deferred from 3.6). Do it here — narrow patch shape, real user input. Wire the global `ConflictError → 409` mapping at the same time.
+- Tests including validation rejection.
+
+#### 6.14 macOS app: consume new contract
+
+- `APIClient`: stop reconstructing video URLs; use `url` from the complete response.
+- `RecordingCoordinator`: surface 409 (`VIDEO_ALREADY_COMPLETE`) distinctly from 404 if DELETE is ever attempted on a completed video (defensive; UI shouldn't allow it).
+- No new UI features in this phase — just consume the new shape cleanly.
+
+#### 6.15 Docs
+
+- `server/CLAUDE.md`: new sections for module layout, slug constraints, response envelope + error codes, `PUBLIC_URL`, `/api/*` reference table.
+- `docs/developer/streaming-and-healing.md`: `/data/*` references replaced with `/:slug/stream/*` and `/:slug/raw/*`. URL examples updated to the rootless slug.
+- `AGENTS.md`: project-tree update for the new `routes/` layout.
+
+### Out of scope (deliberately)
+
+- **URL versioning** (`/api/v1/*`). Single controlled client; additive evolution suffices until forced otherwise.
+- **`Idempotency-Key` header on `POST /api/videos`.** Add when the bug shows up, not before.
+- **Client metadata at create-time** (`device`, `appVersion`, etc.). Cheap to add later when there's a real use case (debugging, analytics).
+- **Resumable single-file upload** (`PUT /api/videos/:id/source` with `Content-Range`) for the future `source: "uploaded"` flow. Build with the feature, not before.
+- **Tag CRUD, trash/restore, bulk operations** on `/api/*`. These belong on `/admin/api/*` in task-x5. Resist the urge to put them on the public surface.
+- **Admin panel functionality.** Module mount + auth shape only. Real CRUD UI, session auth, `/admin/api/*` endpoints all happen in task-x5.
+- **Real viewer-page quality** (HTML, OG tags, SEO, embed UX, full JSON/MD content). Phase 7. This phase only ensures the routes exist with reasonable stubs.
+
 
 ## Phase 7 - Improve viewer-facing video page
 

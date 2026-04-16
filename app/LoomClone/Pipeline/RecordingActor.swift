@@ -12,8 +12,8 @@ actor RecordingActor {
 
     // MARK: - Pipeline
 
-    private let composition = CompositionActor()
-    private let writer = WriterActor()
+    let composition = CompositionActor()
+    let writer = WriterActor()
     private let upload = UploadActor()
 
     // MARK: - Raw Stream Writers
@@ -24,9 +24,9 @@ actor RecordingActor {
     // has selected. Each writer consumes its source's frames at native rate
     // (not metronome-paced) and writes to its own MP4 / M4A.
 
-    private var screenRawWriter: RawStreamWriter?
-    private var cameraRawWriter: RawStreamWriter?
-    private var audioRawWriter: RawStreamWriter?
+    var screenRawWriter: RawStreamWriter?
+    var cameraRawWriter: RawStreamWriter?
+    var audioRawWriter: RawStreamWriter?
 
     /// Captured at prepare time so we can populate the timeline `rawStreams`
     /// block after `finish()`. Avoids re-resolving devices at stop time.
@@ -40,20 +40,20 @@ actor RecordingActor {
 
     // MARK: - State
 
-    private var mode: RecordingMode = .screenAndCamera
+    var mode: RecordingMode = .screenAndCamera
     private var preset: OutputPreset = .default
-    private var isRecording = false
+    var isRecording = false
     private var localSavePath: URL?
 
     /// Structured account of the recording — metadata + events + segments.
     /// Written to `recording.json` alongside the segments and uploaded to the
     /// server as part of the complete payload.
-    private var timeline = RecordingTimelineBuilder()
+    var timeline = RecordingTimelineBuilder()
 
     /// Set when the first audio sample arrives from the mic.
     /// Used to ensure audio hardware is active before starting the writer,
     /// so the init segment includes both video and audio tracks.
-    private var audioHasArrived = false
+    var audioHasArrived = false
 
     // MARK: - Overlay Frame Callback
 
@@ -62,7 +62,7 @@ actor RecordingActor {
     /// (BEFORE entering this actor) so the overlay isn't blocked by metronome
     /// scheduling. Stored as a nonisolated property so the camera capture
     /// callback can read it without an actor hop.
-    nonisolated(unsafe) private var onCameraSampleForOverlay: (@Sendable (CMSampleBuffer) -> Void)?
+    private nonisolated(unsafe) var onCameraSampleForOverlay: (@Sendable (CMSampleBuffer) -> Void)?
 
     func setOverlayCallback(_ callback: @escaping @Sendable (CMSampleBuffer) -> Void) {
         onCameraSampleForOverlay = callback
@@ -77,7 +77,7 @@ actor RecordingActor {
     // on the recording timeline — we only ever fire this at most once per
     // recording, and only on the unhappy path.
 
-    private var onTerminalError: (@Sendable (String) async -> Void)?
+    var onTerminalError: (@Sendable (String) async -> Void)?
 
     /// Set by the coordinator before `commitRecording`. When invoked the
     /// coordinator should tear down the recording via `stopRecording()` and
@@ -89,7 +89,7 @@ actor RecordingActor {
     /// Guard so we only fire the terminal-error callback once per recording,
     /// even if multiple metronome ticks observe the same failure before the
     /// stop flow lands.
-    private var terminalErrorFired = false
+    var terminalErrorFired = false
 
     /// Forward the shared camera-adjustments box into the compositor so its
     /// camera-frame path picks up slider moves on the next tick. Called once
@@ -116,19 +116,19 @@ actor RecordingActor {
 
     /// Host clock time at which `frameIdx = 0` on the recording timeline.
     /// nil until `commitRecording()` runs.
-    private var recordingStartTime: CMTime?
+    var recordingStartTime: CMTime?
 
     /// Total wall-clock time spent paused. Subtracted from elapsed wall time
     /// for both audio and video, so the recording timeline is continuous
     /// across pauses. Updated by pause/resume.
-    private var pauseAccumulator: CMTime = .zero
+    var pauseAccumulator: CMTime = .zero
 
     /// Host clock time when the current pause started. Used by `resume()`.
-    private var pauseStartHostTime: CMTime?
+    var pauseStartHostTime: CMTime?
 
     /// Strictly-monotonic guard for video PTS. Prevents same-PTS appends
     /// across pause/resume edge cases (which AVAssetWriter rejects).
-    private var lastEmittedVideoPTS: CMTime = .invalid
+    var lastEmittedVideoPTS: CMTime = .invalid
 
     // MARK: - Frame Cache
 
@@ -138,7 +138,7 @@ actor RecordingActor {
     /// content was actually captured — not when the metronome happened to
     /// emit. This keeps video aligned with audio (whose PTS is likewise the
     /// hardware capture time).
-    private struct CachedFrame {
+    struct CachedFrame {
         let pixelBuffer: CVPixelBuffer
         let capturePTS: CMTime
     }
@@ -146,7 +146,7 @@ actor RecordingActor {
     /// Latest valid screen frame received from ScreenCaptureKit.
     /// The metronome reads this on every tick — so an idle screen produces
     /// correctly-encoded static frames at 30fps instead of gaps.
-    private var latestScreenFrame: CachedFrame?
+    var latestScreenFrame: CachedFrame?
 
     /// Bounded FIFO of camera frames. A single-slot cache previously lost
     /// frames whenever the camera delivered faster than the metronome
@@ -160,24 +160,24 @@ actor RecordingActor {
     ///   the PiP backdrop without popping; older entries age out via the
     ///   capacity cap.
     /// - `screenOnly`: queue unused.
-    private var cameraFrameQueue: [CachedFrame] = []
-    private static let cameraFrameQueueCapacity = 4
+    var cameraFrameQueue: [CachedFrame] = []
+    static let cameraFrameQueueCapacity = 4
 
     // MARK: - Metronome
 
     /// Target frame rate for the output video timeline. The encoder's keyframe
     /// interval (2s) and segment interval (4s) are sized to this.
-    private static let targetFrameRate: Int32 = 30
-    private static let frameDuration = CMTime(value: 1, timescale: targetFrameRate)
+    static let targetFrameRate: Int32 = 30
+    static let frameDuration = CMTime(value: 1, timescale: targetFrameRate)
 
     /// Drives the encoding cadence. Emits a composited frame every 1/30s
     /// regardless of how fast the underlying sources are delivering.
-    private var metronomeTask: Task<Void, Never>?
+    var metronomeTask: Task<Void, Never>?
 
     /// Tick counter used only for drift-corrected sleep scheduling. The
     /// encoder PTS comes from wall clock at emit time, not from this counter.
     /// Resets to 0 when the metronome (re)starts after pause.
-    private var metronomeTickIdx: Int64 = 0
+    var metronomeTickIdx: Int64 = 0
 
     // MARK: - Two-Phase Start
 
@@ -813,7 +813,7 @@ actor RecordingActor {
     /// Logical recording time in seconds (wall elapsed minus time spent paused).
     /// Returns 0 before commit. Used for timeline event timestamps so events on
     /// the timeline line up with segment PTS values.
-    private func logicalElapsedSeconds() -> Double {
+    func logicalElapsedSeconds() -> Double {
         guard let start = recordingStartTime else { return 0 }
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         return ((now - start) - pauseAccumulator).seconds
@@ -837,363 +837,6 @@ actor RecordingActor {
         mode = newMode
         timeline.recordModeSwitch(from: previous, to: newMode, t: timeline.now())
         print("[recording] Mode switched to: \(newMode)")
-    }
-
-    // MARK: - Frame Handling
-
-    /// Screen frames are cached for the metronome (composited HLS path)
-    /// AND retimed + appended to the raw screen writer at native cadence.
-    /// Frames may arrive during prepare (before commit) — we still cache
-    /// them so the metronome has fresh content the instant it starts, but
-    /// raw writes are gated on `isRecording` so pre-commit frames don't
-    /// reach the raw file.
-    private func handleScreenFrame(_ sampleBuffer: CMSampleBuffer) async {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        latestScreenFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
-
-        if let screenRawWriter,
-           let retimed = retimedSampleForRawWriter(sampleBuffer)
-        {
-            await screenRawWriter.append(retimed)
-        }
-    }
-
-    /// Camera frames are enqueued for the metronome to consume, AND
-    /// retimed + appended to the raw camera writer. The on-screen overlay
-    /// is fed separately from the capture queue itself (see
-    /// `onCameraSampleForOverlay`).
-    private func handleCameraFrame(_ sampleBuffer: CMSampleBuffer) async {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        cameraFrameQueue.append(CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS))
-        if cameraFrameQueue.count > Self.cameraFrameQueueCapacity {
-            cameraFrameQueue.removeFirst()
-        }
-
-        if let cameraRawWriter,
-           let retimed = retimedSampleForRawWriter(sampleBuffer)
-        {
-            await cameraRawWriter.append(retimed)
-        }
-    }
-
-    /// Retime a sample buffer onto the recording's logical timeline so it
-    /// can be appended to a raw writer. Returns nil if the recording isn't
-    /// committed yet, the recording is paused, or the sample's PTS is
-    /// before the recording start anchor.
-    ///
-    /// Both raw video and raw audio writers use this — same single-anchor
-    /// formula the metronome uses for the composited path.
-    private func retimedSampleForRawWriter(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
-        guard isRecording,
-              pauseStartHostTime == nil,
-              let startTime = recordingStartTime else { return nil }
-
-        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard originalPTS.isValid else { return nil }
-
-        let relPTS = (originalPTS - startTime) - pauseAccumulator
-        guard relPTS >= .zero else { return nil }
-
-        let duration = CMSampleBufferGetDuration(sampleBuffer)
-        var timing = CMSampleTimingInfo(
-            duration: duration,
-            presentationTimeStamp: relPTS,
-            decodeTimeStamp: .invalid
-        )
-        var out: CMSampleBuffer?
-        CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &timing,
-            sampleBufferOut: &out
-        )
-        return out
-    }
-
-    private func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
-        audioHasArrived = true
-        guard isRecording else { return }
-        guard let startTime = recordingStartTime else { return }
-
-        // Audio uses the same single-anchor formula as the metronome:
-        //   PTS = primingOffset + (originalHostPTS - recordingStartTime) - pauseAccumulator
-        // Both audio and video derive their PTS from this formula, so they
-        // are anchored to exactly the same point on the host clock.
-        // The TimestampAdjuster in WriterActor adds the priming offset and
-        // applies its parallel pause accumulator — both accumulators advance
-        // together via pause/resume so they stay in lockstep.
-        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard originalPTS.isValid else { return }
-        let relativePTS = originalPTS - startTime
-
-        // Drop samples captured before the recording was committed.
-        // These can occur briefly during the prepare→commit transition.
-        guard relativePTS >= .zero else { return }
-
-        let duration = CMSampleBufferGetDuration(sampleBuffer)
-
-        var timing = CMSampleTimingInfo(
-            duration: duration,
-            presentationTimeStamp: relativePTS,
-            decodeTimeStamp: .invalid
-        )
-
-        var retimed: CMSampleBuffer?
-        CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &timing,
-            sampleBufferOut: &retimed
-        )
-
-        guard let retimed else { return }
-        await writer.appendAudio(retimed)
-
-        // Raw audio path: independent retiming using RecordingActor's
-        // pauseAccumulator (no priming offset — that's an HLS-only concern).
-        // The pause check is the same gate the composited path uses inside
-        // WriterActor.appendAudio.
-        if let audioRawWriter, pauseStartHostTime == nil {
-            let rawAudioPTS = relativePTS - pauseAccumulator
-            if rawAudioPTS >= .zero {
-                var rawTiming = CMSampleTimingInfo(
-                    duration: duration,
-                    presentationTimeStamp: rawAudioPTS,
-                    decodeTimeStamp: .invalid
-                )
-                var rawOut: CMSampleBuffer?
-                CMSampleBufferCreateCopyWithNewTiming(
-                    allocator: kCFAllocatorDefault,
-                    sampleBuffer: sampleBuffer,
-                    sampleTimingEntryCount: 1,
-                    sampleTimingArray: &rawTiming,
-                    sampleBufferOut: &rawOut
-                )
-                if let rawOut {
-                    await audioRawWriter.append(rawOut)
-                }
-            }
-        }
-    }
-
-    // MARK: - Metronome
-
-    /// Starts the metronome loop. Safe to call only when `metronomeTask` is nil.
-    private func startMetronome() {
-        metronomeTickIdx = 0
-        metronomeTask = Task { [weak self] in
-            await self?.metronomeLoop()
-        }
-    }
-
-    /// Cancels the metronome task and awaits its completion so the caller can
-    /// be sure no more frames will be appended before it proceeds.
-    private func cancelMetronome() async {
-        guard let task = metronomeTask else { return }
-        task.cancel()
-        _ = await task.value
-        metronomeTask = nil
-    }
-
-    /// The 30fps encoding loop. Each tick composes one output frame using
-    /// the cached source buffer(s) and stamps it with the source's own
-    /// capture PTS (see `emitMetronomeFrame`), which is the same clock
-    /// audio samples are stamped with — so A/V stay aligned regardless
-    /// of capture pipeline latency.
-    ///
-    /// The sleep schedule is drift-corrected against `recordingStartTime`
-    /// so ticks fire at steady 1/30s intervals.
-    private func metronomeLoop() async {
-        while !Task.isCancelled, isRecording {
-            let emitted = await emitMetronomeFrame()
-
-            if !emitted {
-                // Source for the current mode hasn't delivered its first frame
-                // yet. Poll briefly and retry.
-                try? await Task.sleep(for: .nanoseconds(33_333_333))
-                continue
-            }
-
-            metronomeTickIdx += 1
-
-            // Drift-corrected sleep: tick N fires at
-            //   recordingStartTime + pauseAccumulator + N × (1/30)
-            // (`pauseAccumulator` is read for the current iteration only —
-            // pause/resume cancels and restarts the loop with tickIdx=0.)
-            guard let start = recordingStartTime else { continue }
-            let nextTarget = start
-                + pauseAccumulator
-                + CMTime(value: metronomeTickIdx, timescale: Self.targetFrameRate)
-            let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let sleepSeconds = (nextTarget - now).seconds
-            if sleepSeconds > 0 {
-                try? await Task.sleep(for: .seconds(sleepSeconds))
-            }
-            // If sleepSeconds <= 0 we're behind schedule — burst-emit until
-            // we catch up. Each catch-up frame uses the same cached content;
-            // since wall-clock advances each iteration, PTS still advances.
-        }
-    }
-
-    /// Compose and append a single metronome frame. Returns true if a frame
-    /// was actually appended (source available, composition succeeded, PTS
-    /// strictly monotonic).
-    private func emitMetronomeFrame() async -> Bool {
-        guard let start = recordingStartTime else { return false }
-
-        let result: Result<CVPixelBuffer, CompositionError>?
-        // `sourcePTS` is the capture time of the visible content. We stamp
-        // the emitted video frame with this (not wall-clock-now) so audio
-        // and video share the same notion of "when the content was at the
-        // hardware" — otherwise camera/screen capture latency shows up as
-        // audio-leads-video in the output.
-        let sourcePTS: CMTime
-        switch mode {
-        case .screenOnly:
-            guard let screen = latestScreenFrame else { return false }
-            sourcePTS = screen.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: nil,
-                mode: .screenOnly
-            )
-        case .screenAndCamera:
-            guard let screen = latestScreenFrame else { return false }
-            // Peek the most recent camera frame as the PiP backdrop.
-            // Don't pop — the metronome ticks at its own cadence; older
-            // camera frames age out via the queue's capacity cap.
-            guard let camera = cameraFrameQueue.last else { return false }
-            // Camera latency dominates sync perception (lip-sync), so we
-            // align to the camera's capture time in composite mode.
-            sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .screenAndCamera
-            )
-        case .cameraOnly:
-            // Pop one frame per emit so every captured frame reaches the
-            // output in order. If the queue is empty (metronome ran
-            // before the camera delivered), skip this tick.
-            guard !cameraFrameQueue.isEmpty else { return false }
-            let camera = cameraFrameQueue.removeFirst()
-            sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: nil,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .cameraOnly
-            )
-        }
-
-        // nil = transient (source raced, output pool miss). Skip, retry next tick.
-        guard let result else { return false }
-
-        let output: CVPixelBuffer
-        switch result {
-        case let .success(buffer):
-            output = buffer
-        case let .failure(compositionError):
-            await handleCompositionFailure(compositionError)
-            return false
-        }
-
-        // Source-capture-derived PTS using the single recording clock.
-        // Same shape as audio: primingOffset + (captureTime - start) - pauseAcc.
-        // Using the source's capture PTS (rather than wall-clock-now) aligns
-        // the video timeline with the audio timeline: both stamp content at
-        // the moment it hit the hardware.
-        guard sourcePTS.isValid else { return false }
-        let elapsedLogical = (sourcePTS - start) - pauseAccumulator
-        // Source frames captured before the recording anchor can briefly
-        // exist in the cache during the prepare→commit transition — skip.
-        guard elapsedLogical >= .zero else { return false }
-        let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
-
-        // Strict monotonicity guard. If the same cached source frame is
-        // re-read by the next metronome tick (capture rate < metronome
-        // rate), the PTS won't have advanced — drop the duplicate rather
-        // than emitting with a synthesized PTS.
-        if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS { return false }
-        lastEmittedVideoPTS = pts
-
-        guard let outputSample = createSampleBuffer(
-            from: output,
-            pts: pts,
-            duration: Self.frameDuration
-        ) else { return false }
-
-        await writer.appendVideo(outputSample)
-        return true
-    }
-
-    // MARK: - Composition Failure Recovery
-
-    //
-    // When `CompositionActor.compositeFrame` surfaces a render error or a
-    // stall, we:
-    //   1. Record the failure + counter in the timeline.
-    //   2. Ask the compositor to rebuild its CIContext + MTLCommandQueue so
-    //      the next tick renders against a fresh command queue (the old one is
-    //      assumed poisoned after the first GPU-timeout cascade).
-    //   3. If rebuild itself fails, fire the terminal-error callback so the
-    //      coordinator can stop the recording cleanly and alert the user.
-    //
-    // The metronome returns false on any failure so this tick is skipped. The
-    // next tick runs with a fresh context (on success) or finds `isRecording`
-    // flipped false (on terminal failure, once the coordinator's stopRecording
-    // lands).
-
-    private func handleCompositionFailure(_ error: CompositionError) async {
-        let t = logicalElapsedSeconds()
-        let kind: String
-        let detail: String
-        switch error {
-        case let .renderFailed(underlying):
-            kind = "renderError"
-            detail = (underlying as NSError).localizedDescription
-        case .stallTimeout:
-            kind = "stallTimeout"
-            detail = "waitUntilCompleted exceeded 2s"
-        }
-        timeline.recordCompositionFailure(kind: kind, t: t, detail: detail)
-        print("[recording] Composition failure: \(kind) — \(detail). Attempting rebuild.")
-
-        let rebuilt = await composition.rebuildContext()
-        if rebuilt {
-            timeline.recordCompositionRebuilt(t: logicalElapsedSeconds())
-            print("[recording] Rebuild succeeded, recording continues")
-            return
-        }
-
-        // Rebuild failed — escalate.
-        print("[recording] Rebuild failed; escalating to terminal stop")
-        await escalateCompositionTerminalFailure(detail: "Rebuild failed after \(kind)")
-    }
-
-    private func escalateCompositionTerminalFailure(detail: String) async {
-        guard !terminalErrorFired else { return }
-        terminalErrorFired = true
-
-        timeline.recordCompositionTerminalFailure(
-            t: logicalElapsedSeconds(),
-            detail: detail
-        )
-
-        let message = "Recording stopped: the GPU became unresponsive. Your recording has been saved up to this point."
-
-        // Fire the callback on a detached task so we don't deadlock — the
-        // coordinator's response will call back into stopRecording(), which
-        // awaits cancelMetronome(), which awaits the metronome task we're
-        // currently running inside.
-        if let callback = onTerminalError {
-            Task { await callback(message) }
-        } else {
-            print("[recording] WARN: terminal composition failure but no onTerminalError callback wired")
-        }
     }
 
     // MARK: - Segment Handling
@@ -1238,7 +881,7 @@ actor RecordingActor {
 
     // MARK: - Helpers
 
-    private func createSampleBuffer(
+    func createSampleBuffer(
         from pixelBuffer: CVPixelBuffer,
         pts: CMTime,
         duration: CMTime

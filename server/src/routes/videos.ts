@@ -63,7 +63,7 @@ videos.post("/", async (c) => {
 // playlist is rebuilt from the on-disk directory listing.
 videos.put("/:id/segments/:filename", async (c) => {
   const { id, filename } = c.req.param();
-  const video = getVideo(id);
+  const video = await getVideo(id);
   if (!video) return c.json({ error: "Video not found" }, 404);
 
   if (!SEGMENT_FILENAME.test(filename)) {
@@ -102,7 +102,7 @@ videos.put("/:id/segments/:filename", async (c) => {
 // back empty (best-effort complete).
 videos.post("/:id/complete", async (c) => {
   const { id } = c.req.param();
-  const existing = getVideo(id);
+  const existing = await getVideo(id);
   if (!existing) return c.json({ error: "Video not found" }, 404);
 
   let timeline: TimelineLike | null = null;

@@ -17,7 +17,7 @@ export async function buildPlaylist(video: VideoRecord): Promise<string> {
 
   const mediaSegments = files.filter((f) => f.endsWith(".m4s")).sort();
 
-  const durations = getSegmentDurations(video.id);
+  const durations = await getSegmentDurations(video.id);
 
   const maxDuration = mediaSegments.reduce(
     (max, f) => Math.max(max, durations.get(f) ?? DEFAULT_SEGMENT_DURATION),

@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { loadAllVideos } from "./lib/store";
+import { initDb } from "./db/client";
 import playback from "./routes/playback";
 import staticRoutes from "./routes/static";
 import videos from "./routes/videos";
 
 // Factory — kept side-effect-free so tests can construct a fresh app
-// without hitting the real filesystem during `loadAllVideos()`.
+// without touching the on-disk database.
 export function createApp(): Hono {
   const app = new Hono();
 
@@ -20,8 +20,8 @@ export function createApp(): Hono {
   return app;
 }
 
-const restored = await loadAllVideos();
-console.log(`[store] rehydrated ${restored} video record(s) from data/`);
+await initDb();
+console.log("[db] ready at data/app.db");
 
 const app = createApp();
 

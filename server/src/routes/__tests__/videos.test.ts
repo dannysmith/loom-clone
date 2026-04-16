@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
-import { DATA_DIR, getVideo } from "../../lib/store";
+import { DATA_DIR, getSegmentDurations, getVideo } from "../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
 
@@ -97,9 +97,8 @@ describe("PUT /:id/segments/:filename", () => {
       body: new Uint8Array([1]),
     });
     expect(res.status).toBe(400);
-    // Ensure video.json wasn't overwritten.
-    const onDisk = await Bun.file(join(DATA_DIR, id, "video.json")).json();
-    expect(onDisk.id).toBe(id);
+    // Ensure no file was written to the video directory under that name.
+    expect(await Bun.file(join(DATA_DIR, id, "video.json")).exists()).toBe(false);
   });
 
   test("init.mp4 upload does not add a segment or rebuild playlist", async () => {
@@ -109,20 +108,21 @@ describe("PUT /:id/segments/:filename", () => {
       body: new Uint8Array([0]),
     });
     expect(res.status).toBe(200);
-    // No segments.json or stream.m3u8 should exist yet.
-    expect(await Bun.file(join(DATA_DIR, id, "segments.json")).exists()).toBe(false);
+    // No segment row created, no playlist built yet.
+    const durations = await getSegmentDurations(id);
+    expect(durations.size).toBe(0);
     expect(await Bun.file(join(DATA_DIR, id, "stream.m3u8")).exists()).toBe(false);
   });
 
-  test("media segment upload writes sidecar and playlist", async () => {
+  test("media segment upload records duration and writes playlist", async () => {
     const { id } = await createVideoViaApi();
     await videos.request(`/${id}/segments/seg_000.m4s`, {
       method: "PUT",
       headers: { "x-segment-duration": "3.5" },
       body: new Uint8Array([0]),
     });
-    const sidecar = await Bun.file(join(DATA_DIR, id, "segments.json")).json();
-    expect(sidecar["seg_000.m4s"]).toBe(3.5);
+    const durations = await getSegmentDurations(id);
+    expect(durations.get("seg_000.m4s")).toBe(3.5);
 
     const playlist = await Bun.file(join(DATA_DIR, id, "stream.m3u8")).text();
     expect(playlist).toContain("seg_000.m4s");
@@ -135,8 +135,8 @@ describe("PUT /:id/segments/:filename", () => {
       method: "PUT",
       body: new Uint8Array([0]),
     });
-    const sidecar = await Bun.file(join(DATA_DIR, id, "segments.json")).json();
-    expect(sidecar["seg_000.m4s"]).toBe(4);
+    const durations = await getSegmentDurations(id);
+    expect(durations.get("seg_000.m4s")).toBe(4);
   });
 });
 
@@ -153,7 +153,7 @@ describe("POST /:id/complete", () => {
     expect(body.slug).toBe(slug);
     expect(body.url).toBe(`/v/${slug}`);
     expect(body.missing).toEqual([]);
-    expect(getVideo(id)?.status).toBe("complete");
+    expect((await getVideo(id))?.status).toBe("complete");
   });
 
   test("with timeline body and all segments present: status complete", async () => {
@@ -169,7 +169,7 @@ describe("POST /:id/complete", () => {
     });
     const body = await res.json();
     expect(body.missing).toEqual([]);
-    expect(getVideo(id)?.status).toBe("complete");
+    expect((await getVideo(id))?.status).toBe("complete");
     // recording.json is persisted
     expect(await Bun.file(join(DATA_DIR, id, "recording.json")).exists()).toBe(true);
   });
@@ -190,18 +190,18 @@ describe("POST /:id/complete", () => {
     });
     const body = await res.json();
     expect(body.missing.sort()).toEqual(["seg_000.m4s", "seg_001.m4s"]);
-    expect(getVideo(id)?.status).toBe("healing");
+    expect((await getVideo(id))?.status).toBe("healing");
   });
 });
 
 describe("DELETE /:id", () => {
   test("removes video record and data directory", async () => {
     const { id } = await createVideoViaApi();
-    expect(getVideo(id)).toBeTruthy();
+    expect(await getVideo(id)).toBeTruthy();
 
     const res = await videos.request(`/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
-    expect(getVideo(id)).toBeUndefined();
+    expect(await getVideo(id)).toBeUndefined();
     // Directory is gone too.
     expect(await Bun.file(join(DATA_DIR, id, "video.json")).exists()).toBe(false);
   });

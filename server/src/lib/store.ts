@@ -1,154 +1,124 @@
-import { mkdir, readdir } from "fs/promises";
+import { eq, sql } from "drizzle-orm";
+import { mkdir } from "fs/promises";
 import { join } from "path";
+import { getDb } from "../db/client";
+import { type Video, videoSegments, videos } from "../db/schema";
+import { logEvent } from "./events";
 
 export const DATA_DIR = "data";
 
-export interface VideoRecord {
-  id: string;
-  slug: string;
-  // "healing" means complete() was called but the server was still missing
-  // some segments. Viewers can play the partial playlist; a background client
-  // task is uploading the gap and will re-call complete() to transition.
-  status: "recording" | "healing" | "complete";
-  createdAt: string;
+// Back-compat alias — routes and tests that imported VideoRecord continue to
+// work. The new shape has extra fields (visibility, source, timestamps,
+// nullable metadata) but that's additive and non-breaking.
+export type VideoRecord = Video;
+
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
-const videos = new Map<string, VideoRecord>();
-const slugIndex = new Map<string, string>();
-// id -> (filename -> duration seconds). Mirrors data/<id>/segments.json.
-const durations = new Map<string, Map<string, number>>();
-
-function videoJsonPath(id: string): string {
-  return join(DATA_DIR, id, "video.json");
-}
-
-function segmentsJsonPath(id: string): string {
-  return join(DATA_DIR, id, "segments.json");
-}
-
-async function persistVideo(record: VideoRecord): Promise<void> {
-  await mkdir(join(DATA_DIR, record.id), { recursive: true });
-  await Bun.write(videoJsonPath(record.id), JSON.stringify(record, null, 2));
-}
-
-async function persistDurations(id: string): Promise<void> {
-  const map = durations.get(id);
-  if (!map) return;
-  const obj: Record<string, number> = {};
-  for (const [k, v] of map) obj[k] = v;
-  await Bun.write(segmentsJsonPath(id), JSON.stringify(obj, null, 2));
-}
-
-export async function createVideo(): Promise<VideoRecord> {
-  const id = crypto.randomUUID();
-  const slug = crypto
+function generateSlug(): string {
+  return crypto
     .getRandomValues(new Uint8Array(4))
     .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+}
 
-  const video: VideoRecord = {
-    id,
-    slug,
-    status: "recording",
-    createdAt: new Date().toISOString(),
-  };
+export async function createVideo(): Promise<Video> {
+  const db = getDb();
+  const id = crypto.randomUUID();
+  const slug = generateSlug();
+  const now = nowIso();
 
-  videos.set(id, video);
-  slugIndex.set(slug, id);
-  durations.set(id, new Map());
-  await persistVideo(video);
+  const [video] = await db
+    .insert(videos)
+    .values({ id, slug, createdAt: now, updatedAt: now })
+    .returning();
+  if (!video) throw new Error("failed to create video");
+
+  await mkdir(join(DATA_DIR, id), { recursive: true });
+  await logEvent(id, "created");
   return video;
 }
 
-export function getVideo(id: string): VideoRecord | undefined {
-  return videos.get(id);
+export async function getVideo(id: string): Promise<Video | undefined> {
+  return getDb().select().from(videos).where(eq(videos.id, id)).get();
 }
 
-export function getVideoBySlug(slug: string): VideoRecord | undefined {
-  const id = slugIndex.get(slug);
-  return id ? videos.get(id) : undefined;
+export async function getVideoBySlug(slug: string): Promise<Video | undefined> {
+  return getDb().select().from(videos).where(eq(videos.slug, slug)).get();
 }
 
-// Idempotent: same filename overwrites its duration, sidecar rewritten atomically.
+// Idempotent: same filename overwrites its duration. Upsert on the composite
+// primary key handles duplicates cleanly.
 export async function addSegment(id: string, filename: string, duration: number): Promise<void> {
-  if (!videos.has(id)) throw new Error(`Video ${id} not found`);
-  let map = durations.get(id);
-  if (!map) {
-    map = new Map();
-    durations.set(id, map);
+  const db = getDb();
+  const exists = await getVideo(id);
+  if (!exists) throw new Error(`Video ${id} not found`);
+  await db
+    .insert(videoSegments)
+    .values({ videoId: id, filename, durationSeconds: duration, uploadedAt: nowIso() })
+    .onConflictDoUpdate({
+      target: [videoSegments.videoId, videoSegments.filename],
+      set: { durationSeconds: duration, uploadedAt: nowIso() },
+    });
+}
+
+export async function getSegmentDurations(id: string): Promise<Map<string, number>> {
+  const rows = await getDb()
+    .select({ filename: videoSegments.filename, duration: videoSegments.durationSeconds })
+    .from(videoSegments)
+    .where(eq(videoSegments.videoId, id));
+  const map = new Map<string, number>();
+  for (const row of rows) map.set(row.filename, row.duration);
+  return map;
+}
+
+async function sumSegmentDuration(id: string): Promise<number> {
+  const [row] = await getDb()
+    .select({ total: sql<number>`COALESCE(SUM(${videoSegments.durationSeconds}), 0)` })
+    .from(videoSegments)
+    .where(eq(videoSegments.videoId, id));
+  return row?.total ?? 0;
+}
+
+export async function setVideoStatus(id: string, status: Video["status"]): Promise<Video> {
+  const db = getDb();
+  const existing = await getVideo(id);
+  if (!existing) throw new Error(`Video ${id} not found`);
+  if (existing.status === status) return existing;
+
+  const now = nowIso();
+  const updates: Partial<Video> = { status, updatedAt: now };
+
+  // Cache duration and set completedAt on transition TO complete. completedAt
+  // is set-once so a healing→complete→(something weird)→complete chain keeps
+  // the original timestamp. Duration is always recomputed so segments added
+  // during healing get reflected.
+  if (status === "complete") {
+    updates.durationSeconds = await sumSegmentDuration(id);
+    if (!existing.completedAt) updates.completedAt = now;
   }
-  map.set(filename, duration);
-  await persistDurations(id);
-}
 
-export function getSegmentDurations(id: string): Map<string, number> {
-  return durations.get(id) ?? new Map();
-}
-
-export async function setVideoStatus(
-  id: string,
-  status: VideoRecord["status"],
-): Promise<VideoRecord> {
-  const video = videos.get(id);
+  const [video] = await db.update(videos).set(updates).where(eq(videos.id, id)).returning();
   if (!video) throw new Error(`Video ${id} not found`);
-  video.status = status;
-  await persistVideo(video);
+
+  if (status === "complete") {
+    const eventType = existing.status === "healing" ? "healed" : "completed";
+    await logEvent(id, eventType);
+  }
+
   return video;
 }
 
-// Back-compat shim — most callers just want "this is done".
-export async function completeVideo(id: string): Promise<VideoRecord> {
+// Thin shim retained so routes and tests don't all need updating.
+export async function completeVideo(id: string): Promise<Video> {
   return setVideoStatus(id, "complete");
 }
 
-export async function deleteVideo(id: string): Promise<VideoRecord | undefined> {
-  const video = videos.get(id);
+export async function deleteVideo(id: string): Promise<Video | undefined> {
+  const db = getDb();
+  const video = await getVideo(id);
   if (!video) return undefined;
-  videos.delete(id);
-  slugIndex.delete(video.slug);
-  durations.delete(id);
+  // FK cascades handle video_segments, slug_redirects, video_tags, video_events.
+  await db.delete(videos).where(eq(videos.id, id));
   return video;
-}
-
-// Test-only: clear in-memory state between test cases. Not called in
-// production code. Named with a leading underscore to discourage accidental
-// use outside tests.
-export function _resetForTests(): void {
-  videos.clear();
-  slugIndex.clear();
-  durations.clear();
-}
-
-// Scan data/*/video.json at startup and rehydrate in-memory state.
-// Missing or malformed records are logged and skipped.
-export async function loadAllVideos(): Promise<number> {
-  let entries: string[];
-  try {
-    entries = await readdir(DATA_DIR);
-  } catch {
-    return 0;
-  }
-
-  let count = 0;
-  for (const entry of entries) {
-    const recordFile = Bun.file(videoJsonPath(entry));
-    if (!(await recordFile.exists())) continue;
-
-    try {
-      const record = (await recordFile.json()) as VideoRecord;
-      videos.set(record.id, record);
-      slugIndex.set(record.slug, record.id);
-
-      const sidecar = Bun.file(segmentsJsonPath(record.id));
-      const map = new Map<string, number>();
-      if (await sidecar.exists()) {
-        const obj = (await sidecar.json()) as Record<string, number>;
-        for (const [k, v] of Object.entries(obj)) map.set(k, v);
-      }
-      durations.set(record.id, map);
-      count++;
-    } catch (err) {
-      console.error(`[store] failed to load ${entry}/video.json:`, err);
-    }
-  }
-  return count;
 }

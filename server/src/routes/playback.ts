@@ -6,7 +6,7 @@ const playback = new Hono();
 
 playback.get("/v/:slug", async (c) => {
   const { slug } = c.req.param();
-  const video = getVideoBySlug(slug);
+  const video = await getVideoBySlug(slug);
   if (!video) return c.text("Not found", 404);
 
   // Prefer the single-file MP4 when the derivative exists; otherwise fall

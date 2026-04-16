@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { mkdir } from "fs/promises";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 import * as schema from "./schema";
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -10,7 +10,9 @@ export type Db = ReturnType<typeof drizzle<typeof schema>>;
 // Default path (relative so tests that chdir into a temp dir get their own
 // copy automatically). `:memory:` is a sentinel that bun:sqlite honours.
 const DEFAULT_DB_PATH = "data/app.db";
-const MIGRATIONS_FOLDER = "./drizzle";
+// Migrations folder resolved absolutely so it stays valid even when callers
+// chdir (e.g. tests sandboxing into a tmpdir).
+const MIGRATIONS_FOLDER = resolve(import.meta.dir, "../../drizzle");
 
 // Opens a SQLite database at `path` (or in-memory for `:memory:`), enables
 // foreign-key enforcement, wraps it in a Drizzle instance, and applies any

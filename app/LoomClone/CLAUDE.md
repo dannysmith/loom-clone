@@ -6,6 +6,7 @@
 - **SwiftFormat** config is at `app/.swiftformat`. Run with `cd app && swiftformat .` to format all files. Run before committing Swift changes.
 - **Strict concurrency** is set to `complete` and **warnings are treated as errors** (`SWIFT_TREAT_WARNINGS_AS_ERRORS`). New code must be concurrency-safe — no `@unchecked Sendable` without justification.
 - Both tools are installed via Homebrew (`brew install swiftlint swiftformat`).
+- **xcode-build-server** bridges SourceKit-LSP with the Xcode project so cross-file type resolution works. Config is at `app/buildServer.json` (gitignored, machine-specific). Regenerate with `cd app && xcode-build-server config -project LoomClone.xcodeproj -scheme LoomClone`. The LSP index updates on build, so rebuild after significant changes.
 
 ## Recording pipeline
 

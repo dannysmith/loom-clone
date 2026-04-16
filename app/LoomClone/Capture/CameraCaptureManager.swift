@@ -9,16 +9,22 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     private var session: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "com.loomclone.camera-capture", qos: .userInteractive)
 
+    /// Minimum acceptable max frame rate when selecting a format. 29.0 fps
+    /// with the tolerance lets NTSC cameras through (they advertise 29.97 =
+    /// 1001/30000, which a strict 30.0 check rejected) while still excluding
+    /// PAL-locked cameras that only offer 25fps.
+    private static let minAcceptableFrameRate: Double = 29.0
+
     /// Pick the "best" format for a device subject to a max height cap.
-    /// Highest resolution that still fits under the cap and supports ≥30fps.
-    /// Returns nil if no format matches — caller should fall back.
+    /// Highest resolution that still fits under the cap and supports
+    /// ≈30fps (see `minAcceptableFrameRate`). Returns nil if no format
+    /// matches — caller should fall back.
     static func bestFormat(for device: AVCaptureDevice, maxHeight: Int) -> AVCaptureDevice.Format? {
-        let targetDur = CMTime(value: 1, timescale: 30)
         let candidates = device.formats.filter { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             guard Int(dims.height) <= maxHeight else { return false }
             return format.videoSupportedFrameRateRanges.contains {
-                $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
+                $0.maxFrameRate >= minAcceptableFrameRate
             }
         }
         return candidates.max { a, b in
@@ -28,14 +34,13 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Maximum height a device can deliver at ≥30fps. Used by the coordinator
+    /// Maximum height a device can deliver at ≈30fps. Used by the coordinator
     /// to gate the 4K preset in cameraOnly mode.
     static func maxNativeHeight(for device: AVCaptureDevice) -> Int {
-        let targetDur = CMTime(value: 1, timescale: 30)
         var maxH = 0
         for format in device.formats {
             let supports30 = format.videoSupportedFrameRateRanges.contains {
-                $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
+                $0.maxFrameRate >= minAcceptableFrameRate
             }
             guard supports30 else { continue }
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
@@ -100,16 +105,23 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = best
-                let targetDur = CMTime(value: 1, timescale: 30)
-                if best.videoSupportedFrameRateRanges.contains(where: {
-                    $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
-                }) {
-                    device.activeVideoMinFrameDuration = targetDur
-                    device.activeVideoMaxFrameDuration = targetDur
+                // Lock to the fastest rate the format supports, but cap at
+                // 30fps. NTSC cameras: range.minFrameDuration is 1001/30000
+                // (29.97fps) — we use that. True 30fps cameras: 1/30. 60fps
+                // formats: clamped to 1/30 so we don't emit faster than the
+                // encoder targets. `max` on durations picks the larger
+                // (slower) of the two.
+                let thirtyDur = CMTime(value: 1, timescale: 30)
+                if let fastest = best.videoSupportedFrameRateRanges.map(\.minFrameDuration).min() {
+                    let chosenDur = max(fastest, thirtyDur)
+                    device.activeVideoMinFrameDuration = chosenDur
+                    device.activeVideoMaxFrameDuration = chosenDur
                 }
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
-                print("[camera] Selected format: \(dims.width)x\(dims.height) @ 30fps (cap: \(maxHeight))")
+                let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                print(String(format: "[camera] Selected format: %dx%d @ %.2ffps (cap: %d)",
+                             dims.width, dims.height, min(rate, 30.0), maxHeight))
             } catch {
                 print("[camera] Could not set activeFormat: \(error) — falling back to .high")
                 session.sessionPreset = .high

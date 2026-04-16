@@ -97,34 +97,42 @@ traversal.
 ### Phase 3 — Identify why camera delivered 25fps (resolved 2026-04-16)
 
 Diagnostic logging added to `CameraCaptureManager.swift` enumerated
-every format + supported fps range. Two controlled recordings:
+every format + supported fps range. Three controlled recordings:
 
-**ZV-1 test (recording `1282a58e`):**
-```
-[camera-diag] ZV-1 advertises 1 formats:
-[camera-diag]   [0] 1280x720 420v fps=[25-25]
-```
-One format, locked to 25fps. Our `bestFormat()` correctly returned
-`nil` (no format satisfies `≥30fps`) and fell through to `.high`
-preset. **Code is correct; camera is the bottleneck.** Most likely
-cause: ZV-1 NTSC/PAL region switch set to PAL (locks USB streaming
-to 25fps across all Sony bodies). User will investigate the camera
-menu settings separately.
+**ZV-1 in PAL mode (recording `1282a58e`):** advertised exactly
+one format `1280x720 420v fps=[25-25]`. `bestFormat()` returned
+`nil`. Camera delivered 25fps. **Hardware setting**, not code.
 
-**FaceTime HD Camera test (recording `a8b87415`):**
-```
-[camera-diag] FaceTime HD Camera advertises 7 formats:
-[camera-diag]   [0] 1920x1080 420v fps=[15-30]
-... (all 7 formats offer 15-30)
-[camera] Selected format: 1920x1080 @ 30fps (cap: 1080)
-```
-All formats advertise up to 30fps. `bestFormat()` picked
-1920x1080 @ 30fps correctly. Raw `camera.mp4` confirmed:
-`r_frame_rate=30000/1001`, 367 frames in 12.24s ≈ 30fps delivery.
-Perceptual result: "MUCH better, definitely good enough."
+**FaceTime HD Camera (recording `a8b87415`):** all 7 formats
+advertised `fps=[15-30]`. `bestFormat()` picked 1920x1080 @ 30fps
+correctly. Raw `camera.mp4`: `r_frame_rate=30000/1001` — 29.97fps
+delivery. Perceptual result: "MUCH better, definitely good enough."
 
-**Unexpected new finding:** even with a 30fps camera, the composited
-output landed at ~22.6fps (277 frames from 367 source frames). Gap
+**ZV-1 in NTSC mode (recording `3e2c654a`, after user switched the
+camera's region setting):** advertised `1280x720 420v fps=[30-30]`.
+Camera now delivers 29.97fps (NTSC). Perceptually on par with
+FaceTime. Note `bestFormat()` still returned `nil` here — see the
+filter-bug fix below.
+
+**Bonus finding and fix — strict-30 filter bug.** Our
+`bestFormat()` filter compared `minFrameDuration <= 1/30 AND
+targetDur <= maxFrameDuration`. NTSC cameras have
+`minFrameDuration = 1001/30000 ≈ 33.367ms`, which is slightly
+*larger* than `1/30 = 33.333ms`, so the check failed and the
+filter silently rejected any camera that only advertises NTSC
+rates. The `.high` preset fallback happened to pick the same
+format, so output was fine — but the filter was defeated. Fixed
+in this task by swapping the duration-based comparison for a
+rate-based one with a small tolerance
+(`maxFrameRate >= 29.0`), which lets NTSC 29.97 through and still
+rejects PAL 25. The matching `activeVideoMinFrameDuration` code
+now picks the fastest duration the format advertises, capped at
+1/30, instead of hardcoding `1/30` (which would silently no-op on
+NTSC devices).
+
+**Unexpected new finding — single-slot cache drops source frames.**
+Even with a 30fps camera, the composited output landed at ~22.6fps
+(277 frames from 367 source frames in the FaceTime test). Gap
 histogram: 186 at 33.3ms, 90 at 66.7ms, zero in between. **90
 camera frames were lost by being overwritten in the
 `latestCameraFrame` cache before the metronome could read them.**

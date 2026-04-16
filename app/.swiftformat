@@ -1,0 +1,7 @@
+--swiftversion 5.10
+--indent 4
+--wraparguments before-first
+--wrapcollections before-first
+--maxwidth 140
+--disable redundantSelf
+--exclude DerivedData,LoomClone.xcodeproj

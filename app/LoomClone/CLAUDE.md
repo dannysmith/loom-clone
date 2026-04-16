@@ -1,5 +1,12 @@
 # macOS App — Agent Notes
 
+## Developer tooling
+
+- **SwiftLint** runs as a post-compile build phase on every Xcode build. Config is at `app/.swiftlint.yml`. Run manually with `cd app && swiftlint lint` or auto-fix with `swiftlint --fix`.
+- **SwiftFormat** config is at `app/.swiftformat`. Run with `cd app && swiftformat .` to format all files. Run before committing Swift changes.
+- **Strict concurrency** is set to `complete` and **warnings are treated as errors** (`SWIFT_TREAT_WARNINGS_AS_ERRORS`). New code must be concurrency-safe — no `@unchecked Sendable` without justification.
+- Both tools are installed via Homebrew (`brew install swiftlint swiftformat`).
+
 ## Recording pipeline
 
 Four actors, each owning one concern:

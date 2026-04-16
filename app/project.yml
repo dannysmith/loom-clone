@@ -5,12 +5,20 @@ options:
     macOS: "14.0"
   xcodeVersion: "16.0"
   minimumXcodeGenVersion: "2.40"
+  createIntermediateGroups: true
+
+settingGroups:
+  codeQuality:
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: true
+    GCC_TREAT_WARNINGS_AS_ERRORS: true
 
 settings:
   base:
     SWIFT_VERSION: "5"
-    SWIFT_STRICT_CONCURRENCY: targeted
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+    groups:
+      - codeQuality
 
 targets:
   LoomClone:
@@ -28,6 +36,15 @@ targets:
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: XT349SJG9U
+    postCompileScripts:
+      - script: |
+          if command -v swiftlint >/dev/null 2>&1; then
+            swiftlint lint --quiet
+          else
+            echo "warning: SwiftLint not installed — install with 'brew install swiftlint'"
+          fi
+        name: SwiftLint
+        basedOnDependencyAnalysis: false
 
   LoomCloneTestHarness:
     # Diagnostic tool for AVFoundation/VideoToolbox/CIContext configurations.
@@ -53,3 +70,12 @@ targets:
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: XT349SJG9U
+    postCompileScripts:
+      - script: |
+          if command -v swiftlint >/dev/null 2>&1; then
+            swiftlint lint --quiet
+          else
+            echo "warning: SwiftLint not installed — install with 'brew install swiftlint'"
+          fi
+        name: SwiftLint
+        basedOnDependencyAnalysis: false

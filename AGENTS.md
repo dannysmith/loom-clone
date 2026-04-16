@@ -60,7 +60,7 @@ Direct commands (for reference or when you need different flags):
 - **macOS app**: `xcodebuild -project app/LoomClone.xcodeproj -scheme LoomClone -configuration Debug -destination 'platform=macOS' build`. Do NOT run `bun run dev` or start the dev server unless explicitly asked.
 - **Server**: see `server/CLAUDE.md` for scripts (lint, format, typecheck, test, dev) and testing conventions. `cd server && bun run dev` runs the hot-reload server on `http://localhost:3000`.
 - **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
-- **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`.
+- **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`. **Also run `make regen` after adding or removing any `.swift` file** — sources are discovered at generate time, not at build time, so xcodebuild won't find them otherwise.
 
 ## Task Management
 
@@ -73,12 +73,12 @@ Direct commands (for reference or when you need different flags):
 ```
 ├── app/
 │   ├── LoomClone/                        # macOS menubar app
-│   │   ├── App/                          #   coordinator, app entry
+│   │   ├── App/                          #   coordinator, app entry, Settings scene
 │   │   ├── Capture/                      #   screen, camera, mic capture managers
-│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, utilities
+│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, APIKeyStore, APIKeyStatus
 │   │   ├── Models/                       #   recording timeline, presets, modes
-│   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, H264Settings
-│   │   └── UI/                           #   SwiftUI views, overlay window, popover
+│   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, APIClient
+│   │   └── UI/                           #   SwiftUI views, overlay window, popover, SettingsView
 │   ├── TestHarness/                      # diagnostic tool (separate Xcode target)
 │   │   ├── Scripts/                      #   tier runner scripts + test-configs/
 │   │   ├── Sources/                      #   synthetic frame sources

@@ -30,6 +30,20 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 - **Tests**: `setupTestEnv()` creates a fresh `:memory:` DB per test with migrations applied. No shared state.
 - **Migration discipline**: never rename or renumber a migration file once it has been applied to any database (yours, anyone else's, CI). Drizzle tracks applied migrations by hash + tag in `__drizzle_migrations`; rewriting a tag leaves local DBs in an unfixable state ("table already exists" on the rerun). If you need to change something, add a new migration. Local `data/app.db` is expendable — `rm -f data/app.db` to recover from any historical mess.
 
+## Auth
+
+All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <token>`. `/api/health`, `/v/*`, `/data/*`, `/static/*`, `/admin` are open.
+
+- **Format**: `lck_<32 random bytes, base64url>`. The `lck_` prefix is a leak-detection aid (grep/secret scanners).
+- **Storage**: `api_keys` table stores only SHA-256 of the token. Plaintext is shown once on creation and never recoverable. SHA-256 is correct here (not bcrypt/argon2) — API keys are high-entropy, so password-hashing functions would just slow down every request verification for no gain. See `src/lib/api-keys.ts` for the rationale on why we don't need `timingSafeEqual`.
+- **Middleware**: `requireApiKey()` in `src/lib/auth.ts`. Returns 401 + `WWW-Authenticate: Bearer realm="loom-clone"`. Updates `lastUsedAt` fire-and-forget. Exposes `apiKeyId` on the Hono context (typed via `AuthVariables`) for future route-level auditing.
+- **CLI**:
+  - `bun run keys:create <name>` — prints the token once, stores the hash
+  - `bun run keys:list` — id, status, last_used, name
+  - `bun run keys:revoke <id>` — idempotent
+- **Env**: `HOST` (default `127.0.0.1`) and `PORT` (default `3000`) in `.env`. Bun auto-loads. See `.env.example`.
+- **Transport**: plaintext bearer over HTTP is acceptable on localhost only. task-x3 (Hetzner) must enforce HTTPS before `HOST` gets widened.
+
 ## Views & Static Assets
 
 Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. No build step; Bun handles `.tsx` natively, browsers fetch CSS as-is.

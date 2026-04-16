@@ -1,5 +1,5 @@
-@testable import LoomClone
 import AVFoundation
+@testable import LoomClone
 import VideoToolbox
 import XCTest
 

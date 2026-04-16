@@ -43,7 +43,7 @@ final class CameraOverlayWindow: @unchecked Sendable {
 
     @MainActor private var panel: NSPanel?
     @MainActor private var currentStyle: Style = .circle
-    nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
+    private nonisolated(unsafe) var previewView: CameraPreviewLayerView?
 
     /// Optional shared camera-adjustments state. Forwarded into the preview
     /// layer on every `show()` so the overlay reflects slider moves live.

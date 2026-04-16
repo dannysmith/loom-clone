@@ -16,9 +16,9 @@ final class RecordingModeTests: XCTestCase {
         XCTAssertEqual(Set(visited).count, RecordingMode.allCases.count)
     }
 
-    func testNextWrapsAround() {
-        let last = RecordingMode.allCases.last!
-        let first = RecordingMode.allCases.first!
+    func testNextWrapsAround() throws {
+        let last = try XCTUnwrap(RecordingMode.allCases.last)
+        let first = try XCTUnwrap(RecordingMode.allCases.first)
         XCTAssertEqual(last.next(), first)
     }
 

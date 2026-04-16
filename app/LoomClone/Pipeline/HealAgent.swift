@@ -22,7 +22,7 @@ actor HealAgent {
     /// unlikely to ever heal cleanly.
     private static let startupWindow: TimeInterval = 3 * 24 * 60 * 60
 
-    private let serverBaseURL: String
+    private let apiClient: APIClient
     private let recordingsRoot: URL
 
     /// Guard against double-starting the same recording when the post-stop
@@ -30,8 +30,8 @@ actor HealAgent {
     /// cheap insurance).
     private var inFlight: Set<String> = []
 
-    init(serverBaseURL: String = "http://localhost:3000") {
-        self.serverBaseURL = serverBaseURL
+    init(apiClient: APIClient = .shared) {
+        self.apiClient = apiClient
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
@@ -183,6 +183,11 @@ actor HealAgent {
                 markOrphaned(localDir: localDir)
                 return
             } catch {
+                // APIClient.ClientError.unauthorized reaches here via the
+                // generic catch — segment gets marked failed, loop continues
+                // and will report "N unhealed" at the end. Not ideal (spams
+                // N log lines for the same cause) but correct, and keeps
+                // heal() under the cyclomatic-complexity threshold.
                 print("[heal] \(videoId): PUT failed for \(filename): \(error)")
                 failed.append(filename)
             }
@@ -223,23 +228,31 @@ actor HealAgent {
     }
 
     private func postComplete(videoId: String, timelineData: Data) async -> CompleteOutcome {
-        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)/complete")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        var body = Data()
-        body.append(Data("{\"timeline\":".utf8))
-        body.append(timelineData)
-        body.append(Data("}".utf8))
-        request.httpBody = body
-
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 404 { return .orphaned }
-            guard code == 200 else { return .failure("status \(code)") }
+            var request = try apiClient.authorizedRequest(
+                path: "/api/videos/\(videoId)/complete"
+            )
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            var body = Data()
+            body.append(Data("{\"timeline\":".utf8))
+            body.append(timelineData)
+            body.append(Data("}".utf8))
+            request.httpBody = body
+
+            let (data, http) = try await apiClient.send(request)
+            if http.statusCode == 404 { return .orphaned }
+            guard http.statusCode == 200 else { return .failure("status \(http.statusCode)") }
             let json = try JSONDecoder().decode(CompleteResponse.self, from: data)
             return .ok(url: json.url, missing: json.missing ?? [])
+        } catch APIClient.ClientError.unauthorized {
+            // Revoked or invalid key — map to the generic failure path so the
+            // caller treats it as retryable-next-launch. A startup scan after
+            // the user fixes the key will re-attempt.
+            return .failure("unauthorized")
+        } catch APIClient.ClientError.missingAPIKey {
+            return .failure("missing API key")
         } catch {
             return .failure("\(error)")
         }
@@ -251,14 +264,16 @@ actor HealAgent {
         data: Data,
         duration: Double
     ) async throws {
-        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)/segments/\(filename)")!)
+        var request = try apiClient.authorizedRequest(
+            path: "/api/videos/\(videoId)/segments/\(filename)"
+        )
         request.httpMethod = "PUT"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(duration), forHTTPHeaderField: "x-segment-duration")
-        let (_, response) = try await URLSession.shared.upload(for: request, from: data)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 404 { throw HealError.orphaned }
-        guard code == 200 else { throw HealError.server("status \(code)") }
+
+        let (_, http) = try await apiClient.upload(request, from: data)
+        if http.statusCode == 404 { throw HealError.orphaned }
+        guard http.statusCode == 200 else { throw HealError.server("status \(http.statusCode)") }
     }
 
     // MARK: - Local state

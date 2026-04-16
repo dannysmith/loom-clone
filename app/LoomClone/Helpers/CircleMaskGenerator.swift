@@ -5,7 +5,7 @@ import CoreImage
 /// Used exclusively from CompositionActor, so access is serialized.
 enum CircleMaskGenerator {
     /// nonisolated(unsafe) is fine — only accessed from CompositionActor (a single actor)
-    nonisolated(unsafe) private static var cache: [Int: CIImage] = [:]
+    private nonisolated(unsafe) static var cache: [Int: CIImage] = [:]
 
     static func mask(diameter: Int) -> CIImage {
         if let cached = cache[diameter] {

@@ -1,5 +1,5 @@
-@testable import LoomClone
 import CoreMedia
+@testable import LoomClone
 import XCTest
 
 final class TimestampAdjusterTests: XCTestCase {

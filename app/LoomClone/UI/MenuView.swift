@@ -4,10 +4,18 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var coordinator: RecordingCoordinator
+    @State private var apiKeyStatus = APIKeyStatus.shared
     var onRecord: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // API key banner (shown if no token is stored). Takes precedence
+            // over the server banner because the key is needed even if the
+            // server is up — you'd just get 401s.
+            if !apiKeyStatus.hasKey {
+                apiKeyMissingBanner
+            }
+
             // Server health banner (shown if the server isn't reachable)
             if !coordinator.serverReachable {
                 serverUnavailableBanner
@@ -131,6 +139,7 @@ struct MenuView: View {
                 && !coordinator.screenPermissionDenied
                 && !coordinator.availableModes.isEmpty
                 && coordinator.serverReachable
+                && apiKeyStatus.hasKey
 
             Button(action: onRecord) {
                 Label("Record", systemImage: "record.circle.fill")
@@ -161,14 +170,32 @@ struct MenuView: View {
 
             Divider()
 
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+            HStack {
+                SettingsLink {
+                    Text("Settings…")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+
+                Spacer()
+
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .font(.caption)
             }
-            .foregroundStyle(.secondary)
-            .font(.caption)
         }
         .padding(12)
         .frame(width: 300)
+        // Re-read the Keychain whenever the popover opens, in case the
+        // user edited settings since last open. `APIKeyStatus` is a cache,
+        // not a live Keychain listener.
+        .onChange(of: coordinator.isPopoverOpen) { _, open in
+            if open { apiKeyStatus.refresh() }
+        }
     }
 
     // MARK: - Preview Area
@@ -349,6 +376,35 @@ struct MenuView: View {
         if coordinator.outputPreset == .p1440, !coordinator.is1440pAvailable {
             coordinator.outputPreset = .p1080
         }
+    }
+
+    // MARK: - API Key Banner
+
+    private var apiKeyMissingBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "key.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No API key configured")
+                    .font(.caption.bold())
+                    .foregroundStyle(.orange)
+                Text("Add a server-issued token in Settings before recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                SettingsLink {
+                    Text("Open Settings")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
+        )
     }
 
     // MARK: - Server Banner

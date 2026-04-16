@@ -179,24 +179,16 @@ final class RecordingCoordinator {
     /// button is disabled until we've confirmed the server is up.
     private(set) var serverReachable: Bool = false
 
-    private static let serverBaseURL = "http://localhost:3000"
     private static let healthCheckTimeout: TimeInterval = 2.0
 
     func checkServerHealth() async {
-        guard let url = URL(string: "\(Self.serverBaseURL)/api/health") else {
-            serverReachable = false
-            return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = Self.healthCheckTimeout
+        let request = APIClient.shared.request(
+            path: "/api/health",
+            timeout: Self.healthCheckTimeout
+        )
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                serverReachable = true
-            } else {
-                serverReachable = false
-            }
+            let (_, http) = try await APIClient.shared.send(request)
+            serverReachable = (http.statusCode == 200)
         } catch {
             serverReachable = false
         }

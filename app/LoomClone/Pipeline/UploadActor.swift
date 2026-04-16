@@ -1,7 +1,7 @@
 import Foundation
 
 actor UploadActor {
-    private let serverBaseURL: String
+    private let apiClient: APIClient
     private let reachability: ReachabilityMonitor
     private(set) var videoId: String?
     private(set) var slug: String?
@@ -25,8 +25,8 @@ actor UploadActor {
         self.onUploadResult = handler
     }
 
-    init(serverBaseURL: String = "http://localhost:3000") {
-        self.serverBaseURL = serverBaseURL
+    init(apiClient: APIClient = .shared) {
+        self.apiClient = apiClient
         self.reachability = ReachabilityMonitor()
     }
 
@@ -48,14 +48,14 @@ actor UploadActor {
 
     /// Create a new video on the server, returning (id, slug).
     func createSession() async throws -> (id: String, slug: String) {
-        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos")!)
+        var request = try apiClient.authorizedRequest(path: "/api/videos")
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, http) = try await apiClient.send(request)
 
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw UploadError.serverError("Failed to create video session")
+        guard http.statusCode == 200 else {
+            throw UploadError.serverError("Failed to create video session (status \(http.statusCode))")
         }
 
         let json = try JSONDecoder().decode(CreateVideoResponse.self, from: data)
@@ -122,19 +122,41 @@ actor UploadActor {
                 return
             }
 
-            let url = URL(string: "\(serverBaseURL)/api/videos/\(videoId)/segments/\(segment.filename)")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "PUT"
-            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            request.setValue(String(segment.duration), forHTTPHeaderField: "x-segment-duration")
+            let request: URLRequest
+            do {
+                var req = try apiClient.authorizedRequest(
+                    path: "/api/videos/\(videoId)/segments/\(segment.filename)"
+                )
+                req.httpMethod = "PUT"
+                req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                req.setValue(String(segment.duration), forHTTPHeaderField: "x-segment-duration")
+                request = req
+            } catch APIClient.ClientError.missingAPIKey {
+                // No API key configured — retrying won't help. Surface a
+                // distinct failure so the Settings UI can react.
+                print("[upload] No API key configured — cannot upload \(segment.filename)")
+                onUploadResult?(segment.filename, false, "missing API key")
+                return
+            } catch {
+                // Unreachable in practice (authorizedRequest only throws
+                // missingAPIKey today) but the compiler needs it.
+                print("[upload] authorizedRequest failed for \(segment.filename): \(error)")
+                onUploadResult?(segment.filename, false, "\(error)")
+                return
+            }
 
             do {
-                let (_, response) = try await URLSession.shared.upload(for: request, from: data)
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                    throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                let (_, http) = try await apiClient.upload(request, from: data)
+                guard http.statusCode == 200 else {
+                    throw UploadError.serverError("Status \(http.statusCode)")
                 }
                 print("[upload] Uploaded \(segment.filename) (\(data.count) bytes)")
                 onUploadResult?(segment.filename, true, nil)
+                return
+            } catch APIClient.ClientError.unauthorized {
+                // Revoked or invalid key — retrying won't help, bail out.
+                print("[upload] Unauthorized for \(segment.filename) — stored key is invalid or revoked")
+                onUploadResult?(segment.filename, false, "unauthorized")
                 return
             } catch {
                 // Cooperative cancellation from the stop-flow grace timeout
@@ -202,7 +224,7 @@ actor UploadActor {
             throw UploadError.noSession
         }
 
-        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)/complete")!)
+        var request = try apiClient.authorizedRequest(path: "/api/videos/\(videoId)/complete")
         request.httpMethod = "POST"
 
         if let timeline {
@@ -216,13 +238,13 @@ actor UploadActor {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw UploadError.serverError("Status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        let (data, http) = try await apiClient.send(request)
+        guard http.statusCode == 200 else {
+            throw UploadError.serverError("Status \(http.statusCode)")
         }
 
         let json = try JSONDecoder().decode(CompleteResponse.self, from: data)
-        let fullURL = "\(serverBaseURL)\(json.url)"
+        let fullURL = "\(apiClient.baseURL)\(json.url)"
         let missing = json.missing ?? []
         print("[upload] Complete: \(fullURL) (missing: \(missing.count))")
         return CompleteResult(url: fullURL, missing: missing)
@@ -240,17 +262,19 @@ actor UploadActor {
 
         guard let videoId else { return }
 
-        var request = URLRequest(url: URL(string: "\(serverBaseURL)/api/videos/\(videoId)")!)
-        request.httpMethod = "DELETE"
-
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+            var request = try apiClient.authorizedRequest(path: "/api/videos/\(videoId)")
+            request.httpMethod = "DELETE"
+            let (_, http) = try await apiClient.send(request)
+            if http.statusCode == 200 {
                 print("[upload] Cancelled server-side: \(videoId)")
             } else {
-                print("[upload] Cancel returned status \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                print("[upload] Cancel returned status \(http.statusCode)")
             }
         } catch {
+            // Fire-and-forget — log the reason (missing key, 401, transport,
+            // non-2xx) but never throw. The local record is discarded either
+            // way; orphaned server-side records fall to the admin cleanup.
             print("[upload] Cancel failed: \(error)")
         }
 

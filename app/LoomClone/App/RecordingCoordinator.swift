@@ -111,7 +111,7 @@ final class RecordingCoordinator {
     /// renders into and what the encoder produces.
     private static let outputPresetDefaultsKey = "outputPresetID"
     var outputPreset: OutputPreset = .fromID(
-        UserDefaults.standard.string(forKey: "outputPresetID") ?? OutputPreset.default.id
+        UserDefaults.standard.string(forKey: RecordingCoordinator.outputPresetDefaultsKey) ?? OutputPreset.default.id
     ) {
         didSet {
             UserDefaults.standard.set(outputPreset.id, forKey: Self.outputPresetDefaultsKey)

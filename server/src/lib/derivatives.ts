@@ -1,6 +1,6 @@
 import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
-import { DATA_DIR } from "./store";
+import { DATA_DIR, getVideo } from "./store";
 
 // A derivative is any file produced from the converged HLS segments. Each
 // recipe declares its final output filename (relative to data/<id>/derivatives/)
@@ -38,15 +38,13 @@ async function runFfmpeg(args: string[]): Promise<void> {
   }
 }
 
-async function totalDurationFromSegments(videoId: string): Promise<number> {
-  const file = Bun.file(join(DATA_DIR, videoId, "segments.json"));
-  if (!(await file.exists())) return 0;
-  try {
-    const obj = (await file.json()) as Record<string, number>;
-    return Object.values(obj).reduce((a, b) => a + (Number(b) || 0), 0);
-  } catch {
-    return 0;
-  }
+// Reads the cached duration populated by setVideoStatus when the video
+// transitions to `complete`. Derivatives are scheduled after that transition,
+// so this is always set by the time the thumbnail recipe runs. Returns 0 for
+// the rare case of a missing video record so ffmpeg just picks frame 0.
+async function videoDuration(videoId: string): Promise<number> {
+  const video = await getVideo(videoId, { includeTrashed: true });
+  return video?.durationSeconds ?? 0;
 }
 
 const sourceMp4Recipe: Recipe = {
@@ -81,7 +79,7 @@ const thumbnailRecipe: Recipe = {
   async generate(videoId, dir) {
     const source = join(dir, "source.mp4");
     const out = join(dir, "thumbnail.jpg.tmp");
-    const duration = await totalDurationFromSegments(videoId);
+    const duration = await videoDuration(videoId);
     const t = duration > 0 ? Math.min(1.0, duration / 2) : 0;
     await runFfmpeg([
       "-ss",

@@ -25,13 +25,15 @@ Two principles drive the design:
 | `audio.m4a` | During recording if a mic was selected | Raw mic master, AAC |
 | `.orphaned` | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent from ever retrying this recording again |
 
-### Server: `server/data/<video-id>/`
+### Server: `server/data/`
+
+The video record itself (id, slug, status, visibility, timestamps, cached duration, etc.) plus the per-segment durations, slug redirects, tags, and event log all live in `server/data/app.db` (SQLite via Drizzle — see `server/CLAUDE.md` for schema and scripts). The per-video directory holds the blobs that need to be on a real filesystem:
+
+`server/data/<video-id>/`
 
 | File | Written when | Purpose |
 |------|--------------|---------|
 | `init.mp4`, `seg_NNN.m4s` | On each PUT | Mirror of the client's segments — what viewers stream |
-| `video.json` | On every mutation (create, complete, heal) | The video record: `id`, `slug`, `status`, `createdAt`. `status` is one of `"recording"`, `"healing"`, `"complete"` |
-| `segments.json` | On each media-segment PUT | Per-filename duration sidecar, used by the playlist builder |
 | `stream.m3u8` | After each PUT and after `/complete` | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename |
 | `recording.json` | On `/complete` (and re-`/complete` after heal) | Server-side copy of the client's timeline, authoritative post-upload |
 | `derivatives/source.mp4` | Background task after each `complete` transition | Single-file MP4 stitched from the HLS segments with `-c copy` — the "download me" file, and what the viewer prefers over HLS when present |
@@ -39,7 +41,7 @@ Two principles drive the design:
 
 ## End-to-end flow of a recording
 
-1. **Create.** User hits record. Client POSTs `/api/videos`. Server creates a `video-id` and `slug`, writes an empty `video.json` with `status: "recording"`, returns both.
+1. **Create.** User hits record. Client POSTs `/api/videos`. Server inserts a row in the `videos` table with `status: "recording"` and `visibility: "unlisted"`, returns `{id, slug}`.
 2. **Segment loop.** Every ~4s the writer emits a segment. For each one:
    - Client writes it to the local recordings dir as a safety net.
    - Client PUTs it to `/api/videos/<id>/segments/<filename>` with an `x-segment-duration` header.
@@ -93,7 +95,7 @@ After every transition to `status: "complete"`, the server generates a set of de
 
 A few properties worth keeping in mind:
 
-- **Disk is truth.** Readiness of a derivative is the presence of its final file. No new fields in `video.json`.
+- **Disk is truth.** Readiness of a derivative is the presence of its final file. No new fields in the `videos` row.
 - **Atomic writes.** Each recipe writes `<filename>.tmp` and renames to `<filename>` on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written final.
 - **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one ffmpeg run per recipe.
 - **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites the previous derivatives atomically.
@@ -110,7 +112,7 @@ The check is per-request with no state tracked client-side: a freshly-stopped re
 
 - **`.orphaned` sidecar.** Only written when the server returns 404 — meaning the video record was deleted upstream (e.g. user cancelled, someone pruned `data/`). Prevents HealAgent from retrying a ghost forever. If a recording *should* be healed and has `.orphaned`, delete the sidecar by hand.
 - **Idempotent PUT.** `PUT /api/videos/:id/segments/:filename` overwrites bytes and rebuilds the playlist from the directory listing — so double-uploads, out-of-order arrivals, and late heal uploads all converge to the correct state.
-- **Server restart mid-recording.** The video record is persisted to `video.json` at every mutation. On startup, the server scans `data/` and rehydrates its in-memory state. The client's next PUT for that video id will succeed rather than 404ing, and the recording can continue.
+- **Server restart mid-recording.** The video record lives in SQLite so it's already durable — no rehydration step needed. The client's next PUT for that video id succeeds rather than 404ing, and the recording can continue.
 - **Empty `missing` from a heal preflight.** Means the server already has everything. The code treats local flags as stale and flips them — otherwise the next startup scan would pointlessly re-trigger a heal that has nothing to do.
 - **Init segment.** `init.mp4` is never in `timeline.segments` (the timeline only tracks media segments). The server's diff adds it implicitly — a missing `init.mp4` would break playback silently otherwise.
 - **Heal is idempotent.** Running the same heal twice is safe. Every HTTP call the heal makes is designed to be replayable.
@@ -121,7 +123,7 @@ The check is per-request with no state tracked client-side: a freshly-stopped re
 - Heal work (both entry points + the core loop): `app/LoomClone/Pipeline/HealAgent.swift`
 - Timeline schema: `app/LoomClone/Models/RecordingTimeline.swift`
 - Segment / complete / delete routes: `server/src/routes/videos.ts`
-- Video record persistence: `server/src/lib/store.ts`
+- Video record persistence (DB-backed): `server/src/lib/store.ts`, schema in `server/src/db/schema.ts`
 - Playlist builder: `server/src/lib/playlist.ts`
 - Derivative generation (recipes, promise cache, ffmpeg): `server/src/lib/derivatives.ts`
 - Viewer page (MP4-vs-HLS selection): `server/src/routes/playback.ts`

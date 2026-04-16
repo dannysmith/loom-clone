@@ -55,7 +55,7 @@ The main file keeps the two-phase start, stop, pause/resume, mode switch, and se
 - **`KeyboardShortcutManager` magic key codes**: Replace bare integers (15, 35, 46) with named constants (e.g. `private static let kVK_R: UInt16 = 15`).
 - **`MicrophonePreviewManager` missing format logging**: Camera capture logs its resolved format and colour extensions on startup; the mic manager doesn't log sample rate, channel count, or codec. Add a matching diagnostic log after `startRunning()` for consistency.
 
-## Phase 3 - Tests
+## Phase 3 - Tests [DONE]
 
 I don't know what the normal pattern for testing is. But we should probably make sure that we have whatever nor automated tests would be normal in a mac OS app like this. 
 
@@ -68,7 +68,7 @@ Added tests:
 - H264SettingsTests (4 tests) — factory keys, bitrate variation, Rec. 709 properties
 - JSONValueTests (4 tests) — encoding round-trip for all four cases
 
-## Phase 4 - Performance Review
+## Phase 4 - Performance Review [DONE]
 
 Now let's conduct another full review of the code base, but this time purely focused on finding any glaring performance issues or low-hanging fruit.
 

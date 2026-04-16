@@ -12,7 +12,7 @@
 
 Four actors, each owning one concern:
 
-- **RecordingActor** — orchestrates everything. Owns the metronome (30fps emit loop), the camera frame queue, the recording clock anchor, pause/resume state. Entry point for all capture callbacks.
+- **RecordingActor** — orchestrates everything. Owns the metronome (30fps emit loop), the camera frame queue, the recording clock anchor, pause/resume state. Entry point for all capture callbacks. Split across extensions: `+Metronome` (drift-corrected emit loop), `+FrameHandling` (capture callbacks, PTS retiming, metronome frame emission), `+CompositionRecovery` (GPU failure handling and terminal escalation).
 - **CompositionActor** — Metal/CIContext rendering. Takes a screen buffer + camera buffer + mode, returns a composited pixel buffer. Stateless between frames except for the CIContext itself.
 - **WriterActor** — AVAssetWriter in HLS fMP4 mode. Receives composited video + audio, cuts segments, reports them back for upload. Owns the AAC timestamp adjuster (priming offset + pause accumulator).
 - **UploadActor** — streams segments to the server during recording, retries on failure, hands off to HealAgent for post-stop recovery.

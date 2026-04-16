@@ -49,6 +49,7 @@ Three components exist today, plus a diagnostic tool:
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 
 - `make build` — build the main app (Debug)
+- `make test` — run unit tests
 - `make build-harness` — build the test harness (Debug)
 - `make regen` — regenerate Xcode project from `project.yml`
 - `make format` — run SwiftFormat on all Swift files
@@ -76,7 +77,7 @@ Direct commands (for reference or when you need different flags):
 │   │   ├── Capture/                      #   screen, camera, mic capture managers
 │   │   ├── Helpers/                      #   timestamp adjuster, preview managers, utilities
 │   │   ├── Models/                       #   recording timeline, presets, modes
-│   │   ├── Pipeline/                     #   RecordingActor, WriterActor, CompositionActor, UploadActor, HealAgent
+│   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, H264Settings
 │   │   └── UI/                           #   SwiftUI views, overlay window, popover
 │   ├── TestHarness/                      # diagnostic tool (separate Xcode target)
 │   │   ├── Scripts/                      #   tier runner scripts + test-configs/
@@ -85,6 +86,7 @@ Direct commands (for reference or when you need different flags):
 │   │   ├── Writers/                      #   isolated writer implementations
 │   │   ├── Observability/                #   event log, watchdog, system snapshots
 │   │   └── README.md                     #   full usage docs
+│   ├── LoomCloneTests/                   # XCTest unit tests for pure-logic layers
 │   ├── LoomClone.xcodeproj/             # generated — do not edit directly
 │   └── project.yml                       # XcodeGen source of truth
 ├── server/                               # Hono + Bun server

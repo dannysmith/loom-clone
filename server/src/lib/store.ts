@@ -25,7 +25,13 @@ export class ConflictError extends Error {
 // Slug format: lowercase alphanumeric + single dashes, no leading/trailing/double dashes.
 // Deliberately excludes dots and slashes so `.json`/`.md`/`.mp4` suffix routes and
 // nested paths can never collide with a real slug.
-export const SLUG_REGEX = /^[a-z0-9](-?[a-z0-9])*$/;
+//
+// Pattern source (without ^/$ anchors) is exported separately for use in Hono
+// route constraints: `app.get(`/:slug{${SLUG_PATTERN}}`, ...)`. Non-capturing
+// group avoids any chance of a router treating the inner alternatives as
+// indexed captures.
+export const SLUG_PATTERN = "[a-z0-9](?:-?[a-z0-9])*";
+export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
 export const SLUG_MAX_LENGTH = 64;
 
 // Slugs that would shadow a top-level route or well-known file. Names are

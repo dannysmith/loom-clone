@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
-import { urlsForSlug } from "../../lib/url";
+import { absoluteUrl, urlsForSlug } from "../../lib/url";
 import { VideoPage } from "../../views/viewer/VideoPage";
 
 // Checks on-disk state so a healing recording transparently upgrades from
@@ -33,8 +33,25 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   const urls = urlsForSlug(video.slug);
   const src = hasMp4 ? urls.raw : urls.hls;
   const poster = hasThumb ? urls.poster : null;
+  const canonicalUrl = absoluteUrl(urls.page);
+  const posterAbsolute = hasThumb ? absoluteUrl(urls.poster) : null;
+  const embedAbsolute = absoluteUrl(`/${video.slug}/embed`);
 
-  return c.html(<VideoPage video={video} src={src} poster={poster} />);
+  // Unlisted videos should not be indexed by search engines.
+  if (video.visibility !== "public") {
+    c.header("X-Robots-Tag", "noindex");
+  }
+
+  return c.html(
+    <VideoPage
+      video={video}
+      src={src}
+      poster={poster}
+      canonicalUrl={canonicalUrl}
+      posterAbsolute={posterAbsolute}
+      embedAbsolute={embedAbsolute}
+    />,
+  );
 }
 
 // Permanent redirect from the legacy /v/:slug path. Cached shared URLs,

@@ -37,11 +37,14 @@ describe("createApp", () => {
     expect(body).toContain("/static/styles/admin.css");
   });
 
-  test("/api/health still works", async () => {
+  test("/api/health returns ok, version, and time", async () => {
     const app = createApp();
     const res = await app.request("/api/health");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(body.time).toBeTruthy();
   });
 
   test("/api/health is unauthenticated", async () => {

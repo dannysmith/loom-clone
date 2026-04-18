@@ -1,15 +1,11 @@
 import type { Context } from "hono";
+import { formatDate, formatDuration } from "../../lib/format";
 import { resolveSlug } from "../../lib/store";
-import { urlsForSlug } from "../../lib/url";
+import { absoluteUrl, urlsForSlug } from "../../lib/url";
 
-// Machine-readable representations of a video. Phase 7 will expand these
-// with richer metadata (tags, transcript, OG fields); today they're a
-// minimal contract that lets integrations start targeting the shape.
-//
-// Exported as handler functions (not a Hono router) because Hono's route
-// param syntax can't separate `:slug` from `.json`/`.md` as param + literal
-// suffix. The aggregator in index.ts dispatches from a single `/:file`
-// catch-all that checks the extension.
+// Machine-readable representations of a video for programmatic/LLM
+// consumption. Shapes are designed to be stable — add fields freely,
+// don't remove or rename.
 
 export async function handleJsonMetadata(c: Context, slug: string): Promise<Response> {
   const resolved = await resolveSlug(slug);
@@ -18,13 +14,31 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
     return c.redirect(`/${resolved.video.slug}.json`, 301);
   }
   const { video } = resolved;
+  const urls = urlsForSlug(video.slug);
   return c.json({
     id: video.id,
     slug: video.slug,
+    status: video.status,
+    visibility: video.visibility,
     title: video.title,
     description: video.description,
     durationSeconds: video.durationSeconds,
-    urls: urlsForSlug(video.slug),
+    durationFormatted: formatDuration(video.durationSeconds),
+    source: video.source,
+    createdAt: video.createdAt,
+    updatedAt: video.updatedAt,
+    completedAt: video.completedAt,
+    url: absoluteUrl(urls.page),
+    urls: {
+      page: absoluteUrl(urls.page),
+      raw: absoluteUrl(urls.raw),
+      hls: absoluteUrl(urls.hls),
+      poster: absoluteUrl(urls.poster),
+      embed: absoluteUrl(`/${video.slug}/embed`),
+      json: absoluteUrl(`/${video.slug}.json`),
+      md: absoluteUrl(`/${video.slug}.md`),
+      mp4: absoluteUrl(`/${video.slug}.mp4`),
+    },
   });
 }
 
@@ -36,8 +50,24 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
   }
   const { video } = resolved;
   const heading = video.title ?? video.slug;
-  const urls = urlsForSlug(video.slug);
-  const body = video.description ? `${video.description}\n\n` : "";
-  const md = `# ${heading}\n\n${body}[Watch](${urls.page})\n`;
-  return c.text(md, 200, { "content-type": "text/markdown; charset=utf-8" });
+  const duration = formatDuration(video.durationSeconds);
+  const date = formatDate(video.completedAt ?? video.createdAt);
+  const pageUrl = absoluteUrl(`/${video.slug}`);
+
+  const lines: string[] = [`# ${heading}`, ""];
+  if (video.description) lines.push(video.description, "");
+  if (duration || date) {
+    lines.push([duration, date].filter(Boolean).join(" · "), "");
+  }
+  lines.push(`[Watch](${pageUrl})`, "");
+
+  // URL reference list
+  lines.push("## Links", "");
+  lines.push(`- [Video page](${pageUrl})`);
+  lines.push(`- [Download MP4](${absoluteUrl(`/${video.slug}.mp4`)})`);
+  lines.push(`- [Embed](${absoluteUrl(`/${video.slug}/embed`)})`);
+  lines.push(`- [JSON metadata](${absoluteUrl(`/${video.slug}.json`)})`);
+  lines.push("");
+
+  return c.text(lines.join("\n"), 200, { "content-type": "text/markdown; charset=utf-8" });
 }

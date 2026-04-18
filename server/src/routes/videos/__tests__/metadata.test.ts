@@ -19,7 +19,7 @@ describe("GET /:slug.json", () => {
     expect(body.error).toBe("Not found");
   });
 
-  test("returns JSON with video data and URL bundle", async () => {
+  test("returns JSON with video data, absolute URLs, and enriched fields", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { title: "My Video" });
     const res = await videos.request(`/${video.slug}.json`);
@@ -29,10 +29,17 @@ describe("GET /:slug.json", () => {
     expect(body.id).toBe(video.id);
     expect(body.slug).toBe(video.slug);
     expect(body.title).toBe("My Video");
-    expect(body.urls.page).toBe(`/${video.slug}`);
-    expect(body.urls.raw).toBe(`/${video.slug}/raw/source.mp4`);
-    expect(body.urls.hls).toBe(`/${video.slug}/stream/stream.m3u8`);
-    expect(body.urls.poster).toBe(`/${video.slug}/poster.jpg`);
+    expect(body.status).toBe("recording");
+    expect(body.visibility).toBe("unlisted");
+    expect(body.createdAt).toBeTruthy();
+    expect(body.url).toMatch(/^https?:\/\//);
+    // URLs should all be absolute
+    expect(body.urls.page).toMatch(/^https?:\/\//);
+    expect(body.urls.raw).toContain("/raw/source.mp4");
+    expect(body.urls.embed).toContain("/embed");
+    expect(body.urls.json).toContain(".json");
+    expect(body.urls.md).toContain(".md");
+    expect(body.urls.mp4).toContain(".mp4");
   });
 
   test("old slug 301-redirects to canonical .json URL", async () => {
@@ -58,7 +65,7 @@ describe("GET /:slug.md", () => {
     expect(res.status).toBe(404);
   });
 
-  test("returns Markdown with heading and watch link", async () => {
+  test("returns Markdown with heading, watch link, and URL list", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { title: "Tutorial", description: "Learn things." });
     const res = await videos.request(`/${video.slug}.md`);
@@ -67,7 +74,11 @@ describe("GET /:slug.md", () => {
     const md = await res.text();
     expect(md).toContain("# Tutorial");
     expect(md).toContain("Learn things.");
-    expect(md).toContain(`[Watch](/${video.slug})`);
+    expect(md).toContain("[Watch]");
+    expect(md).toContain("## Links");
+    expect(md).toContain("[Download MP4]");
+    expect(md).toContain("[Embed]");
+    expect(md).toContain("[JSON metadata]");
   });
 
   test("uses slug as heading when no title is set", async () => {

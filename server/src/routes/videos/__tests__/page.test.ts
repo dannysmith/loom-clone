@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import { createVideo, DATA_DIR, updateSlug, type VideoRecord } from "../../../lib/store";
+import {
+  createVideo,
+  DATA_DIR,
+  updateSlug,
+  updateVideo,
+  type VideoRecord,
+} from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
 import page from "../page";
@@ -93,5 +99,36 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     const res = await videos.request(`/${oldSlug}`, { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe("/hello");
+  });
+
+  test("includes OG tags and canonical link", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { title: "Demo" });
+    const res = await videos.request(`/${video.slug}`);
+    const html = await res.text();
+    expect(html).toContain('property="og:title"');
+    expect(html).toContain('property="og:type" content="video.other"');
+    expect(html).toContain('property="og:video"');
+    expect(html).toContain('rel="canonical"');
+    expect(html).toContain('name="twitter:card" content="player"');
+    expect(html).toContain('rel="alternate" type="application/json+oembed"');
+  });
+
+  test("unlisted video gets noindex meta and header", async () => {
+    const video = await createVideo();
+    // Default visibility is "unlisted"
+    const res = await videos.request(`/${video.slug}`);
+    expect(res.headers.get("x-robots-tag")).toBe("noindex");
+    const html = await res.text();
+    expect(html).toContain('name="robots" content="noindex"');
+  });
+
+  test("public video has no noindex", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { visibility: "public" });
+    const res = await videos.request(`/${video.slug}`);
+    expect(res.headers.get("x-robots-tag")).toBeNull();
+    const html = await res.text();
+    expect(html).not.toContain("noindex");
   });
 });

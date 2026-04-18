@@ -182,17 +182,48 @@ Cancel/delete a recording. Only works for non-complete videos.
 
 **Errors**: `404` `VIDEO_NOT_FOUND` | `409` `VIDEO_ALREADY_COMPLETE`
 
+### `GET /api/oembed`
+
+oEmbed discovery endpoint. Open, no auth.
+
+**Query params**:
+- `url` (required) — the video page URL (path-only or absolute)
+- `format` — only `json` is supported (default)
+- `maxwidth`, `maxheight` — clamp iframe dimensions (default 1280x720, maintains 16:9)
+
+**Response** `200`:
+```json
+{
+  "version": "1.0",
+  "type": "video",
+  "title": "...",
+  "author_name": "Danny Smith",
+  "provider_name": "loom-clone",
+  "provider_url": "https://example.com",
+  "html": "<iframe src=\".../embed\" ...></iframe>",
+  "width": 640, "height": 360,
+  "thumbnail_url": "https://example.com/.../poster.jpg",
+  "thumbnail_width": 640, "thumbnail_height": 360
+}
+```
+
+**Errors**: `400` (missing url param) | `404` (unknown video)
+
 ## Viewer routes (`/:slug`)
 
 All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonical slug via the `slug_redirects` table. Trashed videos return 404.
 
 ### `/:slug`
 
-HTML video page. Prefers the MP4 derivative (`/:slug/raw/source.mp4`) when present; falls back to HLS (`/:slug/stream/stream.m3u8`). Poster set from `/:slug/poster.jpg` when available. Uses Vidstack player (CDN-hosted for now).
+HTML video page. Prefers the MP4 derivative (`/:slug/raw/source.mp4`) when present; falls back to HLS (`/:slug/stream/stream.m3u8`). Poster set from `/:slug/poster.jpg` when available. Uses Vidstack player (CDN-hosted via jsDelivr).
+
+Includes below the player: title (if set), formatted duration + date, description, and attribution link.
+
+**SEO/meta**: canonical link, `og:title`, `og:description`, `og:image`, `og:video` (embed URL), `og:type=video.other`, Twitter Card (`player` type), and oEmbed discovery `<link>`. Unlisted videos get `<meta name="robots" content="noindex">` and `X-Robots-Tag: noindex` header.
 
 ### `/:slug/embed`
 
-Chromeless player for iframe embeds. Same MP4-vs-HLS selection, no page chrome.
+Chromeless player for iframe embeds. Same MP4-vs-HLS selection, no page chrome. Full-viewport dark background. Used by the oEmbed `html` field and OG/Twitter player tags.
 
 ### `/:slug/raw/:file`
 
@@ -218,11 +249,22 @@ Convenience redirect. **302** to `/:slug/raw/source.mp4`. 302 (not 301) because 
 
 ### `/:slug.json`
 
-JSON metadata for programmatic/LLM consumption. Includes `id`, `slug`, `title`, `description`, `durationSeconds`, and a `urls` bundle.
+JSON metadata for programmatic/LLM consumption. All URLs are absolute.
+
+```json
+{
+  "id": "uuid", "slug": "...", "status": "...", "visibility": "...",
+  "title": "...", "description": "...", "durationSeconds": 42.5,
+  "durationFormatted": "42s", "source": "recorded",
+  "createdAt": "ISO", "updatedAt": "ISO", "completedAt": "ISO",
+  "url": "https://example.com/my-slug",
+  "urls": { "page", "raw", "hls", "poster", "embed", "json", "md", "mp4" }
+}
+```
 
 ### `/:slug.md`
 
-Markdown metadata. Includes heading (title or slug), description if set, and a watch link. Intended for embedding in documentation, Notion, etc.
+Markdown metadata. Includes heading (title or slug), description, formatted duration + date, watch link, and a "Links" section with bulleted URLs (page, MP4 download, embed, JSON). All URLs absolute.
 
 ## Back-compat redirects
 
@@ -235,7 +277,7 @@ Markdown metadata. Includes heading (title or slug), description if set, and a w
 | `/` | Minimal HTML landing page |
 | `/robots.txt` | Disallows `/admin` and `/api` |
 | `/favicon.ico` | 204 No Content (placeholder) |
-| `/sitemap.xml` | Empty stub (Phase 7 populates from DB) |
+| `/sitemap.xml` | Video sitemap (public + complete + non-trashed only, with `<video:video>` extension) |
 
 ## Admin routes
 
@@ -294,3 +336,5 @@ See `.env.example` for documentation and defaults.
 | URL builders | `src/lib/url.ts` |
 | Auth middleware | `src/lib/auth.ts` |
 | Slug validation + store | `src/lib/store.ts` |
+| Display formatting (duration, date) | `src/lib/format.ts` |
+| oEmbed endpoint | `src/routes/api/index.ts` (alongside health) |

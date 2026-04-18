@@ -202,16 +202,19 @@ export async function listVideosPaginated(opts: ListPaginatedOpts = {}): Promise
   return { items, nextCursor };
 }
 
-// Resolves a public slug. Checks the current slug first, then falls back to
-// the redirect table. Returns null for unknown slugs and for redirects whose
-// target video has been trashed (respects the same visibility rules as
-// getVideoBySlug).
+// Resolves a public slug for viewer-facing routes. Checks the current slug
+// first, then falls back to the redirect table. Returns null for unknown
+// slugs, trashed videos, and private videos — private content is only
+// accessible via bearer-authed API routes (by id, not slug).
 export async function resolveSlug(
   slug: string,
   opts: GetOpts = {},
 ): Promise<{ video: Video; redirected: boolean } | null> {
   const direct = await getVideoBySlug(slug, opts);
-  if (direct) return { video: direct, redirected: false };
+  if (direct) {
+    if (direct.visibility === "private") return null;
+    return { video: direct, redirected: false };
+  }
 
   const redirect = await getDb()
     .select()
@@ -221,7 +224,7 @@ export async function resolveSlug(
   if (!redirect) return null;
 
   const target = await getVideo(redirect.videoId, opts);
-  if (!target) return null;
+  if (!target || target.visibility === "private") return null;
   return { video: target, redirected: true };
 }
 

@@ -316,6 +316,28 @@ describe("updateSlug / resolveSlug", () => {
     expect(await resolveSlug("does-not-exist")).toBeNull();
   });
 
+  test("resolveSlug returns null for private video on current slug", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { visibility: "private" });
+    expect(await resolveSlug(video.slug)).toBeNull();
+  });
+
+  test("resolveSlug returns null for private video on redirect slug", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    await updateSlug(video.id, "renamed-private");
+    await updateVideo(video.id, { visibility: "private" });
+    expect(await resolveSlug(oldSlug)).toBeNull();
+  });
+
+  test("resolveSlug returns unlisted videos (they're accessible by URL)", async () => {
+    const video = await createVideo();
+    // Default visibility is "unlisted"
+    const resolved = await resolveSlug(video.slug);
+    expect(resolved).not.toBeNull();
+    expect(resolved?.video.id).toBe(video.id);
+  });
+
   test("rejects ConflictError if new slug fails format validation", async () => {
     const video = await createVideo();
     expect(updateSlug(video.id, "BadCASE")).rejects.toBeInstanceOf(ConflictError);

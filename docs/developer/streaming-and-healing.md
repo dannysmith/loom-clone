@@ -104,9 +104,11 @@ A few properties worth keeping in mind:
 
 ## Viewer
 
-The playback page at `/v/:slug` checks `data/<id>/derivatives/source.mp4` on each request. If present, the Vidstack `<media-player>` `src` is the MP4 and the `poster` attribute is set to `thumbnail.jpg` when that's also present. If absent, the page falls back to the HLS playlist with no poster.
+The playback page at `/:slug` checks `data/<id>/derivatives/source.mp4` on each request. If present, the Vidstack `<media-player>` `src` points to `/:slug/raw/source.mp4` and the `poster` attribute is set to `/:slug/poster.jpg` when the thumbnail also exists. If absent, the page falls back to `/:slug/stream/stream.m3u8` (the HLS playlist) with no poster. An embed variant at `/:slug/embed` provides a chromeless player for iframe use.
 
 The check is per-request with no state tracked client-side: a freshly-stopped recording serves HLS for a second or two, then upgrades to MP4 on the next page load. A recording still healing stays on HLS for as long as healing takes and upgrades once derivatives land.
+
+UUIDs never appear in viewer-facing URLs. All media is served under the slug namespace — `/:slug/raw/*` for MP4 derivatives, `/:slug/stream/*` for HLS segments, `/:slug/poster.jpg` for the thumbnail. The slug-to-id lookup happens per request (indexed, fast). See `docs/developer/server-routes-and-api.md` for the full route reference.
 
 ## Corner cases worth knowing about
 
@@ -122,8 +124,10 @@ The check is per-request with no state tracked client-side: a freshly-stopped re
 - Live upload queue and `/complete` call: `app/LoomClone/Pipeline/UploadActor.swift`
 - Heal work (both entry points + the core loop): `app/LoomClone/Pipeline/HealAgent.swift`
 - Timeline schema: `app/LoomClone/Models/RecordingTimeline.swift`
-- Segment / complete / delete routes: `server/src/routes/videos.ts`
+- Segment / complete / delete routes: `server/src/routes/api/videos.ts`
 - Video record persistence (DB-backed): `server/src/lib/store.ts`, schema in `server/src/db/schema.ts`
 - Playlist builder: `server/src/lib/playlist.ts`
 - Derivative generation (recipes, promise cache, ffmpeg): `server/src/lib/derivatives.ts`
-- Viewer page (MP4-vs-HLS selection): `server/src/routes/playback.ts`
+- Viewer page (MP4-vs-HLS selection): `server/src/routes/videos/page.tsx`
+- Media serving (raw, stream, poster): `server/src/routes/videos/media.ts`
+- URL builders: `server/src/lib/url.ts`

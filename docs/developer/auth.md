@@ -4,7 +4,7 @@ One-page tour of how the macOS app authenticates to the server. Single-user proj
 
 ## The model in one paragraph
 
-The server issues long-lived API keys. The macOS app stores one in the system Keychain and sends it as `Authorization: Bearer <token>` on every call to `/api/videos/*`. The server stores only the SHA-256 hash of each token; plaintext is shown once at creation and never recoverable. Keys can be named (for human readability), listed, and revoked. Everything else on the server — `/api/health`, `/v/:slug`, `/data/*`, `/static/*`, `/admin` — is open.
+The server issues long-lived API keys. The macOS app stores one in the system Keychain and sends it as `Authorization: Bearer <token>` on every call to `/api/videos/*`. The server stores only the SHA-256 hash of each token; plaintext is shown once at creation and never recoverable. Keys can be named (for human readability), listed, and revoked. Everything else on the server — `/api/health`, `/:slug/*`, `/static/*`, `/admin` — is open.
 
 ## Token format
 
@@ -21,7 +21,7 @@ lck_<43 chars of base64url>
 
 **Key lib** (`server/src/lib/api-keys.ts`): `createApiKey`, `verifyApiKey`, `listApiKeys`, `revokeApiKey`, `touchLastUsed`. SHA-256 hash of the plaintext is looked up by indexed equality — no byte-by-byte constant-time comparison. For 256-bit random tokens the practical timing leak is negligible; revisit if auth rate-limiting is ever added.
 
-**Middleware** (`server/src/lib/auth.ts`): `requireApiKey()` is a Hono middleware. On a bad/missing/revoked token it returns `401` with `WWW-Authenticate: Bearer realm="loom-clone"`. On success it fire-and-forgets `touchLastUsed(id)` and stashes `apiKeyId` on the Hono context (typed via `AuthVariables`).
+**Middleware** (`server/src/lib/auth.ts`): `requireApiKey()` is a Hono middleware. On a bad/missing/revoked token it returns `401` with `WWW-Authenticate: Bearer realm="loom-clone"` and a JSON body following the standard error envelope: `{ error: "<message>", code: "<MACHINE_CODE>" }`. Codes: `MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOKEN`, `INVALID_API_KEY`. On success it fire-and-forgets `touchLastUsed(id)` and stashes `apiKeyId` on the Hono context (typed via `AuthVariables`).
 
 **Mount point** (`server/src/app.ts`): `app.use("/api/videos/*", requireApiKey())`. Placed at the mount-point rather than inside the `videos` sub-app so that sub-app stays auth-agnostic and tests can exercise routes directly via `videos.request(...)`.
 
@@ -58,4 +58,4 @@ bun run keys:revoke <id>        # idempotent
 - **Per-key scopes / read-only keys** — YAGNI for a single user.
 - **Token refresh / expiry** — long-lived tokens with manual rotation are fine at this scale.
 - **HTTPS enforcement** — a task-x3 (deploy) concern. Plaintext bearer over HTTP is acceptable on localhost only. Before `HOST` moves off `127.0.0.1`, HTTPS must be in place (bearer tokens over plain HTTP are trivially interceptable).
-- **Admin panel auth** — Phase 6 concern, different mechanism (sessions, not API keys). Deliberately not conflated.
+- **Admin panel auth** — task-x5 concern, different mechanism (sessions, not API keys). Deliberately not conflated.

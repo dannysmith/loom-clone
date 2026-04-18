@@ -33,13 +33,15 @@ These are the real-world situations this tool needs to serve:
 Three components exist today, plus a diagnostic tool:
 
 - **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
-- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves the viewer page. Currently also serves static files (segments, derivatives) with Range-request support. `server/data/` holds per-video directories.
-- **Viewer Layer** — not yet built as a separate component. Currently the server handles playback directly at `/v/:slug` using Vidstack. Future plan is Cloudflare Workers + KV for CDN-backed delivery.
+- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). `server/data/` holds per-video directories.
+- **Viewer Layer** — not yet built as a separate component. Currently the server handles playback directly at `/:slug` using Vidstack, with media served under `/:slug/raw/*` and `/:slug/stream/*`. Future plan is Cloudflare Workers + KV for CDN-backed delivery.
 - **Test Harness** (`app/TestHarness/`, `test-runs/`) — diagnostic tool for probing AVFoundation/VideoToolbox/Metal configurations in isolation, without going through the real recording pipeline. Separate Xcode target (`LoomCloneTestHarness`), not a shipping component. Has its own `README.md` and `CLAUDE.md` with detailed usage instructions.
 
 ## Developer Docs
 
-- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/videos.ts`.
+- `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
+- `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
+- `docs/developer/auth.md` — how the bearer token system works end-to-end (server schema, key lifecycle, macOS Keychain storage, Settings UI).
 - `docs/requirements.md` — refined requirements for the whole system.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
 - `docs/archive/` — incident records and completed research audits. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
@@ -98,12 +100,18 @@ Direct commands (for reference or when you need different flags):
 │       ├── index.ts                      #   entry — initDb() + boots createApp()
 │       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)
 │       ├── test-utils.ts                 #   temp-dir test isolation helpers
-│       ├── lib/                          #   store, playlist, derivatives, constants — co-located __tests__/
+│       ├── lib/                          #   store, playlist, derivatives, errors, url, file-serve — co-located __tests__/
 │       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
-│       └── routes/                       #   /api/videos, /v/:slug, /admin, /data/* — co-located __tests__/
+│       └── routes/                       #   four modules, each with co-located __tests__/
+│           ├── api/                      #     /api/* — bearer-authed JSON API (health, videos CRUD)
+│           ├── admin/                    #     /admin — web-authed admin (stub until task-x5)
+│           ├── site/                     #     root, well-known files (robots, favicon, sitemap)
+│           └── videos/                   #     /:slug viewer surface (page, embed, media, metadata)
 ├── docs/
 │   ├── developer/                        # living developer docs
-│   │   └── streaming-and-healing.md
+│   │   ├── streaming-and-healing.md      #   segment flow, healing, derivatives
+│   │   ├── server-routes-and-api.md      #   full route + API reference
+│   │   └── auth.md                       #   bearer token system end-to-end
 │   ├── tasks-todo/                       # active/upcoming work
 │   ├── tasks-done/                       # completed task write-ups
 │   ├── research/                         # historical: initial research (pre-prototype)

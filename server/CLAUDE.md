@@ -57,16 +57,19 @@ Current codes: `MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOK
 ```
 routes/
   api/      bearer auth on /videos/* (mount-point), /health open
-    index.ts        mounts /health + /videos
-    videos.ts       PUT segment, POST complete, POST/DELETE
+    index.ts        mounts /health + /videos, ConflictError→409 handler
+    videos.ts       GET list, GET/:id, POST create, PATCH, PUT segment, POST complete, DELETE
   admin/    web/session auth at the mount (placeholder until task-x5)
     index.tsx       /admin stub
-  site/     open — root, well-known files, /data/* (drops in 6.5)
+  site/     open — root, well-known files
     index.ts        aggregator
-    data.ts         Range-aware /data/* handler
-  videos/   /:slug{...}/* viewer surface — mounted last
-    index.ts        aggregator
-    page.tsx        /v/:slug HTML page (slug-namespaced routes land in 6.4)
+    well-known.tsx  /, /robots.txt, /favicon.ico, /sitemap.xml
+  videos/   /:slug viewer surface — mounted last as catch-all
+    index.ts        aggregator + /:file dispatch (.json, .md, .mp4, plain slug)
+    page.tsx        /:slug HTML page + /v/:slug→/:slug 301 redirect
+    embed.tsx       /:slug/embed chromeless player
+    media.ts        /:slug/raw/:file, /:slug/stream/:file, /:slug/poster.jpg
+    metadata.ts     /:slug.json, /:slug.md handler functions
 ```
 
 - **Auth at the mount**: bearer middleware is applied in `app.ts` to `/api/videos/*` only, keeping the api router itself auth-agnostic and easy to test.
@@ -82,7 +85,7 @@ Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + cust
 src/views/
   layouts/   RootLayout, ViewerLayout, AdminLayout — shared <html>/<head>/body shells
   viewer/    public-facing pages (VideoPage today; embed/etc. later)
-  admin/     admin UI components (stub today, fleshed out in Phase 6)
+  admin/     admin UI components (stub today, fleshed out in task-x5)
 public/
   styles/    CSS — see below
 ```
@@ -118,6 +121,6 @@ Preferences:
 
 - **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory in `src/app.ts` is the side-effect-free entry — import that from tests, not `index.ts`.
 - **`DATA_DIR = "data"`** is relative. Tests depend on this. When deployment comes it'll likely become env-configurable; until then, don't hard-code absolute paths.
-- **Segment filename allowlist** in `routes/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists.
+- **Segment filename allowlist** in `routes/api/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists. Similar allowlists exist in `routes/videos/media.ts` for raw and stream routes.
 - **Derivatives are fire-and-forget.** `scheduleDerivatives(id)` returns immediately; the `/complete` response never waits on ffmpeg. Tests use `_inFlightPromise(id)` to await completion.
 - **Default queries hide trashed videos.** `getVideo` / `getVideoBySlug` / `resolveSlug` / `listVideos` all accept `{ includeTrashed: true }` to opt in. Admin-side code needs the opt-in; public routes should never use it.

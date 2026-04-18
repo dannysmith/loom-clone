@@ -19,3 +19,19 @@ export function urlsForSlug(slug: string): VideoUrls {
     poster: `/${slug}/poster.jpg`,
   };
 }
+
+// Returns the public base URL for constructing absolute URLs (clipboard,
+// API responses). Reads `PUBLIC_URL` from the environment; falls back to
+// `http://${HOST}:${PORT}` for local dev. Read at call time so `.env`
+// changes take effect without restart.
+export function getPublicBaseUrl(): string {
+  if (Bun.env.PUBLIC_URL) return Bun.env.PUBLIC_URL.replace(/\/+$/, "");
+  const host = Bun.env.HOST ?? "127.0.0.1";
+  const port = Bun.env.PORT ?? "3000";
+  return `http://${host}:${port}`;
+}
+
+// Absolute URL for a path (e.g. "/my-slug" → "https://loom.example.com/my-slug").
+export function absoluteUrl(path: string): string {
+  return `${getPublicBaseUrl()}${path}`;
+}

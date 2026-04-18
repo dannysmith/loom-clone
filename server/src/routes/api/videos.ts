@@ -13,6 +13,7 @@ import {
   getVideo,
   setVideoStatus,
 } from "../../lib/store";
+import { absoluteUrl } from "../../lib/url";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.
@@ -146,11 +147,12 @@ videos.post("/:id/complete", async (c) => {
     scheduleDerivatives(id);
   }
 
-  const url = `/${video.slug}`;
+  const path = `/${video.slug}`;
+  const url = absoluteUrl(path);
   console.log(
-    `[complete] ${video.slug} -> ${url} (status=${nextStatus}, missing=${missing.length})`,
+    `[complete] ${video.slug} -> ${path} (status=${nextStatus}, missing=${missing.length})`,
   );
-  return c.json({ url, slug: video.slug, missing });
+  return c.json({ path, url, slug: video.slug, missing });
 });
 
 // Cancel/delete a recording. Only allowed for non-complete videos — once a

@@ -178,12 +178,14 @@ describe("POST /:id/complete", () => {
     expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
   });
 
-  test("without timeline body: status complete, empty missing", async () => {
+  test("without timeline body: status complete, empty missing, returns path + url", async () => {
     const { id, slug } = await createVideoViaApi();
     const res = await videos.request(`/${id}/complete`, { method: "POST" });
     const body = await res.json();
     expect(body.slug).toBe(slug);
-    expect(body.url).toBe(`/${slug}`);
+    expect(body.path).toBe(`/${slug}`);
+    expect(body.url).toContain(`/${slug}`);
+    expect(body.url).toMatch(/^https?:\/\//);
     expect(body.missing).toEqual([]);
     expect((await getVideo(id))?.status).toBe("complete");
   });

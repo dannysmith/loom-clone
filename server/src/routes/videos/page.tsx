@@ -37,13 +37,16 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   return c.html(<VideoPage slug={video.slug} src={src} poster={poster} />);
 }
 
-// Legacy /v/:slug path. Delegates to the same handler as /:slug so both
-// surfaces emit slug-namespaced media URLs. Phase 6.6 will turn this into
-// a 301 redirect to /:slug.
+// Permanent redirect from the legacy /v/:slug path. Cached shared URLs,
+// bookmarks, and older macOS app versions that still reference /v/... will
+// 301 to the canonical /:slug form. Do not remove this route.
 const page = new Hono();
 
-page.get("/v/:slug", async (c) => {
-  return handleSlugPage(c, c.req.param("slug"));
+page.get("/v/:slug", (c) => c.redirect(`/${c.req.param("slug")}`, 301));
+page.get("/v/:slug/*", (c) => {
+  const slug = c.req.param("slug");
+  const rest = c.req.path.replace(`/v/${slug}`, `/${slug}`);
+  return c.redirect(rest, 301);
 });
 
 export default page;

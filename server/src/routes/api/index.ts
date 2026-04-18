@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { Hono } from "hono";
 import { resolve } from "path";
+import { ConflictError } from "../../lib/store";
 import videos from "./videos";
 
 // Read version once at import time. resolve() from this file's directory
@@ -23,5 +24,14 @@ api.get("/health", (c) =>
 );
 
 api.route("/videos", videos);
+
+// Map store-layer ConflictError (e.g. slug collisions) to 409 so the
+// client gets a structured error instead of a generic 500.
+api.onError((err, c) => {
+  if (err instanceof ConflictError) {
+    return c.json({ error: err.message, code: "CONFLICT" }, 409);
+  }
+  throw err;
+});
 
 export default api;

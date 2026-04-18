@@ -1,6 +1,8 @@
+import { zValidator } from "@hono/zod-validator";
 import { readdir, rm } from "fs/promises";
 import { Hono } from "hono";
 import { join, resolve } from "path";
+import { z } from "zod";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { scheduleDerivatives } from "../../lib/derivatives";
 import { apiError, ErrorCode } from "../../lib/errors";
@@ -13,6 +15,7 @@ import {
   getVideo,
   listVideosPaginated,
   setVideoStatus,
+  updateVideo,
   type VideoRecord,
 } from "../../lib/store";
 import { absoluteUrl, urlsForSlug } from "../../lib/url";
@@ -97,6 +100,30 @@ videos.get("/:id", async (c) => {
   if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
   return c.json(videoToApiJson(video));
 });
+
+// Edit title, description, or visibility. Returns the updated video.
+const patchSchema = z.object({
+  title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  visibility: z.enum(["public", "unlisted", "private"]).optional(),
+});
+
+videos.patch(
+  "/:id",
+  zValidator("json", patchSchema, (result, c) => {
+    if (!result.success) {
+      return apiError(c, 400, result.error.message, ErrorCode.VALIDATION_ERROR);
+    }
+  }),
+  async (c) => {
+    const { id } = c.req.param();
+    const existing = await getVideo(id);
+    if (!existing) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+    const patch = c.req.valid("json");
+    const updated = await updateVideo(id, patch);
+    return c.json(videoToApiJson(updated));
+  },
+);
 
 // Create a new video record
 videos.post("/", async (c) => {

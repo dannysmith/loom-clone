@@ -319,6 +319,80 @@ describe("POST /:id/complete", () => {
   });
 });
 
+describe("PATCH /:id", () => {
+  test("updates title and returns updated video", async () => {
+    const { id, slug } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "My Recording" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.title).toBe("My Recording");
+    expect(body.slug).toBe(slug);
+    expect(body.urls).toBeTruthy();
+  });
+
+  test("updates visibility", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "public" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).visibility).toBe("public");
+  });
+
+  test("clears title with null", async () => {
+    const { id } = await createVideoViaApi();
+    await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Temp" }),
+    });
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: null }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).title).toBeNull();
+  });
+
+  test("returns 404 for unknown id", async () => {
+    const res = await videos.request("/nonexistent", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
+  });
+
+  test("rejects invalid visibility with 400 VALIDATION_ERROR", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "secret" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("VALIDATION_ERROR");
+  });
+
+  test("rejects non-string title with 400", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: 42 }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("DELETE /:id", () => {
   test("removes non-complete video and data directory", async () => {
     const { id } = await createVideoViaApi();

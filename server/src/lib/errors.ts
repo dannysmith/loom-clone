@@ -22,6 +22,9 @@ export const ErrorCode = {
 
   // Videos (409) — added in 6.8
   VIDEO_ALREADY_COMPLETE: "VIDEO_ALREADY_COMPLETE",
+
+  // Validation (400) — added in 6.13
+  VALIDATION_ERROR: "VALIDATION_ERROR",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

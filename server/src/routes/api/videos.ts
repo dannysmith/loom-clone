@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { join, resolve } from "path";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { scheduleDerivatives } from "../../lib/derivatives";
+import { apiError, ErrorCode } from "../../lib/errors";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
 import {
   addSegment,
@@ -64,10 +65,10 @@ videos.post("/", async (c) => {
 videos.put("/:id/segments/:filename", async (c) => {
   const { id, filename } = c.req.param();
   const video = await getVideo(id);
-  if (!video) return c.json({ error: "Video not found" }, 404);
+  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
 
   if (!SEGMENT_FILENAME.test(filename)) {
-    return c.json({ error: "Invalid segment filename" }, 400);
+    return apiError(c, 400, "Invalid segment filename", ErrorCode.INVALID_SEGMENT_FILENAME);
   }
 
   // Belt-and-braces: even with the allowlist, resolve the destination and
@@ -75,7 +76,7 @@ videos.put("/:id/segments/:filename", async (c) => {
   const videoDir = resolve(join(DATA_DIR, id));
   const path = resolve(join(videoDir, filename));
   if (!path.startsWith(`${videoDir}/`)) {
-    return c.json({ error: "Invalid segment filename" }, 400);
+    return apiError(c, 400, "Invalid segment filename", ErrorCode.INVALID_SEGMENT_FILENAME);
   }
 
   const body = await c.req.arrayBuffer();
@@ -106,7 +107,7 @@ videos.put("/:id/segments/:filename", async (c) => {
 videos.post("/:id/complete", async (c) => {
   const { id } = c.req.param();
   const existing = await getVideo(id);
-  if (!existing) return c.json({ error: "Video not found" }, 404);
+  if (!existing) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
 
   let timeline: TimelineLike | null = null;
   const contentType = c.req.header("content-type") ?? "";
@@ -145,7 +146,7 @@ videos.post("/:id/complete", async (c) => {
     scheduleDerivatives(id);
   }
 
-  const url = `/v/${video.slug}`;
+  const url = `/${video.slug}`;
   console.log(
     `[complete] ${video.slug} -> ${url} (status=${nextStatus}, missing=${missing.length})`,
   );
@@ -156,7 +157,7 @@ videos.post("/:id/complete", async (c) => {
 videos.delete("/:id", async (c) => {
   const { id } = c.req.param();
   const video = await deleteVideo(id);
-  if (!video) return c.json({ error: "Video not found" }, 404);
+  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
 
   await rm(join(DATA_DIR, id), { recursive: true, force: true });
 

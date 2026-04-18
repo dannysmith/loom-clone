@@ -32,7 +32,7 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 
 ## Auth
 
-All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <token>`. `/api/health`, `/v/*`, `/data/*`, `/static/*`, `/admin` are open.
+All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <token>`. `/api/health`, `/:slug/*`, `/static/*`, `/admin` are open.
 
 - **Format**: `lck_<32 random bytes, base64url>`. The `lck_` prefix is a leak-detection aid (grep/secret scanners).
 - **Storage**: `api_keys` table stores only SHA-256 of the token. Plaintext is shown once on creation and never recoverable. SHA-256 is correct here (not bcrypt/argon2) — API keys are high-entropy, so password-hashing functions would just slow down every request verification for no gain. See `src/lib/api-keys.ts` for the rationale on why we don't need `timingSafeEqual`.
@@ -43,6 +43,12 @@ All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <to
   - `bun run keys:revoke <id>` — idempotent
 - **Env**: `HOST` (default `127.0.0.1`) and `PORT` (default `3000`) in `.env`. Bun auto-loads. See `.env.example`.
 - **Transport**: plaintext bearer over HTTP is acceptable on localhost only. task-x3 (Hetzner) must enforce HTTPS before `HOST` gets widened.
+
+## API response envelope
+
+All `/api/*` error responses use a uniform shape: `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Success responses return the resource directly (or `{ ok: true }` for action endpoints with no return value). Error codes are defined in `src/lib/errors.ts`; use the `apiError(c, status, message, code)` helper to build error responses — never construct them by hand.
+
+Current codes: `MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOKEN`, `INVALID_API_KEY` (401), `VIDEO_NOT_FOUND` (404), `INVALID_SEGMENT_FILENAME` (400), `VIDEO_ALREADY_COMPLETE` (409).
 
 ## Route modules
 
@@ -84,7 +90,7 @@ public/
 - **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.
 - **DOCTYPE**: `RootLayout` emits `<!DOCTYPE html>` via `raw()` from `hono/html`. Don't repeat it elsewhere.
 - **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
-- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is on the Range-aware `/data/*` handler in `routes/site/data.ts` (slated to drop in Phase 6.5).
+- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module (Phase 6.4).
 
 **CSS**:
 

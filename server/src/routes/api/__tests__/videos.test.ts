@@ -72,15 +72,16 @@ describe("PUT /:id/segments/:filename", () => {
     expect(written).toEqual(bytes);
   });
 
-  test("returns 404 for unknown video id", async () => {
+  test("returns 404 with VIDEO_NOT_FOUND for unknown video id", async () => {
     const res = await videos.request(`/nope/segments/seg_000.m4s`, {
       method: "PUT",
       body: new Uint8Array([1]),
     });
     expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
   });
 
-  test("rejects invalid filenames (path traversal)", async () => {
+  test("rejects invalid filenames with INVALID_SEGMENT_FILENAME", async () => {
     const { id } = await createVideoViaApi();
     // Hono normalizes the path before routing, so we go straight to the handler.
     const res = await videos.request(`/${id}/segments/..%2F..%2Fetc%2Fpasswd`, {
@@ -88,6 +89,7 @@ describe("PUT /:id/segments/:filename", () => {
       body: new Uint8Array([1]),
     });
     expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("INVALID_SEGMENT_FILENAME");
   });
 
   test("rejects filenames that don't match the allowlist", async () => {
@@ -97,6 +99,7 @@ describe("PUT /:id/segments/:filename", () => {
       body: new Uint8Array([1]),
     });
     expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("INVALID_SEGMENT_FILENAME");
     // Ensure no file was written to the video directory under that name.
     expect(await Bun.file(join(DATA_DIR, id, "video.json")).exists()).toBe(false);
   });
@@ -163,9 +166,10 @@ describe("PUT /:id/segments/:filename", () => {
 });
 
 describe("POST /:id/complete", () => {
-  test("returns 404 for unknown video id", async () => {
+  test("returns 404 with VIDEO_NOT_FOUND for unknown video id", async () => {
     const res = await videos.request(`/nope/complete`, { method: "POST" });
     expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
   });
 
   test("without timeline body: status complete, empty missing", async () => {
@@ -173,7 +177,7 @@ describe("POST /:id/complete", () => {
     const res = await videos.request(`/${id}/complete`, { method: "POST" });
     const body = await res.json();
     expect(body.slug).toBe(slug);
-    expect(body.url).toBe(`/v/${slug}`);
+    expect(body.url).toBe(`/${slug}`);
     expect(body.missing).toEqual([]);
     expect((await getVideo(id))?.status).toBe("complete");
   });
@@ -228,9 +232,10 @@ describe("DELETE /:id", () => {
     expect(await Bun.file(join(DATA_DIR, id, "video.json")).exists()).toBe(false);
   });
 
-  test("returns 404 for unknown id", async () => {
+  test("returns 404 with VIDEO_NOT_FOUND for unknown id", async () => {
     const res = await videos.request(`/nope`, { method: "DELETE" });
     expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
   });
 });
 

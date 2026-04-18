@@ -153,15 +153,20 @@ videos.post("/:id/complete", async (c) => {
   return c.json({ url, slug: video.slug, missing });
 });
 
-// Cancel/delete a recording
+// Cancel/delete a recording. Only allowed for non-complete videos — once a
+// video is complete it's shareable and deletion is an admin act.
 videos.delete("/:id", async (c) => {
   const { id } = c.req.param();
-  const video = await deleteVideo(id);
-  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+  const existing = await getVideo(id);
+  if (!existing) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+  if (existing.status === "complete") {
+    return apiError(c, 409, "Cannot delete a completed video", ErrorCode.VIDEO_ALREADY_COMPLETE);
+  }
 
+  await deleteVideo(id);
   await rm(join(DATA_DIR, id), { recursive: true, force: true });
 
-  console.log(`[delete] ${id} (slug: ${video.slug})`);
+  console.log(`[delete] ${id} (slug: ${existing.slug})`);
   return c.json({ ok: true });
 });
 

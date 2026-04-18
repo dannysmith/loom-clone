@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
-import { DATA_DIR, getSegmentDurations, getVideo, trashVideo } from "../../../lib/store";
+import {
+  DATA_DIR,
+  getSegmentDurations,
+  getVideo,
+  setVideoStatus,
+  trashVideo,
+} from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
 
@@ -221,15 +227,37 @@ describe("POST /:id/complete", () => {
 });
 
 describe("DELETE /:id", () => {
-  test("removes video record and data directory", async () => {
+  test("removes non-complete video and data directory", async () => {
     const { id } = await createVideoViaApi();
     expect(await getVideo(id)).toBeTruthy();
 
     const res = await videos.request(`/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
     expect(await getVideo(id)).toBeUndefined();
-    // Directory is gone too.
-    expect(await Bun.file(join(DATA_DIR, id, "video.json")).exists()).toBe(false);
+  });
+
+  test("allows deleting a recording-status video", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+  });
+
+  test("allows deleting a healing-status video", async () => {
+    const { id } = await createVideoViaApi();
+    await setVideoStatus(id, "healing");
+    const res = await videos.request(`/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+  });
+
+  test("returns 409 VIDEO_ALREADY_COMPLETE for complete videos", async () => {
+    const { id } = await createVideoViaApi();
+    await setVideoStatus(id, "complete");
+    const res = await videos.request(`/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("VIDEO_ALREADY_COMPLETE");
+    // Video still exists
+    expect(await getVideo(id)).toBeTruthy();
   });
 
   test("returns 404 with VIDEO_NOT_FOUND for unknown id", async () => {

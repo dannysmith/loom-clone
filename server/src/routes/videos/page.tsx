@@ -34,7 +34,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   const src = hasMp4 ? urls.raw : urls.hls;
   const poster = hasThumb ? urls.poster : null;
 
-  return c.html(<VideoPage slug={video.slug} src={src} poster={poster} />);
+  return c.html(<VideoPage video={video} src={src} poster={poster} />);
 }
 
 // Permanent redirect from the legacy /v/:slug path. Cached shared URLs,

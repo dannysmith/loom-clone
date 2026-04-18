@@ -262,7 +262,7 @@ Gate the `/api/videos/*` routes behind API-key auth and make the macOS app send 
 - CORS — irrelevant until delivery moves cross-origin (task-x6).
 - Key rotation automation — manual `revoke` + `create` is fine at this scale.
 
-## Phase 6 - API restructure + route surface
+## Phase 6 - API restructure + route surface [DONE]
 
 This phase rationalises the URL surface so it's predictable, future-proof, and easy to extend. Three concrete things happen:
 
@@ -492,34 +492,87 @@ Additive: existing `/v/:slug` keeps working through 6.6.
 - **Real viewer-page quality** (HTML, OG tags, SEO, embed UX, full JSON/MD content). Phase 7. This phase only ensures the routes exist with reasonable stubs.
 
 
-## Phase 7 - Improve viewer-facing video page
+## Phase 7 - Viewer page quality + metadata endpoints [DONE through 6.x stubs]
 
-NOTE: We may eventually replicate these endpoints using CloudFlare Workers, but In the spirit of iterative development, I would like to start by serving them from our Honno app.
+Make the viewer-facing pages production-quality: proper HTML, SEO, OG tags, metadata endpoints, oEmbed, sitemap. We may eventually replicate these via Cloudflare Workers, but iterating on the Hono app first.
 
-### `/:slug`
+### Decisions locked in during planning
 
-The HTML page which renders the video player
+- **Vidstack stays on the CDN** (`cdn.vidstack.io`). It's jsDelivr-backed (Cloudflare + Fastly + StackPath), treated as a first-class installation method by the Vidstack docs, and is actually the more current distribution vs the stale npm package. No version pinning — updates arrive automatically, and for a personal tool the risk of a breaking change is lower than the cost of remembering to update a pinned version. If the project ever goes dormant, downloading the files into `public/vendor/` is a 5-minute task.
+- **Unlisted videos**: `X-Robots-Tag: noindex` header + `<meta name="robots" content="noindex">` in `<head>`. Still accessible by URL, still get oEmbed/OG previews — just not discoverable by search engines. Never appear in sitemap.
+- **oEmbed**: `GET /api/oembed?url=&format=json` returning a `video` type response with an iframe pointing at `/:slug/embed`. Discovery via `<link rel="alternate">` in the HTML head. Slack/Discord won't inline-play (they whitelist providers), but the endpoint is the right thing for Notion embeds, WordPress, and anything that supports oEmbed discovery. OG tags are what actually drive Slack/Discord/iMessage rich preview cards.
+- **Sitemap**: uses the video sitemap extension (`<video:video>`) for Google video thumbnails in search results. Only `public` + non-trashed + `complete` videos.
 
-- Serve a performant & accessible HTML page with the correct SEO, metadata, OG tags/images etc.
-- Suitably render the title and other video metadata, and a little link to my website etc.
-- Minimal but on-brand CSS styling
-- Player is as good and properly configured as it can be
+### Sub-phases
 
-### `/:slug/embed`
+#### 7.1 Enrich VideoPage
 
-Serves the HTML Video player with no padding or other chrome. Intended for use in iframes.
+- Pass the full video record to `VideoPage`, not just slug + src + poster.
+- Render below the player: title (if set), description (if set), formatted duration, formatted date.
+- Small attribution footer ("Hosted with loom-clone" or similar — easy to update later).
+- Page `<title>`: use video title if set, fall back to "Video {slug}".
 
-### `/:slug.mp4`
+#### 7.2 OG tags, meta, and unlisted handling
 
-Serves the `source.mp4` directly with appropriate headers.
+- `<meta name="description">`, `<link rel="canonical">` (absolute URL).
+- Open Graph: `og:title`, `og:description`, `og:image` (absolute poster URL), `og:url`, `og:type=video.other`, `og:video` (absolute embed URL).
+- Twitter Card: `twitter:card=player`, `twitter:player` (absolute embed URL with dimensions), `twitter:image`.
+- oEmbed discovery: `<link rel="alternate" type="application/json+oembed" href="...">`.
+- For unlisted videos: add `<meta name="robots" content="noindex">` in `<head>` and `X-Robots-Tag: noindex` response header. Public videos get neither.
+- Embed page: add equivalent OG tags (services fetching the embed URL directly should still get metadata).
 
-### `/:slug.json`
+#### 7.3 oEmbed endpoint
 
-Serves a JSON representation of the video data including the URLs above. Intended for programmatic and LLM consumption.
+- `GET /api/oembed?url=<encoded-page-url>&format=json` — open, no auth.
+- Response shape (type `video`): `version`, `type`, `title`, `author_name`, `provider_name`, `provider_url`, `html` (iframe pointing at `/:slug/embed`), `width`, `height`, `thumbnail_url`, `thumbnail_width`, `thumbnail_height`.
+- `maxwidth` / `maxheight` query params respected (clamp the iframe dimensions).
+- Returns 404 if the URL doesn't resolve to a known video. Returns the response for unlisted videos (they're accessible by URL).
+- Parse the `url` param to extract the slug, resolve via `resolveSlug`.
 
-### `/:slug.md`
+#### 7.4 Viewer CSS polish
 
-Serves a Markdown representation of the video data including the URLs above. This will be a very sparse markdown file for videos which do not have a title, description, transcription etc. But that's fine. We're including it here so that further down the line when we are generating titles, descriptions, transcriptions, this endpoint & template is already here. 
+- Style the metadata section below the player: title, description, date/duration row, attribution. Light-on-dark to match the black viewer background.
+- Extract embed inline CSS into `public/styles/embed.css`, linked via the head slot.
+- Responsive: player and metadata should work well on mobile viewports.
+- Use existing tokens (spacing, type scale, colours) — no new design system work.
+
+#### 7.5 `/:slug.json` enrichment
+
+- Use absolute URLs in the `urls` bundle (wrap with `absoluteUrl()`).
+- Add fields: `status`, `visibility`, `createdAt`, `updatedAt`, `completedAt`, `source`, `width`, `height`.
+- Add top-level `url` (absolute page URL) to match the API video shape.
+- This is the public metadata endpoint for programmatic/LLM consumption — shape should be stable.
+
+#### 7.6 `/:slug.md` enrichment
+
+- Add formatted duration (e.g. "1m 23s"), formatted date.
+- Add a bulleted list of URLs at the end: page (absolute), download (.mp4 redirect, absolute), embed (absolute), JSON (absolute).
+- Description section if set.
+- Sparse is fine when there's no title/description/transcription — the template is ready for when those arrive.
+
+#### 7.7 Sitemap
+
+- Replace the empty stub in `well-known.tsx` with a DB-backed generator.
+- Only include videos where `status = 'complete'`, `visibility = 'public'`, `trashedAt IS NULL`.
+- Use the video sitemap extension: `<video:thumbnail_loc>`, `<video:title>`, `<video:content_loc>` (MP4 URL), `<video:player_loc>` (embed URL), `<video:duration>`.
+- All URLs absolute via `getPublicBaseUrl()`.
+
+#### 7.8 Tests + docs
+
+- Render tests: VideoPage includes OG tags, canonical, robots meta for unlisted.
+- oEmbed: returns correct shape, handles unknown URLs, respects maxwidth/maxheight.
+- Sitemap: includes public videos, excludes unlisted/trashed/incomplete.
+- JSON/MD: verify enriched shapes and absolute URLs.
+- Update `docs/developer/server-routes-and-api.md` with oEmbed endpoint, sitemap, enriched JSON/MD shapes.
+- Update `server/CLAUDE.md` if any structural changes.
+
+### Out of scope (deliberately)
+
+- **Vidstack self-hosting** — CDN is legitimate for production, backed by jsDelivr. Defer to if/when the project goes dormant.
+- **Vidstack theming / custom controls** — default layout is fine for now. Cosmetic.
+- **Transcription / AI-generated titles** — the `.md` and `.json` templates are ready for these fields; the generation pipeline is a separate task.
+- **CORS headers** — irrelevant until delivery goes cross-origin (task-x6).
+- **View counts / analytics** — separate concern, later phase.
 
 ## Phase 8 - Full Review of Serverside App
 

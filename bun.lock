@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "media-icons": "^0.10.0",
+      },
+    },
+  },
+  "packages": {
+    "media-icons": ["media-icons@0.10.0", "", {}, "sha512-M9loX7KUWsID3T8pRSN6/+MNKPEm9dNteqJk7yfo9ZaAIEYzEd07jWTVRlRmgVMKoAh1kY7funD6Qe1prrTJMQ=="],
+  }
+}

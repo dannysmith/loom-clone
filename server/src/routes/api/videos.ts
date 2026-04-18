@@ -11,9 +11,11 @@ import {
   DATA_DIR,
   deleteVideo,
   getVideo,
+  listVideosPaginated,
   setVideoStatus,
+  type VideoRecord,
 } from "../../lib/store";
-import { absoluteUrl } from "../../lib/url";
+import { absoluteUrl, urlsForSlug } from "../../lib/url";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.
@@ -52,7 +54,49 @@ async function onDiskFilenames(id: string): Promise<Set<string>> {
   }
 }
 
+// Shared JSON shape for a single video in API responses.
+function videoToApiJson(video: VideoRecord) {
+  const urls = urlsForSlug(video.slug);
+  return {
+    id: video.id,
+    slug: video.slug,
+    status: video.status,
+    visibility: video.visibility,
+    title: video.title,
+    description: video.description,
+    durationSeconds: video.durationSeconds,
+    width: video.width,
+    height: video.height,
+    source: video.source,
+    createdAt: video.createdAt,
+    updatedAt: video.updatedAt,
+    completedAt: video.completedAt,
+    url: absoluteUrl(urls.page),
+    urls,
+  };
+}
+
 const videos = new Hono();
+
+// List all videos, newest first. Cursor-paginated.
+videos.get("/", async (c) => {
+  const limit = Number(c.req.query("limit") ?? 20);
+  const cursor = c.req.query("cursor");
+  const includeTrashed = c.req.query("includeTrashed") === "1";
+  const result = await listVideosPaginated({ limit, cursor, includeTrashed });
+  return c.json({
+    items: result.items.map(videoToApiJson),
+    nextCursor: result.nextCursor,
+  });
+});
+
+// Single video by id.
+videos.get("/:id", async (c) => {
+  const { id } = c.req.param();
+  const video = await getVideo(id);
+  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+  return c.json(videoToApiJson(video));
+});
 
 // Create a new video record
 videos.post("/", async (c) => {

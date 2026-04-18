@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
@@ -148,6 +148,58 @@ export async function listVideos(opts: GetOpts = {}): Promise<Video[]> {
   return opts.includeTrashed
     ? base.orderBy(desc(videos.createdAt))
     : base.where(isNull(videos.trashedAt)).orderBy(desc(videos.createdAt));
+}
+
+export type ListPaginatedOpts = GetOpts & {
+  limit?: number;
+  cursor?: string; // id of the last video from the previous page
+};
+
+// Cursor-paginated listing. Cursor is a video id; items after that video's
+// createdAt (in DESC order) are returned. Fetches limit+1 to detect whether
+// a next page exists without a separate count query.
+export async function listVideosPaginated(opts: ListPaginatedOpts = {}): Promise<{
+  items: Video[];
+  nextCursor: string | null;
+}> {
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+  const db = getDb();
+
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (!opts.includeTrashed) conditions.push(isNull(videos.trashedAt));
+
+  if (opts.cursor) {
+    const cursorVideo = db
+      .select({ createdAt: videos.createdAt, id: videos.id })
+      .from(videos)
+      .where(eq(videos.id, opts.cursor))
+      .get();
+    if (cursorVideo) {
+      // Composite cursor: items that sort after the cursor in (createdAt DESC, id DESC).
+      // Handles timestamp ties from rapid creates (common in tests, possible in prod).
+      conditions.push(
+        or(
+          lt(videos.createdAt, cursorVideo.createdAt),
+          and(eq(videos.createdAt, cursorVideo.createdAt), lt(videos.id, cursorVideo.id)),
+        )!,
+      );
+    }
+  }
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const rows = await db
+    .select()
+    .from(videos)
+    .where(where)
+    .orderBy(desc(videos.createdAt), desc(videos.id))
+    .limit(limit + 1);
+
+  const hasNext = rows.length > limit;
+  const items = hasNext ? rows.slice(0, limit) : rows;
+  const lastItem = items[items.length - 1];
+  const nextCursor = hasNext && lastItem ? lastItem.id : null;
+
+  return { items, nextCursor };
 }
 
 // Resolves a public slug. Checks the current slug first, then falls back to

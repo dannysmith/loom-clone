@@ -53,6 +53,97 @@ describe("expectedFilenamesFromTimeline", () => {
   });
 });
 
+describe("GET /", () => {
+  test("returns empty items when no videos exist", async () => {
+    const res = await videos.request("/");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items).toEqual([]);
+    expect(body.nextCursor).toBeNull();
+  });
+
+  test("returns videos with urls bundle", async () => {
+    const a = await createVideoViaApi();
+    const b = await createVideoViaApi();
+    const res = await videos.request("/");
+    const body = await res.json();
+    expect(body.items.length).toBe(2);
+    const ids = body.items.map((v: { id: string }) => v.id);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+    expect(body.items[0].urls.page).toBeTruthy();
+    expect(body.items[0].url).toMatch(/^https?:\/\//);
+  });
+
+  test("excludes trashed videos by default", async () => {
+    const v = await createVideoViaApi();
+    await trashVideo(v.id);
+    const res = await videos.request("/");
+    const body = await res.json();
+    expect(body.items.length).toBe(0);
+  });
+
+  test("includes trashed when includeTrashed=1", async () => {
+    const v = await createVideoViaApi();
+    await trashVideo(v.id);
+    const res = await videos.request("/?includeTrashed=1");
+    const body = await res.json();
+    expect(body.items.length).toBe(1);
+    expect(body.items[0].id).toBe(v.id);
+  });
+
+  test("paginates with cursor", async () => {
+    // Create 3 videos; request limit=2, then use cursor for the rest.
+    await createVideoViaApi();
+    await createVideoViaApi();
+    await createVideoViaApi();
+
+    const res1 = await videos.request("/?limit=2");
+    const page1 = await res1.json();
+    expect(page1.items.length).toBe(2);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const res2 = await videos.request(`/?limit=2&cursor=${page1.nextCursor}`);
+    const page2 = await res2.json();
+    expect(page2.items.length).toBe(1);
+    expect(page2.nextCursor).toBeNull();
+
+    // All 3 ids are distinct across both pages
+    const allIds = [...page1.items, ...page2.items].map((v: { id: string }) => v.id);
+    expect(new Set(allIds).size).toBe(3);
+  });
+});
+
+describe("GET /:id", () => {
+  test("returns video JSON with urls bundle", async () => {
+    const { id, slug } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe(id);
+    expect(body.slug).toBe(slug);
+    expect(body.status).toBe("recording");
+    expect(body.urls.page).toBe(`/${slug}`);
+    expect(body.urls.raw).toBe(`/${slug}/raw/source.mp4`);
+    expect(body.urls.hls).toBe(`/${slug}/stream/stream.m3u8`);
+    expect(body.urls.poster).toBe(`/${slug}/poster.jpg`);
+    expect(body.url).toMatch(/^https?:\/\//);
+  });
+
+  test("returns 404 for unknown id", async () => {
+    const res = await videos.request("/nonexistent-id");
+    expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("VIDEO_NOT_FOUND");
+  });
+
+  test("returns 404 for trashed video", async () => {
+    const { id } = await createVideoViaApi();
+    await trashVideo(id);
+    const res = await videos.request(`/${id}`);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("POST /", () => {
   test("creates a video and returns id + slug", async () => {
     const body = await createVideoViaApi();

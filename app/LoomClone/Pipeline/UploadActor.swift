@@ -244,10 +244,12 @@ actor UploadActor {
         }
 
         let json = try JSONDecoder().decode(CompleteResponse.self, from: data)
-        let fullURL = "\(apiClient.baseURL)\(json.url)"
+        // Server returns the full absolute URL directly — no need to
+        // reconstruct from baseURL + path.
+        let videoURL = json.url
         let missing = json.missing ?? []
-        print("[upload] Complete: \(fullURL) (missing: \(missing.count))")
-        return CompleteResult(url: fullURL, missing: missing)
+        print("[upload] Complete: \(videoURL) (missing: \(missing.count))")
+        return CompleteResult(url: videoURL, missing: missing)
     }
 
     // MARK: - Cancel
@@ -266,9 +268,14 @@ actor UploadActor {
             var request = try apiClient.authorizedRequest(path: "/api/videos/\(videoId)")
             request.httpMethod = "DELETE"
             let (_, http) = try await apiClient.send(request)
-            if http.statusCode == 200 {
+            switch http.statusCode {
+            case 200:
                 print("[upload] Cancelled server-side: \(videoId)")
-            } else {
+            case 409:
+                // Video already completed — can't delete via API. Not an
+                // error from the user's perspective; the recording is safe.
+                print("[upload] Cancel skipped (video already complete): \(videoId)")
+            default:
                 print("[upload] Cancel returned status \(http.statusCode)")
             }
         } catch {
@@ -295,7 +302,10 @@ actor UploadActor {
     }
 
     private struct CompleteResponse: Decodable {
+        /// Absolute URL for the video page (e.g. "https://loom.example.com/my-video").
         let url: String
+        /// Path-only URL (e.g. "/my-video").
+        let path: String?
         let slug: String
         /// Absent in pre-Phase-2 servers; treat as empty when missing.
         let missing: [String]?

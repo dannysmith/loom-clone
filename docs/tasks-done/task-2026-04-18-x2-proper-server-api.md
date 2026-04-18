@@ -264,6 +264,8 @@ Gate the `/api/videos/*` routes behind API-key auth and make the macOS app send 
 
 ## Phase 6 - API restructure + route surface [DONE]
 
+All 15 sub-phases (6.1–6.15) completed.
+
 This phase rationalises the URL surface so it's predictable, future-proof, and easy to extend. Three concrete things happen:
 
 1. The Hono app is reorganised into four route modules (`api` / `admin` / `site` / `videos`), each with its own auth profile.
@@ -492,7 +494,7 @@ Additive: existing `/v/:slug` keeps working through 6.6.
 - **Real viewer-page quality** (HTML, OG tags, SEO, embed UX, full JSON/MD content). Phase 7. This phase only ensures the routes exist with reasonable stubs.
 
 
-## Phase 7 - Viewer page quality + metadata endpoints [DONE through 6.x stubs]
+## Phase 7 - Viewer page quality + metadata endpoints [DONE]
 
 Make the viewer-facing pages production-quality: proper HTML, SEO, OG tags, metadata endpoints, oEmbed, sitemap. We may eventually replicate these via Cloudflare Workers, but iterating on the Hono app first.
 

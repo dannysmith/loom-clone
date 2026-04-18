@@ -1,21 +1,85 @@
-/* Viewer page only. Linked via <ViewerLayout> head slot. */
+/* Viewer page — linked via <ViewerLayout> head slot, not from app.css.
+   Dark background, centred player, metadata below. */
 
 body.viewer {
-  background: oklch(0% 0 0);
+  background: oklch(8% 0.005 250);
+  color: oklch(85% 0.01 250);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   min-height: 100vh;
+  padding: 0;
 }
 
 .viewer-main {
   inline-size: 100%;
+  max-inline-size: 1280px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  padding-inline: var(--space-4);
 }
 
+/* Player */
 media-player {
   inline-size: 100%;
-  max-inline-size: 1280px;
   aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-block-start: var(--space-6);
+}
+
+/* Metadata section below the player */
+.viewer-meta {
+  padding-block: var(--space-5);
+}
+
+.viewer-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: oklch(95% 0.005 250);
+  line-height: var(--line-height-tight);
+  margin-block-end: var(--space-2);
+}
+
+.viewer-details {
+  font-size: var(--font-size-sm);
+  color: oklch(55% 0.015 250);
+  margin-block-end: var(--space-3);
+}
+
+.viewer-description {
+  font-size: var(--font-size-base);
+  color: oklch(75% 0.01 250);
+  line-height: var(--line-height-normal);
+  max-inline-size: 65ch;
+  margin-block-end: var(--space-4);
+}
+
+.viewer-attribution {
+  font-size: var(--font-size-xs);
+  color: oklch(40% 0.01 250);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid oklch(20% 0.01 250);
+}
+
+.viewer-attribution a {
+  color: oklch(50% 0.015 250);
+  text-decoration: none;
+}
+
+.viewer-attribution a:hover {
+  color: oklch(65% 0.015 250);
+}
+
+/* Responsive: on small screens, reduce top padding and let the player
+   sit closer to the top edge. */
+@media (max-width: 640px) {
+  media-player {
+    margin-block-start: 0;
+    border-radius: 0;
+  }
+
+  .viewer-main {
+    padding-inline: var(--space-3);
+  }
 }

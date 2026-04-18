@@ -6,10 +6,8 @@ type Props = {
   poster: string | null;
 };
 
-// Chromeless player for iframe embeds. No page chrome, no viewer.css —
-// just the player filling the viewport. Phase 7 will polish the styling
-// and add proper embed-specific tokens (e.g. dark background, no rounded
-// corners on the player container).
+// Chromeless player for iframe embeds. No page chrome — just the player
+// filling the viewport. Styling in embed.css.
 export function EmbedPage({ slug, src, poster }: Props) {
   return (
     <RootLayout
@@ -19,11 +17,8 @@ export function EmbedPage({ slug, src, poster }: Props) {
         <>
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+          <link rel="stylesheet" href="/static/styles/embed.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />
-          <style>
-            {`html, body.embed { margin: 0; padding: 0; height: 100%; background: #000; }
-              body.embed media-player { width: 100%; height: 100%; }`}
-          </style>
         </>
       }
     >

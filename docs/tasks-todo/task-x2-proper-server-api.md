@@ -573,7 +573,3 @@ Make the viewer-facing pages production-quality: proper HTML, SEO, OG tags, meta
 - **Transcription / AI-generated titles** — the `.md` and `.json` templates are ready for these fields; the generation pipeline is a separate task.
 - **CORS headers** — irrelevant until delivery goes cross-origin (task-x6).
 - **View counts / analytics** — separate concern, later phase.
-
-## Phase 8 - Full Review of Serverside App
-
-And finally, let's conduct a full comprehensive review of all of the server side code. Let's clean up anything that needs cleaning, do any re-architecting, analyze and review it for code quality, architectural quality, and best practices, as well as any obvious issues with performance etc.

@@ -37,26 +37,13 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   return c.html(<VideoPage slug={video.slug} src={src} poster={poster} />);
 }
 
-// Legacy /v/:slug path. Kept intact through 6.6 where it'll become a 301
-// redirect to the slug-root form. Still emits /data/* URLs today; 6.5
-// updates those at the same time the /data/* handler is dropped.
+// Legacy /v/:slug path. Delegates to the same handler as /:slug so both
+// surfaces emit slug-namespaced media URLs. Phase 6.6 will turn this into
+// a 301 redirect to /:slug.
 const page = new Hono();
 
 page.get("/v/:slug", async (c) => {
-  const { slug } = c.req.param();
-  const resolved = await resolveSlug(slug);
-  if (!resolved) return c.text("Not found", 404);
-
-  if (resolved.redirected) {
-    return c.redirect(`/v/${resolved.video.slug}`, 301);
-  }
-  const { video } = resolved;
-
-  const { hasMp4, hasThumb } = await derivativeFlags(video.id);
-  const src = hasMp4 ? `/data/${video.id}/derivatives/source.mp4` : `/data/${video.id}/stream.m3u8`;
-  const poster = hasThumb ? `/data/${video.id}/derivatives/thumbnail.jpg` : null;
-
-  return c.html(<VideoPage slug={video.slug} src={src} poster={poster} />);
+  return handleSlugPage(c, c.req.param("slug"));
 });
 
 export default page;

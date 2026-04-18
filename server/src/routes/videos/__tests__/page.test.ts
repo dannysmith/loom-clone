@@ -51,8 +51,8 @@ describe("GET /v/:slug", () => {
     const video = await createVideo();
     const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
-    expect(html).toContain(`/data/${video.id}/stream.m3u8`);
-    expect(html).not.toContain(`/data/${video.id}/derivatives/source.mp4`);
+    expect(html).toContain(`/${video.slug}/stream/stream.m3u8`);
+    expect(html).not.toContain("/data/");
   });
 
   test("prefers source.mp4 when the derivative exists", async () => {
@@ -60,8 +60,8 @@ describe("GET /v/:slug", () => {
     await writeDerivative(video, "source.mp4");
     const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
-    expect(html).toContain(`/data/${video.id}/derivatives/source.mp4`);
-    expect(html).not.toContain(`stream.m3u8`);
+    expect(html).toContain(`/${video.slug}/raw/source.mp4`);
+    expect(html).not.toContain("/data/");
   });
 
   test("sets poster attribute when thumbnail.jpg exists", async () => {
@@ -69,7 +69,7 @@ describe("GET /v/:slug", () => {
     await writeDerivative(video, "thumbnail.jpg");
     const res = await page.request(`/v/${video.slug}`);
     const html = await res.text();
-    expect(html).toContain(`poster="/data/${video.id}/derivatives/thumbnail.jpg"`);
+    expect(html).toContain(`poster="/${video.slug}/poster.jpg"`);
   });
 
   test("no poster attribute when thumbnail is absent", async () => {
@@ -86,7 +86,7 @@ describe("GET /v/:slug", () => {
 
     const res = await page.request(`/v/${oldSlug}`, { redirect: "manual" });
     expect(res.status).toBe(301);
-    expect(res.headers.get("location")).toBe("/v/welcome");
+    expect(res.headers.get("location")).toBe("/welcome");
   });
 
   test("current slug returns 200 (not a redirect) after rename", async () => {

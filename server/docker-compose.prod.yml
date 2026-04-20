@@ -1,0 +1,14 @@
+# Production overrides. Used on the VPS:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  loom-clone-server:
+    volumes:
+      - /mnt/data/loom-clone:/app/data
+    environment:
+      - PUBLIC_URL=https://v.danny.is
+    networks:
+      - caddy-net
+
+networks:
+  caddy-net:
+    external: true

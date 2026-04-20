@@ -1,0 +1,40 @@
+name: Deploy Server
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: cd server && bun install --frozen-lockfile
+
+      - name: Lint & format check
+        run: cd server && bun run check
+
+      - name: Typecheck
+        run: cd server && bun run typecheck
+
+      - name: Test
+        run: cd server && bun test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_SSH_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/loom-clone && git pull
+            cd server && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build

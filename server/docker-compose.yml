@@ -2,10 +2,6 @@ services:
   loom-clone-server:
     build: .
     container_name: loom-clone-server
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./data:/app/data
     environment:
       - HOST=0.0.0.0
       - PORT=3000
@@ -13,13 +9,3 @@ services:
       - path: .env
         required: false
     restart: unless-stopped
-
-    # Production: uncomment to join the shared Caddy network and remove
-    # the ports mapping (Caddy proxies via the Docker network instead).
-    #
-    # networks:
-    #   - caddy-net
-    #
-    # networks:
-    #   caddy-net:
-    #     external: true

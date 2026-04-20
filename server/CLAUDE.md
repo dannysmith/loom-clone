@@ -32,47 +32,28 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 
 ## Auth
 
-All `/api/videos/*` routes require an API key sent as `Authorization: Bearer <token>`. `/api/health`, `/:slug/*`, `/static/*`, `/admin` are open.
+Bearer token (`lck_…`) on all `/api/videos/*` routes; everything else is open. See `docs/developer/auth.md` at the repo root for the full system (server schema, key lifecycle, macOS Keychain storage, CLI commands).
 
-- **Format**: `lck_<32 random bytes, base64url>`. The `lck_` prefix is a leak-detection aid (grep/secret scanners).
-- **Storage**: `api_keys` table stores only SHA-256 of the token. Plaintext is shown once on creation and never recoverable. SHA-256 is correct here (not bcrypt/argon2) — API keys are high-entropy, so password-hashing functions would just slow down every request verification for no gain. See `src/lib/api-keys.ts` for the rationale on why we don't need `timingSafeEqual`.
-- **Middleware**: `requireApiKey()` in `src/lib/auth.ts`. Returns 401 + `WWW-Authenticate: Bearer realm="loom-clone"`. Updates `lastUsedAt` fire-and-forget. Exposes `apiKeyId` on the Hono context (typed via `AuthVariables`) for future route-level auditing.
-- **CLI**:
-  - `bun run keys:create <name>` — prints the token once, stores the hash
-  - `bun run keys:list` — id, status, last_used, name
-  - `bun run keys:revoke <id>` — idempotent
-- **Env**: `HOST` (default `127.0.0.1`) and `PORT` (default `3000`) in `.env`. Bun auto-loads. See `.env.example`.
-- **Transport**: plaintext bearer over HTTP is acceptable on localhost only. task-x3 (Hetzner) must enforce HTTPS before `HOST` gets widened.
+Key things to know when working here:
+- Middleware: `requireApiKey()` in `src/lib/auth.ts`, mounted in `app.ts` on `/api/videos/*`.
+- Error shape: 401 with `WWW-Authenticate: Bearer realm="loom-clone"` + standard error envelope.
+- CLI: `bun run keys:create <name>`, `bun run keys:list`, `bun run keys:revoke <id>`.
+- Env: `HOST` (default `127.0.0.1`), `PORT` (default `3000`), `PUBLIC_URL` in `.env`. See `.env.example`.
 
 ## API response envelope
 
-All `/api/*` error responses use a uniform shape: `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Success responses return the resource directly (or `{ ok: true }` for action endpoints with no return value). Error codes are defined in `src/lib/errors.ts`; use the `apiError(c, status, message, code)` helper to build error responses — never construct them by hand.
-
-Current codes: `MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOKEN`, `INVALID_API_KEY` (401), `VIDEO_NOT_FOUND` (404), `INVALID_SEGMENT_FILENAME` (400), `VIDEO_ALREADY_COMPLETE` (409).
+All `/api/*` error responses: `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Success: resource directly, or `{ ok: true }`. Use the `apiError(c, status, message, code)` helper from `src/lib/errors.ts` — never construct error responses by hand.
 
 ## Route modules
 
-`src/routes/` is split into four modules, each with its own auth profile. Mount order in `app.ts` matches the list below; the wildcard `videos` module is mounted last as documentation of intent (Hono's trie router prefers specific routes regardless).
+Four modules in `src/routes/`, each with its own auth profile. Full route reference with request/response shapes, error codes, and content types: `docs/developer/server-routes-and-api.md`.
 
-```
-routes/
-  api/      bearer auth on /videos/* (mount-point), /health open
-    index.ts        mounts /health + /videos, ConflictError→409 handler
-    videos.ts       GET list, GET/:id, POST create, PATCH, PUT segment, POST complete, DELETE
-  admin/    web/session auth at the mount (placeholder until task-x5)
-    index.tsx       /admin stub
-  site/     open — root, well-known files, oEmbed discovery
-    index.ts        aggregator
-    well-known.tsx  /, /robots.txt, /favicon.ico, /sitemap.xml
-    oembed.ts       /oembed — oEmbed discovery for embed services
-  videos/   /:slug viewer surface — mounted last as catch-all
-    index.ts        aggregator + /:file dispatch + /v/:slug back-compat redirects
-    resolve.ts      shared slug resolution + derivative flags for viewer routes
-    page.tsx        /:slug HTML page handler
-    embed.tsx       /:slug/embed chromeless player
-    media.ts        /:slug/raw/:file, /:slug/stream/:file, /:slug/poster.jpg
-    metadata.ts     /:slug.json, /:slug.md handler functions
-```
+| Module    | Mount      | Auth                                  | Purpose                             |
+| --------- | ---------- | ------------------------------------- | ----------------------------------- |
+| `api/`    | `/api`     | Bearer on `/videos/*`; `/health` open | JSON API for macOS app              |
+| `admin/`  | `/admin`   | Session-based (stub — task-x5)        | Admin panel                         |
+| `site/`   | `/`        | Open                                  | Root, well-known files, oEmbed      |
+| `videos/` | `/` (last) | Open                                  | `/:slug` viewer surface (catch-all) |
 
 - **Auth at the mount**: bearer middleware is applied in `app.ts` to `/api/videos/*` only, keeping the api router itself auth-agnostic and easy to test.
 - **Co-located tests**: each module has its own `__tests__/` next to its handlers. App-level integration tests live at `src/__tests__/app.test.ts`.

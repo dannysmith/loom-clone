@@ -83,11 +83,14 @@ struct RecordingPanelContent: View {
                     .frame(height: 24)
 
                 ForEach(coordinator.availableModes, id: \.self) { mode in
-                    Button(action: { coordinator.switchMode(to: mode) }) {
-                        Image(systemName: mode.systemImage)
-                            .font(.body)
-                            .foregroundStyle(coordinator.mode == mode ? .primary : .secondary)
-                    }
+                    Button(
+                        action: { coordinator.switchMode(to: mode) },
+                        label: {
+                            Image(systemName: mode.systemImage)
+                                .font(.body)
+                                .foregroundStyle(coordinator.mode == mode ? .primary : .secondary)
+                        }
+                    )
                     .buttonStyle(.plain)
                     .help(mode.displayName)
                 }

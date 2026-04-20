@@ -12,8 +12,9 @@ We currently use ffmpeg to generate `derivitives/` for completed videos in the b
 
 This is also the time to consider other background tasks like:
 
-- Smarter thumbnail generation
+- Smarter thumbnail generation?
 - Audio cleanup post-processing?
+- 
 - Generating more derivitives:
   - 1080p.mp4 — downsampled variant if original > 1080p
   - 720p.mp4 — downsampled variant if original > 720p

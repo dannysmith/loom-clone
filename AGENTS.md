@@ -39,6 +39,7 @@ Three components exist today, plus a diagnostic tool:
 
 ## Developer Docs
 
+- `docs/developer/recording-pipeline.md` — how the macOS app captures, composites, encodes, and streams video. Actors, timing, mode switching, pause/resume, GPU recovery. Read before touching anything in `RecordingActor`, `CompositionActor`, `WriterActor`, or `UploadActor`.
 - `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
 - `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
 - `docs/developer/auth.md` — how the bearer token system works end-to-end (server schema, key lifecycle, macOS Keychain storage, Settings UI).

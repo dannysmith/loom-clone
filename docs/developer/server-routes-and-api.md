@@ -6,12 +6,12 @@ Complete reference for every route the Hono server exposes. For how segments flo
 
 The server is split into four route modules, each with its own auth profile:
 
-| Module | Mount | Auth | Purpose |
-|--------|-------|------|---------|
-| `api` | `/api` | Bearer on `/api/videos/*`; `/api/health` open | JSON API for macOS app + programmatic clients |
-| `admin` | `/admin` | Session-based (stub — task-x5) | Admin panel |
-| `site` | `/` | Open | Root landing, well-known files, oEmbed discovery |
-| `videos` | `/` (last) | Open | Viewer-facing `/:slug` surface, catch-all |
+| Module   | Mount      | Auth                                          | Purpose                                          |
+| -------- | ---------- | --------------------------------------------- | ------------------------------------------------ |
+| `api`    | `/api`     | Bearer on `/api/videos/*`; `/api/health` open | JSON API for macOS app + programmatic clients    |
+| `admin`  | `/admin`   | Session-based (stub — task-x5)                | Admin panel                                      |
+| `site`   | `/`        | Open                                          | Root landing, well-known files, oEmbed discovery |
+| `videos` | `/` (last) | Open                                          | Viewer-facing `/:slug` surface, catch-all        |
 
 Modules are mounted in the order above in `app.ts`. The `videos` module is deliberately last since its `/:slug` catch-all would swallow anything more specific if it went first. In practice Hono's trie router matches by specificity regardless of mount order, but the ordering documents intent.
 
@@ -25,17 +25,17 @@ Modules are mounted in the order above in `app.ts`. The `videos` module is delib
 
 Error codes:
 
-| Code | Status | When |
-|------|--------|------|
-| `MISSING_AUTH_HEADER` | 401 | No `Authorization` header |
-| `MALFORMED_AUTH_HEADER` | 401 | Not `Bearer <token>` format |
-| `EMPTY_BEARER_TOKEN` | 401 | `Bearer` present but token is empty |
-| `INVALID_API_KEY` | 401 | Token unknown or revoked |
-| `VIDEO_NOT_FOUND` | 404 | Unknown or trashed video |
-| `INVALID_SEGMENT_FILENAME` | 400 | Filename doesn't match the allowlist |
-| `VIDEO_ALREADY_COMPLETE` | 409 | DELETE attempted on a completed video |
-| `VALIDATION_ERROR` | 400 | Request body fails zod schema validation |
-| `CONFLICT` | 409 | Store-level conflict (e.g. slug collision) |
+| Code                       | Status | When                                       |
+| -------------------------- | ------ | ------------------------------------------ |
+| `MISSING_AUTH_HEADER`      | 401    | No `Authorization` header                  |
+| `MALFORMED_AUTH_HEADER`    | 401    | Not `Bearer <token>` format                |
+| `EMPTY_BEARER_TOKEN`       | 401    | `Bearer` present but token is empty        |
+| `INVALID_API_KEY`          | 401    | Token unknown or revoked                   |
+| `VIDEO_NOT_FOUND`          | 404    | Unknown or trashed video                   |
+| `INVALID_SEGMENT_FILENAME` | 400    | Filename doesn't match the allowlist       |
+| `VIDEO_ALREADY_COMPLETE`   | 409    | DELETE attempted on a completed video      |
+| `VALIDATION_ERROR`         | 400    | Request body fails zod schema validation   |
+| `CONFLICT`                 | 409    | Store-level conflict (e.g. slug collision) |
 
 All 401 responses include `WWW-Authenticate: Bearer realm="loom-clone"`.
 
@@ -245,11 +245,11 @@ Markdown metadata. Includes heading (title or slug), description, formatted dura
 
 ## Site routes
 
-| Path | Response |
-|------|----------|
-| `/` | Minimal HTML landing page |
-| `/robots.txt` | Disallows `/admin` and `/api` |
-| `/favicon.ico` | 204 No Content (placeholder) |
+| Path           | Response                                                                             |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `/`            | Minimal HTML landing page                                                            |
+| `/robots.txt`  | Disallows `/admin` and `/api`                                                        |
+| `/favicon.ico` | 204 No Content (placeholder)                                                         |
 | `/sitemap.xml` | Video sitemap (public + complete + non-trashed only, with `<video:video>` extension) |
 
 ### `GET /oembed`
@@ -281,20 +281,20 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
 
 ## Admin routes
 
-| Path | Response |
-|------|----------|
+| Path     | Response                                                        |
+| -------- | --------------------------------------------------------------- |
 | `/admin` | HTML stub (`AdminLayout` placeholder). Real admin UI is task-x5 |
 
 ## Content types
 
-| Extension | Content-Type | Used by |
-|-----------|-------------|---------|
-| `.m3u8` | `application/vnd.apple.mpegurl` | HLS playlist |
-| `.m4s` | `video/iso.segment` | HLS media segments |
-| `.mp4` | `video/mp4` | init segment, derivatives |
-| `.jpg` | `image/jpeg` | poster/thumbnail |
-| `.json` | `application/json` | API responses, /:slug.json |
-| `.md` | `text/markdown` | /:slug.md |
+| Extension | Content-Type                    | Used by                    |
+| --------- | ------------------------------- | -------------------------- |
+| `.m3u8`   | `application/vnd.apple.mpegurl` | HLS playlist               |
+| `.m4s`    | `video/iso.segment`             | HLS media segments         |
+| `.mp4`    | `video/mp4`                     | init segment, derivatives  |
+| `.jpg`    | `image/jpeg`                    | poster/thumbnail           |
+| `.json`   | `application/json`              | API responses, /:slug.json |
+| `.md`     | `text/markdown`                 | /:slug.md                  |
 
 ## Range support
 
@@ -309,33 +309,33 @@ The Range-aware file serving logic lives in `src/lib/file-serve.ts`.
 
 ## Environment variables
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `HOST` | `127.0.0.1` | Server bind address |
-| `PORT` | `3000` | Server port |
+| Variable     | Default                  | Purpose                                     |
+| ------------ | ------------------------ | ------------------------------------------- |
+| `HOST`       | `127.0.0.1`              | Server bind address                         |
+| `PORT`       | `3000`                   | Server port                                 |
 | `PUBLIC_URL` | `http://${HOST}:${PORT}` | Base URL for absolute URLs in API responses |
 
 See `.env.example` for documentation and defaults.
 
 ## Where the code lives
 
-| Concern | File |
-|---------|------|
-| App factory + module mounting | `src/app.ts` |
-| API module (health + videos) | `src/routes/api/index.ts` |
-| Video CRUD routes | `src/routes/api/videos.ts` |
-| Admin stub | `src/routes/admin/index.tsx` |
-| Site (root, well-known) | `src/routes/site/well-known.tsx` |
-| oEmbed endpoint | `src/routes/site/oembed.ts` |
-| Viewer HTML page | `src/routes/videos/page.tsx` |
-| Embed page | `src/routes/videos/embed.tsx` |
-| Viewer slug resolution + derivatives | `src/routes/videos/resolve.ts` |
-| Media serving (raw, stream, poster, .mp4) | `src/routes/videos/media.ts` |
-| Metadata (.json, .md) | `src/routes/videos/metadata.ts` |
-| Videos module aggregator + /v/ redirects | `src/routes/videos/index.ts` |
-| Error codes + helper | `src/lib/errors.ts` |
-| Range-aware file serving | `src/lib/file-serve.ts` |
-| URL builders | `src/lib/url.ts` |
-| Auth middleware | `src/lib/auth.ts` |
-| Slug validation + store | `src/lib/store.ts` |
-| Display formatting (duration, date) | `src/lib/format.ts` |
+| Concern                                   | File                             |
+| ----------------------------------------- | -------------------------------- |
+| App factory + module mounting             | `src/app.ts`                     |
+| API module (health + videos)              | `src/routes/api/index.ts`        |
+| Video CRUD routes                         | `src/routes/api/videos.ts`       |
+| Admin stub                                | `src/routes/admin/index.tsx`     |
+| Site (root, well-known)                   | `src/routes/site/well-known.tsx` |
+| oEmbed endpoint                           | `src/routes/site/oembed.ts`      |
+| Viewer HTML page                          | `src/routes/videos/page.tsx`     |
+| Embed page                                | `src/routes/videos/embed.tsx`    |
+| Viewer slug resolution + derivatives      | `src/routes/videos/resolve.ts`   |
+| Media serving (raw, stream, poster, .mp4) | `src/routes/videos/media.ts`     |
+| Metadata (.json, .md)                     | `src/routes/videos/metadata.ts`  |
+| Videos module aggregator + /v/ redirects  | `src/routes/videos/index.ts`     |
+| Error codes + helper                      | `src/lib/errors.ts`              |
+| Range-aware file serving                  | `src/lib/file-serve.ts`          |
+| URL builders                              | `src/lib/url.ts`                 |
+| Auth middleware                           | `src/lib/auth.ts`                |
+| Slug validation + store                   | `src/lib/store.ts`               |
+| Display formatting (duration, date)       | `src/lib/format.ts`              |

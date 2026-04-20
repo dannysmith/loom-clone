@@ -54,3 +54,4 @@ cyclomatic_complexity:
 excluded:
   - "*/DerivedData"
   - "LoomClone.xcodeproj"
+  - "TestHarness"

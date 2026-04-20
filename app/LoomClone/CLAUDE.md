@@ -1,5 +1,7 @@
 # macOS App — Agent Notes
 
+For the full narrative walkthrough of the recording pipeline (actors, timing, mode switching, pause/resume, GPU recovery), see `docs/developer/recording-pipeline.md` at the repo root. This file covers tooling, quick-reference notes, and gotchas specific to working in this directory.
+
 ## Developer tooling
 
 - **SwiftLint** runs as a post-compile build phase on every Xcode build. Config is at `app/.swiftlint.yml`. Run manually with `cd app && swiftlint lint` or auto-fix with `swiftlint --fix`.

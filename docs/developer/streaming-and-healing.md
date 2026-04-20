@@ -15,15 +15,15 @@ Two principles drive the design:
 
 ### Client: `~/Library/Application Support/LoomClone/recordings/<video-id>/`
 
-| File | Written when | Purpose |
-|------|--------------|---------|
-| `init.mp4` | First segment of a recording | HLS fMP4 header — single codec description for the whole stream |
-| `seg_NNN.m4s` | Every ~4s during recording | Composited HLS media segment (what viewers watch) |
-| `recording.json` | At stop, again after each heal | Structured timeline — session info, events, per-segment `uploaded` flag. Schema in `Models/RecordingTimeline.swift` |
-| `screen.mov` | During recording if a display was selected | Raw screen master, ProRes 422 Proxy. Safety net for future re-composition |
-| `camera.mp4` | During recording if a camera was selected | Raw camera master, H.264 native resolution |
-| `audio.m4a` | During recording if a mic was selected | Raw mic master, AAC |
-| `.orphaned` | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent from ever retrying this recording again |
+| File             | Written when                                   | Purpose                                                                                                             |
+| ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `init.mp4`       | First segment of a recording                   | HLS fMP4 header — single codec description for the whole stream                                                     |
+| `seg_NNN.m4s`    | Every ~4s during recording                     | Composited HLS media segment (what viewers watch)                                                                   |
+| `recording.json` | At stop, again after each heal                 | Structured timeline — session info, events, per-segment `uploaded` flag. Schema in `Models/RecordingTimeline.swift` |
+| `screen.mov`     | During recording if a display was selected     | Raw screen master, ProRes 422 Proxy. Safety net for future re-composition                                           |
+| `camera.mp4`     | During recording if a camera was selected      | Raw camera master, H.264 native resolution                                                                          |
+| `audio.m4a`      | During recording if a mic was selected         | Raw mic master, AAC                                                                                                 |
+| `.orphaned`      | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent from ever retrying this recording again                                                  |
 
 ### Server: `server/data/`
 
@@ -31,13 +31,13 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 
 `server/data/<video-id>/`
 
-| File | Written when | Purpose |
-|------|--------------|---------|
-| `init.mp4`, `seg_NNN.m4s` | On each PUT | Mirror of the client's segments — what viewers stream |
-| `stream.m3u8` | After each PUT and after `/complete` | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename |
-| `recording.json` | On `/complete` (and re-`/complete` after heal) | Server-side copy of the client's timeline, authoritative post-upload |
-| `derivatives/source.mp4` | Background task after each `complete` transition | Single-file MP4 stitched from the HLS segments with `-c copy` — the "download me" file, and what the viewer prefers over HLS when present |
-| `derivatives/thumbnail.jpg` | Same pass as `source.mp4` | Single-frame JPEG (~1280px wide) sampled at `min(1s, duration/2)`. Used as the viewer page poster when present |
+| File                        | Written when                                     | Purpose                                                                                                                                   |
+| --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream                                                                                     |
+| `stream.m3u8`               | After each PUT and after `/complete`             | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename                                                           |
+| `recording.json`            | On `/complete` (and re-`/complete` after heal)   | Server-side copy of the client's timeline, authoritative post-upload                                                                      |
+| `derivatives/source.mp4`    | Background task after each `complete` transition | Single-file MP4 stitched from the HLS segments with `-c copy` — the "download me" file, and what the viewer prefers over HLS when present |
+| `derivatives/thumbnail.jpg` | Same pass as `source.mp4`                        | Single-frame JPEG (~1280px wide) sampled at `min(1s, duration/2)`. Used as the viewer page poster when present                            |
 
 ## End-to-end flow of a recording
 

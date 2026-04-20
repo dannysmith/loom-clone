@@ -4,4 +4,5 @@
 --wrapcollections before-first
 --maxwidth 140
 --disable redundantSelf
+--modifierorder nonisolated,override,private,fileprivate,internal,public,open,final,static,class,lazy,weak,required,optional,convenience,dynamic
 --exclude DerivedData,LoomClone.xcodeproj

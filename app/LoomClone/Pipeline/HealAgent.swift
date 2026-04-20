@@ -147,6 +147,45 @@ actor HealAgent {
             return
         }
 
+        switch await uploadMissingSegments(videoId: videoId, missing: missing, localDir: localDir) {
+        case .orphaned:
+            return
+        case let .incomplete(count):
+            print("[heal] \(videoId): \(count) segment(s) still unhealed — will retry next launch")
+            return
+        case .allHealed:
+            break
+        }
+
+        // Re-POST /complete with the updated timeline so the server's
+        // recording.json mirrors local `uploaded: true` flags and the
+        // status transitions healing → complete.
+        let updatedTimeline = (try? Data(contentsOf: localDir.appendingPathComponent("recording.json"))) ?? timelineData
+        switch await postComplete(videoId: videoId, timelineData: updatedTimeline) {
+        case let .ok(_, finalMissing) where finalMissing.isEmpty:
+            print("[heal] \(videoId): complete")
+        case let .ok(_, finalMissing):
+            print("[heal] \(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
+        case .orphaned:
+            markOrphaned(localDir: localDir)
+        case let .failure(err):
+            print("[heal] \(videoId): final /complete failed: \(err) — will retry next launch")
+        }
+    }
+
+    // MARK: - Segment Upload Loop
+
+    private enum SegmentUploadResult {
+        case allHealed
+        case incomplete(Int)
+        case orphaned
+    }
+
+    private func uploadMissingSegments(
+        videoId: String,
+        missing: [String],
+        localDir: URL
+    ) async -> SegmentUploadResult {
         var failed: [String] = []
         for filename in missing {
             let filePath = localDir.appendingPathComponent(filename)
@@ -181,37 +220,13 @@ actor HealAgent {
                 print("[heal] \(videoId): healed \(filename)")
             } catch HealError.orphaned {
                 markOrphaned(localDir: localDir)
-                return
+                return .orphaned
             } catch {
-                // APIClient.ClientError.unauthorized reaches here via the
-                // generic catch — segment gets marked failed, loop continues
-                // and will report "N unhealed" at the end. Not ideal (spams
-                // N log lines for the same cause) but correct, and keeps
-                // heal() under the cyclomatic-complexity threshold.
                 print("[heal] \(videoId): PUT failed for \(filename): \(error)")
                 failed.append(filename)
             }
         }
-
-        if !failed.isEmpty {
-            print("[heal] \(videoId): \(failed.count) segment(s) still unhealed — will retry next launch")
-            return
-        }
-
-        // Re-POST /complete with the updated timeline so the server's
-        // recording.json mirrors local `uploaded: true` flags and the
-        // status transitions healing → complete.
-        let updatedTimeline = (try? Data(contentsOf: localDir.appendingPathComponent("recording.json"))) ?? timelineData
-        switch await postComplete(videoId: videoId, timelineData: updatedTimeline) {
-        case let .ok(_, finalMissing) where finalMissing.isEmpty:
-            print("[heal] \(videoId): complete")
-        case let .ok(_, finalMissing):
-            print("[heal] \(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
-        case .orphaned:
-            markOrphaned(localDir: localDir)
-        case let .failure(err):
-            print("[heal] \(videoId): final /complete failed: \(err) — will retry next launch")
-        }
+        return failed.isEmpty ? .allHealed : .incomplete(failed.count)
     }
 
     // MARK: - HTTP
@@ -281,7 +296,7 @@ actor HealAgent {
     private func markOrphaned(localDir: URL) {
         let path = localDir.appendingPathComponent(".orphaned")
         let now = ISO8601DateFormatter().string(from: Date())
-        let contents = "orphaned: server returned 404 at \(now)\n".data(using: .utf8) ?? Data()
+        let contents = Data("orphaned: server returned 404 at \(now)\n".utf8)
         try? contents.write(to: path)
         print("[heal] marked orphaned: \(localDir.lastPathComponent)")
     }

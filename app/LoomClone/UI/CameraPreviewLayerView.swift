@@ -29,15 +29,15 @@ private let cameraPreviewFilterQueue = DispatchQueue(
 ///   Fast-paths the original sample buffer through unchanged otherwise.
 @MainActor
 final class CameraPreviewLayerView: NSView {
-    private nonisolated(unsafe) let displayLayer = AVSampleBufferDisplayLayer()
+    nonisolated(unsafe) private let displayLayer = AVSampleBufferDisplayLayer()
 
     // MARK: - Filter State
 
-    private nonisolated(unsafe) var adjustmentsState: CameraAdjustmentsState?
-    private nonisolated let filterContext: CIContext
-    private nonisolated(unsafe) var filterOutputPool: CVPixelBufferPool?
-    private nonisolated(unsafe) var filterPoolDims: (Int, Int) = (0, 0)
-    private nonisolated static let rec709ColorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
+    nonisolated(unsafe) private var adjustmentsState: CameraAdjustmentsState?
+    nonisolated private let filterContext: CIContext
+    nonisolated(unsafe) private var filterOutputPool: CVPixelBufferPool?
+    nonisolated(unsafe) private var filterPoolDims: (Int, Int) = (0, 0)
+    nonisolated private static let rec709ColorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
 
     override init(frame: NSRect) {
         // Separate CIContext from the compositor's — the preview/overlay
@@ -148,7 +148,7 @@ final class CameraPreviewLayerView: NSView {
     /// Rec. 709 attachments. Returns nil when no adjustments are attached, the
     /// values are defaults, or any step of the wrap fails — caller enqueues
     /// the original buffer in that case.
-    private nonisolated func filteredSampleBuffer(from sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+    nonisolated private func filteredSampleBuffer(from sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
         guard let state = adjustmentsState else { return nil }
         let adj = state.value
         guard !adj.isDefault else { return nil }
@@ -190,7 +190,7 @@ final class CameraPreviewLayerView: NSView {
 
     /// Lazily create or recreate the output pixel-buffer pool when the
     /// input dimensions change. Called on `filterPoolQueue`.
-    private nonisolated func ensureFilterPool(width: Int, height: Int) {
+    nonisolated private func ensureFilterPool(width: Int, height: Int) {
         if filterPoolDims == (width, height), filterOutputPool != nil { return }
         let attributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
@@ -208,7 +208,7 @@ final class CameraPreviewLayerView: NSView {
     /// Wrap a filtered pixel buffer into a fresh CMSampleBuffer, reusing the
     /// source sample's timing info so the display layer timebase behaviour is
     /// identical to the passthrough path.
-    private nonisolated func wrapInSampleBuffer(
+    nonisolated private func wrapInSampleBuffer(
         pixelBuffer: CVPixelBuffer,
         sourceSampleBuffer: CMSampleBuffer
     ) -> CMSampleBuffer? {
@@ -242,7 +242,7 @@ final class CameraPreviewLayerView: NSView {
     /// Build the filter graph for the given adjustments. Static because it
     /// doesn't touch any instance state — just returns a CIImage graph the
     /// caller renders into an output buffer.
-    private nonisolated static func applyFilters(
+    nonisolated private static func applyFilters(
         to image: CIImage,
         adjustments: CameraAdjustments
     ) -> CIImage {
@@ -262,7 +262,7 @@ final class CameraPreviewLayerView: NSView {
 
     /// Sets `kCMSampleAttachmentKey_DisplayImmediately` on every sample in the
     /// buffer's sample-attachments array.
-    private nonisolated static func markDisplayImmediately(_ sampleBuffer: CMSampleBuffer) {
+    nonisolated private static func markDisplayImmediately(_ sampleBuffer: CMSampleBuffer) {
         guard
             let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(
                 sampleBuffer,

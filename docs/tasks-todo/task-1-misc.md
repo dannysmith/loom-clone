@@ -1,12 +1,10 @@
 # Task: Miscellaneous Things
 
-## Phase 1 - Full Review of Serverside App
-
-> Moved from task-x2-proper-server-api.md
+## Phase 1 - Full Review of Serverside App [DONE]
 
 And finally, let's conduct a full comprehensive review of all of the server side code. Let's clean up anything that needs cleaning, do any re-architecting, analyze and review it for code quality, architectural quality, and best practices, as well as any obvious issues with performance etc.
 
-## Phase 2 - macOS App XCode Errors
+## Phase 2 - macOS App XCode Errors [DONE]
 
 When I build the macOs app in XCode I get the following errors and warnings. Let's please make sure that we have things set up so that either we've addressed these errors and warnings if they are things we actually need to address, Or if they are not because they are either stale or are showing up in X code when they shouldn't be. Let's work out the best way of preventing that so that X code actually only shows us warnings and errors that we probably care about. 
 

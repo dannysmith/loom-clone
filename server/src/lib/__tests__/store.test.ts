@@ -13,7 +13,6 @@ import {
   completeVideo,
   createVideo,
   deleteVideo,
-  ValidationError,
   getSegmentDurations,
   getVideo,
   getVideoBySlug,
@@ -25,6 +24,7 @@ import {
   trashVideo,
   updateSlug,
   updateVideo,
+  ValidationError,
   validateSlugFormat,
 } from "../store";
 

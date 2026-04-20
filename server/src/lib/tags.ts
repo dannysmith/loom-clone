@@ -13,7 +13,11 @@ export async function createTag(name: string): Promise<Tag> {
 
   // Use onConflictDoNothing to avoid the TOCTOU race of check-then-insert.
   // If the name already exists, the insert returns nothing and we throw.
-  const [tag] = await getDb().insert(tags).values({ name: trimmed }).onConflictDoNothing().returning();
+  const [tag] = await getDb()
+    .insert(tags)
+    .values({ name: trimmed })
+    .onConflictDoNothing()
+    .returning();
   if (!tag) throw new ConflictError(`Tag "${trimmed}" already exists`);
   return tag;
 }

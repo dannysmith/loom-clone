@@ -20,16 +20,27 @@ Set up a new Hetzner VPS with Docker, Caddy (reverse proxy + auto-TLS), and shar
 
 ### `setup.sh`
 
-One-time bootstrap script to configure a fresh Ubuntu VPS. Should be idempotent (safe to re-run). Covers:
+One-time bootstrap script to configure a fresh Ubuntu VPS. Should be idempotent (safe to re-run). Follow the structure and patterns from `~/dev/mc-infra/setup.sh` (pre-flight checks, numbered sections, summary output, idempotent guards). Key differences from mc-infra: no nginx (Caddy replaces it and handles TLS automatically), no certbot/acme-dns, no Java/minecraft stuff.
 
+Covers:
+
+- Pre-flight checks (must be root, correct OS)
 - System updates (`apt update && apt upgrade`)
-- Install Docker Engine (official Docker apt repo, not snap)
-- Install Docker Compose plugin
+- Create the deploy user with sudo + SSH keys copied from root (same pattern as mc-infra)
+- SSH hardening (disable root login, disable password auth)
+- Timezone to UTC
+- Install apt packages: `curl wget jq htop tmux git unzip tree ufw fail2ban unattended-upgrades apt-listchanges`
+- Install Docker Engine (official Docker apt repo, not snap) + Docker Compose plugin
+- Docker daemon.json with log rotation (10m x 3 — prevents log bloat)
+- Add the deploy user to docker group
 - Create the shared Docker network: `docker network create caddy-net`
-- Basic firewall setup (UFW): allow 22, 80, 443; deny everything else
-- Create a non-root deploy user (or configure an existing one) with Docker permissions
-- Mount the storage volume (add to `/etc/fstab` for persistence across reboots)
-- Any other basic hardening (disable root SSH password auth, etc.)
+- UFW firewall: allow 22, 80, 443; deny everything else
+- fail2ban SSH jail
+- unattended-upgrades (automatic security patches)
+- Mount the storage volume at `/mnt/data` (add to `/etc/fstab` for persistence across reboots)
+- Install user-level tools for the deploy user: GitHub CLI, Bun, Claude Code
+- Configure bash environment (use `configure-bash.sh` pattern from mc-infra — Ghostty TERM support, git prompt, history size)
+- Summary output showing installed versions + next steps
 
 ### `caddy/docker-compose.yml`
 
@@ -86,4 +97,5 @@ Document:
 - This task doesn't touch loom-clone at all — it's purely infrastructure.
 - Keep the setup script simple and readable. It's a personal VPS, not a fleet.
 - Consider whether we want SSH key-based deploys (for GitHub Actions in Task 2c) configured here, or if that belongs in Task 2c. Probably here — the deploy user + authorized key is part of "setting up the box."
-- Reference: `~/dev/mc-infra/` has an older setup script that may have useful patterns (though it's for a different setup).
+- Reference: `~/dev/mc-infra/setup.sh` and `~/dev/mc-infra/configure-bash.sh` are the primary pattern references. Same structure (numbered sections, idempotent, clear output), adapted for this box's purpose.
+- Caddy's auto-TLS is a major simplification over the mc-infra approach (which uses nginx + certbot + acme-dns). No cert scripts needed — Caddy handles Let's Encrypt challenge + renewal automatically as long as ports 80/443 are reachable and DNS points to the box.

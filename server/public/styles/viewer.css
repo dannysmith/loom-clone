@@ -2,8 +2,8 @@
    Dark background, centred player, metadata below. */
 
 body.viewer {
-  background: oklch(8% 0.005 250);
-  color: oklch(85% 0.01 250);
+  background: var(--viewer-bg);
+  color: var(--viewer-fg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -36,20 +36,20 @@ media-player {
 .viewer-title {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
-  color: oklch(95% 0.005 250);
+  color: var(--viewer-title);
   line-height: var(--line-height-tight);
   margin-block-end: var(--space-2);
 }
 
 .viewer-details {
   font-size: var(--font-size-sm);
-  color: oklch(55% 0.015 250);
+  color: var(--viewer-details);
   margin-block-end: var(--space-3);
 }
 
 .viewer-description {
   font-size: var(--font-size-base);
-  color: oklch(75% 0.01 250);
+  color: var(--viewer-description);
   line-height: var(--line-height-normal);
   max-inline-size: 65ch;
   margin-block-end: var(--space-4);
@@ -57,18 +57,18 @@ media-player {
 
 .viewer-attribution {
   font-size: var(--font-size-xs);
-  color: oklch(40% 0.01 250);
+  color: var(--viewer-muted);
   padding-block-start: var(--space-4);
-  border-block-start: 1px solid oklch(20% 0.01 250);
+  border-block-start: 1px solid var(--viewer-border);
 }
 
 .viewer-attribution a {
-  color: oklch(50% 0.015 250);
+  color: var(--viewer-link);
   text-decoration: none;
 }
 
 .viewer-attribution a:hover {
-  color: oklch(65% 0.015 250);
+  color: var(--viewer-link-hover);
 }
 
 /* Responsive: on small screens, reduce top padding and let the player

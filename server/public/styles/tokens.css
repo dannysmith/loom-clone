@@ -75,4 +75,16 @@
   --color-accent: var(--accent-500);
   --color-accent-hover: var(--accent-600);
   --color-accent-fg: var(--accent-fg);
+
+  /* Viewer page — always dark regardless of system theme. Centralised here
+     so the viewer palette moves with the neutral scale's hue. */
+  --viewer-bg: oklch(8% 0.005 250);
+  --viewer-fg: oklch(85% 0.01 250);
+  --viewer-title: oklch(95% 0.005 250);
+  --viewer-details: oklch(55% 0.015 250);
+  --viewer-description: oklch(75% 0.01 250);
+  --viewer-muted: oklch(40% 0.01 250);
+  --viewer-border: oklch(20% 0.01 250);
+  --viewer-link: oklch(50% 0.015 250);
+  --viewer-link-hover: oklch(65% 0.015 250);
 }

@@ -11,11 +11,10 @@ export async function createTag(name: string): Promise<Tag> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Tag name cannot be empty");
 
-  const existing = await getDb().select().from(tags).where(eq(tags.name, trimmed)).get();
-  if (existing) throw new ConflictError(`Tag "${trimmed}" already exists`);
-
-  const [tag] = await getDb().insert(tags).values({ name: trimmed }).returning();
-  if (!tag) throw new Error("failed to create tag");
+  // Use onConflictDoNothing to avoid the TOCTOU race of check-then-insert.
+  // If the name already exists, the insert returns nothing and we throw.
+  const [tag] = await getDb().insert(tags).values({ name: trimmed }).onConflictDoNothing().returning();
+  if (!tag) throw new ConflictError(`Tag "${trimmed}" already exists`);
   return tag;
 }
 
@@ -36,16 +35,21 @@ export async function renameTag(id: number, name: string): Promise<Tag> {
   if (!existing) throw new Error(`Tag ${id} not found`);
   if (existing.name === trimmed) return existing;
 
-  const conflict = await getDb().select().from(tags).where(eq(tags.name, trimmed)).get();
-  if (conflict) throw new ConflictError(`Tag "${trimmed}" already exists`);
-
-  const [updated] = await getDb()
-    .update(tags)
-    .set({ name: trimmed })
-    .where(eq(tags.id, id))
-    .returning();
-  if (!updated) throw new Error(`Tag ${id} not found`);
-  return updated;
+  try {
+    const [updated] = await getDb()
+      .update(tags)
+      .set({ name: trimmed })
+      .where(eq(tags.id, id))
+      .returning();
+    if (!updated) throw new Error(`Tag ${id} not found`);
+    return updated;
+  } catch (err) {
+    // SQLite UNIQUE constraint violation on tags.name — convert to ConflictError.
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      throw new ConflictError(`Tag "${trimmed}" already exists`);
+    }
+    throw err;
+  }
 }
 
 // Deletes a tag and, via FK cascade, removes all video_tag associations.

@@ -17,18 +17,21 @@ function derivativesDir(videoId: string): string {
   return join(DATA_DIR, videoId, "derivatives");
 }
 
-let ffmpegMissingLogged = false;
+// Cache the ffmpeg PATH lookup — no need to scan on every invocation.
+let ffmpegPath: string | null | undefined; // undefined = not checked yet
 
 async function runFfmpeg(args: string[]): Promise<void> {
-  if (!Bun.which("ffmpeg")) {
-    if (!ffmpegMissingLogged) {
-      ffmpegMissingLogged = true;
+  if (ffmpegPath === undefined) {
+    ffmpegPath = Bun.which("ffmpeg");
+    if (!ffmpegPath) {
       console.warn("[derivatives] ffmpeg not found on PATH — derivative generation will fail");
     }
+  }
+  if (!ffmpegPath) {
     throw new Error("ffmpeg not found on PATH");
   }
 
-  const proc = Bun.spawn(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", ...args], {
+  const proc = Bun.spawn([ffmpegPath, "-y", "-hide_banner", "-loglevel", "error", ...args], {
     stderr: "pipe",
     stdout: "pipe",
   });

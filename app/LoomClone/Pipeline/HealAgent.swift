@@ -32,11 +32,7 @@ actor HealAgent {
 
     init(apiClient: APIClient = .shared) {
         self.apiClient = apiClient
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        self.recordingsRoot = appSupport
-            .appendingPathComponent("LoomClone/recordings")
+        self.recordingsRoot = AppEnvironment.recordingsDirectory
     }
 
     // MARK: - Public entry points

@@ -11,12 +11,20 @@ enum AppEnvironment {
         static let keychainService = "is.danny.loomclone.debug.apikey"
         static let defaultsSuiteName = "is.danny.loomclone.debug"
         static let defaultServerURL = "http://127.0.0.1:3000"
+        static let appSupportSubdirectory = "LoomClone-Debug"
     #else
         static let isDebug = false
         static let keychainService = "is.danny.loomclone.apikey"
         static let defaultsSuiteName = "is.danny.loomclone"
         static let defaultServerURL = ""
+        static let appSupportSubdirectory = "LoomClone"
     #endif
+
+    /// Base recordings directory, isolated per build configuration.
+    static var recordingsDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("\(appSupportSubdirectory)/recordings")
+    }
 
     /// Shared UserDefaults suite — all app preferences go here.
     /// Using a named suite (not `.standard`) ensures debug/release isolation

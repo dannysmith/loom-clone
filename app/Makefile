@@ -24,6 +24,9 @@ lint: ## Lint all Swift files with SwiftLint
 lint-fix: ## Auto-fix SwiftLint violations
 	swiftlint --fix
 
+install-prod: ## Build Release and install to ~/Applications
+	./scripts/install-prod.sh
+
 clean: ## Remove Xcode build artifacts
 	xcodebuild -project LoomClone.xcodeproj -scheme LoomClone clean
 	rm -rf build/

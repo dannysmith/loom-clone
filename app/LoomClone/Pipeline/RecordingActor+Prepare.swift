@@ -64,8 +64,7 @@ extension RecordingActor {
         }
 
         // 3. Set up local safety net directory
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let localDir = appSupport.appendingPathComponent("LoomClone/recordings/\(session.id)")
+        let localDir = AppEnvironment.recordingsDirectory.appendingPathComponent(session.id)
         try FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
         localSavePath = localDir
 

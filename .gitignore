@@ -21,6 +21,7 @@ app/build/
 DerivedData/
 *.xcworkspace/
 buildServer.json
+*.profraw
 
 # macOS
 .DS_Store

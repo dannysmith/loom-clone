@@ -32,6 +32,7 @@ export function VideoPage({
         <>
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+          <link rel="stylesheet" href="/static/styles/player.css" />
           <link rel="stylesheet" href="/static/styles/viewer.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />
 
@@ -64,7 +65,7 @@ export function VideoPage({
           <link
             rel="alternate"
             type="application/json+oembed"
-            href={`/api/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`}
+            href={`/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`}
             title={pageTitle}
           />
         </>
@@ -82,8 +83,8 @@ export function VideoPage({
         )}
         {video.description && <p class="viewer-description">{video.description}</p>}
         <p class="viewer-attribution">
-          <a href="https://dannysmith.com" rel="noopener">
-            dannysmith.com
+          <a href="https://danny.is" rel="noopener noreferrer" target="_blank">
+            danny.is
           </a>
         </p>
       </div>

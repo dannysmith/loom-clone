@@ -1,0 +1,4 @@
+/* Shared Vidstack player overrides. Applied to both the video page and the
+   embed page. Per-page player tweaks (border-radius, sizing) stay in
+   viewer.css / embed.css — this file is for customising the player chrome
+   itself (controls, colours, hover states) consistently across both. */

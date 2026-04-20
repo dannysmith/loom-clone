@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import embed from "./embed";
 import media, { handleMp4Redirect } from "./media";
 import { handleJsonMetadata, handleMdMetadata } from "./metadata";
-import page, { handleSlugPage } from "./page";
+import { handleSlugPage } from "./page";
 
 // Viewer-facing routes. Mounted at `/` last in `app.ts` so it acts as the
 // slug catch-all. Sub-routers handle multi-segment paths (/:slug/embed,
@@ -11,8 +11,17 @@ import page, { handleSlugPage } from "./page";
 // from a literal dot-suffix, so we parse it ourselves.
 const videos = new Hono();
 
+// Permanent redirect from the legacy /v/:slug path. Cached shared URLs,
+// bookmarks, and older macOS app versions that still reference /v/... will
+// 301 to the canonical /:slug form. Do not remove these routes.
+videos.get("/v/:slug", (c) => c.redirect(`/${c.req.param("slug")}`, 301));
+videos.get("/v/:slug/*", (c) => {
+  const slug = c.req.param("slug");
+  const rest = c.req.path.replace(`/v/${slug}`, `/${slug}`);
+  return c.redirect(rest, 301);
+});
+
 // Multi-segment routes (more specific, matched first by the trie router)
-videos.route("/", page); // /v/:slug (legacy)
 videos.route("/", embed); // /:slug/embed
 videos.route("/", media); // /:slug/raw/:file, /:slug/stream/:file, /:slug/poster.jpg
 

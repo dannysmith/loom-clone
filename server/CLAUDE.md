@@ -61,12 +61,14 @@ routes/
     videos.ts       GET list, GET/:id, POST create, PATCH, PUT segment, POST complete, DELETE
   admin/    web/session auth at the mount (placeholder until task-x5)
     index.tsx       /admin stub
-  site/     open — root, well-known files
+  site/     open — root, well-known files, oEmbed discovery
     index.ts        aggregator
     well-known.tsx  /, /robots.txt, /favicon.ico, /sitemap.xml
+    oembed.ts       /oembed — oEmbed discovery for embed services
   videos/   /:slug viewer surface — mounted last as catch-all
-    index.ts        aggregator + /:file dispatch (.json, .md, .mp4, plain slug)
-    page.tsx        /:slug HTML page + /v/:slug→/:slug 301 redirect
+    index.ts        aggregator + /:file dispatch + /v/:slug back-compat redirects
+    resolve.ts      shared slug resolution + derivative flags for viewer routes
+    page.tsx        /:slug HTML page handler
     embed.tsx       /:slug/embed chromeless player
     media.ts        /:slug/raw/:file, /:slug/stream/:file, /:slug/poster.jpg
     metadata.ts     /:slug.json, /:slug.md handler functions
@@ -99,7 +101,8 @@ public/
 
 - Single entry point `public/styles/app.css` declares `@layer reset, tokens, base, components, utilities;` then `@import`s modular files into named layers.
 - `tokens.css` holds all design tokens (colours in OKLCH, type/spacing scales, radii, transitions). Change values here; everything downstream uses `var(--…)`.
-- Page-/section-specific styles (`viewer.css`, `admin.css`) get linked via the `head` slot of their respective layout, not from `app.css`. Keeps page payloads small.
+- `player.css` holds shared Vidstack player overrides for both the video page and embed page. Per-page layout tweaks stay in `viewer.css`/`embed.css`.
+- Page-/section-specific styles (`viewer.css`, `embed.css`, `admin.css`) get linked via the `head` slot of their respective layout, not from `app.css`. Keeps page payloads small.
 - Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`. All Baseline.
 
 ## Testing

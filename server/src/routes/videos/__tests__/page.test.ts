@@ -10,7 +10,6 @@ import {
 } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
-import page from "../page";
 
 let env: TestEnv;
 
@@ -31,20 +30,20 @@ async function writeDerivative(video: VideoRecord, filename: string): Promise<vo
 describe("GET /v/:slug (back-compat redirect)", () => {
   test("301 redirects to /:slug", async () => {
     const video = await createVideo();
-    const res = await page.request(`/v/${video.slug}`, { redirect: "manual" });
+    const res = await videos.request(`/v/${video.slug}`, { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe(`/${video.slug}`);
   });
 
   test("redirects unknown slugs too — resolution happens at the target", async () => {
-    const res = await page.request("/v/nonexist", { redirect: "manual" });
+    const res = await videos.request("/v/nonexist", { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe("/nonexist");
   });
 
   test("redirects sub-paths: /v/:slug/embed → /:slug/embed", async () => {
     const video = await createVideo();
-    const res = await page.request(`/v/${video.slug}/embed`, { redirect: "manual" });
+    const res = await videos.request(`/v/${video.slug}/embed`, { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe(`/${video.slug}/embed`);
   });

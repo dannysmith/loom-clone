@@ -52,22 +52,30 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
   const heading = video.title ?? video.slug;
   const duration = formatDuration(video.durationSeconds);
   const date = formatDate(video.completedAt ?? video.createdAt);
+  const meta = [duration, date].filter(Boolean).join(" · ");
   const pageUrl = absoluteUrl(`/${video.slug}`);
+  const mp4Url = absoluteUrl(`/${video.slug}.mp4`);
+  const embedUrl = absoluteUrl(`/${video.slug}/embed`);
+  const jsonUrl = absoluteUrl(`/${video.slug}.json`);
 
-  const lines: string[] = [`# ${heading}`, ""];
-  if (video.description) lines.push(video.description, "");
-  if (duration || date) {
-    lines.push([duration, date].filter(Boolean).join(" · "), "");
-  }
-  lines.push(`[Watch](${pageUrl})`, "");
+  // Sections joined by blank lines. Optional sections (description, meta)
+  // are only included when present, so the output stays clean either way.
+  const sections: string[] = [`# ${heading}`];
+  if (video.description) sections.push(video.description);
+  if (meta) sections.push(meta);
+  sections.push(`[Watch](${pageUrl})`);
+  sections.push(
+    [
+      "## Links",
+      "",
+      `- [Video page](${pageUrl})`,
+      `- [Download MP4](${mp4Url})`,
+      `- [Embed](${embedUrl})`,
+      `- [JSON metadata](${jsonUrl})`,
+    ].join("\n"),
+  );
 
-  // URL reference list
-  lines.push("## Links", "");
-  lines.push(`- [Video page](${pageUrl})`);
-  lines.push(`- [Download MP4](${absoluteUrl(`/${video.slug}.mp4`)})`);
-  lines.push(`- [Embed](${absoluteUrl(`/${video.slug}/embed`)})`);
-  lines.push(`- [JSON metadata](${absoluteUrl(`/${video.slug}.json`)})`);
-  lines.push("");
-
-  return c.text(lines.join("\n"), 200, { "content-type": "text/markdown; charset=utf-8" });
+  return c.text(`${sections.join("\n\n")}\n`, 200, {
+    "content-type": "text/markdown; charset=utf-8",
+  });
 }

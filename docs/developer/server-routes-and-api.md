@@ -10,7 +10,7 @@ The server is split into four route modules, each with its own auth profile:
 |--------|-------|------|---------|
 | `api` | `/api` | Bearer on `/api/videos/*`; `/api/health` open | JSON API for macOS app + programmatic clients |
 | `admin` | `/admin` | Session-based (stub — task-x5) | Admin panel |
-| `site` | `/` | Open | Root landing, well-known files |
+| `site` | `/` | Open | Root landing, well-known files, oEmbed discovery |
 | `videos` | `/` (last) | Open | Viewer-facing `/:slug` surface, catch-all |
 
 Modules are mounted in the order above in `app.ts`. The `videos` module is deliberately last since its `/:slug` catch-all would swallow anything more specific if it went first. In practice Hono's trie router matches by specificity regardless of mount order, but the ordering documents intent.
@@ -182,33 +182,6 @@ Cancel/delete a recording. Only works for non-complete videos.
 
 **Errors**: `404` `VIDEO_NOT_FOUND` | `409` `VIDEO_ALREADY_COMPLETE`
 
-### `GET /api/oembed`
-
-oEmbed discovery endpoint. Open, no auth.
-
-**Query params**:
-- `url` (required) — the video page URL (path-only or absolute)
-- `format` — only `json` is supported (default)
-- `maxwidth`, `maxheight` — clamp iframe dimensions (default 1280x720, maintains 16:9)
-
-**Response** `200`:
-```json
-{
-  "version": "1.0",
-  "type": "video",
-  "title": "...",
-  "author_name": "Danny Smith",
-  "provider_name": "loom-clone",
-  "provider_url": "https://example.com",
-  "html": "<iframe src=\".../embed\" ...></iframe>",
-  "width": 640, "height": 360,
-  "thumbnail_url": "https://example.com/.../poster.jpg",
-  "thumbnail_width": 640, "thumbnail_height": 360
-}
-```
-
-**Errors**: `400` (missing url param) | `404` (unknown video)
-
 ## Viewer routes (`/:slug`)
 
 All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonical slug via the `slug_redirects` table. Trashed videos return 404.
@@ -279,6 +252,33 @@ Markdown metadata. Includes heading (title or slug), description, formatted dura
 | `/favicon.ico` | 204 No Content (placeholder) |
 | `/sitemap.xml` | Video sitemap (public + complete + non-trashed only, with `<video:video>` extension) |
 
+### `GET /oembed`
+
+oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) call this to get an iframe embed code for a video URL. The discovery `<link>` tag on `/:slug` pages points here.
+
+**Query params**:
+- `url` (required) — the video page URL (path-only or absolute)
+- `format` — only `json` is supported (default)
+- `maxwidth`, `maxheight` — clamp iframe dimensions (default 1280x720, maintains 16:9)
+
+**Response** `200`:
+```json
+{
+  "version": "1.0",
+  "type": "video",
+  "title": "...",
+  "author_name": "Danny Smith",
+  "provider_name": "loom-clone",
+  "provider_url": "https://example.com",
+  "html": "<iframe src=\".../embed\" ...></iframe>",
+  "width": 640, "height": 360,
+  "thumbnail_url": "https://example.com/.../poster.jpg",
+  "thumbnail_width": 640, "thumbnail_height": 360
+}
+```
+
+**Errors**: `400` (missing url param) | `404` (unknown video)
+
 ## Admin routes
 
 | Path | Response |
@@ -326,15 +326,16 @@ See `.env.example` for documentation and defaults.
 | Video CRUD routes | `src/routes/api/videos.ts` |
 | Admin stub | `src/routes/admin/index.tsx` |
 | Site (root, well-known) | `src/routes/site/well-known.tsx` |
+| oEmbed endpoint | `src/routes/site/oembed.ts` |
 | Viewer HTML page | `src/routes/videos/page.tsx` |
 | Embed page | `src/routes/videos/embed.tsx` |
+| Viewer slug resolution + derivatives | `src/routes/videos/resolve.ts` |
 | Media serving (raw, stream, poster, .mp4) | `src/routes/videos/media.ts` |
 | Metadata (.json, .md) | `src/routes/videos/metadata.ts` |
-| Videos module aggregator | `src/routes/videos/index.ts` |
+| Videos module aggregator + /v/ redirects | `src/routes/videos/index.ts` |
 | Error codes + helper | `src/lib/errors.ts` |
 | Range-aware file serving | `src/lib/file-serve.ts` |
 | URL builders | `src/lib/url.ts` |
 | Auth middleware | `src/lib/auth.ts` |
 | Slug validation + store | `src/lib/store.ts` |
 | Display formatting (duration, date) | `src/lib/format.ts` |
-| oEmbed endpoint | `src/routes/api/index.ts` (alongside health) |

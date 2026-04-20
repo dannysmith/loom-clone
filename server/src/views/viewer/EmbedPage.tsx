@@ -17,6 +17,7 @@ export function EmbedPage({ slug, src, poster }: Props) {
         <>
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+          <link rel="stylesheet" href="/static/styles/player.css" />
           <link rel="stylesheet" href="/static/styles/embed.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />
         </>

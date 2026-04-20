@@ -10,7 +10,6 @@ server/.env.*
 !server/.env.example
 
 # Bun
-server/bun.lock
 
 # Build output
 server/dist/

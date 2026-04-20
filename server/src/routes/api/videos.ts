@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { readdir, rm } from "fs/promises";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { join, resolve } from "path";
 import { z } from "zod";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
@@ -134,7 +135,9 @@ videos.post("/", async (c) => {
 
 // Receive a segment. Idempotent — re-uploads overwrite cleanly and the
 // playlist is rebuilt from the on-disk directory listing.
-videos.put("/:id/segments/:filename", async (c) => {
+// 50 MB limit — well above normal segment size (~500KB-2MB), guards against
+// buggy clients exhausting memory.
+videos.put("/:id/segments/:filename", bodyLimit({ maxSize: 50 * 1024 * 1024 }), async (c) => {
   const { id, filename } = c.req.param();
   const video = await getVideo(id);
   if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
@@ -184,15 +187,16 @@ videos.post("/:id/complete", async (c) => {
   let timeline: TimelineLike | null = null;
   const contentType = c.req.header("content-type") ?? "";
   if (contentType.includes("application/json")) {
+    let body: { timeline?: TimelineLike };
     try {
-      const body = (await c.req.json()) as { timeline?: TimelineLike };
-      if (body.timeline && typeof body.timeline === "object") {
-        timeline = body.timeline;
-        const path = join(DATA_DIR, id, "recording.json");
-        await Bun.write(path, JSON.stringify(timeline, null, 2));
-      }
-    } catch (err) {
-      console.error(`[complete] failed to parse timeline body:`, err);
+      body = (await c.req.json()) as { timeline?: TimelineLike };
+    } catch {
+      return apiError(c, 400, "Malformed JSON body", ErrorCode.VALIDATION_ERROR);
+    }
+    if (body.timeline && typeof body.timeline === "object") {
+      timeline = body.timeline;
+      const path = join(DATA_DIR, id, "recording.json");
+      await Bun.write(path, JSON.stringify(timeline, null, 2));
     }
   }
 

@@ -14,10 +14,15 @@ import Foundation
 /// response and let each call site interpret its own status codes (200
 /// success, 404 "orphaned" in heal, etc.).
 struct APIClient {
-    static let shared = APIClient(
-        baseURL: "http://127.0.0.1:3000",
-        keyStore: .shared
-    )
+    /// Reads the current server URL from preferences each time it's accessed.
+    /// New recording sessions capture this at init, so mid-session URL changes
+    /// don't affect in-flight recordings — only new ones.
+    static var shared: APIClient {
+        APIClient(
+            baseURL: AppEnvironment.serverURL,
+            keyStore: .shared
+        )
+    }
 
     /// No trailing slash. Paths passed to `request(path:)` must start with `/`.
     let baseURL: String

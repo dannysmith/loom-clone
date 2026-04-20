@@ -109,12 +109,11 @@ final class RecordingCoordinator {
     /// Resolution + bitrate of the encoded HLS stream. Capture happens at
     /// native resolution regardless; this controls what the compositor
     /// renders into and what the encoder produces.
-    private static let outputPresetDefaultsKey = "outputPresetID"
     var outputPreset: OutputPreset = .fromID(
-        UserDefaults.standard.string(forKey: RecordingCoordinator.outputPresetDefaultsKey) ?? OutputPreset.default.id
+        AppEnvironment.defaults.string(forKey: AppEnvironment.outputPresetKey) ?? OutputPreset.default.id
     ) {
         didSet {
-            UserDefaults.standard.set(outputPreset.id, forKey: Self.outputPresetDefaultsKey)
+            AppEnvironment.defaults.set(outputPreset.id, forKey: AppEnvironment.outputPresetKey)
         }
     }
 

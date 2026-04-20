@@ -14,7 +14,7 @@ import Security
 /// key. Write and delete throw because their failures are rare and
 /// actionable (e.g. surface a Settings UI error to the user).
 struct APIKeyStore {
-    static let shared = APIKeyStore(service: "com.danny.loomclone.apikey")
+    static let shared = APIKeyStore(service: AppEnvironment.keychainService)
 
     let service: String
     let account: String

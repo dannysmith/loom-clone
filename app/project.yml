@@ -1,6 +1,6 @@
 name: LoomClone
 options:
-  bundleIdPrefix: com.danny.loomclone
+  bundleIdPrefix: is.danny.loomclone
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -30,7 +30,7 @@ targets:
       base:
         INFOPLIST_FILE: LoomClone/Info.plist
         CODE_SIGN_ENTITLEMENTS: LoomClone.entitlements
-        PRODUCT_BUNDLE_IDENTIFIER: com.danny.loomclone
+        PRODUCT_BUNDLE_IDENTIFIER: is.danny.loomclone
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         ENABLE_HARDENED_RUNTIME: true
@@ -57,7 +57,7 @@ targets:
       - target: LoomClone
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.danny.loomclone.tests
+        PRODUCT_BUNDLE_IDENTIFIER: is.danny.loomclone.tests
         GENERATE_INFOPLIST_FILE: true
         DEVELOPMENT_TEAM: XT349SJG9U
 
@@ -78,7 +78,7 @@ targets:
       base:
         INFOPLIST_FILE: TestHarness/Info.plist
         CODE_SIGN_ENTITLEMENTS: TestHarness/TestHarness.entitlements
-        PRODUCT_BUNDLE_IDENTIFIER: com.danny.loomclone.testharness
+        PRODUCT_BUNDLE_IDENTIFIER: is.danny.loomclone.testharness
         PRODUCT_NAME: LoomCloneTestHarness
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"

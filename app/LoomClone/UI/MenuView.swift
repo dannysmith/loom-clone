@@ -417,7 +417,7 @@ struct MenuView: View {
                 Text("Server unreachable")
                     .font(.caption.bold())
                     .foregroundStyle(.orange)
-                Text("Start the recording server at localhost:3000 before recording.")
+                Text("Server is not reachable at \(AppEnvironment.serverURL). Check Settings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

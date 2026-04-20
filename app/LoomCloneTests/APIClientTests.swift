@@ -8,7 +8,7 @@ import XCTest
 /// manual testing.
 final class APIClientTests: XCTestCase {
     private let testKeyStore = APIKeyStore(
-        service: "com.danny.loomclone.apikey-apiclient-tests",
+        service: "is.danny.loomclone.apikey-apiclient-tests",
         account: "unit-tests"
     )
 

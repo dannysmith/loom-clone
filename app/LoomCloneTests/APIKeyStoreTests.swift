@@ -5,7 +5,7 @@ import XCTest
 /// stored API key. `setUp` wipes before each test; `tearDown` cleans up.
 final class APIKeyStoreTests: XCTestCase {
     private let store = APIKeyStore(
-        service: "com.danny.loomclone.apikey-tests",
+        service: "is.danny.loomclone.apikey-tests",
         account: "unit-tests"
     )
 
@@ -46,7 +46,7 @@ final class APIKeyStoreTests: XCTestCase {
 
     func testInstancesWithDifferentServicesDoNotCollide() throws {
         let other = APIKeyStore(
-            service: "com.danny.loomclone.apikey-tests-other",
+            service: "is.danny.loomclone.apikey-tests-other",
             account: "unit-tests"
         )
         try? other.delete()

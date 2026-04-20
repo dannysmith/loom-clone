@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class APIKeyStatusTests: XCTestCase {
     private let store = APIKeyStore(
-        service: "com.danny.loomclone.apikey-status-tests",
+        service: "is.danny.loomclone.apikey-status-tests",
         account: "unit-tests"
     )
 

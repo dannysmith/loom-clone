@@ -12,9 +12,17 @@ export const DATA_DIR = "data";
 // nullable metadata) but that's additive and non-breaking.
 export type VideoRecord = Video;
 
-// Thrown by mutating ops when the requested change would violate uniqueness
-// expectations (e.g. slug already in use) or slug format/reservation rules.
-// Routes map this to HTTP 409.
+// Thrown when a slug or other input fails format/reservation validation.
+// Routes map this to HTTP 400.
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+// Thrown when a mutation would violate uniqueness expectations (e.g. slug
+// already in use by another video or redirect). Routes map this to HTTP 409.
 export class ConflictError extends Error {
   constructor(message: string) {
     super(message);
@@ -69,19 +77,19 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
 ]);
 
 // Validates a user-supplied slug's format and reservation status. Throws
-// ConflictError on failure so routes get a uniform 409 mapping. Uniqueness
-// is checked separately by the caller against the DB.
+// ValidationError on failure (400-class input errors). Uniqueness is checked
+// separately by the caller against the DB (ConflictError, 409).
 export function validateSlugFormat(slug: string): void {
   if (slug.length === 0 || slug.length > SLUG_MAX_LENGTH) {
-    throw new ConflictError(`Slug must be 1-${SLUG_MAX_LENGTH} characters`);
+    throw new ValidationError(`Slug must be 1-${SLUG_MAX_LENGTH} characters`);
   }
   if (!SLUG_REGEX.test(slug)) {
-    throw new ConflictError(
+    throw new ValidationError(
       `Slug "${slug}" must be lowercase alphanumeric with single dashes (no dots, slashes, leading/trailing dashes)`,
     );
   }
   if (RESERVED_SLUGS.has(slug)) {
-    throw new ConflictError(`Slug "${slug}" is reserved`);
+    throw new ValidationError(`Slug "${slug}" is reserved`);
   }
 }
 

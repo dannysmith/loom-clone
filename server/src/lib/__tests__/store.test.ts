@@ -13,6 +13,7 @@ import {
   completeVideo,
   createVideo,
   deleteVideo,
+  ValidationError,
   getSegmentDurations,
   getVideo,
   getVideoBySlug,
@@ -338,18 +339,18 @@ describe("updateSlug / resolveSlug", () => {
     expect(resolved?.video.id).toBe(video.id);
   });
 
-  test("rejects ConflictError if new slug fails format validation", async () => {
+  test("rejects ValidationError if new slug fails format validation", async () => {
     const video = await createVideo();
-    expect(updateSlug(video.id, "BadCASE")).rejects.toBeInstanceOf(ConflictError);
-    expect(updateSlug(video.id, "with.dot")).rejects.toBeInstanceOf(ConflictError);
-    expect(updateSlug(video.id, "trailing-")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "BadCASE")).rejects.toBeInstanceOf(ValidationError);
+    expect(updateSlug(video.id, "with.dot")).rejects.toBeInstanceOf(ValidationError);
+    expect(updateSlug(video.id, "trailing-")).rejects.toBeInstanceOf(ValidationError);
   });
 
-  test("rejects ConflictError if new slug is reserved", async () => {
+  test("rejects ValidationError if new slug is reserved", async () => {
     const video = await createVideo();
-    expect(updateSlug(video.id, "admin")).rejects.toBeInstanceOf(ConflictError);
-    expect(updateSlug(video.id, "api")).rejects.toBeInstanceOf(ConflictError);
-    expect(updateSlug(video.id, "favicon")).rejects.toBeInstanceOf(ConflictError);
+    expect(updateSlug(video.id, "admin")).rejects.toBeInstanceOf(ValidationError);
+    expect(updateSlug(video.id, "api")).rejects.toBeInstanceOf(ValidationError);
+    expect(updateSlug(video.id, "favicon")).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
@@ -376,13 +377,13 @@ describe("validateSlugFormat", () => {
       "a".repeat(SLUG_MAX_LENGTH + 1), // too long
     ];
     for (const slug of bad) {
-      expect(() => validateSlugFormat(slug)).toThrow(ConflictError);
+      expect(() => validateSlugFormat(slug)).toThrow(ValidationError);
     }
   });
 
   test("rejects every reserved word", () => {
     for (const slug of RESERVED_SLUGS) {
-      expect(() => validateSlugFormat(slug)).toThrow(ConflictError);
+      expect(() => validateSlugFormat(slug)).toThrow(ValidationError);
     }
   });
 });

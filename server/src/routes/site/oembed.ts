@@ -13,7 +13,12 @@ oembed.get("/oembed", async (c) => {
 
   // Extract slug from the URL. Accept both path-only and absolute forms.
   const base = getPublicBaseUrl();
-  const pathname = url.startsWith("http") ? new URL(url).pathname : url;
+  let pathname: string;
+  if (URL.canParse(url)) {
+    pathname = new URL(url).pathname;
+  } else {
+    pathname = url;
+  }
   const slugMatch = /^\/([a-z0-9](?:-?[a-z0-9])*)$/.exec(pathname);
   if (!slugMatch?.[1]) return c.json({ error: "Not found" }, 404);
 

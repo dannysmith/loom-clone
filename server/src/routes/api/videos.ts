@@ -83,7 +83,7 @@ const videos = new Hono();
 
 // List all videos, newest first. Cursor-paginated.
 videos.get("/", async (c) => {
-  const limit = Number(c.req.query("limit") ?? 20);
+  const limit = Number(c.req.query("limit")) || 20;
   const cursor = c.req.query("cursor");
   const includeTrashed = c.req.query("includeTrashed") === "1";
   const result = await listVideosPaginated({ limit, cursor, includeTrashed });

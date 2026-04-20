@@ -381,7 +381,7 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
 
   // Transaction: add the old slug to redirects + point the video at the new
   // slug. Atomic so a crash can't leave a video with no resolvable URL.
-  db.transaction((tx) => {
+  await db.transaction((tx) => {
     tx.insert(slugRedirects).values({ oldSlug, videoId: id, createdAt: now }).run();
     tx.update(videos).set({ slug: newSlug, updatedAt: now }).where(eq(videos.id, id)).run();
   });

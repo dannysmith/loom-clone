@@ -24,6 +24,8 @@ export async function createDb(path: string = DEFAULT_DB_PATH): Promise<Db> {
   const sqlite = new Database(path, { create: true });
   // SQLite ignores ON DELETE CASCADE unless this is set per connection.
   sqlite.exec("PRAGMA foreign_keys = ON");
+  // WAL mode allows concurrent readers + writers without SQLITE_BUSY errors.
+  sqlite.exec("PRAGMA journal_mode = WAL");
   const db = drizzle(sqlite, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   return db;

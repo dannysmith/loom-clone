@@ -15,7 +15,7 @@ enum AppEnvironment {
     #else
         static let isDebug = false
         static let keychainService = "is.danny.loomclone.apikey"
-        static let defaultsSuiteName = "is.danny.loomclone"
+        static let defaultsSuiteName = "is.danny.loomclone.settings"
         static let defaultServerURL = ""
         static let appSupportSubdirectory = "LoomClone"
     #endif

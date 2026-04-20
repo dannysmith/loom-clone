@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/.."
 APP_NAME="LoomClone.app"
 INSTALL_DIR="/Applications"
-DEFAULTS_SUITE="is.danny.loomclone"
+DEFAULTS_SUITE="is.danny.loomclone.settings"
 SERVER_URL="https://v.danny.is"
 
 echo "==> Building Release configuration..."

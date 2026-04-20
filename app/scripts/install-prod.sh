@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/.."
 APP_NAME="LoomClone.app"
-INSTALL_DIR="$HOME/Applications"
+INSTALL_DIR="/Applications"
 DEFAULTS_SUITE="is.danny.loomclone"
 SERVER_URL="https://v.danny.is"
 

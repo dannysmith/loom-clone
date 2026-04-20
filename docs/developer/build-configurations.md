@@ -28,7 +28,7 @@ Run the install script from the repo root:
 app/scripts/install-prod.sh
 ```
 
-This builds a Release configuration, copies it to `~/Applications/LoomClone.app`, and ensures the server URL is set to `https://v.danny.is` in the release UserDefaults. The API key persists in the Keychain from previous runs — set it once via the app's Settings and it stays there across reinstalls.
+This builds a Release configuration, copies it to `/Applications/LoomClone.app`, and ensures the server URL is set to `https://v.danny.is` in the release UserDefaults. The API key persists in the Keychain from previous runs — set it once via the app's Settings and it stays there across reinstalls.
 
 ## Day-to-day development
 

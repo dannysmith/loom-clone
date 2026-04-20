@@ -12,7 +12,7 @@ const app = createApp();
 const port = Number(Bun.env.PORT ?? 3000);
 const hostname = Bun.env.HOST ?? "127.0.0.1";
 
-console.log(`Server running at http://${hostname}:${port}`);
+console.log(`[server] listening on http://${hostname}:${port}`);
 
 export default {
   port,

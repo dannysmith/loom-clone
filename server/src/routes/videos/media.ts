@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
-import { serveFileWithRange } from "../../lib/file-serve";
+import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
 
 // Allowlists constrain which on-disk files each route can serve, preventing
@@ -22,7 +22,8 @@ media.get("/:slug/raw/:file", async (c) => {
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
   const path = join(DATA_DIR, video.id, "derivatives", file);
-  return serveFileWithRange(c, path, "video/mp4");
+  // Derivatives are written atomically (tmp→rename) and never mutated.
+  return serveFileWithRange(c, path, "video/mp4", "immutable");
 });
 
 media.get("/:slug/stream/:file", async (c) => {
@@ -36,7 +37,9 @@ media.get("/:slug/stream/:file", async (c) => {
     : file.endsWith(".m4s")
       ? "video/iso.segment"
       : "video/mp4";
-  return serveFileWithRange(c, path, contentType);
+  // Playlist changes during recording; segments are immutable once uploaded.
+  const cache: CacheHint = file.endsWith(".m3u8") ? "short" : "immutable";
+  return serveFileWithRange(c, path, contentType, cache);
 });
 
 media.get("/:slug/poster.jpg", async (c) => {
@@ -44,7 +47,7 @@ media.get("/:slug/poster.jpg", async (c) => {
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
   const path = join(DATA_DIR, video.id, "derivatives", "thumbnail.jpg");
-  return serveFileWithRange(c, path, "image/jpeg");
+  return serveFileWithRange(c, path, "image/jpeg", "immutable");
 });
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file

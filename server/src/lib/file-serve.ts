@@ -8,14 +8,24 @@ import type { Context } from "hono";
 // `routes/site/data.ts` has its own copy of this logic that goes away in
 // Phase 6.5; the new slug-namespaced media routes use this helper.
 
+export type CacheHint = "immutable" | "short" | "none";
+
 export async function serveFileWithRange(
   c: Context,
   absPath: string,
   contentType: string,
+  cache: CacheHint = "none",
 ): Promise<Response> {
   const file = Bun.file(absPath);
   if (!(await file.exists())) return c.text("Not found", 404);
   const size = file.size;
+
+  const cacheControl =
+    cache === "immutable"
+      ? "public, max-age=31536000, immutable"
+      : cache === "short"
+        ? "public, max-age=60"
+        : undefined;
 
   const range = c.req.header("range");
   if (range) {
@@ -29,25 +39,23 @@ export async function serveFileWithRange(
     const { start, end } = parsed;
     // Bun.file.slice returns a BunFile whose body streams just the
     // requested bytes — no full read into memory.
-    return new Response(file.slice(start, end + 1), {
-      status: 206,
-      headers: {
-        "Content-Type": contentType,
-        "Content-Length": String(end - start + 1),
-        "Content-Range": `bytes ${start}-${end}/${size}`,
-        "Accept-Ranges": "bytes",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Content-Length": String(end - start + 1),
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Accept-Ranges": "bytes",
+    };
+    if (cacheControl) headers["Cache-Control"] = cacheControl;
+    return new Response(file.slice(start, end + 1), { status: 206, headers });
   }
 
-  return new Response(file, {
-    status: 200,
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(size),
-      "Accept-Ranges": "bytes",
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    "Content-Length": String(size),
+    "Accept-Ranges": "bytes",
+  };
+  if (cacheControl) headers["Cache-Control"] = cacheControl;
+  return new Response(file, { status: 200, headers });
 }
 
 // Parses a single-range Range header against a known file size. Returns

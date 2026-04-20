@@ -17,7 +17,7 @@ import {
   listVideosPaginated,
   setVideoStatus,
   updateVideo,
-  type VideoRecord,
+  type Video,
 } from "../../lib/store";
 import { absoluteUrl, urlsForSlug } from "../../lib/url";
 
@@ -59,7 +59,7 @@ async function onDiskFilenames(id: string): Promise<Set<string>> {
 }
 
 // Shared JSON shape for a single video in API responses.
-function videoToApiJson(video: VideoRecord) {
+function videoToApiJson(video: Video) {
   const urls = urlsForSlug(video.slug);
   return {
     id: video.id,

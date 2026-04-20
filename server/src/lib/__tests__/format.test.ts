@@ -27,12 +27,10 @@ describe("formatDuration", () => {
     expect(formatDuration(300)).toBe("5m");
   });
 
-  test("handles fractional seconds by rounding", () => {
+  test("handles fractional seconds by rounding total first", () => {
     expect(formatDuration(4.7)).toBe("5s");
-    // 59.5 rounds the seconds to 60 but minutes stays 0 → "60s".
-    // This is a known edge case — not worth over-engineering for sub-second
-    // precision in a display formatter.
-    expect(formatDuration(59.5)).toBe("60s");
+    // 59.5 rounds to 60 total seconds → 1m 0s → "1m"
+    expect(formatDuration(59.5)).toBe("1m");
     expect(formatDuration(90.4)).toBe("1m 30s");
   });
 });

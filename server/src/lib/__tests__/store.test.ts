@@ -108,8 +108,8 @@ describe("addSegment", () => {
     expect(durations.get("seg_000.m4s")).toBe(5.0);
   });
 
-  test("throws for unknown video id", async () => {
-    expect(addSegment("nope", "seg_000.m4s", 4.0)).rejects.toThrow("Video nope not found");
+  test("throws for unknown video id (FK constraint)", async () => {
+    expect(addSegment("nope", "seg_000.m4s", 4.0)).rejects.toThrow("FOREIGN KEY constraint failed");
   });
 });
 

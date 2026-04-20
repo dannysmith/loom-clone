@@ -3,14 +3,13 @@ import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { slugRedirects, type Video, videoSegments, videos } from "../db/schema";
-import { logEvent } from "./events";
+import { type EventType, logEvent } from "./events";
 
 export const DATA_DIR = "data";
 
-// Back-compat alias — routes and tests that imported VideoRecord continue to
-// work. The new shape has extra fields (visibility, source, timestamps,
-// nullable metadata) but that's additive and non-breaking.
-export type VideoRecord = Video;
+// Re-export for convenience — routes import Video from here alongside store
+// functions rather than reaching into db/schema directly.
+export type { Video } from "../db/schema";
 
 // Thrown when a slug or other input fails format/reservation validation.
 // Routes map this to HTTP 400.
@@ -237,11 +236,10 @@ export async function resolveSlug(
 }
 
 // Idempotent: same filename overwrites its duration. Upsert on the composite
-// primary key handles duplicates cleanly.
+// primary key handles duplicates cleanly. The FK constraint on video_id
+// rejects inserts for unknown videos, so no pre-check SELECT is needed.
 export async function addSegment(id: string, filename: string, duration: number): Promise<void> {
   const db = getDb();
-  const exists = await getVideo(id);
-  if (!exists) throw new Error(`Video ${id} not found`);
   await db
     .insert(videoSegments)
     .values({ videoId: id, filename, durationSeconds: duration, uploadedAt: nowIso() })
@@ -320,7 +318,7 @@ export async function updateVideo(id: string, patch: VideoPatch): Promise<Video>
   if (!existing) throw new Error(`Video ${id} not found`);
 
   const changes: Partial<Video> = {};
-  const events: Array<{ type: string; data: unknown }> = [];
+  const events: Array<{ type: EventType; data: unknown }> = [];
 
   if (patch.title !== undefined && patch.title !== existing.title) {
     changes.title = patch.title;

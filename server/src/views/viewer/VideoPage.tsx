@@ -1,9 +1,9 @@
 import { formatDate, formatDuration } from "../../lib/format";
-import type { VideoRecord } from "../../lib/store";
+import type { Video } from "../../lib/store";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 
 type Props = {
-  video: VideoRecord;
+  video: Video;
   src: string;
   poster: string | null;
   canonicalUrl: string;

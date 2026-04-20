@@ -1,12 +1,12 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { DEFAULT_SEGMENT_DURATION } from "./constants";
-import { DATA_DIR, getSegmentDurations, type VideoRecord } from "./store";
+import { DATA_DIR, getSegmentDurations, type Video } from "./store";
 
 // Build the playlist from the filesystem: directory listing sorted by filename
 // is the source of truth for order, durations come from the in-memory sidecar.
 // Safe against out-of-order uploads, duplicates, and late re-uploads.
-export async function buildPlaylist(video: VideoRecord): Promise<string> {
+export async function buildPlaylist(video: Video): Promise<string> {
   const dir = join(DATA_DIR, video.id);
   let files: string[] = [];
   try {

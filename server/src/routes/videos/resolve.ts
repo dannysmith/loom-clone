@@ -1,5 +1,5 @@
 import { join } from "path";
-import { DATA_DIR, resolveSlug, type VideoRecord } from "../../lib/store";
+import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
 import { urlsForSlug, type VideoUrls } from "../../lib/url";
 
 // Checks which derivatives exist on disk so the viewer can pick the best
@@ -17,7 +17,7 @@ async function derivativeFlags(videoId: string): Promise<{ hasMp4: boolean; hasT
 
 // Resolved video data ready for viewer rendering.
 export type ViewerVideo = {
-  video: VideoRecord;
+  video: Video;
   urls: VideoUrls;
   src: string;
   poster: string | null;

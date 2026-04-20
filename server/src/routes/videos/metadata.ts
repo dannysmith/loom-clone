@@ -9,7 +9,7 @@ import { absoluteUrl, urlsForSlug } from "../../lib/url";
 
 export async function handleJsonMetadata(c: Context, slug: string): Promise<Response> {
   const resolved = await resolveSlug(slug);
-  if (!resolved) return c.json({ error: "Not found" }, 404);
+  if (!resolved) return c.json({ error: "Not found", code: "VIDEO_NOT_FOUND" }, 404);
   if (resolved.redirected) {
     return c.redirect(`/${resolved.video.slug}.json`, 301);
   }

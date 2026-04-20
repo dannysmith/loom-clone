@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import {
-  createVideo,
-  DATA_DIR,
-  updateSlug,
-  updateVideo,
-  type VideoRecord,
-} from "../../../lib/store";
+import { createVideo, DATA_DIR, updateSlug, updateVideo, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
 
@@ -21,7 +15,7 @@ afterEach(async () => {
   await teardownTestEnv(env);
 });
 
-async function writeDerivative(video: VideoRecord, filename: string): Promise<void> {
+async function writeDerivative(video: Video, filename: string): Promise<void> {
   const dir = join(DATA_DIR, video.id, "derivatives");
   await mkdir(dir, { recursive: true });
   await Bun.write(join(dir, filename), "stub");

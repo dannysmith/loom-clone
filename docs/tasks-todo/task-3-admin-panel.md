@@ -193,3 +193,22 @@ All admin mutations must write to the `video_events` table. The event log is the
 ### Inline Feedback
 
 Actions that succeed update the UI in-place. No toast notification system needed initially. Confirmations are required for: visibility changes, trashing, and tag deletion.
+
+---
+
+# Implementation Plan
+
+## Phase 0 — Database Audit
+
+Before building any admin features, audit the current schema (`src/db/schema.ts`) and data model for integrity, future-proofing, and efficiency. This is the first occasion where we rely heavily on the database, so it's worth thinking carefully about design before piling features on top.
+
+Areas to review:
+
+- **SQLite vs Postgres** — evaluate whether SQLite remains the right choice given the admin's heavier read/query patterns (filtering, full-text search, pagination), or whether migrating to Postgres is worth the operational cost.
+- **Primary keys** — videos use UUIDs (matching the on-disk directory name). Confirm this is the right approach for all tables. Consider whether any tables would benefit from different key strategies.
+- **Timestamps** — review which tables have `created_at` / `updated_at` and whether any are missing columns that would help with debugging or migration in future.
+- **Tags schema** — add `color` column. Decide on storage format (constrained palette name vs hex string).
+- **Event log schema** — `video_events.data` is JSON text. Consider whether this is sufficient for the query patterns the admin will need (filtering by event type, date range), or whether certain fields should be promoted to columns.
+- **Index coverage** — review existing indexes against the query patterns the admin will introduce (filtered listing, search, tag joins, event lookups by video + date).
+- **Foreign key discipline** — confirm all cross-table references have appropriate FK constraints and cascade rules.
+- **General hygiene** — look for anything that would make future migrations painful (implicit defaults, missing NOT NULL constraints, columns that should exist but don't).

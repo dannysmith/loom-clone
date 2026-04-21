@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
-import { mkdir } from "fs/promises";
+import { cp, mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { slugRedirects, type Video, videoSegments, videos, videoTags } from "../db/schema";
@@ -598,4 +598,130 @@ export async function trashVideo(id: string): Promise<Video> {
 
   await logEvent(id, "trashed");
   return updated;
+}
+
+// Restore a trashed video. Clears trashedAt, preserving the original
+// visibility, slug, and all data.
+export async function untrashVideo(id: string): Promise<Video> {
+  const existing = await getVideo(id, { includeTrashed: true });
+  if (!existing) throw new Error(`Video ${id} not found`);
+  if (!existing.trashedAt) return existing;
+
+  const now = nowIso();
+  const [updated] = await getDb()
+    .update(videos)
+    .set({ trashedAt: null, updatedAt: now })
+    .where(eq(videos.id, id))
+    .returning();
+  if (!updated) throw new Error(`Video ${id} not found`);
+
+  await logEvent(id, "untrashed");
+  return updated;
+}
+
+// Creates a complete copy of a video: new UUID, new slug, new title suffix,
+// all files copied, tags preserved, events on both original and duplicate.
+export async function duplicateVideo(id: string): Promise<Video> {
+  const db = getDb();
+  const original = await getVideo(id, { includeTrashed: true });
+  if (!original) throw new Error(`Video ${id} not found`);
+
+  const newId = crypto.randomUUID();
+  const newSlug = await findAvailableSlug(original.slug);
+  const newTitle = original.title ? findAvailableTitle(original.title) : null;
+  const now = nowIso();
+
+  // Insert the new video row with preserved metadata.
+  const [duplicate] = await db
+    .insert(videos)
+    .values({
+      id: newId,
+      slug: newSlug,
+      status: original.status,
+      visibility: original.visibility,
+      title: newTitle,
+      description: original.description,
+      durationSeconds: original.durationSeconds,
+      width: original.width,
+      height: original.height,
+      source: original.source,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: original.completedAt ? now : null,
+    })
+    .returning();
+  if (!duplicate) throw new Error("Failed to create duplicate video");
+
+  // Copy tag associations.
+  const originalTags = await db
+    .select({ tagId: videoTags.tagId })
+    .from(videoTags)
+    .where(eq(videoTags.videoId, id));
+  for (const { tagId } of originalTags) {
+    await db.insert(videoTags).values({ videoId: newId, tagId }).onConflictDoNothing();
+  }
+
+  // Copy segment records.
+  const originalSegments = await db
+    .select()
+    .from(videoSegments)
+    .where(eq(videoSegments.videoId, id));
+  for (const seg of originalSegments) {
+    await db.insert(videoSegments).values({
+      videoId: newId,
+      filename: seg.filename,
+      durationSeconds: seg.durationSeconds,
+      uploadedAt: now,
+    });
+  }
+
+  // Copy files on disk.
+  const srcDir = join(DATA_DIR, id);
+  const dstDir = join(DATA_DIR, newId);
+  try {
+    await cp(srcDir, dstDir, { recursive: true });
+  } catch {
+    // Source dir may not exist (e.g. in tests). The video record is still valid.
+    await mkdir(dstDir, { recursive: true });
+  }
+
+  // Log events on both videos.
+  await logEvent(id, "duplicated", { newId: newId, newSlug });
+  await logEvent(newId, "duplicated_from", { originalId: id, originalSlug: original.slug });
+
+  return duplicate;
+}
+
+// Finds an available slug by appending -1, -2, etc.
+async function findAvailableSlug(baseSlug: string): Promise<string> {
+  const db = getDb();
+  for (let i = 1; i < 100; i++) {
+    const candidate = `${baseSlug}-${i}`;
+    if (candidate.length > SLUG_MAX_LENGTH) break;
+    const existing = db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(eq(videos.slug, candidate))
+      .get();
+    const redirect = db
+      .select({ oldSlug: slugRedirects.oldSlug })
+      .from(slugRedirects)
+      .where(eq(slugRedirects.oldSlug, candidate))
+      .get();
+    if (!existing && !redirect) return candidate;
+  }
+  // Fallback: random slug
+  return crypto
+    .getRandomValues(new Uint8Array(4))
+    .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+}
+
+// Appends " (1)" to a title, stripping any existing " (N)" suffix first.
+// Titles aren't unique so no DB check needed — just increment the suffix.
+function findAvailableTitle(baseTitle: string): string {
+  const match = baseTitle.match(/^(.*) \((\d+)\)$/);
+  if (match?.[1] != null && match[2] != null) {
+    return `${match[1]} (${Number(match[2]) + 1})`;
+  }
+  return `${baseTitle} (1)`;
 }

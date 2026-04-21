@@ -3,6 +3,7 @@ import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDuration } from "../../../lib/format";
 import { AdminLayout } from "../../layouts/AdminLayout";
+import { VideoActions } from "../partials/VideoActions";
 import {
   DescriptionDisplay,
   SlugDisplay,
@@ -48,6 +49,9 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
         </div>
         <VisibilityControl video={video} />
       </div>
+
+      {/* --- Actions --- */}
+      <VideoActions video={video} />
 
       {/* --- Player --- */}
       <div class="video-player-container">

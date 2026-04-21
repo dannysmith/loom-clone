@@ -18,8 +18,11 @@ import {
   DATA_DIR,
   type DashboardFilters,
   type DashboardSort,
+  duplicateVideo,
   getVideo,
   listVideosFiltered,
+  trashVideo,
+  untrashVideo,
   updateSlug,
   updateVideo,
   ValidationError,
@@ -311,7 +314,29 @@ admin.get("/videos/:id/media/poster.jpg", async (c) => {
 
 // --- Other pages ---
 
-admin.get("/trash", (c) => c.html(<TrashBinPage />));
+admin.get("/trash", async (c) => {
+  const result = await listVideosFiltered({ trashedOnly: true });
+  const view = c.req.query("view") || "grid";
+  return c.html(<TrashBinPage videos={result.items} view={view} />);
+});
+
+// --- Video actions ---
+
+admin.post("/videos/:id/trash", async (c) => {
+  await trashVideo(c.req.param("id"));
+  return c.redirect("/admin");
+});
+
+admin.post("/videos/:id/untrash", async (c) => {
+  const id = c.req.param("id");
+  await untrashVideo(id);
+  return c.redirect(`/admin/videos/${id}`);
+});
+
+admin.post("/videos/:id/duplicate", async (c) => {
+  const duplicate = await duplicateVideo(c.req.param("id"));
+  return c.redirect(`/admin/videos/${duplicate.id}`);
+});
 
 // --- Settings ---
 

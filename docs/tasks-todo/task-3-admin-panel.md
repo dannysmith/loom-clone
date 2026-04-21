@@ -369,7 +369,7 @@ Make the video page interactive. This is where the HTMX click-to-edit partial pa
 
 **Done when:** all editable fields save via in-place editing with clean save/cancel UX, visibility changes work with confirmation, and tags can be added/removed.
 
-## Phase 7 — Video Actions & Trash Bin
+## Phase 7 — Video Actions & Trash Bin ✅
 
 Implement the remaining video actions and the Trash Bin page.
 

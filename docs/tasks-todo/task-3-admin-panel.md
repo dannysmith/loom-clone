@@ -393,7 +393,7 @@ Upload an MP4 file to create a new video.
 
 **Done when:** a video can be uploaded via the admin, appears on the dashboard, has derivatives generated, and is playable on its video page.
 
-## Phase 9 — Dashboard Card Actions
+## Phase 9 — Dashboard Card Actions ✅
 
 The final feature deliverable. Add a context menu / dropdown to each video card on the dashboard with quick-access to video actions.
 

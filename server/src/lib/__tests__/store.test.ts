@@ -7,26 +7,31 @@ import {
   videos as videosTable,
 } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { listEvents } from "../events";
 import {
   addSegment,
   ConflictError,
   completeVideo,
   createVideo,
   deleteVideo,
+  duplicateVideo,
   getSegmentDurations,
   getVideo,
   getVideoBySlug,
   listVideos,
+  listVideosFiltered,
   RESERVED_SLUGS,
   resolveSlug,
   SLUG_MAX_LENGTH,
   setVideoStatus,
   trashVideo,
+  untrashVideo,
   updateSlug,
   updateVideo,
   ValidationError,
   validateSlugFormat,
 } from "../store";
+import { addTagToVideo, createTag, getVideoTags } from "../tags";
 
 let env: TestEnv;
 
@@ -512,5 +517,260 @@ describe("listVideos", () => {
 
     const list = await listVideos({ includeTrashed: true });
     expect(list.map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
+  });
+});
+
+// Small delay helper to ensure distinct timestamps for ordering tests.
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+describe("untrashVideo", () => {
+  test("clears trashedAt and logs event", async () => {
+    const v = await createVideo();
+    await trashVideo(v.id);
+    const restored = await untrashVideo(v.id);
+    expect(restored.trashedAt).toBeNull();
+
+    const events = await listEvents(v.id);
+    expect(events.some((e) => e.type === "untrashed")).toBe(true);
+  });
+
+  test("is a no-op if not trashed", async () => {
+    const v = await createVideo();
+    const result = await untrashVideo(v.id);
+    expect(result.id).toBe(v.id);
+
+    const events = await listEvents(v.id);
+    expect(events.filter((e) => e.type === "untrashed")).toHaveLength(0);
+  });
+
+  test("restored video appears in default queries again", async () => {
+    const v = await createVideo();
+    await trashVideo(v.id);
+    expect(await getVideo(v.id)).toBeUndefined();
+
+    await untrashVideo(v.id);
+    expect((await getVideo(v.id))?.id).toBe(v.id);
+  });
+});
+
+describe("duplicateVideo", () => {
+  test("creates a new video with different id and slug", async () => {
+    const original = await createVideo();
+    await updateVideo(original.id, { title: "Original", visibility: "public" });
+
+    const dup = await duplicateVideo(original.id);
+    expect(dup.id).not.toBe(original.id);
+    expect(dup.slug).not.toBe(original.slug);
+    expect(dup.slug).toContain(original.slug); // slug-1 pattern
+  });
+
+  test("appends (1) to title, increments existing suffix", async () => {
+    const v = await createVideo();
+    await updateVideo(v.id, { title: "My Video" });
+
+    const d1 = await duplicateVideo(v.id);
+    expect(d1.title).toBe("My Video (1)");
+
+    const d2 = await duplicateVideo(d1.id);
+    expect(d2.title).toBe("My Video (2)");
+  });
+
+  test("preserves null title", async () => {
+    const v = await createVideo();
+    const dup = await duplicateVideo(v.id);
+    expect(dup.title).toBeNull();
+  });
+
+  test("preserves visibility, description, and source", async () => {
+    const v = await createVideo();
+    await updateVideo(v.id, {
+      title: "Test",
+      description: "A description",
+      visibility: "private",
+    });
+
+    const dup = await duplicateVideo(v.id);
+    expect(dup.visibility).toBe("private");
+    expect(dup.description).toBe("A description");
+    expect(dup.source).toBe("recorded");
+  });
+
+  test("preserves tag associations", async () => {
+    const v = await createVideo();
+    const tag1 = await createTag("demo", "blue");
+    const tag2 = await createTag("tutorial", "green");
+    await addTagToVideo(v.id, tag1.id);
+    await addTagToVideo(v.id, tag2.id);
+
+    const dup = await duplicateVideo(v.id);
+    const dupTags = await getVideoTags(dup.id);
+    expect(dupTags.map((t) => t.name).sort()).toEqual(["demo", "tutorial"]);
+  });
+
+  test("logs events on both original and duplicate", async () => {
+    const v = await createVideo();
+    await updateVideo(v.id, { title: "Original" });
+
+    const dup = await duplicateVideo(v.id);
+
+    const origEvents = await listEvents(v.id);
+    expect(origEvents.some((e) => e.type === "duplicated")).toBe(true);
+
+    const dupEvents = await listEvents(dup.id);
+    expect(dupEvents.some((e) => e.type === "duplicated_from")).toBe(true);
+    // Duplicate should NOT inherit original's event log
+    expect(dupEvents.filter((e) => e.type === "created")).toHaveLength(0);
+  });
+
+  test("does not create slug redirects for the duplicate", async () => {
+    const v = await createVideo();
+    const dup = await duplicateVideo(v.id);
+
+    const db = getDb();
+    const redirects = await db
+      .select()
+      .from(slugRedirectsTable)
+      .where(eq(slugRedirectsTable.videoId, dup.id));
+    expect(redirects).toHaveLength(0);
+  });
+});
+
+describe("listVideosFiltered", () => {
+  test("excludes trashed videos by default", async () => {
+    const a = await createVideo();
+    const b = await createVideo();
+    await trashVideo(a.id);
+
+    const result = await listVideosFiltered();
+    expect(result.items.map((v) => v.id)).toEqual([b.id]);
+  });
+
+  test("trashedOnly returns only trashed videos", async () => {
+    const a = await createVideo();
+    await createVideo(); // untrashed video, should be excluded
+    await trashVideo(a.id);
+
+    const result = await listVideosFiltered({ trashedOnly: true });
+    expect(result.items.map((v) => v.id)).toEqual([a.id]);
+  });
+
+  test("filters by visibility", async () => {
+    const pub = await createVideo();
+    await updateVideo(pub.id, { visibility: "public" });
+    const priv = await createVideo();
+    await updateVideo(priv.id, { visibility: "private" });
+
+    const result = await listVideosFiltered({ visibility: "public" });
+    expect(result.items.map((v) => v.id)).toContain(pub.id);
+    expect(result.items.map((v) => v.id)).not.toContain(priv.id);
+  });
+
+  test("filters by status", async () => {
+    const a = await createVideo();
+    await tick();
+    const b = await createVideo();
+    await completeVideo(b.id);
+
+    const result = await listVideosFiltered({ status: "recording" });
+    expect(result.items.map((v) => v.id)).toContain(a.id);
+    expect(result.items.map((v) => v.id)).not.toContain(b.id);
+  });
+
+  test("filters by tag", async () => {
+    const tagged = await createVideo();
+    const untagged = await createVideo();
+    const tag = await createTag("test-tag");
+    await addTagToVideo(tagged.id, tag.id);
+
+    const result = await listVideosFiltered({ tagId: tag.id });
+    expect(result.items.map((v) => v.id)).toContain(tagged.id);
+    expect(result.items.map((v) => v.id)).not.toContain(untagged.id);
+  });
+
+  test("FTS search filters results", async () => {
+    const v1 = await createVideo();
+    await updateVideo(v1.id, { title: "Alpha Video" });
+    const v2 = await createVideo();
+    await updateVideo(v2.id, { title: "Beta Video" });
+
+    const result = await listVideosFiltered({ search: "alpha" });
+    expect(result.items.map((v) => v.id)).toContain(v1.id);
+    expect(result.items.map((v) => v.id)).not.toContain(v2.id);
+  });
+
+  test("search with no matches returns empty", async () => {
+    await createVideo();
+    const result = await listVideosFiltered({ search: "nonexistent" });
+    expect(result.items).toHaveLength(0);
+  });
+
+  test("sorts by date descending (default)", async () => {
+    const a = await createVideo();
+    await tick();
+    const b = await createVideo();
+    await tick();
+    const c = await createVideo();
+
+    const result = await listVideosFiltered();
+    expect(result.items.map((v) => v.id)).toEqual([c.id, b.id, a.id]);
+  });
+
+  test("sorts by date ascending", async () => {
+    const a = await createVideo();
+    await tick();
+    const b = await createVideo();
+    await tick();
+    const c = await createVideo();
+
+    const result = await listVideosFiltered({ sort: "date-asc" });
+    expect(result.items.map((v) => v.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  test("sorts by title ascending", async () => {
+    const c = await createVideo();
+    await updateVideo(c.id, { title: "Charlie" });
+    const a = await createVideo();
+    await updateVideo(a.id, { title: "Alpha" });
+    const b = await createVideo();
+    await updateVideo(b.id, { title: "Bravo" });
+
+    const result = await listVideosFiltered({ sort: "title-asc" });
+    expect(result.items.map((v) => v.title)).toEqual(["Alpha", "Bravo", "Charlie"]);
+  });
+
+  test("cursor pagination returns next page", async () => {
+    await createVideo();
+    await tick();
+    await createVideo();
+    await tick();
+    await createVideo();
+
+    const page1 = await listVideosFiltered({ limit: 2 });
+    expect(page1.items).toHaveLength(2);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listVideosFiltered({ limit: 2, cursor: page1.nextCursor! });
+    expect(page2.items).toHaveLength(1);
+    expect(page2.nextCursor).toBeNull();
+
+    // All three videos appear across both pages, no duplicates
+    const allIds = [...page1.items, ...page2.items].map((v) => v.id);
+    expect(new Set(allIds).size).toBe(3);
+  });
+
+  test("multiple filters combine (AND logic)", async () => {
+    const v1 = await createVideo();
+    await updateVideo(v1.id, { title: "Public Recording", visibility: "public" });
+
+    const v2 = await createVideo();
+    await updateVideo(v2.id, { title: "Private Recording", visibility: "private" });
+
+    const v3 = await createVideo();
+    await updateVideo(v3.id, { title: "Public Other", visibility: "public" });
+    await completeVideo(v3.id);
+
+    // Filter: public + recording status
+    const result = await listVideosFiltered({ visibility: "public", status: "recording" });
+    expect(result.items.map((v) => v.id)).toEqual([v1.id]);
   });
 });

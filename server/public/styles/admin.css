@@ -345,7 +345,7 @@ body.admin--login {
 	justify-content: center;
 	inline-size: 1.75rem;
 	block-size: 1.75rem;
-	border: none;
+	border: 1px solid var(--color-border);
 	border-radius: var(--radius-md);
 	background-color: light-dark(var(--neutral-0), var(--neutral-800));
 	color: var(--color-fg-muted);
@@ -355,7 +355,6 @@ body.admin--login {
 	letter-spacing: 0.1em;
 	opacity: 0;
 	transition: opacity var(--duration-fast) var(--ease-out);
-	border: 1px solid var(--color-border);
 }
 
 .video-card:hover .video-card-menu-btn {
@@ -410,6 +409,10 @@ body.admin--login {
 }
 
 /* Load More */
+[data-view="grid"] #load-more {
+	grid-column: 1 / -1;
+}
+
 .load-more-btn {
 	margin-block-start: var(--space-4);
 	inline-size: 100%;

@@ -26,8 +26,8 @@ export function VideoList({ videos, nextCursor, filters, view }: Props) {
         {videos.map((v) => (
           <VideoCard video={v} />
         ))}
+        {nextCursor && <LoadMoreButton nextCursor={nextCursor} filters={filters} view={view} />}
       </div>
-      {nextCursor && <LoadMoreButton nextCursor={nextCursor} filters={filters} view={view} />}
     </div>
   );
 }

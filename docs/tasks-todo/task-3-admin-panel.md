@@ -2,6 +2,8 @@
 
 A web-based admin interface at `/admin` for managing videos, tags, settings, and API keys. Single-user (Danny only), publicly accessible over HTTPS, session-authenticated.
 
+> **Implementation context**: The product requirements below and the Technical Approach / Implementation Plan at the bottom of this document were developed through detailed discussion and research into current (2026) best practices for Hono + HTMX applications. The technical decisions (HTMX, no client-side framework, no custom elements, vanilla JS sprinkles, signed cookie sessions, plain `hx-boost` navigation) are deliberate — implement as specified. Before starting any phase, read this full document, `server/CLAUDE.md`, and the existing code in `src/lib/store.ts`, `src/routes/admin/`, `src/views/admin/`, and `src/db/schema.ts`.
+
 ## Auth
 
 ### Admin Login
@@ -222,9 +224,9 @@ No custom elements / Web Components initially. Every interactive pattern the adm
 
 ## Navigation Pattern
 
-Page navigation uses `hx-boost="true"` on the admin body + `hx-select="#admin-main"` to extract the content area from full-page responses. The server always returns a complete HTML page wrapped in `AdminLayout` — HTMX selects just the part it needs.
+Page navigation uses `hx-boost="true"` on the admin body. The server always returns a complete HTML page wrapped in `AdminLayout`. Default `hx-boost` behaviour fetches the full page, extracts the `<body>`, and replaces the current body — so the nav, active states, and content all update on each navigation.
 
-This avoids all history/caching bugs associated with conditional fragment-vs-full-page responses (no `Vary: HX-Request` header juggling). Every URL is a full page that works on direct navigation, browser back/forward, and refresh.
+This avoids all history/caching bugs associated with conditional fragment-vs-full-page responses (no `Vary: HX-Request` header juggling). Every URL is a full page that works on direct navigation, browser back/forward, and refresh. Not using `hx-select` to narrow the swap — the nav needs to update on each navigation for active page highlighting, and the bandwidth difference is irrelevant for a single-user admin.
 
 In-page interactions (inline edits, search, filter, tab content, actions) use dedicated fragment routes that return only the relevant HTML partial.
 
@@ -267,7 +269,7 @@ Before building any admin features, audit the current schema (`src/db/schema.ts`
 
 Areas to review:
 
-- **SQLite vs Postgres** — evaluate whether SQLite remains the right choice given the admin's heavier read/query patterns (filtering, full-text search, pagination), or whether migrating to Postgres is worth the operational cost.
+- **Confirm SQLite** — SQLite is almost certainly the right choice for this workload (single user, hundreds to low-thousands of videos, no concurrent write pressure, FTS5 covers the search case). Briefly confirm this reasoning holds against the admin's query patterns and document the decision, rather than running a full evaluation.
 - **Primary keys** — videos use UUIDs (matching the on-disk directory name). Confirm this is the right approach for all tables. Consider whether any tables would benefit from different key strategies.
 - **Timestamps** — review which tables have `created_at` / `updated_at` and whether any are missing columns that would help with debugging or migration in future.
 - **Tags schema** — add `color` column. Decide on storage format (constrained palette name vs hex string).
@@ -282,7 +284,7 @@ Set up the HTMX tooling, admin view structure, layout shell, and CSS foundations
 
 - Install `typed-htmx` (dev dep), add `global.d.ts` type augmentation for `hx-*` attributes in Hono JSX.
 - Add HTMX `<script>` tag (CDN) to `AdminLayout`.
-- Set up `hx-boost="true"` + `hx-select="#admin-main"` navigation pattern on the admin body/nav.
+- Set up `hx-boost="true"` on the admin body for SPA-like navigation (no `hx-select` — full body swap so nav active states update).
 - Create the view directory structure: `views/admin/pages/`, `views/admin/partials/`, `views/admin/components/`.
 - Flesh out `AdminLayout` with proper nav (links to Dashboard, Settings, Trash Bin).
 - Create placeholder pages for each admin route (`/admin`, `/admin/videos/:id`, `/admin/settings`, `/admin/trash`, `/admin/login`).
@@ -346,22 +348,29 @@ The video detail page with all display elements. Read-only at this stage — edi
 
 **Done when:** clicking a video card on the dashboard opens its admin page, the player works (including for private videos), metadata is displayed, and both tabs show real data.
 
-## Phase 6 — Video Editing, Actions & Trash Bin
+## Phase 6 — Video Editing & Metadata
 
-Make the video page interactive and implement all video actions. Also build the Trash Bin page since it depends on the trash action.
+Make the video page interactive. This is where the HTMX click-to-edit partial pattern gets exercised for real — worth isolating so the edit/save/cancel UX can be iterated on without also juggling file duplication logic.
 
 - **In-place editing**: title, slug, description — HTMX click-to-edit partials (GET edit form → swap → PATCH save → swap back to display).
 - **Visibility change**: dropdown/segmented control with confirmation dialog.
 - **Tag assignment**: add/remove tags on the video, server-driven (each action is an HTMX POST returning updated tag list).
+
+**Done when:** all editable fields save via in-place editing with clean save/cancel UX, visibility changes work with confirmation, and tags can be added/removed.
+
+## Phase 7 — Video Actions & Trash Bin
+
+Implement the remaining video actions and the Trash Bin page.
+
 - **Trash**: confirmation dialog, soft-delete, redirect to dashboard.
 - **Duplicate**: copy video row + files, new UUID/slug/title, preserve tags, write events on both original and duplicate, redirect to the new video's admin page.
 - **Download**: link to source.mp4 (or derivative chooser if multiple exist).
 - **Open Public URL / Copy Public URL**: link + clipboard JS. Only shown for public/unlisted.
 - **Trash Bin page** (`/admin/trash`): same card/table display as dashboard, but showing only trashed videos. Untrash action (restores video, redirects to its admin page).
 
-**Done when:** all editable fields save via in-place editing, all video actions work, trashing moves videos to the Trash Bin, and untrashing restores them.
+**Done when:** all video actions work, trashing moves videos to the Trash Bin, and untrashing restores them.
 
-## Phase 7 — Upload
+## Phase 8 — Upload
 
 Upload an MP4 file to create a new video.
 
@@ -373,17 +382,17 @@ Upload an MP4 file to create a new video.
 
 **Done when:** a video can be uploaded via the admin, appears on the dashboard, has derivatives generated, and is playable on its video page.
 
-## Phase 8 — Dashboard Card Actions
+## Phase 9 — Dashboard Card Actions
 
 The final feature deliverable. Add a context menu / dropdown to each video card on the dashboard with quick-access to video actions.
 
 - Context menu or dropdown on cards/rows (using native `popover` attribute).
 - Available actions: Open Public URL, Copy Public URL, Change Visibility, Download, Duplicate, Trash.
-- Actions call the same endpoints built in Phase 6.
+- Actions call the same endpoints built in Phases 6 and 7.
 
 **Done when:** video actions are accessible from both the video page and the dashboard card menu.
 
-## Phase 9 — Review & Polish
+## Phase 10 — Review & Polish
 
 Verify the implementation against all requirements in this document. Not a feature phase — a quality pass.
 

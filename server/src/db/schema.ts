@@ -76,9 +76,28 @@ export const slugRedirects = sqliteTable(
   (t) => [index("slug_redirects_video_id_idx").on(t.videoId)],
 );
 
+// Palette names for the `color` column. Stored as readable strings (not hex)
+// so they're meaningful in queries and event logs. CSS maps these to actual
+// OKLCH values via custom properties. The constraint is application-side
+// (same pattern as status/visibility enums).
+export const TAG_COLORS = [
+  "gray",
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "blue",
+  "indigo",
+  "purple",
+  "pink",
+] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
 export const tags = sqliteTable("tags", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
+  color: text("color").notNull().default("gray"),
   createdAt: text("created_at").notNull().$defaultFn(nowIso),
 });
 

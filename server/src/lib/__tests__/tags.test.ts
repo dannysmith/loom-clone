@@ -13,6 +13,7 @@ import {
   listTags,
   removeTagFromVideo,
   renameTag,
+  updateTag,
 } from "../tags";
 
 let env: TestEnv;
@@ -30,7 +31,24 @@ describe("createTag", () => {
     const tag = await createTag("tutorial");
     expect(tag.id).toBeGreaterThan(0);
     expect(tag.name).toBe("tutorial");
+    expect(tag.color).toBe("gray");
     expect(() => new Date(tag.createdAt)).not.toThrow();
+  });
+
+  test("accepts an explicit color", async () => {
+    const tag = await createTag("important", "red");
+    expect(tag.name).toBe("important");
+    expect(tag.color).toBe("red");
+  });
+
+  test("defaults color to gray when omitted", async () => {
+    const tag = await createTag("plain");
+    expect(tag.color).toBe("gray");
+  });
+
+  test("rejects invalid color", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+    expect(createTag("bad", "neon" as any)).rejects.toThrow("Invalid tag color");
   });
 
   test("trims whitespace in the name", async () => {
@@ -86,6 +104,45 @@ describe("renameTag", () => {
 
   test("throws for unknown tag id", async () => {
     expect(renameTag(999, "whatever")).rejects.toThrow();
+  });
+});
+
+describe("updateTag", () => {
+  test("updates color only", async () => {
+    const tag = await createTag("demo");
+    const updated = await updateTag(tag.id, { color: "blue" });
+    expect(updated.name).toBe("demo");
+    expect(updated.color).toBe("blue");
+  });
+
+  test("updates name and color together", async () => {
+    const tag = await createTag("demo");
+    const updated = await updateTag(tag.id, { name: "renamed", color: "purple" });
+    expect(updated.name).toBe("renamed");
+    expect(updated.color).toBe("purple");
+  });
+
+  test("is a no-op when nothing changed", async () => {
+    const tag = await createTag("same", "red");
+    const result = await updateTag(tag.id, { name: "same", color: "red" });
+    expect(result.name).toBe("same");
+    expect(result.color).toBe("red");
+  });
+
+  test("rejects invalid color", async () => {
+    const tag = await createTag("demo");
+    // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+    expect(updateTag(tag.id, { color: "neon" as any })).rejects.toThrow("Invalid tag color");
+  });
+
+  test("rejects name conflict", async () => {
+    await createTag("first");
+    const second = await createTag("second");
+    expect(updateTag(second.id, { name: "first" })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("throws for unknown tag id", async () => {
+    expect(updateTag(999, { color: "red" })).rejects.toThrow();
   });
 });
 
@@ -163,14 +220,15 @@ describe("addTagToVideo / removeTagFromVideo / getVideoTags", () => {
     expect(await removeTagFromVideo(video.id, tag.id)).toBe(false);
   });
 
-  test("getVideoTags returns tags sorted by name", async () => {
+  test("getVideoTags returns tags sorted by name with color", async () => {
     const video = await createVideo();
-    const zulu = await createTag("zulu");
-    const alpha = await createTag("alpha");
+    const zulu = await createTag("zulu", "red");
+    const alpha = await createTag("alpha", "blue");
     await addTagToVideo(video.id, zulu.id);
     await addTagToVideo(video.id, alpha.id);
     const attached = await getVideoTags(video.id);
     expect(attached.map((t) => t.name)).toEqual(["alpha", "zulu"]);
+    expect(attached.map((t) => t.color)).toEqual(["blue", "red"]);
   });
 
   test("deleting a video cascades to video_tags", async () => {

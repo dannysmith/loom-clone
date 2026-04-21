@@ -1,23 +1,31 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { type Tag, tags, videoTags } from "../db/schema";
+import { TAG_COLORS, type Tag, type TagColor, tags, videoTags } from "../db/schema";
 import { logEvent } from "./events";
-import { ConflictError } from "./store";
+import { ConflictError, ValidationError } from "./store";
+
+function validateColor(color: string): asserts color is TagColor {
+  if (!TAG_COLORS.includes(color as TagColor)) {
+    throw new ValidationError(
+      `Invalid tag color "${color}". Must be one of: ${TAG_COLORS.join(", ")}`,
+    );
+  }
+}
 
 // Creates a new tag. Tag names are unique case-sensitively (matches the DB
 // constraint); callers that want case-insensitive matching should normalise
 // upstream. Throws ConflictError if the name already exists.
-export async function createTag(name: string): Promise<Tag> {
+export async function createTag(name: string, color?: TagColor): Promise<Tag> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Tag name cannot be empty");
+  if (color !== undefined) validateColor(color);
 
   // Use onConflictDoNothing to avoid the TOCTOU race of check-then-insert.
   // If the name already exists, the insert returns nothing and we throw.
-  const [tag] = await getDb()
-    .insert(tags)
-    .values({ name: trimmed })
-    .onConflictDoNothing()
-    .returning();
+  const values: { name: string; color?: TagColor } = { name: trimmed };
+  if (color !== undefined) values.color = color;
+
+  const [tag] = await getDb().insert(tags).values(values).onConflictDoNothing().returning();
   if (!tag) throw new ConflictError(`Tag "${trimmed}" already exists`);
   return tag;
 }
@@ -30,30 +38,49 @@ export async function getTag(id: number): Promise<Tag | undefined> {
   return getDb().select().from(tags).where(eq(tags.id, id)).get();
 }
 
-// Renames a tag. Conflicts with another tag's existing name throw ConflictError.
-export async function renameTag(id: number, name: string): Promise<Tag> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Tag name cannot be empty");
+export type TagPatch = {
+  name?: string;
+  color?: TagColor;
+};
 
+// Updates a tag's name and/or color. Name conflicts throw ConflictError.
+// renameTag is retained as a convenience alias.
+export async function updateTag(id: number, patch: TagPatch): Promise<Tag> {
   const existing = await getTag(id);
   if (!existing) throw new Error(`Tag ${id} not found`);
-  if (existing.name === trimmed) return existing;
+
+  const changes: { name?: string; color?: TagColor } = {};
+
+  if (patch.name !== undefined) {
+    const trimmed = patch.name.trim();
+    if (!trimmed) throw new Error("Tag name cannot be empty");
+    if (trimmed !== existing.name) changes.name = trimmed;
+  }
+
+  if (patch.color !== undefined) {
+    validateColor(patch.color);
+    if (patch.color !== existing.color) changes.color = patch.color;
+  }
+
+  if (Object.keys(changes).length === 0) return existing;
 
   try {
-    const [updated] = await getDb()
-      .update(tags)
-      .set({ name: trimmed })
-      .where(eq(tags.id, id))
-      .returning();
+    const [updated] = await getDb().update(tags).set(changes).where(eq(tags.id, id)).returning();
     if (!updated) throw new Error(`Tag ${id} not found`);
     return updated;
   } catch (err) {
     // SQLite UNIQUE constraint violation on tags.name — convert to ConflictError.
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
-      throw new ConflictError(`Tag "${trimmed}" already exists`);
+      throw new ConflictError(`Tag "${changes.name}" already exists`);
     }
     throw err;
   }
+}
+
+// Convenience alias — existing callers that only rename don't need to learn
+// the patch API. Delegates to updateTag.
+export async function renameTag(id: number, name: string): Promise<Tag> {
+  return updateTag(id, { name });
 }
 
 // Deletes a tag and, via FK cascade, removes all video_tag associations.
@@ -102,6 +129,7 @@ export async function getVideoTags(videoId: string): Promise<Tag[]> {
     .select({
       id: tags.id,
       name: tags.name,
+      color: tags.color,
       createdAt: tags.createdAt,
     })
     .from(videoTags)

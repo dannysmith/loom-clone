@@ -263,7 +263,7 @@ Extend the existing `@layer` system. Admin styles live in `admin.css` (already l
 
 # Implementation Plan
 
-## Phase 0 — Database Audit
+## Phase 0 — Database Audit ✅
 
 Before building any admin features, audit the current schema (`src/db/schema.ts`) and data model for integrity, future-proofing, and efficiency. This is the first occasion where we rely heavily on the database, so it's worth thinking carefully about design before piling features on top.
 
@@ -277,6 +277,17 @@ Areas to review:
 - **Index coverage** — review existing indexes against the query patterns the admin will introduce (filtered listing, search, tag joins, event lookups by video + date).
 - **Foreign key discipline** — confirm all cross-table references have appropriate FK constraints and cascade rules.
 - **General hygiene** — look for anything that would make future migrations painful (implicit defaults, missing NOT NULL constraints, columns that should exist but don't).
+
+### Audit Findings
+
+- **SQLite confirmed.** Single user, low-thousands of videos, no concurrent write pressure. WAL mode already enabled. FTS5 (built into SQLite/Bun) covers the full-text search case — use FTS5, not LIKE. The admin's heavier read patterns (filtered listing, tag joins, cursor pagination) are well within SQLite's comfort zone at this scale. No reason to consider Postgres.
+- **Primary keys — no changes needed.** UUIDs for videos/apiKeys (match filesystem `data/<id>/` directories), autoincrement integers for tags/events (lookup tables and append-only log), composite natural keys for videoSegments/videoTags/slugRedirects. All appropriate for their use cases.
+- **Timestamps — complete coverage, no gaps.** Every table has `createdAt`. Videos additionally has `updatedAt`, `completedAt`, `trashedAt`. ApiKeys has `lastUsedAt`, `revokedAt`. Segments has `uploadedAt`. Tags has only `createdAt` — no `updatedAt`, but tag renames are low-stakes label changes and the video_events table captures per-video tag associations with timestamps, so the audit trail is adequate.
+- **Tags schema — `color` column added.** Stored as palette name strings (`"gray"`, `"red"`, `"blue"`, etc.), NOT NULL, defaulting to `"gray"`. Palette names over hex because: readable in queries, CSS maps them to OKLCH values via custom properties, and changing the visual color doesn't require updating rows. Palette: gray, red, orange, yellow, green, teal, blue, indigo, purple, pink (10 colours). Validation is application-side (same pattern as status/visibility enums). Migration `0002` applied. Store functions updated: `createTag` accepts optional color, `updateTag` added for name+color patches, `getVideoTags` returns color.
+- **Event log schema — sufficient as-is.** Events are only queried per-video (the `(video_id, created_at)` composite index covers this). No cross-video event queries needed for the admin. JSON `data` column is fine — nothing needs promoting to columns. The `EventType` union is open (DB column is an open string); new types (`untrashed`, `duplicated`, `uploaded`, etc.) get added when the code that writes them is built in later phases.
+- **Index coverage — adequate for admin patterns.** Dashboard filtering at hundreds-to-low-thousands of videos will use WHERE clauses on a table scan, which is fast at this scale. Existing indexes cover the important paths: slug unique lookup, `created_at` for sort/pagination, `trashed_at` for exclusion, tag joins in both directions via composite PK + `tag_id` index, event lookup by `(video_id, created_at)`. No new indexes needed now. FTS5 virtual table for search is Phase 3 implementation work, not a schema concern.
+- **Foreign key discipline — clean.** All cross-table references have FK constraints with `ON DELETE CASCADE`. `PRAGMA foreign_keys = ON` set per-connection in `createDb()`. ApiKeys has no FKs, which is correct (independent entities).
+- **General hygiene — no issues found.** NOT NULL constraints appropriate everywhere. Defaults sensible (status→recording, visibility→unlisted, source→recorded). Nullable columns are the ones that should be nullable (title, description, dimensions, completedAt, trashedAt). ISO-8601 text timestamps consistent across all tables. No implicit defaults, no missing constraints, nothing that would make future migrations painful.
 
 ## Phase 1 — Foundation
 

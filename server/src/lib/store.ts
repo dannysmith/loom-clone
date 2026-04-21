@@ -4,6 +4,7 @@ import { join } from "path";
 import { getDb } from "../db/client";
 import { slugRedirects, type Video, videoSegments, videos, videoTags } from "../db/schema";
 import { type EventType, logEvent } from "./events";
+import { nowIso } from "./format";
 import { searchVideoIds } from "./search";
 
 export const DATA_DIR = "data";
@@ -102,10 +103,6 @@ export type VideoPatch = {
   description?: string | null;
   visibility?: Video["visibility"];
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function generateSlug(): string {
   // 8 hex chars from 4 random bytes. Re-roll if it lands on a reserved word —

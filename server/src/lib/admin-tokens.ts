@@ -2,15 +2,12 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { type AdminToken, adminTokens } from "../db/schema";
 import { hashToken } from "./api-keys";
+import { nowIso } from "./format";
 
 // Admin token prefix — distinct from the `lck_` recording API keys.
 // Lets humans and secret-scanners instantly tell the two apart.
 const TOKEN_PREFIX = "lca_";
 const TOKEN_BYTES = 32;
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function generateToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_BYTES));

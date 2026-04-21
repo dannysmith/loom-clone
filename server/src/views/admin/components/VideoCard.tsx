@@ -1,10 +1,11 @@
 import type { Video } from "../../../db/schema";
+import { formatDate, formatDurationShort } from "../../../lib/format";
 
 // Shared card component for both grid and table views. The containing
 // element's `data-view` attribute controls the layout via CSS.
 export function VideoCard({ video }: { video: Video }) {
   const title = video.title || video.slug;
-  const duration = video.durationSeconds != null ? formatDuration(video.durationSeconds) : null;
+  const duration = formatDurationShort(video.durationSeconds);
   const date = formatDate(video.createdAt);
   const thumbSrc = `/admin/videos/${video.id}/media/poster.jpg`;
   const isPublicOrUnlisted = video.visibility !== "private";
@@ -80,13 +81,3 @@ export function VideoCard({ video }: { video: Video }) {
   );
 }
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}

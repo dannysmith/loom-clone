@@ -1,7 +1,7 @@
 import type { Tag, Video, VideoEvent } from "../../../db/schema";
 import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
-import { formatDate, formatDuration } from "../../../lib/format";
+import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
 import { AdminLayout } from "../../layouts/AdminLayout";
 import { VideoActions } from "../partials/VideoActions";
 import {
@@ -156,18 +156,6 @@ function FileBrowser({ files }: { files: FileEntry[] }) {
       ))}
     </div>
   );
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }
 
 function tryParseJson(s: string): Record<string, unknown> | null {

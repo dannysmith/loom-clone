@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { type ApiKey, apiKeys } from "../db/schema";
+import { nowIso } from "./format";
 
 // Visible prefix on every issued token. Two purposes: (a) lets a human
 // glance at a string and recognise "this is a loom-clone API key", which
@@ -10,10 +11,6 @@ import { type ApiKey, apiKeys } from "../db/schema";
 const TOKEN_PREFIX = "lck_";
 // 32 random bytes = 256 bits of entropy. base64url ≈ 43 chars.
 const TOKEN_BYTES = 32;
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function generateToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_BYTES));

@@ -1,4 +1,5 @@
 import type { AdminToken, ApiKey } from "../../../db/schema";
+import { formatDate } from "../../../lib/format";
 
 type KeyLike = ApiKey | AdminToken;
 
@@ -137,10 +138,3 @@ function KeyRow({ apiKey: k, revokePrefix }: { apiKey: KeyLike; revokePrefix: st
   );
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}

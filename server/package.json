@@ -32,6 +32,7 @@
     "@types/bun": "latest",
     "better-sqlite3": "^12.9.0",
     "drizzle-kit": "^0.31.10",
+    "typed-htmx": "^0.3.1",
     "typescript": "^5"
   }
 }

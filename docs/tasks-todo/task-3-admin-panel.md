@@ -289,7 +289,7 @@ Areas to review:
 - **Foreign key discipline — clean.** All cross-table references have FK constraints with `ON DELETE CASCADE`. `PRAGMA foreign_keys = ON` set per-connection in `createDb()`. ApiKeys has no FKs, which is correct (independent entities).
 - **General hygiene — no issues found.** NOT NULL constraints appropriate everywhere. Defaults sensible (status→recording, visibility→unlisted, source→recorded). Nullable columns are the ones that should be nullable (title, description, dimensions, completedAt, trashedAt). ISO-8601 text timestamps consistent across all tables. No implicit defaults, no missing constraints, nothing that would make future migrations painful.
 
-## Phase 1 — Foundation
+## Phase 1 — Foundation ✅
 
 Set up the HTMX tooling, admin view structure, layout shell, and CSS foundations. After this phase the admin has a working skeleton with navigation between placeholder pages.
 

@@ -1,29 +1,193 @@
 /* Admin-only styles. Linked via <AdminLayout> head slot.
-   Phase 6 (task-x5) builds out nav, lists, forms, etc. */
+   Sidebar layout, nav, and foundation component classes. */
+
+/* ------- Layout ------- */
 
 body.admin {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  min-block-size: 100vh;
+	display: grid;
+	grid-template-columns: 15rem 1fr;
+	min-block-size: 100dvh;
 }
 
-.admin-header {
-  display: flex;
-  align-items: center;
-  padding-block: var(--space-3);
-  padding-inline: var(--space-5);
-  border-block-end: 1px solid var(--color-border);
-  background-color: var(--color-surface);
+/* Login page — no sidebar, centered content */
+body.admin--login {
+	display: grid;
+	grid-template-columns: 1fr;
+}
+
+/* ------- Sidebar ------- */
+
+.admin-sidebar {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-5);
+	padding: var(--space-5);
+	border-inline-end: 1px solid var(--color-border);
+	background-color: var(--color-surface);
 }
 
 .admin-brand {
-  font-weight: var(--font-weight-bold);
-  text-decoration: none;
+	font-weight: var(--font-weight-bold);
+	font-size: var(--font-size-sm);
+	text-decoration: none;
+	color: var(--color-fg);
+	letter-spacing: -0.01em;
 }
 
+/* ------- Nav ------- */
+
+.admin-nav {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.admin-nav-link {
+	display: block;
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-md);
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
+	text-decoration: none;
+	transition: background-color var(--duration-fast) var(--ease-out),
+		color var(--duration-fast) var(--ease-out);
+}
+
+.admin-nav-link:hover {
+	color: var(--color-fg);
+	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+}
+
+.admin-nav-link[aria-current="page"] {
+	color: var(--color-fg);
+	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	font-weight: var(--font-weight-bold);
+}
+
+/* ------- Main content ------- */
+
 .admin-main {
-  padding: var(--space-6);
-  max-inline-size: var(--content-max);
-  margin-inline: auto;
-  inline-size: 100%;
+	padding: var(--space-6);
+	max-inline-size: var(--content-max);
+	inline-size: 100%;
+	overflow-y: auto;
+}
+
+/* ------- Page header ------- */
+
+.page-header {
+	margin-block-end: var(--space-5);
+
+	& h1 {
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-bold);
+		letter-spacing: -0.01em;
+	}
+}
+
+/* ------- Empty state ------- */
+
+.empty-state {
+	color: var(--color-fg-muted);
+	font-size: var(--font-size-sm);
+}
+
+/* ------- Login ------- */
+
+.login-container {
+	display: grid;
+	place-items: center;
+	min-block-size: 100dvh;
+	padding: var(--space-6);
+}
+
+.login-card {
+	inline-size: 100%;
+	max-inline-size: 24rem;
+
+	& h1 {
+		font-size: var(--font-size-xl);
+		font-weight: var(--font-weight-bold);
+		margin-block-end: var(--space-5);
+	}
+}
+
+/* ------- Buttons ------- */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-4);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	line-height: var(--line-height-tight);
+	color: var(--color-fg);
+	background-color: var(--color-surface);
+	cursor: pointer;
+	transition: background-color var(--duration-fast) var(--ease-out);
+
+	&:hover {
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	}
+}
+
+.btn--primary {
+	color: var(--color-accent-fg);
+	background-color: var(--color-accent);
+	border-color: var(--color-accent);
+
+	&:hover {
+		background-color: var(--color-accent-hover);
+		border-color: var(--color-accent-hover);
+	}
+}
+
+/* ------- Badges ------- */
+
+.badge {
+	display: inline-flex;
+	align-items: center;
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-full);
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-medium);
+	line-height: 1;
+	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	color: var(--color-fg-muted);
+}
+
+/* ------- Form elements ------- */
+
+.input {
+	display: block;
+	inline-size: 100%;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	font-size: var(--font-size-sm);
+	font-family: inherit;
+	color: var(--color-fg);
+	background-color: var(--color-bg);
+	transition: border-color var(--duration-fast) var(--ease-out);
+
+	&:focus {
+		outline: 2px solid var(--color-accent);
+		outline-offset: -1px;
+		border-color: var(--color-accent);
+	}
+
+	&::placeholder {
+		color: var(--color-fg-muted);
+	}
+}
+
+.label {
+	display: block;
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	margin-block-end: var(--space-1);
 }

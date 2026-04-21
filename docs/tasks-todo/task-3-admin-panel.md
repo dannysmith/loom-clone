@@ -196,6 +196,69 @@ Actions that succeed update the UI in-place. No toast notification system needed
 
 ---
 
+# Technical Approach
+
+Decisions made after researching current (2026) best practices for Hono + HTMX applications.
+
+## Frontend Stack
+
+**HTMX** (~14KB, CDN) for all interactivity. No client-side framework (no React, Preact, Alpine.js, etc). No build step.
+
+The server renders all HTML via Hono JSX. HTMX makes it interactive by fetching HTML fragments and swapping them into the page. A single small vanilla JS file (`admin.js`, ~20-40 lines) handles the few purely client-side interactions: clipboard copy, `<dialog>` opening for confirmations, and file upload progress.
+
+No custom elements / Web Components initially. Every interactive pattern the admin needs is covered by established HTMX patterns or native HTML features:
+
+| Interaction | Approach |
+|-------------|----------|
+| In-place editing | HTMX click-to-edit partials (zero JS) |
+| Search | `hx-trigger="input changed delay:500ms"` |
+| Filters & sorting | HTMX form submission, server returns updated list |
+| Tabs | Server-driven HATEOAS (server sets active state) |
+| Pagination (load more) | Self-replacing button pattern |
+| Confirmations | Server-rendered `<dialog>`, auto-opened via JS |
+| Dropdowns/menus | Native `popover` attribute (Baseline 2024) |
+| Grid/table toggle | `data-view` attribute + CSS |
+| File upload | htmx multipart + `htmx:xhr:progress` event |
+
+## Navigation Pattern
+
+Page navigation uses `hx-boost="true"` on the admin body + `hx-select="#admin-main"` to extract the content area from full-page responses. The server always returns a complete HTML page wrapped in `AdminLayout` — HTMX selects just the part it needs.
+
+This avoids all history/caching bugs associated with conditional fragment-vs-full-page responses (no `Vary: HX-Request` header juggling). Every URL is a full page that works on direct navigation, browser back/forward, and refresh.
+
+In-page interactions (inline edits, search, filter, tab content, actions) use dedicated fragment routes that return only the relevant HTML partial.
+
+## View Structure
+
+```
+src/views/admin/
+  pages/         # Full page components (wrapped in AdminLayout)
+  partials/      # Fragment components for HTMX swaps (no layout)
+  components/    # Shared JSX building blocks used by both
+```
+
+Pages always call `AdminLayout`. Partials never include layout chrome. Components are reusable JSX functions used by both (e.g. `VideoCard` appears in full pages and in fragment responses).
+
+## Route Surfaces
+
+A single HTML surface at `/admin/*`. No separate JSON API built initially — deferred until there's a real scripting/automation use case. The route structure is CRUD-logical (RESTful verbs and paths) to facilitate adding a JSON API later.
+
+## Auth
+
+- **Sessions**: signed cookie (~2 week expiry, `SameSite=Lax; Secure; HttpOnly`). No server-side session table.
+- **CSRF**: Hono's built-in CSRF middleware (checks `Origin` header on mutations).
+- **Admin tokens**: separate system from the macOS app's `lck_` recording API keys. Different table, different prefix (`lca_`), same hash-and-store mechanism. Admin auth middleware accepts either valid session cookie or valid admin bearer token.
+
+## CSS
+
+Extend the existing `@layer` system. Admin styles live in `admin.css` (already linked via `AdminLayout`). Component classes added to the `components` layer as patterns emerge. Same design tokens, same modern CSS approach (nesting, container queries, `:has()`, `light-dark()`).
+
+## TypeScript
+
+`typed-htmx` (dev dependency) for type-safe `hx-*` attributes in Hono JSX. Declaration via `global.d.ts` using the `declare global { namespace Hono }` pattern (required for Hono v4.4+).
+
+---
+
 # Implementation Plan
 
 ## Phase 0 — Database Audit

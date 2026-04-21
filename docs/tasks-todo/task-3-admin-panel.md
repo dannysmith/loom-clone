@@ -43,7 +43,7 @@ The main page. Shows all non-trashed videos.
 
 Two views toggled by the user, with **grid as the default**:
 
-- **Grid** — card layout with thumbnail, title/slug, duration, visibility badge, date.
+- **Grid** — card layout with thumbnail, title/slug, duration, visibility badge, date etc.
 - **Table** — row layout with the same information in columns.
 
 Both views show identical data — the toggle may be achievable with CSS alone (container queries) if the markup is shared.
@@ -67,7 +67,7 @@ The filtering system should be designed so that adding new filterable fields in 
 
 ### Pagination
 
-Cursor-based pagination (the server already supports this). Infinite scroll or "Load More" button — not numbered pages.
+Cursor-based pagination. Infinite scroll or "Load More" button — not numbered pages.
 
 ## Video Page
 
@@ -77,7 +77,7 @@ The page for viewing and managing a single video.
 
 - **Page header**: Title and slug displayed prominently, editable in-place (click to edit, save/cancel). Clear visibility indicator (badge or similar) that's easy to change.
 - **Player**: Below the header. Uses Vidstack (CDN). Fully independent from the viewer-facing player — no shared CSS, no shared code paths. Must work for private videos (served via session-gated admin media routes).
-- **Metadata area**: Description (editable in-place), tags, duration, dimensions, status, dates, source type. Some fields editable, some read-only.
+- **Metadata area**: Description (editable in-place where appropriate), tags, duration, dimensions, status, dates, source type. Some fields editable, some read-only.
 - **Tabbed section below**: Heavier content in tabs — event log, file browser, and potentially more in future.
 
 ### Editable Fields
@@ -96,7 +96,7 @@ Future consideration: when files move to R2/object storage, this should also sho
 
 ### Event Log (tab)
 
-Chronological timeline of events from the `video_events` table. Shows event type, timestamp, and relevant data. Read-only. Newest first or oldest first (TBD).
+Chronological timeline of events from the `video_events` table. Shows event type, timestamp, and relevant data. Read-only, oldest first.
 
 Events are already written for: `created`, `completed`, `healed`, `title_changed`, `description_changed`, `visibility_changed`, `slug_changed`, `trashed`. As new admin features are built, they should write events for their mutations.
 
@@ -104,7 +104,7 @@ Pre-existing server operations (derivative generation, healing) should also writ
 
 ## Video Actions
 
-Actions available on the video page. (Adding these to dashboard cards as context menus is a separate deliverable done last.)
+Actions available on the video page. (Adding these to dashboard cards as context menus is a separate deliverable done later.)
 
 | Action | Behaviour | Availability |
 |--------|-----------|--------------|
@@ -176,7 +176,7 @@ A dedicated page at `/admin/trash` showing only trashed videos. Same card/table 
 - Untrash action: restores the video with its original visibility, slug, and all data intact.
 - Permanent deletion / "Empty Trash" is out of scope for now.
 
-## Dashboard Card Actions (Deferred)
+## Dashboard Card Actions
 
 Once the dashboard, video page, and all actions are built, the final deliverable is adding a context menu or dropdown to each dashboard card/row with quick-access to video actions (Open Public URL, Copy URL, Change Visibility, Download, Duplicate, Trash). This is deliberately last because it depends on everything else being in place.
 

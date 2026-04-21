@@ -347,7 +347,7 @@ The settings page with three panes: General, Tags, and API Keys.
 
 **Done when:** tags can be created/edited/deleted, API keys can be managed via the web UI, and all mutations write events.
 
-## Phase 5 — Video Page (Display)
+## Phase 5 — Video Page (Display) ✅
 
 The video detail page with all display elements. Read-only at this stage — editing comes in Phase 6.
 

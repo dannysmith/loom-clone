@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { csrf } from "hono/csrf";
+import { join } from "path";
 import {
   clearSession,
   createSession,
@@ -9,8 +10,17 @@ import {
   verifyCredentials,
 } from "../../lib/admin-auth";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
-import { type DashboardFilters, type DashboardSort, listVideosFiltered } from "../../lib/store";
-import { createTag, deleteTag, getTag, listTags, updateTag } from "../../lib/tags";
+import { listEvents } from "../../lib/events";
+import { serveFileWithRange } from "../../lib/file-serve";
+import { listVideoFiles } from "../../lib/files";
+import {
+  DATA_DIR,
+  type DashboardFilters,
+  type DashboardSort,
+  getVideo,
+  listVideosFiltered,
+} from "../../lib/store";
+import { createTag, deleteTag, getTag, getVideoTags, listTags, updateTag } from "../../lib/tags";
 import { DashboardPage } from "../../views/admin/pages/DashboardPage";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
@@ -99,9 +109,72 @@ admin.get("/partials/video-list", async (c) => {
   );
 });
 
+// --- Video detail ---
+
+admin.get("/videos/:id", async (c) => {
+  const id = c.req.param("id");
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Video not found", 404);
+
+  const activeTab = c.req.query("tab") === "files" ? "files" : "events";
+  const [tags, events, files] = await Promise.all([
+    getVideoTags(id),
+    listEvents(id),
+    listVideoFiles(id),
+  ]);
+
+  return c.html(
+    <VideoDetailPage
+      video={video}
+      tags={tags}
+      events={events}
+      files={files}
+      activeTab={activeTab}
+    />,
+  );
+});
+
+// --- Admin media routes (session-gated, serves by video ID) ---
+
+const RAW_FILENAME = /^(source|\d+p)\.mp4$/;
+const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
+
+admin.get("/videos/:id/media/raw/:file", async (c) => {
+  const { id, file } = c.req.param();
+  if (!RAW_FILENAME.test(file)) return c.text("Not found", 404);
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return serveFileWithRange(c, join(DATA_DIR, id, "derivatives", file), "video/mp4", "immutable");
+});
+
+admin.get("/videos/:id/media/stream/:file", async (c) => {
+  const { id, file } = c.req.param();
+  if (!STREAM_FILENAME.test(file)) return c.text("Not found", 404);
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  const contentType = file.endsWith(".m3u8")
+    ? "application/vnd.apple.mpegurl"
+    : file.endsWith(".m4s")
+      ? "video/iso.segment"
+      : "video/mp4";
+  const cache = file.endsWith(".m3u8") ? ("short" as const) : ("immutable" as const);
+  return serveFileWithRange(c, join(DATA_DIR, id, file), contentType, cache);
+});
+
+admin.get("/videos/:id/media/poster.jpg", async (c) => {
+  const id = c.req.param("id");
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return serveFileWithRange(
+    c,
+    join(DATA_DIR, id, "derivatives", "thumbnail.jpg"),
+    "image/jpeg",
+    "immutable",
+  );
+});
+
 // --- Other pages ---
 
-admin.get("/videos/:id", (c) => c.html(<VideoDetailPage id={c.req.param("id")} />));
 admin.get("/trash", (c) => c.html(<TrashBinPage />));
 
 // --- Settings ---

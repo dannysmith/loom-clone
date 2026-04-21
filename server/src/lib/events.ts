@@ -1,5 +1,6 @@
+import { asc, eq } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { videoEvents } from "../db/schema";
+import { type VideoEvent, videoEvents } from "../db/schema";
 
 // Known event types. The DB column is an open string (no migration needed to
 // add types), but this union catches typos at compile time in app code.
@@ -14,6 +15,16 @@ export type EventType =
   | "slug_changed"
   | "tag_added"
   | "tag_removed";
+
+// Returns all events for a video, oldest first. The `data` field is raw
+// JSON text — callers parse it as needed for display.
+export async function listEvents(videoId: string): Promise<VideoEvent[]> {
+  return getDb()
+    .select()
+    .from(videoEvents)
+    .where(eq(videoEvents.videoId, videoId))
+    .orderBy(asc(videoEvents.createdAt));
+}
 
 // Appends a row to video_events. `data` is optional structured context,
 // serialised as JSON. Per-segment uploads are deliberately NOT logged:

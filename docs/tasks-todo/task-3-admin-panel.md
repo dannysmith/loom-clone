@@ -336,7 +336,7 @@ The video list page with both view modes, search, filtering, sorting, and pagina
 
 **Done when:** the dashboard shows all non-trashed videos in both grid and table views, search/filter/sort work with URL persistence, and pagination loads more results.
 
-## Phase 4 — Settings
+## Phase 4 — Settings ✅
 
 The settings page with three panes: General, Tags, and API Keys.
 

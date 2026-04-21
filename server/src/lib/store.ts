@@ -1,9 +1,10 @@
-import { and, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
-import { slugRedirects, type Video, videoSegments, videos } from "../db/schema";
+import { slugRedirects, type Video, videoSegments, videos, videoTags } from "../db/schema";
 import { type EventType, logEvent } from "./events";
+import { searchVideoIds } from "./search";
 
 export const DATA_DIR = "data";
 
@@ -207,6 +208,186 @@ export async function listVideosPaginated(opts: ListPaginatedOpts = {}): Promise
   const nextCursor = hasNext && lastItem ? lastItem.id : null;
 
   return { items, nextCursor };
+}
+
+// --- Dashboard listing with filtering, sorting, and search ---
+
+export type DashboardSort =
+  | "date-desc"
+  | "date-asc"
+  | "duration-desc"
+  | "duration-asc"
+  | "title-asc"
+  | "title-desc";
+
+export type DashboardFilters = {
+  search?: string;
+  visibility?: Video["visibility"];
+  status?: Video["status"];
+  tagId?: number;
+  dateFrom?: string; // ISO date string
+  dateTo?: string; // ISO date string
+  durationMin?: number; // seconds
+  durationMax?: number; // seconds
+  sort?: DashboardSort;
+  cursor?: string; // video ID of last item from previous page
+  limit?: number;
+  trashedOnly?: boolean; // true for the Trash Bin page
+};
+
+export async function listVideosFiltered(filters: DashboardFilters = {}): Promise<{
+  items: Video[];
+  nextCursor: string | null;
+}> {
+  const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
+  const sort = filters.sort ?? "date-desc";
+  const db = getDb();
+
+  const conditions: ReturnType<typeof eq>[] = [];
+
+  // Trash filter
+  if (filters.trashedOnly) {
+    conditions.push(sql`${videos.trashedAt} IS NOT NULL`);
+  } else {
+    conditions.push(isNull(videos.trashedAt));
+  }
+
+  // FTS5 search
+  if (filters.search) {
+    const matchingIds = searchVideoIds(filters.search);
+    if (matchingIds.length === 0) return { items: [], nextCursor: null };
+    conditions.push(inArray(videos.id, matchingIds));
+  }
+
+  // Filters
+  if (filters.visibility) conditions.push(eq(videos.visibility, filters.visibility));
+  if (filters.status) conditions.push(eq(videos.status, filters.status));
+  if (filters.dateFrom) conditions.push(gte(videos.createdAt, filters.dateFrom));
+  if (filters.dateTo) conditions.push(lte(videos.createdAt, filters.dateTo));
+  if (filters.durationMin != null)
+    conditions.push(gte(videos.durationSeconds, filters.durationMin));
+  if (filters.durationMax != null)
+    conditions.push(lte(videos.durationSeconds, filters.durationMax));
+
+  // Tag filter via subquery
+  if (filters.tagId != null) {
+    const taggedIds = db
+      .select({ videoId: videoTags.videoId })
+      .from(videoTags)
+      .where(eq(videoTags.tagId, filters.tagId));
+    conditions.push(inArray(videos.id, taggedIds));
+  }
+
+  // Cursor pagination — look up the cursor video's sort-column value
+  if (filters.cursor) {
+    const cursorVideo = db
+      .select({
+        id: videos.id,
+        createdAt: videos.createdAt,
+        durationSeconds: videos.durationSeconds,
+        title: videos.title,
+      })
+      .from(videos)
+      .where(eq(videos.id, filters.cursor))
+      .get();
+
+    if (cursorVideo) {
+      conditions.push(cursorCondition(sort, cursorVideo));
+    }
+  }
+
+  // Sort order
+  const orderCols = sortOrder(sort);
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const rows = await db
+    .select()
+    .from(videos)
+    .where(where)
+    .orderBy(...orderCols)
+    .limit(limit + 1);
+
+  const hasNext = rows.length > limit;
+  const items = hasNext ? rows.slice(0, limit) : rows;
+  const lastItem = items[items.length - 1];
+  const nextCursor = hasNext && lastItem ? lastItem.id : null;
+
+  return { items, nextCursor };
+}
+
+type CursorVideo = {
+  id: string;
+  createdAt: string;
+  durationSeconds: number | null;
+  title: string | null;
+};
+
+// Returns a WHERE clause that selects rows "after" the cursor in the given
+// sort order. Uses composite tiebreakers to ensure stable pagination.
+function cursorCondition(sort: DashboardSort, c: CursorVideo): ReturnType<typeof eq> {
+  switch (sort) {
+    case "date-desc":
+      return or(
+        lt(videos.createdAt, c.createdAt),
+        and(eq(videos.createdAt, c.createdAt), lt(videos.id, c.id)),
+      )!;
+    case "date-asc":
+      return or(
+        gt(videos.createdAt, c.createdAt),
+        and(eq(videos.createdAt, c.createdAt), gt(videos.id, c.id)),
+      )!;
+    case "duration-desc": {
+      const d = c.durationSeconds ?? 0;
+      return or(
+        lt(videos.durationSeconds, d),
+        and(eq(videos.durationSeconds, d), lt(videos.id, c.id)),
+      )!;
+    }
+    case "duration-asc": {
+      const d = c.durationSeconds ?? 0;
+      return or(
+        gt(videos.durationSeconds, d),
+        and(eq(videos.durationSeconds, d), gt(videos.id, c.id)),
+        // Nulls sort last in asc — include them after all non-null values
+        and(
+          sql`${videos.durationSeconds} IS NOT NULL`,
+          eq(videos.durationSeconds, d),
+          gt(videos.id, c.id),
+        ),
+      )!;
+    }
+    case "title-asc": {
+      const t = c.title ?? "";
+      return or(
+        sql`${videos.title} > ${t}`,
+        and(sql`${videos.title} = ${t}`, gt(videos.id, c.id)),
+      )!;
+    }
+    case "title-desc": {
+      const t = c.title ?? "";
+      return or(
+        sql`${videos.title} < ${t}`,
+        and(sql`${videos.title} = ${t}`, lt(videos.id, c.id)),
+      )!;
+    }
+  }
+}
+
+function sortOrder(sort: DashboardSort) {
+  switch (sort) {
+    case "date-desc":
+      return [desc(videos.createdAt), desc(videos.id)] as const;
+    case "date-asc":
+      return [asc(videos.createdAt), asc(videos.id)] as const;
+    case "duration-desc":
+      return [desc(videos.durationSeconds), desc(videos.id)] as const;
+    case "duration-asc":
+      return [asc(videos.durationSeconds), asc(videos.id)] as const;
+    case "title-asc":
+      return [asc(videos.title), asc(videos.id)] as const;
+    case "title-desc":
+      return [desc(videos.title), desc(videos.id)] as const;
+  }
 }
 
 // Resolves a public slug for viewer-facing routes. Checks the current slug

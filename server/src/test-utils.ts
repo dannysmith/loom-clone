@@ -19,13 +19,13 @@ export async function setupTestEnv(): Promise<TestEnv> {
   const tempDir = await mkdtemp(join(tmpdir(), "loom-clone-test-"));
   const originalCwd = process.cwd();
   process.chdir(tempDir);
-  const db = await createDb(":memory:");
-  _setDbForTests(db);
+  const { db, sqlite } = await createDb(":memory:");
+  _setDbForTests(db, sqlite);
   return { tempDir, originalCwd };
 }
 
 export async function teardownTestEnv(env: TestEnv): Promise<void> {
-  _setDbForTests(null);
+  _setDbForTests(null, null);
   process.chdir(env.originalCwd);
   await rm(env.tempDir, { recursive: true, force: true });
 }

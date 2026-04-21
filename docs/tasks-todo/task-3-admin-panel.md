@@ -320,7 +320,7 @@ Implement the login/session system and admin token mechanism. After this phase, 
 
 **Done when:** unauthenticated requests to any admin page redirect to login, logging in sets a session cookie, all subsequent navigation works, and bearer token auth works for programmatic access.
 
-## Phase 3 — Dashboard
+## Phase 3 — Dashboard ✅
 
 The video list page with both view modes, search, filtering, sorting, and pagination. This is the first feature that exercises the full HTMX fragment pattern.
 

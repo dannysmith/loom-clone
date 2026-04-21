@@ -403,7 +403,7 @@ The final feature deliverable. Add a context menu / dropdown to each video card 
 
 **Done when:** video actions are accessible from both the video page and the dashboard card menu.
 
-## Phase 10 — Review & Polish
+## Phase 10 — Review & Polish ✅
 
 Verify the implementation against all requirements in this document. Not a feature phase — a quality pass.
 

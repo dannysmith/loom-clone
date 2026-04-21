@@ -9,7 +9,7 @@ The server is split into four route modules, each with its own auth profile:
 | Module   | Mount      | Auth                                          | Purpose                                          |
 | -------- | ---------- | --------------------------------------------- | ------------------------------------------------ |
 | `api`    | `/api`     | Bearer on `/api/videos/*`; `/api/health` open | JSON API for macOS app + programmatic clients    |
-| `admin`  | `/admin`   | Session-based (stub — task-x5)                | Admin panel                                      |
+| `admin`  | `/admin`   | Session cookie or `lca_` bearer token         | Admin panel (HTML pages + HTMX partials)         |
 | `site`   | `/`        | Open                                          | Root landing, well-known files, oEmbed discovery |
 | `videos` | `/` (last) | Open                                          | Viewer-facing `/:slug` surface, catch-all        |
 
@@ -281,9 +281,71 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
 
 ## Admin routes
 
-| Path     | Response                                                        |
-| -------- | --------------------------------------------------------------- |
-| `/admin` | HTML stub (`AdminLayout` placeholder). Real admin UI is task-x5 |
+Auth: session cookie (`lc_session`, signed, 2-week expiry) or `Authorization: Bearer lca_...` admin token. All routes except `GET/POST /admin/login` require auth. CSRF protection on all mutations.
+
+When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
+
+### Pages (full HTML, hx-boost navigation)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin` | Dashboard — video list with search, filters, sort, pagination |
+| GET | `/admin/login` | Login page |
+| POST | `/admin/login` | Authenticate (sets session cookie, redirects to `/admin`) |
+| POST | `/admin/logout` | Clear session, redirect to login |
+| GET | `/admin/videos/:id` | Video detail — player, metadata, event log, file browser |
+| GET | `/admin/upload` | Upload form |
+| POST | `/admin/upload` | Upload MP4, create video, redirect to detail page |
+| GET | `/admin/settings` | Settings — General pane |
+| GET | `/admin/settings/tags` | Settings — Tags pane |
+| GET | `/admin/settings/keys` | Settings — API Keys pane |
+| GET | `/admin/trash` | Trash bin — trashed videos with restore |
+
+### HTMX partials (HTML fragments for in-page updates)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin/partials/video-list` | Filtered/sorted video list (search, pagination) |
+| GET | `/admin/videos/:id/partials/title` | Title display partial |
+| GET | `/admin/videos/:id/partials/title/edit` | Title edit form |
+| PATCH | `/admin/videos/:id/title` | Save title |
+| GET | `/admin/videos/:id/partials/slug` | Slug display partial |
+| GET | `/admin/videos/:id/partials/slug/edit` | Slug edit form |
+| PATCH | `/admin/videos/:id/slug` | Save slug (creates redirect) |
+| GET | `/admin/videos/:id/partials/description` | Description display partial |
+| GET | `/admin/videos/:id/partials/description/edit` | Description edit form |
+| PATCH | `/admin/videos/:id/description` | Save description |
+| PATCH | `/admin/videos/:id/visibility` | Change visibility |
+| POST | `/admin/videos/:id/tags` | Add tag to video |
+| DELETE | `/admin/videos/:id/tags/:tagId` | Remove tag from video |
+
+### Video actions
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/admin/videos/:id/trash` | Soft-delete, redirect to dashboard |
+| POST | `/admin/videos/:id/untrash` | Restore, redirect to video detail |
+| POST | `/admin/videos/:id/duplicate` | Full copy (files + DB), redirect to duplicate |
+
+### Admin media (session-gated, serves by video ID regardless of visibility)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin/videos/:id/media/raw/:file` | MP4 derivatives (source.mp4, Np.mp4) |
+| GET | `/admin/videos/:id/media/stream/:file` | HLS files (stream.m3u8, init.mp4, seg_*.m4s) |
+| GET | `/admin/videos/:id/media/poster.jpg` | Thumbnail |
+
+### Settings mutations
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/admin/settings/tags` | Create tag |
+| GET | `/admin/settings/tags/:id/edit` | Tag edit form partial |
+| GET | `/admin/settings/tags/:id/display` | Tag display partial |
+| PATCH | `/admin/settings/tags/:id` | Update tag name/color |
+| DELETE | `/admin/settings/tags/:id` | Delete tag |
+| POST | `/admin/settings/keys` | Create API key (shows token once) |
+| POST | `/admin/settings/keys/:id/revoke` | Revoke API key |
 
 ## Content types
 

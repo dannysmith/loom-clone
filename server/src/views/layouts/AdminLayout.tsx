@@ -47,6 +47,11 @@ export function AdminLayout({ title, activePage, head, children }: Props) {
                 </a>
               ))}
             </nav>
+            <form method="post" action="/admin/logout" class="admin-sidebar-footer">
+              <button type="submit" class="admin-nav-link admin-logout-btn">
+                Log out
+              </button>
+            </form>
           </aside>
           <main class="admin-main">{children}</main>
           <script

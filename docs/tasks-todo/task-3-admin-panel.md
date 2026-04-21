@@ -305,7 +305,7 @@ Set up the HTMX tooling, admin view structure, layout shell, and CSS foundations
 
 **Done when:** navigating between all admin pages works via `hx-boost`, the layout/nav is visible, and HTMX is loaded and functional.
 
-## Phase 2 — Auth
+## Phase 2 — Auth ✅
 
 Implement the login/session system and admin token mechanism. After this phase, all `/admin/*` routes (except login) are protected.
 

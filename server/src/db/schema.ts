@@ -150,6 +150,18 @@ export const apiKeys = sqliteTable("api_keys", {
   revokedAt: text("revoked_at"),
 });
 
+// Admin tokens — bearer tokens for admin API access (scripting, automation).
+// Separate system from the macOS app's `lck_` recording API keys: different
+// table, different prefix (`lca_`), different security boundary.
+export const adminTokens = sqliteTable("admin_tokens", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  hashedToken: text("hashed_token").notNull().unique(),
+  createdAt: text("created_at").notNull().$defaultFn(nowIso),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+});
+
 // Inferred types — export for use in store and routes.
 export type Video = typeof videos.$inferSelect;
 export type VideoInsert = typeof videos.$inferInsert;
@@ -159,3 +171,4 @@ export type Tag = typeof tags.$inferSelect;
 export type VideoTag = typeof videoTags.$inferSelect;
 export type VideoEvent = typeof videoEvents.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
+export type AdminToken = typeof adminTokens.$inferSelect;

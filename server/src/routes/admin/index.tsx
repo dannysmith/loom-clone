@@ -13,6 +13,7 @@ import {
   requireAdmin,
   verifyCredentials,
 } from "../../lib/admin-auth";
+import { createAdminToken, listAdminTokens, revokeAdminToken } from "../../lib/admin-tokens";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
 import { probeDuration, scheduleUploadDerivatives } from "../../lib/derivatives";
 import { listEvents, logEvent } from "../../lib/events";
@@ -511,36 +512,47 @@ admin.delete("/settings/tags/:id", async (c) => {
 
 // --- API Keys ---
 
-admin.get("/settings/keys", async (c) => {
-  const keys = await listApiKeys();
-  return c.html(
-    <SettingsPage activeTab="keys">
-      <ApiKeysPane keys={keys} />
-    </SettingsPage>,
+// Helper to render the full keys pane with both key types.
+async function renderKeysPane(opts?: { newRecordingToken?: string; newAdminToken?: string }) {
+  const [recordingKeys, adminTokens] = await Promise.all([listApiKeys(), listAdminTokens()]);
+  return (
+    <ApiKeysPane
+      recordingKeys={recordingKeys}
+      adminTokens={adminTokens}
+      newRecordingToken={opts?.newRecordingToken}
+      newAdminToken={opts?.newAdminToken}
+    />
   );
+}
+
+admin.get("/settings/keys", async (c) =>
+  c.html(<SettingsPage activeTab="keys">{await renderKeysPane()}</SettingsPage>),
+);
+
+// Recording API keys (lck_)
+admin.post("/settings/keys/recording", async (c) => {
+  const name = String((await c.req.parseBody()).name ?? "").trim();
+  let newRecordingToken: string | undefined;
+  if (name) newRecordingToken = (await createApiKey(name)).plaintext;
+  return c.html(await renderKeysPane({ newRecordingToken }));
 });
 
-admin.post("/settings/keys", async (c) => {
-  const body = await c.req.parseBody();
-  const name = String(body.name ?? "").trim();
-  let newToken: string | undefined;
-  if (name) {
-    const { plaintext } = await createApiKey(name);
-    newToken = plaintext;
-  }
-  const keys = await listApiKeys();
-  return c.html(<ApiKeysPane keys={keys} newToken={newToken} />);
+admin.post("/settings/keys/recording/:id/revoke", async (c) => {
+  await revokeApiKey(c.req.param("id"));
+  return c.html(await renderKeysPane());
 });
 
-admin.post("/settings/keys/:id/revoke", async (c) => {
-  const id = c.req.param("id");
-  await revokeApiKey(id);
-  // Return the updated row — re-fetch all keys and find this one.
-  const keys = await listApiKeys();
-  const key = keys.find((k) => k.id === id);
-  if (!key) return c.text("Key not found", 404);
-  // Re-render the full pane so the row updates in place.
-  return c.html(<ApiKeysPane keys={keys} />);
+// Admin API tokens (lca_)
+admin.post("/settings/keys/admin", async (c) => {
+  const name = String((await c.req.parseBody()).name ?? "").trim();
+  let newAdminToken: string | undefined;
+  if (name) newAdminToken = (await createAdminToken(name)).plaintext;
+  return c.html(await renderKeysPane({ newAdminToken }));
+});
+
+admin.post("/settings/keys/admin/:id/revoke", async (c) => {
+  await revokeAdminToken(c.req.param("id"));
+  return c.html(await renderKeysPane());
 });
 
 export default admin;

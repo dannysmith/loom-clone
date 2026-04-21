@@ -1,24 +1,77 @@
-import type { ApiKey } from "../../../db/schema";
+import type { AdminToken, ApiKey } from "../../../db/schema";
 
-export function ApiKeysPane({ keys, newToken }: { keys: ApiKey[]; newToken?: string }) {
+type KeyLike = ApiKey | AdminToken;
+
+type Props = {
+  recordingKeys: ApiKey[];
+  adminTokens: AdminToken[];
+  newRecordingToken?: string;
+  newAdminToken?: string;
+};
+
+export function ApiKeysPane({
+  recordingKeys,
+  adminTokens,
+  newRecordingToken,
+  newAdminToken,
+}: Props) {
   return (
     <div id="keys-pane">
+      <KeySection
+        title="Recording API Keys"
+        description="Bearer tokens for the macOS recording app (lck_ prefix). Used to authenticate segment uploads and video creation."
+        keys={recordingKeys}
+        newToken={newRecordingToken}
+        createAction="/admin/settings/keys/recording"
+        revokePrefix="/admin/settings/keys/recording"
+        placeholder="Key name (e.g. MacBook Pro)"
+      />
+
+      <KeySection
+        title="Admin API Tokens"
+        description="Bearer tokens for admin API access (lca_ prefix). Used for scripting, automation, and programmatic admin operations."
+        keys={adminTokens}
+        newToken={newAdminToken}
+        createAction="/admin/settings/keys/admin"
+        revokePrefix="/admin/settings/keys/admin"
+        placeholder="Token name (e.g. backup script)"
+      />
+    </div>
+  );
+}
+
+function KeySection({
+  title,
+  description,
+  keys,
+  newToken,
+  createAction,
+  revokePrefix,
+  placeholder,
+}: {
+  title: string;
+  description: string;
+  keys: KeyLike[];
+  newToken?: string;
+  createAction: string;
+  revokePrefix: string;
+  placeholder: string;
+}) {
+  return (
+    <div class="keys-section">
+      <h3 class="keys-section-title">{title}</h3>
+      <p class="keys-section-description">{description}</p>
+
       <div class="keys-create">
         <form
-          hx-post="/admin/settings/keys"
+          hx-post={createAction}
           hx-target="#keys-pane"
           hx-swap="outerHTML"
           class="keys-create-form"
         >
-          <input
-            class="input"
-            type="text"
-            name="name"
-            placeholder="Key name (e.g. MacBook Pro)"
-            required
-          />
+          <input class="input" type="text" name="name" placeholder={placeholder} required />
           <button type="submit" class="btn btn--primary">
-            Create key
+            Create
           </button>
         </form>
       </div>
@@ -26,14 +79,14 @@ export function ApiKeysPane({ keys, newToken }: { keys: ApiKey[]; newToken?: str
       {newToken && (
         <div class="keys-new-token">
           <p>
-            <strong>New API key created.</strong> Copy it now — it won't be shown again.
+            <strong>New key created.</strong> Copy it now — it won't be shown again.
           </p>
           <code class="keys-token-value">{newToken}</code>
         </div>
       )}
 
       {keys.length === 0 ? (
-        <p class="empty-state">No API keys yet.</p>
+        <p class="empty-state">No keys yet.</p>
       ) : (
         <div class="keys-list">
           <div class="keys-header">
@@ -44,7 +97,7 @@ export function ApiKeysPane({ keys, newToken }: { keys: ApiKey[]; newToken?: str
             <span />
           </div>
           {keys.map((k) => (
-            <KeyRow apiKey={k} />
+            <KeyRow apiKey={k} revokePrefix={revokePrefix} />
           ))}
         </div>
       )}
@@ -52,7 +105,7 @@ export function ApiKeysPane({ keys, newToken }: { keys: ApiKey[]; newToken?: str
   );
 }
 
-function KeyRow({ apiKey: k }: { apiKey: ApiKey }) {
+function KeyRow({ apiKey: k, revokePrefix }: { apiKey: KeyLike; revokePrefix: string }) {
   const isRevoked = k.revokedAt !== null;
   return (
     <div class={`key-row ${isRevoked ? "key-row--revoked" : ""}`} id={`key-${k.id}`}>
@@ -71,10 +124,10 @@ function KeyRow({ apiKey: k }: { apiKey: ApiKey }) {
           <button
             type="button"
             class="btn btn--sm btn--danger"
-            hx-post={`/admin/settings/keys/${k.id}/revoke`}
-            hx-target={`#key-${k.id}`}
+            hx-post={`${revokePrefix}/${k.id}/revoke`}
+            hx-target="#keys-pane"
             hx-swap="outerHTML"
-            hx-confirm={`Revoke key "${k.name}"? This cannot be undone.`}
+            hx-confirm={`Revoke "${k.name}"? This cannot be undone.`}
           >
             Revoke
           </button>

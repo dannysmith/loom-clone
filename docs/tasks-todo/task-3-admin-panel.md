@@ -275,3 +275,120 @@ Areas to review:
 - **Index coverage** — review existing indexes against the query patterns the admin will introduce (filtered listing, search, tag joins, event lookups by video + date).
 - **Foreign key discipline** — confirm all cross-table references have appropriate FK constraints and cascade rules.
 - **General hygiene** — look for anything that would make future migrations painful (implicit defaults, missing NOT NULL constraints, columns that should exist but don't).
+
+## Phase 1 — Foundation
+
+Set up the HTMX tooling, admin view structure, layout shell, and CSS foundations. After this phase the admin has a working skeleton with navigation between placeholder pages.
+
+- Install `typed-htmx` (dev dep), add `global.d.ts` type augmentation for `hx-*` attributes in Hono JSX.
+- Add HTMX `<script>` tag (CDN) to `AdminLayout`.
+- Set up `hx-boost="true"` + `hx-select="#admin-main"` navigation pattern on the admin body/nav.
+- Create the view directory structure: `views/admin/pages/`, `views/admin/partials/`, `views/admin/components/`.
+- Flesh out `AdminLayout` with proper nav (links to Dashboard, Settings, Trash Bin).
+- Create placeholder pages for each admin route (`/admin`, `/admin/videos/:id`, `/admin/settings`, `/admin/trash`, `/admin/login`).
+- Create `public/js/admin.js` (empty scaffold, loaded in AdminLayout).
+- Establish admin CSS foundations in `admin.css`: layout grid, nav styling, basic component classes (buttons, badges, form elements).
+- Restructure the admin route module to support the new pages.
+
+**Done when:** navigating between all admin pages works via `hx-boost`, the layout/nav is visible, and HTMX is loaded and functional.
+
+## Phase 2 — Auth
+
+Implement the login/session system and admin token mechanism. After this phase, all `/admin/*` routes (except login) are protected.
+
+- Admin password: decide on env var vs CLI approach, implement hashing and verification.
+- Login page with username/password form.
+- Session mechanism: signed cookie with ~2 week expiry (`SameSite=Lax; Secure; HttpOnly`).
+- Auth middleware on `/admin/*` that redirects to `/admin/login` if unauthenticated.
+- Logout (clears session cookie).
+- Hono CSRF middleware on `/admin/*` mutation routes.
+- Admin token table (`admin_tokens`, `lca_` prefix) with create/list/revoke store functions.
+- Admin auth middleware accepts either valid session cookie OR valid `lca_` bearer token.
+
+**Done when:** unauthenticated requests to any admin page redirect to login, logging in sets a session cookie, all subsequent navigation works, and bearer token auth works for programmatic access.
+
+## Phase 3 — Dashboard
+
+The video list page with both view modes, search, filtering, sorting, and pagination. This is the first feature that exercises the full HTMX fragment pattern.
+
+- Store layer: extend `listVideosPaginated` (or add a new function) to support filtering by visibility, status, tags, date range, and duration range. Add sorting options.
+- Full-text search over title, description, and slug (SQLite FTS5 or LIKE — decide based on Phase 0 findings).
+- `VideoCard` component (shared JSX, used in grid and table views).
+- Grid/table view toggle via `data-view` attribute + CSS.
+- Search input with `hx-trigger="input changed delay:500ms"`, returning the video list partial.
+- Filter controls (dropdowns, date pickers) that trigger list refresh via HTMX.
+- Sort controls.
+- "Load More" pagination (cursor-based, self-replacing button pattern).
+- URL state: `hx-replace-url` so search/filter state is bookmarkable and survives refresh.
+
+**Done when:** the dashboard shows all non-trashed videos in both grid and table views, search/filter/sort work with URL persistence, and pagination loads more results.
+
+## Phase 4 — Settings
+
+The settings page with three panes: General, Tags, and API Keys.
+
+- Settings page shell with pane navigation (tabs or sidebar).
+- **General pane**: empty or showing read-only system info initially.
+- **Tags pane**: CRUD for tags with name and colour (constrained palette). Inline editing of name/colour. Delete with confirmation. Any schema changes needed from Phase 0 (e.g. adding `color` column) should already be applied.
+- **API Keys pane**: list all keys (name, created, last used, revoked status), create new key (show token once), revoke. This is a web UI for the existing `api-keys.ts` store functions.
+
+**Done when:** tags can be created/edited/deleted, API keys can be managed via the web UI, and all mutations write events.
+
+## Phase 5 — Video Page (Display)
+
+The video detail page with all display elements. Read-only at this stage — editing comes in Phase 6.
+
+- Page layout: header area (title, slug, visibility badge), player, metadata area (description, tags, duration, dimensions, status, dates, source), tabbed section below.
+- Admin media routes: session-gated endpoints that serve video files by video ID regardless of visibility (`/admin/videos/:id/media/:file`). Needed for the player to work on private videos.
+- Video player: Vidstack via CDN, admin-specific CSS (no shared styles with the viewer player).
+- Event log tab: chronological timeline from `video_events`. Check that existing server operations (derivative generation, healing, completion) are writing events — fill gaps as needed.
+- File browser tab: read `data/<id>/` directory tree, display with subfolder expansion and file sizes. Text file preview.
+
+**Done when:** clicking a video card on the dashboard opens its admin page, the player works (including for private videos), metadata is displayed, and both tabs show real data.
+
+## Phase 6 — Video Editing, Actions & Trash Bin
+
+Make the video page interactive and implement all video actions. Also build the Trash Bin page since it depends on the trash action.
+
+- **In-place editing**: title, slug, description — HTMX click-to-edit partials (GET edit form → swap → PATCH save → swap back to display).
+- **Visibility change**: dropdown/segmented control with confirmation dialog.
+- **Tag assignment**: add/remove tags on the video, server-driven (each action is an HTMX POST returning updated tag list).
+- **Trash**: confirmation dialog, soft-delete, redirect to dashboard.
+- **Duplicate**: copy video row + files, new UUID/slug/title, preserve tags, write events on both original and duplicate, redirect to the new video's admin page.
+- **Download**: link to source.mp4 (or derivative chooser if multiple exist).
+- **Open Public URL / Copy Public URL**: link + clipboard JS. Only shown for public/unlisted.
+- **Trash Bin page** (`/admin/trash`): same card/table display as dashboard, but showing only trashed videos. Untrash action (restores video, redirects to its admin page).
+
+**Done when:** all editable fields save via in-place editing, all video actions work, trashing moves videos to the Trash Bin, and untrashing restores them.
+
+## Phase 7 — Upload
+
+Upload an MP4 file to create a new video.
+
+- Upload UI: accessible from the dashboard (button → page or modal). File input (MP4 only), optional metadata fields (title, slug, description, visibility, tags).
+- Upload route: accepts multipart form data, creates video record (`source: "uploaded"`), saves the file to `data/<id>/`.
+- Progress indication: `htmx:xhr:progress` event updating a `<progress>` element.
+- Trigger the existing derivative pipeline (ffmpeg → MP4 transcode + thumbnail). No HLS segments.
+- Write `uploaded` event.
+
+**Done when:** a video can be uploaded via the admin, appears on the dashboard, has derivatives generated, and is playable on its video page.
+
+## Phase 8 — Dashboard Card Actions
+
+The final feature deliverable. Add a context menu / dropdown to each video card on the dashboard with quick-access to video actions.
+
+- Context menu or dropdown on cards/rows (using native `popover` attribute).
+- Available actions: Open Public URL, Copy Public URL, Change Visibility, Download, Duplicate, Trash.
+- Actions call the same endpoints built in Phase 6.
+
+**Done when:** video actions are accessible from both the video page and the dashboard card menu.
+
+## Phase 9 — Review & Polish
+
+Verify the implementation against all requirements in this document. Not a feature phase — a quality pass.
+
+- Walk through every H2 section under "Task 3: Admin Interface" and confirm all requirements are met.
+- Verify events are written for all admin mutations (metadata changes, visibility, slug, trash, untrash, duplicate, upload, tag changes).
+- CSS review: check that the admin is usable on smaller viewports, components are consistent, dark/light mode works.
+- Test edge cases: empty states (no videos, no tags, no events), long titles/descriptions, many tags, pagination boundaries.
+- Update `docs/developer/server-routes-and-api.md` with the new admin routes.

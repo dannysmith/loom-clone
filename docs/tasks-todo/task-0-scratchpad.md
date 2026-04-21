@@ -24,4 +24,3 @@ Note: This scratchpad is always "task 0", although the tasks below are not necec
 - **AI title & slug suggestions**: Suggest a title and slug based on the transcript content.
 - **Basic web-based editor**: Trim, cut, and stitch videos in the browser. This may be where Remotion becomes interesting as a future direction.
 - **Adaptive quality**: The player automatically adjusts quality based on the viewer's connection speed. (If we're using HLS with multiple renditions, this comes naturally.)
-- **Format suffixes**: `v.danny.is/{slug}.mp4` returns the raw MP4 file. `v.danny.is/{slug}.json` returns metadata (URL, raw video URL, transcript, duration, etc.). `v.danny.is/{slug}.md` returns similar in Markdown format.

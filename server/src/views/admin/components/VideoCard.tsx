@@ -80,4 +80,3 @@ export function VideoCard({ video }: { video: Video }) {
     </article>
   );
 }
-

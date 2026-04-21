@@ -77,6 +77,14 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "search",
 ]);
 
+const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
+
+export function validateVisibility(v: string): asserts v is Video["visibility"] {
+  if (!VALID_VISIBILITY.has(v)) {
+    throw new ValidationError(`Invalid visibility "${v}". Must be public, unlisted, or private`);
+  }
+}
+
 // Validates a user-supplied slug's format and reservation status. Throws
 // ValidationError on failure (400-class input errors). Uniqueness is checked
 // separately by the caller against the DB (ConflictError, 409).
@@ -91,6 +99,29 @@ export function validateSlugFormat(slug: string): void {
   }
   if (RESERVED_SLUGS.has(slug)) {
     throw new ValidationError(`Slug "${slug}" is reserved`);
+  }
+}
+
+// Checks that a slug is not already taken by another video or redirect.
+// Throws ConflictError if unavailable. `excludeVideoId` is used when
+// renaming an existing video's slug (so its own current slug doesn't clash).
+export function checkSlugAvailable(slug: string, excludeVideoId?: string): void {
+  const db = getDb();
+  const slugWhere = excludeVideoId
+    ? and(eq(videos.slug, slug), ne(videos.id, excludeVideoId))
+    : eq(videos.slug, slug);
+  const taken = db.select({ id: videos.id }).from(videos).where(slugWhere).get();
+  if (taken) {
+    throw new ConflictError(`Slug "${slug}" is already in use by another video`);
+  }
+
+  const redirectTaken = db
+    .select({ oldSlug: slugRedirects.oldSlug })
+    .from(slugRedirects)
+    .where(eq(slugRedirects.oldSlug, slug))
+    .get();
+  if (redirectTaken) {
+    throw new ConflictError(`Slug "${slug}" is reserved as a redirect`);
   }
 }
 
@@ -130,6 +161,60 @@ export async function createVideo(): Promise<Video> {
 
   await mkdir(join(DATA_DIR, id), { recursive: true });
   await logEvent(id, "created");
+  return video;
+}
+
+// Options for creating a video from an uploaded file.
+export type UploadVideoOpts = {
+  slug?: string; // custom slug; random if empty/omitted
+  title?: string | null;
+  description?: string | null;
+  visibility?: string; // validated internally
+};
+
+// Creates a video record for an uploaded MP4. Handles slug validation/
+// generation, visibility validation, tag assignment, and event logging.
+// File I/O (saving the upload, probing duration, scheduling derivatives)
+// stays in the route — the store handles DB concerns only.
+// Throws ValidationError/ConflictError on bad input.
+export async function createUploadedVideo(opts: UploadVideoOpts): Promise<Video> {
+  const db = getDb();
+  const id = crypto.randomUUID();
+  const now = nowIso();
+
+  // Visibility
+  const visibility = opts.visibility || "unlisted";
+  validateVisibility(visibility);
+
+  // Slug: validate custom slug or generate a random one.
+  let slug: string;
+  if (opts.slug) {
+    validateSlugFormat(opts.slug);
+    checkSlugAvailable(opts.slug);
+    slug = opts.slug;
+  } else {
+    slug = generateSlug();
+  }
+
+  const [video] = await db
+    .insert(videos)
+    .values({
+      id,
+      slug,
+      status: "complete",
+      visibility,
+      title: opts.title ?? null,
+      description: opts.description ?? null,
+      source: "uploaded",
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now,
+    })
+    .returning();
+  if (!video) throw new Error("Failed to create uploaded video");
+
+  await mkdir(join(DATA_DIR, id), { recursive: true });
+  await logEvent(id, "uploaded");
   return video;
 }
 
@@ -539,26 +624,9 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
   if (!existing) throw new Error(`Video ${id} not found`);
   if (existing.slug === newSlug) return existing;
 
-  // Format + reservation checks before hitting the DB.
+  // Format + reservation + uniqueness checks.
   validateSlugFormat(newSlug);
-
-  const slugTaken = await db
-    .select()
-    .from(videos)
-    .where(and(eq(videos.slug, newSlug), ne(videos.id, id)))
-    .get();
-  if (slugTaken) {
-    throw new ConflictError(`Slug "${newSlug}" is already in use by another video`);
-  }
-
-  const redirectTaken = await db
-    .select()
-    .from(slugRedirects)
-    .where(eq(slugRedirects.oldSlug, newSlug))
-    .get();
-  if (redirectTaken) {
-    throw new ConflictError(`Slug "${newSlug}" is reserved as a redirect`);
-  }
+  checkSlugAvailable(newSlug, id);
 
   const oldSlug = existing.slug;
   const now = nowIso();

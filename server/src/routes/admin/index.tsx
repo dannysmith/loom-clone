@@ -1,11 +1,11 @@
 import { eq } from "drizzle-orm";
-import { mkdir, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 import { join } from "path";
 import { getDb } from "../../db/client";
-import { slugRedirects, videos } from "../../db/schema";
+import { videos } from "../../db/schema";
 import {
   clearSession,
   createSession,
@@ -16,11 +16,12 @@ import {
 import { createAdminToken, listAdminTokens, revokeAdminToken } from "../../lib/admin-tokens";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
 import { probeDuration, scheduleUploadDerivatives } from "../../lib/derivatives";
-import { listEvents, logEvent } from "../../lib/events";
+import { listEvents } from "../../lib/events";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { listVideoFiles } from "../../lib/files";
 import {
   ConflictError,
+  createUploadedVideo,
   DATA_DIR,
   type DashboardFilters,
   type DashboardSort,
@@ -32,7 +33,6 @@ import {
   updateSlug,
   updateVideo,
   ValidationError,
-  validateSlugFormat,
 } from "../../lib/store";
 import {
   addTagToVideo,
@@ -369,86 +369,51 @@ admin.post("/upload", async (c) => {
   const file = body.file;
   if (!(file instanceof File) || file.size === 0) {
     const tags = await listTags();
-    return c.html(<UploadPage tags={tags} />, 400);
+    return c.html(<UploadPage tags={tags} error="Please select an MP4 file." />, 400);
   }
 
-  // Create the video record
-  const id = crypto.randomUUID();
-  const slug = body.slug ? String(body.slug).trim() : "";
+  // Parse form fields.
+  const slug = body.slug ? String(body.slug).trim() : undefined;
   const title = body.title ? String(body.title).trim() || null : null;
   const description = body.description ? String(body.description).trim() || null : null;
-  const visibility = String(body.visibility || "unlisted") as "public" | "unlisted" | "private";
-
-  // Validate and check uniqueness of custom slug
-  const finalSlug =
-    slug ||
-    crypto
-      .getRandomValues(new Uint8Array(4))
-      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
-
-  if (slug) {
-    try {
-      validateSlugFormat(slug);
-    } catch {
-      const tags = await listTags();
-      return c.html(<UploadPage tags={tags} />, 400);
-    }
-    const db = getDb();
-    const taken = db.select({ id: videos.id }).from(videos).where(eq(videos.slug, slug)).get();
-    const redirect = db
-      .select({ oldSlug: slugRedirects.oldSlug })
-      .from(slugRedirects)
-      .where(eq(slugRedirects.oldSlug, slug))
-      .get();
-    if (taken || redirect) {
-      const tags = await listTags();
-      return c.html(<UploadPage tags={tags} />, 400);
-    }
-  }
-
-  const db = getDb();
-  const now = new Date().toISOString();
-
-  await db.insert(videos).values({
-    id,
-    slug: finalSlug,
-    status: "complete",
-    visibility,
-    title,
-    description,
-    source: "uploaded",
-    createdAt: now,
-    updatedAt: now,
-    completedAt: now,
-  });
-
-  // Save the uploaded file
-  const videoDir = join(DATA_DIR, id);
-  await mkdir(videoDir, { recursive: true });
-  const uploadPath = join(videoDir, "upload.mp4");
-  await writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
-
-  // Probe duration and update the record
-  const duration = await probeDuration(uploadPath);
-  if (duration != null) {
-    await db.update(videos).set({ durationSeconds: duration }).where(eq(videos.id, id));
-  }
-
-  // Apply tags
+  const visibility = String(body.visibility || "unlisted");
   const tagValues = Array.isArray(body.tags) ? body.tags : body.tags ? [body.tags] : [];
-  for (const tagId of tagValues) {
-    const n = Number(tagId);
-    if (Number.isFinite(n)) {
-      await addTagToVideo(id, n);
+  const tagIds = tagValues.map(Number).filter(Number.isFinite);
+
+  try {
+    // Create the video record (validates slug + visibility, creates directory).
+    const video = await createUploadedVideo({ slug, title, description, visibility });
+
+    // Save the uploaded file into the video's data directory.
+    const uploadPath = join(DATA_DIR, video.id, "upload.mp4");
+    await writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+
+    // Probe duration and update the record.
+    const duration = await probeDuration(uploadPath);
+    if (duration != null) {
+      await getDb()
+        .update(videos)
+        .set({ durationSeconds: duration })
+        .where(eq(videos.id, video.id));
     }
+
+    // Apply tags.
+    for (const tagId of tagIds) {
+      await addTagToVideo(video.id, tagId);
+    }
+
+    // Fire-and-forget: generate derivatives (source.mp4 with faststart + thumbnail)
+    scheduleUploadDerivatives(video.id);
+
+    return c.redirect(`/admin/videos/${video.id}`);
+  } catch (err) {
+    const message =
+      err instanceof ValidationError || err instanceof ConflictError
+        ? err.message
+        : "Upload failed";
+    const tags = await listTags();
+    return c.html(<UploadPage tags={tags} error={message} />, 400);
   }
-
-  await logEvent(id, "uploaded");
-
-  // Fire-and-forget: generate derivatives (source.mp4 with faststart + thumbnail)
-  scheduleUploadDerivatives(id);
-
-  return c.redirect(`/admin/videos/${id}`);
 });
 
 // --- Settings ---

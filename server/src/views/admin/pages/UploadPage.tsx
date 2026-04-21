@@ -1,12 +1,14 @@
 import type { Tag } from "../../../db/schema";
 import { AdminLayout } from "../../layouts/AdminLayout";
 
-export function UploadPage({ tags }: { tags: Tag[] }) {
+export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
   return (
     <AdminLayout title="Upload Video" activePage="dashboard">
       <div class="page-header">
         <h1>Upload Video</h1>
       </div>
+
+      {error && <p class="login-error">{error}</p>}
 
       <form
         class="upload-form"

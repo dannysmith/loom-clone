@@ -23,8 +23,6 @@ import {
   ConflictError,
   createUploadedVideo,
   DATA_DIR,
-  type DashboardFilters,
-  type DashboardSort,
   duplicateVideo,
   getVideo,
   listVideosFiltered,
@@ -64,6 +62,7 @@ import {
   VisibilityControl,
 } from "../../views/admin/partials/VideoFields";
 import { VideoList, VideoListAppend } from "../../views/admin/partials/VideoList";
+import { parseFilters } from "./helpers";
 
 type AdminEnv = { Variables: { adminAuthMethod: string } };
 const admin = new Hono<AdminEnv>();
@@ -529,61 +528,4 @@ async function requireVideo(c: Context<AdminEnv>): Promise<Video | Response> {
   const video = await getVideo(id, { includeTrashed: true });
   if (!video) return c.text("Video not found", 404);
   return video;
-}
-
-const VALID_SORTS = new Set<DashboardSort>([
-  "date-desc",
-  "date-asc",
-  "duration-desc",
-  "duration-asc",
-  "title-asc",
-  "title-desc",
-]);
-
-const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
-const VALID_STATUS = new Set(["recording", "healing", "complete", "failed"]);
-
-function parseFilters(c: Context<AdminEnv>): DashboardFilters {
-  const filters: DashboardFilters = {};
-  const q = (key: string) => c.req.query(key);
-
-  const search = q("q")?.trim();
-  if (search) filters.search = search;
-
-  const visibility = q("visibility");
-  if (visibility && VALID_VISIBILITY.has(visibility))
-    filters.visibility = visibility as DashboardFilters["visibility"];
-
-  const status = q("status");
-  if (status && VALID_STATUS.has(status)) filters.status = status as DashboardFilters["status"];
-
-  const tagId = q("tag");
-  if (tagId) {
-    const n = Number(tagId);
-    if (Number.isFinite(n)) filters.tagId = n;
-  }
-
-  const dateFrom = q("from");
-  if (dateFrom) filters.dateFrom = dateFrom;
-  const dateTo = q("to");
-  if (dateTo) filters.dateTo = dateTo;
-
-  const dmin = q("dmin");
-  if (dmin) {
-    const n = Number(dmin);
-    if (Number.isFinite(n)) filters.durationMin = n;
-  }
-  const dmax = q("dmax");
-  if (dmax) {
-    const n = Number(dmax);
-    if (Number.isFinite(n)) filters.durationMax = n;
-  }
-
-  const sort = q("sort");
-  if (sort && VALID_SORTS.has(sort as DashboardSort)) filters.sort = sort as DashboardSort;
-
-  const cursor = q("cursor");
-  if (cursor) filters.cursor = cursor;
-
-  return filters;
 }

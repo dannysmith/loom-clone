@@ -1,5 +1,6 @@
 import type { Video } from "../../../db/schema";
 import type { DashboardFilters } from "../../../lib/store";
+import { filtersToParams } from "../../../routes/admin/helpers";
 import { VideoCard } from "../components/VideoCard";
 
 type Props = {
@@ -71,21 +72,6 @@ export function VideoListAppend({ videos, nextCursor, filters, view }: Props) {
       {nextCursor && <LoadMoreButton nextCursor={nextCursor} filters={filters} view={view} />}
     </>
   );
-}
-
-// Converts DashboardFilters to URL query params (excluding cursor/limit).
-function filtersToParams(f: DashboardFilters): Record<string, string> {
-  const p: Record<string, string> = {};
-  if (f.search) p.q = f.search;
-  if (f.visibility) p.visibility = f.visibility;
-  if (f.status) p.status = f.status;
-  if (f.tagId != null) p.tag = String(f.tagId);
-  if (f.dateFrom) p.from = f.dateFrom;
-  if (f.dateTo) p.to = f.dateTo;
-  if (f.durationMin != null) p.dmin = String(f.durationMin);
-  if (f.durationMax != null) p.dmax = String(f.durationMax);
-  if (f.sort && f.sort !== "date-desc") p.sort = f.sort;
-  return p;
 }
 
 function buildQueryString(params: Record<string, string>): string {

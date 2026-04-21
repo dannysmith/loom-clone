@@ -1,7 +1,11 @@
-import type { Context } from "hono";
+import { eq } from "drizzle-orm";
+import { mkdir, writeFile } from "fs/promises";
+import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 import { join } from "path";
+import { getDb } from "../../db/client";
+import { slugRedirects, videos } from "../../db/schema";
 import {
   clearSession,
   createSession,
@@ -84,7 +88,18 @@ admin.post("/login", async (c) => {
 // --- Auth + CSRF on everything below ---
 
 admin.use("*", requireAdmin());
-admin.use("*", csrf());
+
+// CSRF protection for cookie-based auth only. Bearer token requests are
+// inherently CSRF-safe (the token is explicitly attached, not auto-sent
+// by the browser), so we skip the Origin/Sec-Fetch-Site check for them.
+function csrfUnlessBearerAuth(): MiddlewareHandler {
+  const csrfCheck = csrf();
+  return (c, next) => {
+    if (c.req.header("authorization")) return next();
+    return csrfCheck(c, next);
+  };
+}
+admin.use("*", csrfUnlessBearerAuth());
 
 // --- Authenticated routes ---
 
@@ -363,7 +378,13 @@ admin.post("/upload", async (c) => {
   const description = body.description ? String(body.description).trim() || null : null;
   const visibility = String(body.visibility || "unlisted") as "public" | "unlisted" | "private";
 
-  // Validate custom slug if provided
+  // Validate and check uniqueness of custom slug
+  const finalSlug =
+    slug ||
+    crypto
+      .getRandomValues(new Uint8Array(4))
+      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+
   if (slug) {
     try {
       validateSlugFormat(slug);
@@ -371,17 +392,21 @@ admin.post("/upload", async (c) => {
       const tags = await listTags();
       return c.html(<UploadPage tags={tags} />, 400);
     }
+    const db = getDb();
+    const taken = db.select({ id: videos.id }).from(videos).where(eq(videos.slug, slug)).get();
+    const redirect = db
+      .select({ oldSlug: slugRedirects.oldSlug })
+      .from(slugRedirects)
+      .where(eq(slugRedirects.oldSlug, slug))
+      .get();
+    if (taken || redirect) {
+      const tags = await listTags();
+      return c.html(<UploadPage tags={tags} />, 400);
+    }
   }
 
-  const { getDb } = await import("../../db/client");
-  const { videos } = await import("../../db/schema");
   const db = getDb();
   const now = new Date().toISOString();
-  const finalSlug =
-    slug ||
-    crypto
-      .getRandomValues(new Uint8Array(4))
-      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
 
   await db.insert(videos).values({
     id,
@@ -397,7 +422,6 @@ admin.post("/upload", async (c) => {
   });
 
   // Save the uploaded file
-  const { mkdir, writeFile } = await import("fs/promises");
   const videoDir = join(DATA_DIR, id);
   await mkdir(videoDir, { recursive: true });
   const uploadPath = join(videoDir, "upload.mp4");
@@ -406,7 +430,6 @@ admin.post("/upload", async (c) => {
   // Probe duration and update the record
   const duration = await probeDuration(uploadPath);
   if (duration != null) {
-    const { eq } = await import("drizzle-orm");
     await db.update(videos).set({ durationSeconds: duration }).where(eq(videos.id, id));
   }
 

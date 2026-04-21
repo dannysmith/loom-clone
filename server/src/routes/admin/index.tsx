@@ -14,13 +14,26 @@ import { listEvents } from "../../lib/events";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { listVideoFiles } from "../../lib/files";
 import {
+  ConflictError,
   DATA_DIR,
   type DashboardFilters,
   type DashboardSort,
   getVideo,
   listVideosFiltered,
+  updateSlug,
+  updateVideo,
+  ValidationError,
 } from "../../lib/store";
-import { createTag, deleteTag, getTag, getVideoTags, listTags, updateTag } from "../../lib/tags";
+import {
+  addTagToVideo,
+  createTag,
+  deleteTag,
+  getTag,
+  getVideoTags,
+  listTags,
+  removeTagFromVideo,
+  updateTag,
+} from "../../lib/tags";
 import { DashboardPage } from "../../views/admin/pages/DashboardPage";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
@@ -28,6 +41,16 @@ import { TrashBinPage } from "../../views/admin/pages/TrashBinPage";
 import { VideoDetailPage } from "../../views/admin/pages/VideoDetailPage";
 import { ApiKeysPane } from "../../views/admin/partials/ApiKeysPane";
 import { TagEditRow, TagRow, TagsPane } from "../../views/admin/partials/TagsPane";
+import {
+  DescriptionDisplay,
+  DescriptionEdit,
+  SlugDisplay,
+  SlugEdit,
+  TitleDisplay,
+  TitleEdit,
+  VideoTagsControl,
+  VisibilityControl,
+} from "../../views/admin/partials/VideoFields";
 import { VideoList, VideoListAppend } from "../../views/admin/partials/VideoList";
 
 const admin = new Hono();
@@ -117,8 +140,9 @@ admin.get("/videos/:id", async (c) => {
   if (!video) return c.text("Video not found", 404);
 
   const activeTab = c.req.query("tab") === "files" ? "files" : "events";
-  const [tags, events, files] = await Promise.all([
+  const [videoTags, allTags, events, files] = await Promise.all([
     getVideoTags(id),
+    listTags(),
     listEvents(id),
     listVideoFiles(id),
   ]);
@@ -126,12 +150,124 @@ admin.get("/videos/:id", async (c) => {
   return c.html(
     <VideoDetailPage
       video={video}
-      tags={tags}
+      videoTags={videoTags}
+      allTags={allTags}
       events={events}
       files={files}
       activeTab={activeTab}
     />,
   );
+});
+
+// --- Video field editing ---
+
+admin.get("/videos/:id/partials/title", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<TitleDisplay video={video} />);
+});
+
+admin.get("/videos/:id/partials/title/edit", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<TitleEdit video={video} />);
+});
+
+admin.patch("/videos/:id/title", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const title = String(body.title ?? "").trim() || null;
+  const video = await updateVideo(id, { title });
+  return c.html(<TitleDisplay video={video} />);
+});
+
+admin.get("/videos/:id/partials/slug", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<SlugDisplay video={video} />);
+});
+
+admin.get("/videos/:id/partials/slug/edit", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<SlugEdit video={video} />);
+});
+
+admin.patch("/videos/:id/slug", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const newSlug = String(body.slug ?? "").trim();
+  try {
+    const video = await updateSlug(id, newSlug);
+    return c.html(<SlugDisplay video={video} />);
+  } catch (err) {
+    const video = await getVideo(id, { includeTrashed: true });
+    if (!video) return c.text("Not found", 404);
+    const message =
+      err instanceof ValidationError || err instanceof ConflictError ? err.message : "Invalid slug";
+    return c.html(<SlugEdit video={video} error={message} />);
+  }
+});
+
+admin.get("/videos/:id/partials/description", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<DescriptionDisplay video={video} />);
+});
+
+admin.get("/videos/:id/partials/description/edit", async (c) => {
+  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
+  if (!video) return c.text("Not found", 404);
+  return c.html(<DescriptionEdit video={video} />);
+});
+
+admin.patch("/videos/:id/description", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const description = String(body.description ?? "").trim() || null;
+  const video = await updateVideo(id, { description });
+  return c.html(<DescriptionDisplay video={video} />);
+});
+
+admin.patch("/videos/:id/visibility", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const visibility = String(body.visibility ?? "") as "public" | "unlisted" | "private";
+  if (!["public", "unlisted", "private"].includes(visibility))
+    return c.text("Invalid visibility", 400);
+  const video = await updateVideo(id, { visibility });
+  return c.html(<VisibilityControl video={video} />);
+});
+
+// --- Video tag assignment ---
+
+admin.post("/videos/:id/tags", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const tagId = Number(body.tagId);
+  if (Number.isFinite(tagId)) {
+    await addTagToVideo(id, tagId);
+  }
+  const [video, videoTags, allTags] = await Promise.all([
+    getVideo(id, { includeTrashed: true }),
+    getVideoTags(id),
+    listTags(),
+  ]);
+  if (!video) return c.text("Not found", 404);
+  return c.html(<VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />);
+});
+
+admin.delete("/videos/:id/tags/:tagId", async (c) => {
+  const id = c.req.param("id");
+  const tagId = Number(c.req.param("tagId"));
+  await removeTagFromVideo(id, tagId);
+  const [video, videoTags, allTags] = await Promise.all([
+    getVideo(id, { includeTrashed: true }),
+    getVideoTags(id),
+    listTags(),
+  ]);
+  if (!video) return c.text("Not found", 404);
+  return c.html(<VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />);
 });
 
 // --- Admin media routes (session-gated, serves by video ID) ---

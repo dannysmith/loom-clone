@@ -820,7 +820,7 @@ body.admin--login {
 	}
 }
 
-.video-tags {
+.video-tags-section {
 	margin-block-end: var(--space-4);
 
 	& h3 {
@@ -834,6 +834,122 @@ body.admin--login {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--space-1);
+}
+
+/* ------- Editable fields ------- */
+
+.editable-field {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.editable-field--editing {
+	gap: var(--space-2);
+}
+
+.editable-field--inline {
+	display: inline-flex;
+}
+
+.editable-field--block {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.editable-trigger {
+	opacity: 0;
+	transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.editable-field:hover .editable-trigger {
+	opacity: 1;
+}
+
+.editable-value--description {
+	font-size: var(--font-size-sm);
+	color: var(--color-fg-muted);
+	white-space: pre-wrap;
+}
+
+.editable-value--empty {
+	font-size: var(--font-size-sm);
+	color: var(--color-fg-muted);
+	font-style: italic;
+}
+
+.editable-input {
+	inline-size: auto;
+	flex: 1;
+}
+
+.editable-input-group {
+	display: flex;
+	align-items: center;
+	gap: 0;
+}
+
+.editable-prefix {
+	font-family: var(--font-mono);
+	font-size: var(--font-size-sm);
+	color: var(--color-fg-muted);
+	padding-inline-end: var(--space-1);
+}
+
+.editable-textarea {
+	inline-size: 100%;
+	font-family: inherit;
+	resize: vertical;
+}
+
+.editable-actions {
+	display: flex;
+	gap: var(--space-2);
+}
+
+.editable-error {
+	font-size: var(--font-size-xs);
+	color: oklch(55% 0.2 25);
+}
+
+/* ------- Tag chips (on video page) ------- */
+
+.video-tags-control {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-full);
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-medium);
+	line-height: 1;
+}
+
+.tag-chip-remove {
+	background: none;
+	border: none;
+	color: inherit;
+	cursor: pointer;
+	font-size: var(--font-size-sm);
+	line-height: 1;
+	padding: 0;
+	opacity: 0.7;
+
+	&:hover {
+		opacity: 1;
+	}
+}
+
+.tag-add-select {
+	inline-size: auto;
+	font-size: var(--font-size-xs);
 }
 
 .video-tabs {

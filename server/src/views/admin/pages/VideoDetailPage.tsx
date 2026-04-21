@@ -3,16 +3,24 @@ import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDuration } from "../../../lib/format";
 import { AdminLayout } from "../../layouts/AdminLayout";
+import {
+  DescriptionDisplay,
+  SlugDisplay,
+  TitleDisplay,
+  VideoTagsControl,
+  VisibilityControl,
+} from "../partials/VideoFields";
 
 type Props = {
   video: Video;
-  tags: Tag[];
+  videoTags: Tag[];
+  allTags: Tag[];
   events: VideoEvent[];
   files: FileEntry[];
   activeTab: "events" | "files";
 };
 
-export function VideoDetailPage({ video, tags, events, files, activeTab }: Props) {
+export function VideoDetailPage({ video, videoTags, allTags, events, files, activeTab }: Props) {
   const title = video.title || video.slug;
   const duration = formatDuration(video.durationSeconds);
   const hasMp4 = files.some((f) => f.path === "derivatives/source.mp4");
@@ -35,10 +43,10 @@ export function VideoDetailPage({ video, tags, events, files, activeTab }: Props
       {/* --- Header --- */}
       <div class="video-header">
         <div class="video-header-title">
-          <h1>{title}</h1>
-          <span class="video-slug">/{video.slug}</span>
+          <TitleDisplay video={video} />
+          <SlugDisplay video={video} />
         </div>
-        <span class={`badge badge--${video.visibility}`}>{video.visibility}</span>
+        <VisibilityControl video={video} />
       </div>
 
       {/* --- Player --- */}
@@ -68,25 +76,15 @@ export function VideoDetailPage({ video, tags, events, files, activeTab }: Props
           )}
         </div>
 
-        {video.description && (
-          <div class="video-description">
-            <h3>Description</h3>
-            <p>{video.description}</p>
-          </div>
-        )}
+        <div class="video-description">
+          <h3>Description</h3>
+          <DescriptionDisplay video={video} />
+        </div>
 
-        {tags.length > 0 && (
-          <div class="video-tags">
-            <h3>Tags</h3>
-            <div class="video-tags-list">
-              {tags.map((t) => (
-                <span class="badge" style={`background-color: var(--tag-${t.color}); color: #fff`}>
-                  {t.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <div class="video-tags-section">
+          <h3>Tags</h3>
+          <VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />
+        </div>
       </div>
 
       {/* --- Tabs --- */}
@@ -105,11 +103,7 @@ export function VideoDetailPage({ video, tags, events, files, activeTab }: Props
         </a>
       </div>
 
-      {activeTab === "events" ? (
-        <EventLog events={events} />
-      ) : (
-        <FileBrowser files={files} />
-      )}
+      {activeTab === "events" ? <EventLog events={events} /> : <FileBrowser files={files} />}
     </AdminLayout>
   );
 }

@@ -359,7 +359,7 @@ The video detail page with all display elements. Read-only at this stage — edi
 
 **Done when:** clicking a video card on the dashboard opens its admin page, the player works (including for private videos), metadata is displayed, and both tabs show real data.
 
-## Phase 6 — Video Editing & Metadata
+## Phase 6 — Video Editing & Metadata ✅
 
 Make the video page interactive. This is where the HTMX click-to-edit partial pattern gets exercised for real — worth isolating so the edit/save/cancel UX can be iterated on without also juggling file duplication logic.
 

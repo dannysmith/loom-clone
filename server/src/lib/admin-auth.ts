@@ -96,9 +96,13 @@ function isSecureContext(c: Context): boolean {
 
 // ---------- Middleware ----------
 
+export type AdminAuthMethod = "session" | "bearer";
+
 // Protects admin routes. Accepts either a valid session cookie or a valid
 // `lca_` admin bearer token. HTML requests (no Authorization header) get
 // redirected to login; programmatic requests (with Authorization) get 401.
+// Sets `c.set("adminAuthMethod", ...)` so downstream middleware (e.g. CSRF)
+// can distinguish cookie-based from bearer-based auth.
 export function requireAdmin(): MiddlewareHandler {
   return async (c, next) => {
     const config = getAdminConfig();
@@ -108,7 +112,10 @@ export function requireAdmin(): MiddlewareHandler {
 
     // 1. Check session cookie
     const user = await getSession(c, config.sessionSecret);
-    if (user) return next();
+    if (user) {
+      c.set("adminAuthMethod", "session" as AdminAuthMethod);
+      return next();
+    }
 
     // 2. Check admin bearer token
     const authHeader = c.req.header("authorization");
@@ -121,6 +128,7 @@ export function requireAdmin(): MiddlewareHandler {
           touchAdminTokenLastUsed(adminToken.id).catch((err: unknown) => {
             console.error(`[admin-auth] touchLastUsed failed for token ${adminToken.id}:`, err);
           });
+          c.set("adminAuthMethod", "bearer" as AdminAuthMethod);
           return next();
         }
       }

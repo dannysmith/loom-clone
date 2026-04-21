@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { writeFile } from "fs/promises";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 import { join } from "path";
@@ -33,6 +33,7 @@ import {
   updateSlug,
   updateVideo,
   ValidationError,
+  type Video,
 } from "../../lib/store";
 import {
   addTagToVideo,
@@ -64,7 +65,8 @@ import {
 } from "../../views/admin/partials/VideoFields";
 import { VideoList, VideoListAppend } from "../../views/admin/partials/VideoList";
 
-const admin = new Hono();
+type AdminEnv = { Variables: { adminAuthMethod: string } };
+const admin = new Hono<AdminEnv>();
 
 // --- Public routes (no auth) ---
 
@@ -92,15 +94,15 @@ admin.use("*", requireAdmin());
 
 // CSRF protection for cookie-based auth only. Bearer token requests are
 // inherently CSRF-safe (the token is explicitly attached, not auto-sent
-// by the browser), so we skip the Origin/Sec-Fetch-Site check for them.
-function csrfUnlessBearerAuth(): MiddlewareHandler {
-  const csrfCheck = csrf();
-  return (c, next) => {
-    if (c.req.header("authorization")) return next();
-    return csrfCheck(c, next);
-  };
-}
-admin.use("*", csrfUnlessBearerAuth());
+// by the browser), so we skip the Origin check for them. We check the
+// actual auth method (set by requireAdmin) rather than the presence of
+// the Authorization header — a request with both a valid session cookie
+// and a bogus Authorization header would otherwise bypass CSRF.
+const csrfCheck = csrf();
+admin.use("*", (c, next) => {
+  if (c.get("adminAuthMethod") === "bearer") return next();
+  return csrfCheck(c, next);
+});
 
 // --- Authenticated routes ---
 
@@ -157,16 +159,16 @@ admin.get("/partials/video-list", async (c) => {
 // --- Video detail ---
 
 admin.get("/videos/:id", async (c) => {
-  const id = c.req.param("id");
-  const video = await getVideo(id, { includeTrashed: true });
-  if (!video) return c.text("Video not found", 404);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const video = result;
 
   const activeTab = c.req.query("tab") === "files" ? "files" : "events";
   const [videoTags, allTags, events, files] = await Promise.all([
-    getVideoTags(id),
+    getVideoTags(video.id),
     listTags(),
-    listEvents(id),
-    listVideoFiles(id),
+    listEvents(video.id),
+    listVideoFiles(video.id),
   ]);
 
   return c.html(
@@ -184,35 +186,34 @@ admin.get("/videos/:id", async (c) => {
 // --- Video field editing ---
 
 admin.get("/videos/:id/partials/title", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<TitleDisplay video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<TitleDisplay video={result} />);
 });
 
 admin.get("/videos/:id/partials/title/edit", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<TitleEdit video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<TitleEdit video={result} />);
 });
 
 admin.patch("/videos/:id/title", async (c) => {
-  const id = c.req.param("id");
   const body = await c.req.parseBody();
   const title = String(body.title ?? "").trim() || null;
-  const video = await updateVideo(id, { title });
+  const video = await updateVideo(c.req.param("id"), { title });
   return c.html(<TitleDisplay video={video} />);
 });
 
 admin.get("/videos/:id/partials/slug", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<SlugDisplay video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<SlugDisplay video={result} />);
 });
 
 admin.get("/videos/:id/partials/slug/edit", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<SlugEdit video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<SlugEdit video={result} />);
 });
 
 admin.patch("/videos/:id/slug", async (c) => {
@@ -223,24 +224,24 @@ admin.patch("/videos/:id/slug", async (c) => {
     const video = await updateSlug(id, newSlug);
     return c.html(<SlugDisplay video={video} />);
   } catch (err) {
-    const video = await getVideo(id, { includeTrashed: true });
-    if (!video) return c.text("Not found", 404);
+    const result = await requireVideo(c);
+    if (result instanceof Response) return result;
     const message =
       err instanceof ValidationError || err instanceof ConflictError ? err.message : "Invalid slug";
-    return c.html(<SlugEdit video={video} error={message} />);
+    return c.html(<SlugEdit video={result} error={message} />);
   }
 });
 
 admin.get("/videos/:id/partials/description", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<DescriptionDisplay video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<DescriptionDisplay video={result} />);
 });
 
 admin.get("/videos/:id/partials/description/edit", async (c) => {
-  const video = await getVideo(c.req.param("id"), { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return c.html(<DescriptionEdit video={video} />);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<DescriptionEdit video={result} />);
 });
 
 admin.patch("/videos/:id/description", async (c) => {
@@ -263,33 +264,26 @@ admin.patch("/videos/:id/visibility", async (c) => {
 
 // --- Video tag assignment ---
 
+// Shared helper for returning the updated tags control after add/remove.
+async function renderTagsControl(c: Context<AdminEnv>): Promise<Response> {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const [videoTags, allTags] = await Promise.all([getVideoTags(result.id), listTags()]);
+  return c.html(<VideoTagsControl video={result} videoTags={videoTags} allTags={allTags} />);
+}
+
 admin.post("/videos/:id/tags", async (c) => {
-  const id = c.req.param("id");
   const body = await c.req.parseBody();
   const tagId = Number(body.tagId);
   if (Number.isFinite(tagId)) {
-    await addTagToVideo(id, tagId);
+    await addTagToVideo(c.req.param("id"), tagId);
   }
-  const [video, videoTags, allTags] = await Promise.all([
-    getVideo(id, { includeTrashed: true }),
-    getVideoTags(id),
-    listTags(),
-  ]);
-  if (!video) return c.text("Not found", 404);
-  return c.html(<VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />);
+  return renderTagsControl(c);
 });
 
 admin.delete("/videos/:id/tags/:tagId", async (c) => {
-  const id = c.req.param("id");
-  const tagId = Number(c.req.param("tagId"));
-  await removeTagFromVideo(id, tagId);
-  const [video, videoTags, allTags] = await Promise.all([
-    getVideo(id, { includeTrashed: true }),
-    getVideoTags(id),
-    listTags(),
-  ]);
-  if (!video) return c.text("Not found", 404);
-  return c.html(<VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />);
+  await removeTagFromVideo(c.req.param("id"), Number(c.req.param("tagId")));
+  return renderTagsControl(c);
 });
 
 // --- Admin media routes (session-gated, serves by video ID) ---
@@ -298,34 +292,38 @@ const RAW_FILENAME = /^(source|\d+p)\.mp4$/;
 const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
 
 admin.get("/videos/:id/media/raw/:file", async (c) => {
-  const { id, file } = c.req.param();
+  const file = c.req.param("file");
   if (!RAW_FILENAME.test(file)) return c.text("Not found", 404);
-  const video = await getVideo(id, { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
-  return serveFileWithRange(c, join(DATA_DIR, id, "derivatives", file), "video/mp4", "immutable");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return serveFileWithRange(
+    c,
+    join(DATA_DIR, result.id, "derivatives", file),
+    "video/mp4",
+    "immutable",
+  );
 });
 
 admin.get("/videos/:id/media/stream/:file", async (c) => {
-  const { id, file } = c.req.param();
+  const file = c.req.param("file");
   if (!STREAM_FILENAME.test(file)) return c.text("Not found", 404);
-  const video = await getVideo(id, { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const contentType = file.endsWith(".m3u8")
     ? "application/vnd.apple.mpegurl"
     : file.endsWith(".m4s")
       ? "video/iso.segment"
       : "video/mp4";
   const cache = file.endsWith(".m3u8") ? ("short" as const) : ("immutable" as const);
-  return serveFileWithRange(c, join(DATA_DIR, id, file), contentType, cache);
+  return serveFileWithRange(c, join(DATA_DIR, result.id, file), contentType, cache);
 });
 
 admin.get("/videos/:id/media/poster.jpg", async (c) => {
-  const id = c.req.param("id");
-  const video = await getVideo(id, { includeTrashed: true });
-  if (!video) return c.text("Not found", 404);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   return serveFileWithRange(
     c,
-    join(DATA_DIR, id, "derivatives", "thumbnail.jpg"),
+    join(DATA_DIR, result.id, "derivatives", "thumbnail.jpg"),
     "image/jpeg",
     "immutable",
   );
@@ -524,6 +522,15 @@ export default admin;
 
 // --- Helpers ---
 
+// Loads a video by :id param, including trashed videos (admin can see
+// everything). Returns the video or a 404 text response.
+async function requireVideo(c: Context<AdminEnv>): Promise<Video | Response> {
+  const id = c.req.param("id") as string;
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Video not found", 404);
+  return video;
+}
+
 const VALID_SORTS = new Set<DashboardSort>([
   "date-desc",
   "date-asc",
@@ -536,7 +543,7 @@ const VALID_SORTS = new Set<DashboardSort>([
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
 const VALID_STATUS = new Set(["recording", "healing", "complete", "failed"]);
 
-function parseFilters(c: Context): DashboardFilters {
+function parseFilters(c: Context<AdminEnv>): DashboardFilters {
   const filters: DashboardFilters = {};
   const q = (key: string) => c.req.query(key);
 

@@ -77,6 +77,10 @@ body.admin--login {
 /* ------- Page header ------- */
 
 .page-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-3);
 	margin-block-end: var(--space-5);
 
 	& h1 {
@@ -1055,4 +1059,55 @@ body.admin--login {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
 	white-space: nowrap;
+}
+
+/* ------- Upload ------- */
+
+.upload-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	max-inline-size: 32rem;
+}
+
+.upload-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+
+.upload-tag-option {
+	cursor: pointer;
+
+	& input {
+		position: absolute;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	& input:checked + .badge {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
+	}
+}
+
+.upload-progress {
+	display: none;
+}
+
+.upload-progress.htmx-request {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.upload-progress-bar {
+	flex: 1;
+	block-size: 0.5rem;
+	border-radius: var(--radius-full);
+}
+
+.upload-progress-text {
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
 }

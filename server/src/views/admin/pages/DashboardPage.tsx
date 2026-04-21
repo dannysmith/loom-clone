@@ -30,6 +30,9 @@ export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props
     <AdminLayout title="Dashboard" activePage="dashboard">
       <div class="page-header">
         <h1>Dashboard</h1>
+        <a href="/admin/upload" class="btn btn--primary">
+          Upload
+        </a>
       </div>
 
       <div class="dashboard-toolbar">

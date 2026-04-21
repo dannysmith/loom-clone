@@ -381,7 +381,7 @@ Implement the remaining video actions and the Trash Bin page.
 
 **Done when:** all video actions work, trashing moves videos to the Trash Bin, and untrashing restores them.
 
-## Phase 8 — Upload
+## Phase 8 — Upload ✅
 
 Upload an MP4 file to create a new video.
 

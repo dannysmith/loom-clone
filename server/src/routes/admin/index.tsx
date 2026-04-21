@@ -10,7 +10,8 @@ import {
   verifyCredentials,
 } from "../../lib/admin-auth";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
-import { listEvents } from "../../lib/events";
+import { probeDuration, scheduleUploadDerivatives } from "../../lib/derivatives";
+import { listEvents, logEvent } from "../../lib/events";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { listVideoFiles } from "../../lib/files";
 import {
@@ -26,6 +27,7 @@ import {
   updateSlug,
   updateVideo,
   ValidationError,
+  validateSlugFormat,
 } from "../../lib/store";
 import {
   addTagToVideo,
@@ -41,6 +43,7 @@ import { DashboardPage } from "../../views/admin/pages/DashboardPage";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
 import { TrashBinPage } from "../../views/admin/pages/TrashBinPage";
+import { UploadPage } from "../../views/admin/pages/UploadPage";
 import { VideoDetailPage } from "../../views/admin/pages/VideoDetailPage";
 import { ApiKeysPane } from "../../views/admin/partials/ApiKeysPane";
 import { TagEditRow, TagRow, TagsPane } from "../../views/admin/partials/TagsPane";
@@ -336,6 +339,92 @@ admin.post("/videos/:id/untrash", async (c) => {
 admin.post("/videos/:id/duplicate", async (c) => {
   const duplicate = await duplicateVideo(c.req.param("id"));
   return c.redirect(`/admin/videos/${duplicate.id}`);
+});
+
+// --- Upload ---
+
+admin.get("/upload", async (c) => {
+  const tags = await listTags();
+  return c.html(<UploadPage tags={tags} />);
+});
+
+admin.post("/upload", async (c) => {
+  const body = await c.req.parseBody();
+  const file = body.file;
+  if (!(file instanceof File) || file.size === 0) {
+    const tags = await listTags();
+    return c.html(<UploadPage tags={tags} />, 400);
+  }
+
+  // Create the video record
+  const id = crypto.randomUUID();
+  const slug = body.slug ? String(body.slug).trim() : "";
+  const title = body.title ? String(body.title).trim() || null : null;
+  const description = body.description ? String(body.description).trim() || null : null;
+  const visibility = String(body.visibility || "unlisted") as "public" | "unlisted" | "private";
+
+  // Validate custom slug if provided
+  if (slug) {
+    try {
+      validateSlugFormat(slug);
+    } catch {
+      const tags = await listTags();
+      return c.html(<UploadPage tags={tags} />, 400);
+    }
+  }
+
+  const { getDb } = await import("../../db/client");
+  const { videos } = await import("../../db/schema");
+  const db = getDb();
+  const now = new Date().toISOString();
+  const finalSlug =
+    slug ||
+    crypto
+      .getRandomValues(new Uint8Array(4))
+      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+
+  await db.insert(videos).values({
+    id,
+    slug: finalSlug,
+    status: "complete",
+    visibility,
+    title,
+    description,
+    source: "uploaded",
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
+  });
+
+  // Save the uploaded file
+  const { mkdir, writeFile } = await import("fs/promises");
+  const videoDir = join(DATA_DIR, id);
+  await mkdir(videoDir, { recursive: true });
+  const uploadPath = join(videoDir, "upload.mp4");
+  await writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+
+  // Probe duration and update the record
+  const duration = await probeDuration(uploadPath);
+  if (duration != null) {
+    const { eq } = await import("drizzle-orm");
+    await db.update(videos).set({ durationSeconds: duration }).where(eq(videos.id, id));
+  }
+
+  // Apply tags
+  const tagValues = Array.isArray(body.tags) ? body.tags : body.tags ? [body.tags] : [];
+  for (const tagId of tagValues) {
+    const n = Number(tagId);
+    if (Number.isFinite(n)) {
+      await addTagToVideo(id, n);
+    }
+  }
+
+  await logEvent(id, "uploaded");
+
+  // Fire-and-forget: generate derivatives (source.mp4 with faststart + thumbnail)
+  scheduleUploadDerivatives(id);
+
+  return c.redirect(`/admin/videos/${id}`);
 });
 
 // --- Settings ---

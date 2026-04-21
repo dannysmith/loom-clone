@@ -100,8 +100,19 @@ const thumbnailRecipe: Recipe = {
   },
 };
 
+// For uploaded videos: transcode upload.mp4 → derivatives/source.mp4 with faststart.
+const uploadSourceRecipe: Recipe = {
+  filename: "source.mp4",
+  async generate(videoId, dir) {
+    const input = join(DATA_DIR, videoId, "upload.mp4");
+    const out = join(dir, "source.mp4.tmp");
+    await runFfmpeg(["-i", input, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", out]);
+  },
+};
+
 // Recipes run in order. source.mp4 must land before thumbnail tries to read it.
 const recipes: Recipe[] = [sourceMp4Recipe, thumbnailRecipe];
+const uploadRecipes: Recipe[] = [uploadSourceRecipe, thumbnailRecipe];
 
 const inFlight = new Map<string, Promise<void>>();
 
@@ -124,11 +135,48 @@ export function _inFlightPromise(videoId: string): Promise<void> | undefined {
   return inFlight.get(videoId);
 }
 
+// Fire-and-forget for uploaded videos. Uses uploadRecipes (no HLS → MP4 step).
+export function scheduleUploadDerivatives(videoId: string): void {
+  if (inFlight.has(videoId)) return;
+  const p = generateFromRecipes(videoId, uploadRecipes).finally(() => {
+    inFlight.delete(videoId);
+  });
+  inFlight.set(videoId, p);
+  p.catch((err) => {
+    console.error(`[derivatives] ${videoId} upload derivatives failed:`, err);
+  });
+}
+
+// Probe duration of a video file using ffprobe. Returns seconds or null
+// if ffprobe fails or isn't available.
+export async function probeDuration(filePath: string): Promise<number | null> {
+  const ffprobePath = Bun.which("ffprobe");
+  if (!ffprobePath) return null;
+
+  try {
+    const proc = Bun.spawn(
+      [ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", filePath],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (exitCode !== 0) return null;
+    const data = JSON.parse(stdout) as { format?: { duration?: string } };
+    const d = Number.parseFloat(data.format?.duration ?? "");
+    return Number.isFinite(d) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 async function generateDerivatives(videoId: string): Promise<void> {
+  return generateFromRecipes(videoId, recipes);
+}
+
+async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promise<void> {
   const dir = derivativesDir(videoId);
   await mkdir(dir, { recursive: true });
 
-  for (const recipe of recipes) {
+  for (const recipe of recipeList) {
     const tmp = join(dir, `${recipe.filename}.tmp`);
     const final = join(dir, recipe.filename);
     const started = Date.now();

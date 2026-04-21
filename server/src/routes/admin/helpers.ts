@@ -1,5 +1,7 @@
 import type { Context } from "hono";
-import type { DashboardFilters, DashboardSort } from "../../lib/store";
+import { type DashboardFilters, type DashboardSort, getVideo, type Video } from "../../lib/store";
+
+export type AdminEnv = { Variables: { adminAuthMethod: string } };
 
 // Query param ↔ DashboardFilters mapping. Both parseFilters and
 // filtersToParams use these same names, so changes to the URL schema
@@ -76,4 +78,13 @@ export function filtersToParams(f: DashboardFilters): Record<string, string> {
   if (f.durationMax != null) p.dmax = String(f.durationMax);
   if (f.sort && f.sort !== "date-desc") p.sort = f.sort;
   return p;
+}
+
+// Loads a video by :id param, including trashed videos (admin can see
+// everything). Returns the video or a 404 text response.
+export async function requireVideo(c: Context<AdminEnv>): Promise<Video | Response> {
+  const id = c.req.param("id") as string;
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) return c.text("Video not found", 404);
+  return video;
 }

@@ -17,7 +17,7 @@ const PUBLIC_ROOT = resolve(import.meta.dir, "..", "public");
 //
 // Module layout (each owns its own auth profile):
 //   api    — bearer auth on `/api/videos/*`, `/api/health` open
-//   admin  — web/session auth at the mount (placeholder until task-x5)
+//   admin  — session cookie or lca_ bearer token at the mount
 //   site   — root, well-known files, `/data/*` (open, drops in 6.5)
 //   videos — `/:slug{...}/*` viewer surface, mounted last as the catch-all
 export function createApp(): Hono {

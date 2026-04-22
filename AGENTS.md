@@ -42,7 +42,7 @@ Three components exist today, plus a diagnostic tool:
 - `docs/developer/recording-pipeline.md` — how the macOS app captures, composites, encodes, and streams video. Actors, timing, mode switching, pause/resume, GPU recovery. Read before touching anything in `RecordingActor`, `CompositionActor`, `WriterActor`, or `UploadActor`.
 - `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
 - `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
-- `docs/developer/auth.md` — how the bearer token system works end-to-end (server schema, key lifecycle, macOS Keychain storage, Settings UI).
+- `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
 - `docs/requirements.md` — refined requirements for the whole system.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
 - `docs/archive/` — incident records and completed research audits. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
@@ -105,14 +105,14 @@ Direct commands (for reference or when you need different flags):
 │       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
 │       └── routes/                       #   four modules, each with co-located __tests__/
 │           ├── api/                      #     /api/* — bearer-authed JSON API (health, videos CRUD)
-│           ├── admin/                    #     /admin — web-authed admin (stub until task-x5)
+│           ├── admin/                    #     /admin — session/bearer-authed admin panel
 │           ├── site/                     #     root, well-known files (robots, favicon, sitemap)
 │           └── videos/                   #     /:slug viewer surface (page, embed, media, metadata)
 ├── docs/
 │   ├── developer/                        # living developer docs
 │   │   ├── streaming-and-healing.md      #   segment flow, healing, derivatives
 │   │   ├── server-routes-and-api.md      #   full route + API reference
-│   │   └── auth.md                       #   bearer token system end-to-end
+│   │   └── auth.md                       #   API keys + admin auth (sessions, bearer tokens)
 │   ├── tasks-todo/                       # active/upcoming work
 │   ├── tasks-done/                       # completed task write-ups
 │   ├── research/                         # historical: initial research (pre-prototype)

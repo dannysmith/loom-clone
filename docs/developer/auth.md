@@ -1,12 +1,14 @@
 # Auth
 
-One-page tour of how the macOS app authenticates to the server. Single-user project; a bearer token is the right primitive.
+How authentication works across the system. Two separate mechanisms serve different purposes: API keys (`lck_`) authenticate the macOS app's recording API calls, and admin auth (sessions + `lca_` tokens) protects the web admin panel.
 
-## The model in one paragraph
+## API keys (`lck_`) — macOS app → server
 
-The server issues long-lived API keys. The macOS app stores one in the system Keychain and sends it as `Authorization: Bearer <token>` on every call to `/api/videos/*`. The server stores only the SHA-256 hash of each token; plaintext is shown once at creation and never recoverable. Keys can be named (for human readability), listed, and revoked. Everything else on the server — `/api/health`, `/:slug/*`, `/static/*`, `/admin` — is open.
+### The model in one paragraph
 
-## Token format
+The server issues long-lived API keys. The macOS app stores one in the system Keychain and sends it as `Authorization: Bearer <token>` on every call to `/api/videos/*`. The server stores only the SHA-256 hash of each token; plaintext is shown once at creation and never recoverable. Keys can be named (for human readability), listed, and revoked.
+
+### Token format
 
 ```
 lck_<43 chars of base64url>
@@ -15,7 +17,7 @@ lck_<43 chars of base64url>
 - `lck_` — "loom-clone key" — is a public prefix so a leaked token is visibly identifiable in logs or screenshots, and trivially grep-able by secret scanners.
 - The body is 32 random bytes (256 bits of entropy) from `crypto.getRandomValues`, encoded base64url.
 
-## Server
+### Server
 
 **Schema** (`server/src/db/schema.ts`): `api_keys(id, name, hashed_token, created_at, last_used_at, revoked_at)`. `hashed_token` is uniquely indexed.
 
@@ -33,7 +35,7 @@ bun run keys:list
 bun run keys:revoke <id>        # idempotent
 ```
 
-## macOS
+### macOS
 
 **Keychain wrapper** (`app/LoomClone/Helpers/APIKeyStore.swift`): `read() -> String?`, `write(_:) throws`, `delete() throws`. Uses `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` — readable in the background after first unlock, not synced via iCloud Keychain.
 
@@ -43,7 +45,7 @@ bun run keys:revoke <id>        # idempotent
 
 **Settings UI** (`app/LoomClone/UI/SettingsView.swift`): standard SwiftUI `Settings` scene (Cmd+,). Single field, Save, Clear. The popover also shows an "Open Settings" link when no key is configured, and the Record button is gated on both server reachability AND a stored key.
 
-## Lifecycle
+### Lifecycle
 
 1. Start the server (`bun run dev`).
 2. Create a key: `bun run keys:create "macbook"`.
@@ -51,11 +53,51 @@ bun run keys:revoke <id>        # idempotent
 4. Record. Every API call now carries the token.
 5. If the key needs rotating: `bun run keys:revoke <id>` then `keys:create` a new one; paste it back into Settings.
 
-## What's not here, and why
+### What's not here, and why
 
 - **Password hashing (bcrypt/argon2)** — wrong tool for high-entropy tokens; would slow verification for no security gain.
-- **Rate limiting on auth failures** — single-user scale, not worth the complexity until the first abuse event (which in practice would be never).
+- **Rate limiting on auth failures** — single-user scale, not worth the complexity.
 - **Per-key scopes / read-only keys** — YAGNI for a single user.
 - **Token refresh / expiry** — long-lived tokens with manual rotation are fine at this scale.
-- **HTTPS enforcement** — a task-x3 (deploy) concern. Plaintext bearer over HTTP is acceptable on localhost only. Before `HOST` moves off `127.0.0.1`, HTTPS must be in place (bearer tokens over plain HTTP are trivially interceptable).
-- **Admin panel auth** — task-x5 concern, different mechanism (sessions, not API keys). Deliberately not conflated.
+
+## Admin authentication — web panel + programmatic access
+
+The admin panel (`/admin/*`) uses a separate auth system from the recording API. Two methods are supported: cookie-based sessions for the web UI, and admin bearer tokens (`lca_`) for programmatic access (scripts, CI, external tools).
+
+### Configuration
+
+Three environment variables control admin auth (see `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADMIN_PASSWORD` | *(unset)* | Password for the admin login form. When unset, admin routes are unprotected (dev mode). |
+| `ADMIN_USERNAME` | `admin` | Username for the admin login form. |
+| `SESSION_SECRET` | *(unset)* | HMAC key for signing session cookies. Required when `ADMIN_PASSWORD` is set. Generate with `openssl rand -base64 48`. |
+
+**Dev mode**: when `ADMIN_PASSWORD` is not set, the `requireAdmin()` middleware passes all requests through without authentication. This lets you develop without needing to log in.
+
+### Sessions (web UI)
+
+Login via `POST /admin/login` with username and password. On success, a signed `lc_session` cookie is set with a 2-week expiry. The cookie is `httpOnly`, `SameSite=Lax`, scoped to `/admin`, and `Secure` on non-localhost origins. The session payload contains the username and an expiry timestamp, HMAC-signed with `SESSION_SECRET`.
+
+CSRF protection applies to all cookie-authenticated mutations (POST/PATCH/DELETE). The server checks the `Origin` header against the expected host and rejects mismatches.
+
+### Admin tokens (`lca_`) — programmatic access
+
+Admin bearer tokens provide the same access as a logged-in session, for use cases where cookies aren't practical (scripts, API clients, CI). They use the same SHA-256 hash-and-verify pattern as API keys.
+
+**Token format**: `lca_<43 chars of base64url>` — "loom-clone admin". Same structure as `lck_` tokens but a distinct prefix so the two are immediately distinguishable.
+
+**Lifecycle**: tokens are created and revoked from the admin UI (Settings > API Keys). The plaintext is shown once at creation. `lastUsedAt` is tracked. Bearer-authenticated requests skip CSRF checks (bearer tokens are inherently CSRF-safe).
+
+**Usage**: `Authorization: Bearer lca_...` on any `/admin/*` route. Invalid tokens get a 401 JSON response; requests with no `Authorization` header and no valid session cookie are redirected to the login page.
+
+### Where the code lives
+
+| Concern | File |
+|---|---|
+| Admin config, sessions, `requireAdmin()` middleware | `src/lib/admin-auth.ts` |
+| Admin token CRUD (create, verify, revoke, list) | `src/lib/admin-tokens.ts` |
+| CSRF middleware | `src/routes/admin/index.tsx` |
+| Login/logout routes | `src/routes/admin/index.tsx` |
+| Admin token management UI | Settings > API Keys pane |

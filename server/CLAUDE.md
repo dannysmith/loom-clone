@@ -32,13 +32,11 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 
 ## Auth
 
-Bearer token (`lck_…`) on all `/api/videos/*` routes; everything else is open. See `docs/developer/auth.md` at the repo root for the full system (server schema, key lifecycle, macOS Keychain storage, CLI commands).
+Two separate auth systems. See `docs/developer/auth.md` at the repo root for the full picture.
 
-Key things to know when working here:
-- Middleware: `requireApiKey()` in `src/lib/auth.ts`, mounted in `app.ts` on `/api/videos/*`.
-- Error shape: 401 with `WWW-Authenticate: Bearer realm="loom-clone"` + standard error envelope.
-- CLI: `bun run keys:create <name>`, `bun run keys:list`, `bun run keys:revoke <id>`.
-- Env: `HOST` (default `127.0.0.1`), `PORT` (default `3000`), `PUBLIC_URL` in `.env`. See `.env.example`.
+**API keys** (`lck_…`): bearer token on all `/api/videos/*` routes. Middleware: `requireApiKey()` in `src/lib/auth.ts`, mounted in `app.ts`. CLI: `bun run keys:create <name>`, `bun run keys:list`, `bun run keys:revoke <id>`.
+
+**Admin auth**: cookie-based sessions for the web UI, plus `lca_…` bearer tokens for programmatic access. Middleware: `requireAdmin()` in `src/lib/admin-auth.ts`. When `ADMIN_PASSWORD` env var is not set, admin auth is bypassed (dev mode). See `.env.example` for the three admin env vars (`ADMIN_PASSWORD`, `ADMIN_USERNAME`, `SESSION_SECRET`).
 
 ## API response envelope
 
@@ -51,7 +49,7 @@ Four modules in `src/routes/`, each with its own auth profile. Full route refere
 | Module    | Mount      | Auth                                  | Purpose                             |
 | --------- | ---------- | ------------------------------------- | ----------------------------------- |
 | `api/`    | `/api`     | Bearer on `/videos/*`; `/health` open | JSON API for macOS app              |
-| `admin/`  | `/admin`   | Session-based (stub — task-x5)        | Admin panel                         |
+| `admin/`  | `/admin`   | Session cookie or `lca_` bearer       | Admin panel                         |
 | `site/`   | `/`        | Open                                  | Root, well-known files, oEmbed      |
 | `videos/` | `/` (last) | Open                                  | `/:slug` viewer surface (catch-all) |
 
@@ -68,7 +66,7 @@ Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + cust
 src/views/
   layouts/   RootLayout, ViewerLayout, AdminLayout — shared <html>/<head>/body shells
   viewer/    public-facing pages (VideoPage today; embed/etc. later)
-  admin/     admin UI components (stub today, fleshed out in task-x5)
+  admin/     admin UI components (dashboard, video detail, settings, upload, trash)
 public/
   styles/    CSS — see below
 ```

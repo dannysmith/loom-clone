@@ -371,11 +371,14 @@ The Range-aware file serving logic lives in `src/lib/file-serve.ts`.
 
 ## Environment variables
 
-| Variable     | Default                  | Purpose                                     |
-| ------------ | ------------------------ | ------------------------------------------- |
-| `HOST`       | `127.0.0.1`              | Server bind address                         |
-| `PORT`       | `3000`                   | Server port                                 |
-| `PUBLIC_URL` | `http://${HOST}:${PORT}` | Base URL for absolute URLs in API responses |
+| Variable         | Default                  | Purpose                                                     |
+| ---------------- | ------------------------ | ----------------------------------------------------------- |
+| `HOST`           | `127.0.0.1`              | Server bind address                                         |
+| `PORT`           | `3000`                   | Server port                                                 |
+| `PUBLIC_URL`     | `http://${HOST}:${PORT}` | Base URL for absolute URLs in API responses                 |
+| `ADMIN_PASSWORD` | *(unset)*                | Admin login password. When unset, admin auth is bypassed.   |
+| `ADMIN_USERNAME` | `admin`                  | Admin login username.                                       |
+| `SESSION_SECRET` | *(unset)*                | HMAC key for session cookies. Required with `ADMIN_PASSWORD`.|
 
 See `.env.example` for documentation and defaults.
 
@@ -386,7 +389,7 @@ See `.env.example` for documentation and defaults.
 | App factory + module mounting             | `src/app.ts`                     |
 | API module (health + videos)              | `src/routes/api/index.ts`        |
 | Video CRUD routes                         | `src/routes/api/videos.ts`       |
-| Admin stub                                | `src/routes/admin/index.tsx`     |
+| Admin module (routes, auth, CSRF)         | `src/routes/admin/index.tsx`     |
 | Site (root, well-known)                   | `src/routes/site/well-known.tsx` |
 | oEmbed endpoint                           | `src/routes/site/oembed.ts`      |
 | Viewer HTML page                          | `src/routes/videos/page.tsx`     |
@@ -398,6 +401,8 @@ See `.env.example` for documentation and defaults.
 | Error codes + helper                      | `src/lib/errors.ts`              |
 | Range-aware file serving                  | `src/lib/file-serve.ts`          |
 | URL builders                              | `src/lib/url.ts`                 |
-| Auth middleware                           | `src/lib/auth.ts`                |
+| API key middleware                        | `src/lib/auth.ts`                |
+| Admin auth (sessions, middleware)         | `src/lib/admin-auth.ts`          |
+| Admin token CRUD                          | `src/lib/admin-tokens.ts`        |
 | Slug validation + store                   | `src/lib/store.ts`               |
 | Display formatting (duration, date)       | `src/lib/format.ts`              |

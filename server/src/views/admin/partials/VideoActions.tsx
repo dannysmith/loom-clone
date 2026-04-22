@@ -1,5 +1,7 @@
 import type { Video } from "../../../db/schema";
+import { absoluteUrl } from "../../../lib/url";
 import {
+  IconCode,
   IconCopy,
   IconDownload,
   IconDuplicate,
@@ -7,9 +9,22 @@ import {
   IconTrash,
 } from "../components/Icons";
 
+function buildEmbedHtml(video: Video): string {
+  const embedUrl = absoluteUrl(`/${video.slug}/embed`);
+  const title = video.title ? video.title.replace(/"/g, "&quot;") : `Video ${video.slug}`;
+  return [
+    '<div style="position: relative; padding-bottom: 56.25%; height: 0;">',
+    `  <iframe src="${embedUrl}" frameborder="0" allowfullscreen allow="autoplay; fullscreen; picture-in-picture" loading="lazy" title="${title}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></iframe>`,
+    "</div>",
+  ].join("\n");
+}
+
 export function VideoActions({ video }: { video: Video }) {
   const isPublicOrUnlisted = video.visibility !== "private";
   const publicUrl = `/${video.slug}`;
+  const embedHtml = buildEmbedHtml(video);
+  // Escape for safe insertion into an onclick attribute
+  const escapedEmbed = embedHtml.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 
   return (
     <div class="video-actions">
@@ -20,6 +35,9 @@ export function VideoActions({ video }: { video: Video }) {
           </a>
           <button type="button" class="btn btn--sm" onclick={`copyToClipboard('${publicUrl}')`}>
             <IconCopy size={14} /> Copy public URL
+          </button>
+          <button type="button" class="btn btn--sm" onclick={`copyText('${escapedEmbed}')`}>
+            <IconCode size={14} /> Copy embed HTML
           </button>
         </>
       )}

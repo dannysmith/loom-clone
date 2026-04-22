@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { formatDuration } from "../../lib/format";
+import { absoluteUrl } from "../../lib/url";
 import { EmbedPage } from "../../views/viewer/EmbedPage";
 import { resolveForViewer } from "./resolve";
 
@@ -14,7 +15,9 @@ embed.get("/:slug/embed", async (c) => {
   if (!result) return c.text("Not found", 404);
   if ("redirect" in result) return c.redirect(`/${result.redirect}/embed`, 301);
 
-  const { video } = result;
+  const { video, poster, urls } = result;
+  const canonicalUrl = absoluteUrl(urls.page);
+  const posterAbsolute = poster ? absoluteUrl(urls.poster) : null;
 
   return c.html(
     <EmbedPage
@@ -22,7 +25,10 @@ embed.get("/:slug/embed", async (c) => {
       src={result.src}
       poster={result.poster}
       title={video.title ?? undefined}
+      description={video.description ?? undefined}
       duration={formatDuration(video.durationSeconds) ?? undefined}
+      canonicalUrl={canonicalUrl}
+      posterAbsolute={posterAbsolute}
     />,
   );
 });

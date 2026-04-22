@@ -5,25 +5,59 @@ type Props = {
   src: string;
   poster: string | null;
   title?: string;
+  description?: string;
   duration?: string;
+  canonicalUrl: string;
+  posterAbsolute: string | null;
 };
 
 // Chromeless player for iframe embeds. Custom overlay shows title, duration,
 // and play button before first play; hides once playback starts.
 // Vidstack's data-started attribute on <media-player> drives visibility via CSS.
-export function EmbedPage({ slug, src, poster, title, duration }: Props) {
+export function EmbedPage({
+  slug,
+  src,
+  poster,
+  title,
+  description,
+  duration,
+  canonicalUrl,
+  posterAbsolute,
+}: Props) {
   const playerTitle = [title, duration].filter(Boolean).join(" · ");
+  const pageTitle = title ?? `Video ${slug}`;
+  const ogDescription =
+    description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
   return (
     <RootLayout
-      title={`Video ${slug} — embed`}
+      title={pageTitle}
       bodyClass="embed"
       head={
         <>
+          <link rel="preconnect" href="https://cdn.vidstack.io" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <link rel="stylesheet" href="/static/styles/player.css" />
           <link rel="stylesheet" href="/static/styles/embed.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />
+
+          {/* Canonical points at the main video page, not the embed */}
+          <link rel="canonical" href={canonicalUrl} />
+          {description && <meta name="description" content={description} />}
+          <meta name="author" content="Danny Smith" />
+
+          {/* OG tags — so an accidentally-pasted embed URL still gets a rich preview */}
+          <meta property="og:type" content="video.other" />
+          <meta property="og:title" content={pageTitle} />
+          <meta property="og:url" content={canonicalUrl} />
+          {ogDescription && <meta property="og:description" content={ogDescription} />}
+          {posterAbsolute && <meta property="og:image" content={posterAbsolute} />}
+
+          {/* Twitter Card */}
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={pageTitle} />
+          {ogDescription && <meta name="twitter:description" content={ogDescription} />}
+          {posterAbsolute && <meta name="twitter:image" content={posterAbsolute} />}
         </>
       }
     >

@@ -1,7 +1,8 @@
 import { raw } from "hono/html";
 import { marked } from "marked";
-import { formatDate, formatDuration } from "../../lib/format";
+import { formatDate, formatDuration, formatDurationIso } from "../../lib/format";
 import type { Video } from "../../lib/store";
+import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 
 marked.setOptions({ breaks: true });
@@ -27,15 +28,43 @@ export function VideoPage({
 }: Props) {
   const pageTitle = video.title ?? `Video ${video.slug}`;
   const description = video.description ?? undefined;
+  const ogDescription =
+    description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
   const duration = formatDuration(video.durationSeconds);
+  const isoDuration = formatDurationIso(video.durationSeconds);
   const date = formatDate(video.completedAt ?? video.createdAt);
+  const uploadDate = video.completedAt ?? video.createdAt;
   const noindex = video.visibility !== "public";
+
+  // JSON-LD VideoObject structured data
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    name: pageTitle,
+    ...(description && { description }),
+    ...(posterAbsolute && { thumbnailUrl: posterAbsolute }),
+    uploadDate,
+    ...(isoDuration && { duration: isoDuration }),
+    contentUrl: absoluteUrl(src),
+    embedUrl: embedAbsolute,
+    ...(video.width &&
+      video.height && {
+        width: video.width,
+        height: video.height,
+      }),
+    author: {
+      "@type": "Person",
+      name: "Danny Smith",
+      url: "https://danny.is",
+    },
+  };
 
   return (
     <ViewerLayout
       title={pageTitle}
       head={
         <>
+          <link rel="preconnect" href="https://cdn.vidstack.io" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <link rel="stylesheet" href="/static/styles/player.css" />
@@ -46,12 +75,13 @@ export function VideoPage({
           <link rel="canonical" href={canonicalUrl} />
           {noindex && <meta name="robots" content="noindex" />}
           {description && <meta name="description" content={description} />}
+          <meta name="author" content="Danny Smith" />
 
           {/* Open Graph */}
           <meta property="og:type" content="video.other" />
           <meta property="og:title" content={pageTitle} />
           <meta property="og:url" content={canonicalUrl} />
-          {description && <meta property="og:description" content={description} />}
+          {ogDescription && <meta property="og:description" content={ogDescription} />}
           {posterAbsolute && <meta property="og:image" content={posterAbsolute} />}
           <meta property="og:video" content={embedAbsolute} />
           <meta property="og:video:type" content="text/html" />
@@ -61,11 +91,14 @@ export function VideoPage({
           {/* Twitter Card */}
           <meta name="twitter:card" content="player" />
           <meta name="twitter:title" content={pageTitle} />
-          {description && <meta name="twitter:description" content={description} />}
+          {ogDescription && <meta name="twitter:description" content={ogDescription} />}
           {posterAbsolute && <meta name="twitter:image" content={posterAbsolute} />}
           <meta name="twitter:player" content={embedAbsolute} />
           <meta name="twitter:player:width" content="1280" />
           <meta name="twitter:player:height" content="720" />
+
+          {/* Structured data */}
+          <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
 
           {/* oEmbed discovery */}
           <link

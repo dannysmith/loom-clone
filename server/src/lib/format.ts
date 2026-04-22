@@ -24,6 +24,20 @@ export function formatDurationShort(seconds: number | null | undefined): string 
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** ISO 8601 duration (e.g. "PT1M30S") for structured data / JSON-LD. */
+export function formatDurationIso(seconds: number | null | undefined): string | null {
+  if (seconds == null || seconds <= 0) return null;
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  let out = "PT";
+  if (h) out += `${h}H`;
+  if (m) out += `${m}M`;
+  if (s || (!h && !m)) out += `${s}S`;
+  return out;
+}
+
 /** Formats an ISO timestamp as a human-readable date (e.g. "17 Apr 2026"). */
 export function formatDate(iso: string | null | undefined): string | null {
   if (!iso) return null;

@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { hasAdminHint } from "../../lib/admin-auth";
 import { absoluteUrl } from "../../lib/url";
 import { VideoPage } from "../../views/viewer/VideoPage";
 import { resolveForViewer } from "./resolve";
@@ -15,6 +16,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   const canonicalUrl = absoluteUrl(urls.page);
   const posterAbsolute = poster ? absoluteUrl(urls.poster) : null;
   const embedAbsolute = absoluteUrl(`/${video.slug}/embed`);
+  const adminUrl = hasAdminHint(c) ? `/admin/videos/${video.id}` : null;
 
   if (video.visibility !== "public") {
     c.header("X-Robots-Tag", "noindex");
@@ -28,6 +30,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
       canonicalUrl={canonicalUrl}
       posterAbsolute={posterAbsolute}
       embedAbsolute={embedAbsolute}
+      adminUrl={adminUrl}
     />,
   );
 }

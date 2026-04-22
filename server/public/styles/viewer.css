@@ -19,6 +19,21 @@ body.viewer {
   padding-inline: var(--space-4);
 }
 
+/* Admin link — only rendered when the admin hint cookie is present */
+.viewer-admin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: var(--font-size-xs);
+  color: var(--viewer-muted);
+  text-decoration: none;
+  margin-block-start: var(--space-3);
+
+  &:hover {
+    color: var(--viewer-fg);
+  }
+}
+
 /* Player */
 media-player {
   inline-size: 100%;

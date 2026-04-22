@@ -212,6 +212,7 @@ final class RecordingCoordinator {
     // MARK: - Result
 
     private(set) var lastVideoURL: String?
+    private(set) var lastVideoId: String?
 
     /// Set by `AppDelegate` at launch. Owned there because heal work spans
     /// app lifetime (startup scan + post-stop handoff).
@@ -349,6 +350,7 @@ final class RecordingCoordinator {
         accumulatedBeforePause = 0
         elapsedSeconds = 0
         lastVideoURL = nil
+        lastVideoId = nil
         recordingStartDate = nil
 
         // Enter the countdown state immediately so the panel renders.
@@ -504,6 +506,7 @@ final class RecordingCoordinator {
         Task {
             let result = await recordingActor?.stopRecording()
             self.lastVideoURL = result?.url
+            self.lastVideoId = result?.videoId
             self.recordingActor = nil
 
             // Hand off any missing segments to HealAgent. Fire-and-forget —
@@ -562,6 +565,7 @@ final class RecordingCoordinator {
             await recordingActor?.cancelRecording()
             self.recordingActor = nil
             self.lastVideoURL = nil
+            self.lastVideoId = nil
             self.state = .idle
         }
         return true
@@ -713,6 +717,7 @@ final class RecordingCoordinator {
         Task { @MainActor in
             let result = await recordingActor?.stopRecording()
             self.lastVideoURL = result?.url
+            self.lastVideoId = result?.videoId
             self.recordingActor = nil
 
             if let result, !result.missing.isEmpty, let heal = self.healAgent {

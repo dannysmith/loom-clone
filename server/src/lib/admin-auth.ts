@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import type { Context, MiddlewareHandler } from "hono";
-import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
+import { deleteCookie, getCookie, getSignedCookie, setCookie, setSignedCookie } from "hono/cookie";
 import { touchAdminTokenLastUsed, verifyAdminToken } from "./admin-tokens";
 
 // ---------- Config ----------
@@ -49,6 +49,7 @@ export function verifyCredentials(
 // ---------- Sessions ----------
 
 const COOKIE_NAME = "lc_session";
+const HINT_COOKIE = "lc_admin";
 const SESSION_MAX_AGE = 14 * 24 * 60 * 60; // 2 weeks in seconds
 
 interface SessionPayload {
@@ -66,6 +67,18 @@ export async function createSession(c: Context, config: AdminConfig): Promise<vo
     secure: isSecureContext(c),
     sameSite: "Lax",
     path: "/admin",
+    maxAge: SESSION_MAX_AGE,
+  });
+
+  // Lightweight hint cookie on "/" so non-admin routes (e.g. the public
+  // viewer page) can detect an active admin session without access to the
+  // signed session cookie (which is scoped to /admin). Not httpOnly so it
+  // could also be read client-side, but we check it server-side.
+  setCookie(c, HINT_COOKIE, "1", {
+    httpOnly: false,
+    secure: isSecureContext(c),
+    sameSite: "Lax",
+    path: "/",
     maxAge: SESSION_MAX_AGE,
   });
 }
@@ -86,12 +99,22 @@ export async function getSession(c: Context, secret: string): Promise<string | n
 
 export function clearSession(c: Context): void {
   deleteCookie(c, COOKIE_NAME, { path: "/admin" });
+  deleteCookie(c, HINT_COOKIE, { path: "/" });
 }
 
 function isSecureContext(c: Context): boolean {
   // Don't set Secure flag on localhost — browsers won't send it back.
   const host = c.req.header("host") ?? "";
   return !host.startsWith("localhost") && !host.startsWith("127.0.0.1");
+}
+
+// ---------- Hint ----------
+
+// Check for the lc_admin hint cookie. Used by public routes (e.g. the
+// viewer page) to conditionally render admin links. Not a security gate —
+// just a UI hint.
+export function hasAdminHint(c: Context): boolean {
+  return getCookie(c, HINT_COOKIE) === "1";
 }
 
 // ---------- Middleware ----------

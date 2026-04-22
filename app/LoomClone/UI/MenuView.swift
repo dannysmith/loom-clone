@@ -159,6 +159,15 @@ struct MenuView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
+                    if let videoId = coordinator.lastVideoId {
+                        Button("Admin") {
+                            let adminURL = "\(AppEnvironment.serverURL)/admin/videos/\(videoId)"
+                            if let nsURL = URL(string: adminURL) {
+                                NSWorkspace.shared.open(nsURL)
+                            }
+                        }
+                        .font(.caption)
+                    }
                     Button("Open") {
                         if let nsURL = URL(string: url) {
                             NSWorkspace.shared.open(nsURL)

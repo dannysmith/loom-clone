@@ -1,6 +1,7 @@
 import type { Video } from "../../../db/schema";
 import { formatDate, formatDurationShort } from "../../../lib/format";
 import {
+  IconClock,
   IconCopy,
   IconDownload,
   IconDuplicate,
@@ -38,7 +39,12 @@ export function VideoCard({ video, mode = "default" }: Props) {
         <div class="video-card-body">
           <div class="video-card-title">{title}</div>
           <div class="video-card-meta">
-            {duration && <span>{duration}</span>}
+            {duration && (
+              <span class="duration-pill">
+                <IconClock size={12} />
+                {duration}
+              </span>
+            )}
             {mode === "trash" ? (
               <span class="badge badge--private">trashed</span>
             ) : (

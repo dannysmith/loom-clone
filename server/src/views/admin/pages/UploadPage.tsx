@@ -64,14 +64,11 @@ export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
         {tags.length > 0 && (
           <div class="form-field">
             <span class="label">Tags (optional)</span>
-            <div class="upload-tags">
+            <div class="tag-picker">
               {tags.map((t) => (
-                <label class="upload-tag-option">
+                <label class="tag-picker-toggle">
                   <input type="checkbox" name="tags" value={String(t.id)} />
-                  <span
-                    class="badge"
-                    style={`background-color: var(--tag-${t.color}); color: #fff`}
-                  >
+                  <span class="tag-chip" style={`--chip-color: var(--tag-${t.color})`}>
                     {t.name}
                   </span>
                 </label>

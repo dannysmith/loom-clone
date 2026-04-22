@@ -38,21 +38,19 @@ export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props
       </div>
 
       <div class="dashboard-toolbar">
-        <div class="dashboard-search">
-          <input
-            class="input"
-            type="search"
-            name="q"
-            placeholder={"Search videos\u2026"}
-            value={filters.search ?? ""}
-            hx-get="/admin/partials/video-list"
-            hx-trigger="input changed delay:500ms, search"
-            hx-target="#video-list"
-            hx-swap="outerHTML"
-            hx-include="[data-filter]"
-            hx-replace-url="/admin"
-          />
-        </div>
+        <input
+          class="input dashboard-search"
+          type="search"
+          name="q"
+          placeholder={"Search videos\u2026"}
+          value={filters.search ?? ""}
+          hx-get="/admin/partials/video-list"
+          hx-trigger="input changed delay:500ms, search"
+          hx-target="#video-list"
+          hx-swap="outerHTML"
+          hx-include="[data-filter]"
+          hx-replace-url="/admin"
+        />
 
         <div class="dashboard-controls">
           <select

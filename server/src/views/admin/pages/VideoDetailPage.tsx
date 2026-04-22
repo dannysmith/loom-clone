@@ -3,6 +3,7 @@ import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
 import { AdminLayout } from "../../layouts/AdminLayout";
+import { IconClock } from "../components/Icons";
 import { VideoActions } from "../partials/VideoActions";
 import {
   DescriptionDisplay,
@@ -46,8 +47,8 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
         <div class="video-header-title">
           <TitleDisplay video={video} />
           <SlugDisplay video={video} />
+          <VisibilityDisplay video={video} />
         </div>
-        <VisibilityDisplay video={video} />
       </div>
 
       {/* --- Actions --- */}
@@ -63,22 +64,29 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
 
       {/* --- Metadata --- */}
       <div class="video-meta">
-        <dl class="video-meta-grid">
-          <MetaField label="Status">
-            <span class={`badge badge--${video.status}`}>{video.status}</span>
-          </MetaField>
-          {duration && <MetaField label="Duration">{duration}</MetaField>}
+        <div class="video-meta-grid">
+          <span class={`badge badge--${video.status}`}>{video.status}</span>
+          {duration && (
+            <span class="duration-pill">
+              <IconClock size={14} />
+              {duration}
+            </span>
+          )}
           {video.width && video.height && (
-            <MetaField label="Dimensions">
+            <span class="meta-pill">
               {video.width}&times;{video.height}
-            </MetaField>
+            </span>
           )}
-          <MetaField label="Source">{video.source}</MetaField>
-          <MetaField label="Created">{formatDate(video.createdAt)}</MetaField>
-          {video.completedAt && (
-            <MetaField label="Completed">{formatDate(video.completedAt)}</MetaField>
-          )}
-        </dl>
+          {video.source === "uploaded" && <span class="meta-pill">uploaded</span>}
+          <span class="meta-pill">{formatDate(video.createdAt)}</span>
+          <span
+            class="meta-pill meta-pill--id"
+            title="Click to copy ID"
+            onclick={`copyText('${video.id}');this.title='Copied!'`}
+          >
+            {video.id}
+          </span>
+        </div>
 
         <div class="video-description">
           <h3>Description</h3>
@@ -92,31 +100,52 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
       </div>
 
       {/* --- Tabs --- */}
+      <VideoTabsSection video={video} events={events} files={files} activeTab={activeTab} />
+    </AdminLayout>
+  );
+}
+
+export function VideoTabsSection({
+  video,
+  events,
+  files,
+  activeTab,
+}: {
+  video: Video;
+  events: VideoEvent[];
+  files: FileEntry[];
+  activeTab: "events" | "files";
+}) {
+  return (
+    <div
+      id="video-tabs-section"
+      hx-get={`/admin/videos/${video.id}/partials/tabs?tab=${activeTab}`}
+      hx-trigger="video-updated from:body"
+      hx-swap="outerHTML"
+    >
       <div class="video-tabs">
         <a
           href={`/admin/videos/${video.id}?tab=events`}
+          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=events`}
+          hx-target="#video-tabs-section"
+          hx-swap="outerHTML"
+          hx-push-url="false"
           class={`settings-tab ${activeTab === "events" ? "active" : ""}`}
         >
           Events ({events.length})
         </a>
         <a
           href={`/admin/videos/${video.id}?tab=files`}
+          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=files`}
+          hx-target="#video-tabs-section"
+          hx-swap="outerHTML"
+          hx-push-url="false"
           class={`settings-tab ${activeTab === "files" ? "active" : ""}`}
         >
           Files ({files.filter((f) => !f.isDirectory).length})
         </a>
       </div>
-
       {activeTab === "events" ? <EventLog events={events} /> : <FileBrowser files={files} />}
-    </AdminLayout>
-  );
-}
-
-function MetaField({ label, children }: { label: string; children: unknown }) {
-  return (
-    <div class="meta-field">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
     </div>
   );
 }
@@ -147,13 +176,25 @@ function FileBrowser({ files }: { files: FileEntry[] }) {
   }
   return (
     <div class="file-browser">
-      {files.map((f) => (
-        <div class={`file-row ${f.isDirectory ? "file-row--dir" : ""}`}>
-          <span class="file-icon">{f.isDirectory ? "\uD83D\uDCC1" : "\uD83D\uDCC4"}</span>
-          <span class="file-path">{f.path}</span>
-          {!f.isDirectory && <span class="file-size">{formatFileSize(f.size)}</span>}
-        </div>
-      ))}
+      {files.map((f) => {
+        const parts = f.path.split("/");
+        const depth = f.isDirectory ? 0 : parts.length - 1;
+        const displayName = parts[parts.length - 1] ?? f.path;
+        return (
+          <div
+            class={`file-row ${f.isDirectory ? "file-row--dir" : ""}`}
+            style={
+              depth > 0
+                ? `padding-inline-start: calc(var(--space-3) + ${depth} * var(--space-5))`
+                : undefined
+            }
+          >
+            <span class="file-icon">{f.isDirectory ? "\uD83D\uDCC1" : "\uD83D\uDCC4"}</span>
+            <span class="file-path">{displayName}</span>
+            {!f.isDirectory && <span class="file-size">{formatFileSize(f.size)}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -40,7 +40,6 @@ export function TagRow({ tag }: { tag: Tag }) {
     <div class="tag-row" id={`tag-${tag.id}`}>
       <span class="tag-swatch" style={`background-color: var(--tag-${tag.color})`} />
       <span class="tag-name">{tag.name}</span>
-      <span class="tag-color-label">{tag.color}</span>
       <button
         type="button"
         class="btn btn--sm"

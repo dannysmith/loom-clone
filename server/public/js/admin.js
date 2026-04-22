@@ -2,13 +2,18 @@
 // server-side: clipboard copy, <dialog> management, file upload progress.
 // Deliberately minimal — most interactivity is HTMX + server partials.
 
-// Copy text to clipboard. Called from onclick handlers on "Copy URL" buttons.
+// Copy a URL path to clipboard (prepends the current origin).
 function copyToClipboard(text) {
   const fullUrl = window.location.origin + text;
+  copyText(fullUrl);
+}
+
+// Copy raw text to clipboard.
+function copyText(text) {
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(fullUrl);
+    navigator.clipboard.writeText(text);
   } else {
-    prompt("Copy this URL:", fullUrl);
+    prompt("Copy:", text);
   }
 }
 

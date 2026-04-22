@@ -12,7 +12,7 @@ import {
   ValidationError,
 } from "../../lib/store";
 import { addTagToVideo, getVideoTags, listTags, removeTagFromVideo } from "../../lib/tags";
-import { VideoDetailPage } from "../../views/admin/pages/VideoDetailPage";
+import { VideoDetailPage, VideoTabsSection } from "../../views/admin/pages/VideoDetailPage";
 import {
   DescriptionDisplay,
   DescriptionEdit,
@@ -73,6 +73,7 @@ videoRoutes.patch("/:id/title", async (c) => {
   const body = await c.req.parseBody();
   const title = String(body.title ?? "").trim() || null;
   const video = await updateVideo(c.req.param("id"), { title });
+  c.header("HX-Trigger", "video-updated");
   return c.html(<TitleDisplay video={video} />);
 });
 
@@ -94,6 +95,7 @@ videoRoutes.patch("/:id/slug", async (c) => {
   const newSlug = String(body.slug ?? "").trim();
   try {
     const video = await updateSlug(id, newSlug);
+    c.header("HX-Trigger", "video-updated");
     return c.html(<SlugDisplay video={video} />);
   } catch (err) {
     const result = await requireVideo(c);
@@ -121,6 +123,7 @@ videoRoutes.patch("/:id/description", async (c) => {
   const body = await c.req.parseBody();
   const description = String(body.description ?? "").trim() || null;
   const video = await updateVideo(id, { description });
+  c.header("HX-Trigger", "video-updated");
   return c.html(<DescriptionDisplay video={video} />);
 });
 
@@ -143,7 +146,20 @@ videoRoutes.patch("/:id/visibility", async (c) => {
   if (!["public", "unlisted", "private"].includes(visibility))
     return c.text("Invalid visibility", 400);
   const video = await updateVideo(id, { visibility });
+  c.header("HX-Trigger", "video-updated");
   return c.html(<VisibilityDisplay video={video} />);
+});
+
+// --- Tabs partial ---
+
+videoRoutes.get("/:id/partials/tabs", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const activeTab = c.req.query("tab") === "files" ? "files" : "events";
+  const [events, files] = await Promise.all([listEvents(result.id), listVideoFiles(result.id)]);
+  return c.html(
+    <VideoTabsSection video={result} events={events} files={files} activeTab={activeTab} />,
+  );
 });
 
 // --- Video tag assignment ---
@@ -152,6 +168,7 @@ async function renderTagsControl(c: Context<AdminEnv>): Promise<Response> {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   const [videoTags, allTags] = await Promise.all([getVideoTags(result.id), listTags()]);
+  c.header("HX-Trigger", "video-updated");
   return c.html(<VideoTagsControl video={result} videoTags={videoTags} allTags={allTags} />);
 }
 

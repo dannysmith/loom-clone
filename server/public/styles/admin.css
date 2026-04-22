@@ -71,7 +71,6 @@ body.admin--login {
 
 .admin-main {
 	padding: var(--space-6);
-	max-inline-size: var(--content-max);
 	inline-size: 100%;
 	overflow-y: auto;
 }
@@ -103,12 +102,16 @@ body.admin--login {
 
 .dashboard-toolbar {
 	display: flex;
-	flex-direction: column;
-	gap: var(--space-3);
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
 	margin-block-end: var(--space-5);
 }
 
 .dashboard-search {
+	inline-size: auto;
+	min-inline-size: 12rem;
+	flex: 1;
 	max-inline-size: 20rem;
 }
 
@@ -361,7 +364,8 @@ body.admin--login {
 	transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.video-card:hover .video-card-menu-btn {
+.video-card:hover .video-card-menu-btn,
+[data-view="table"] .video-card-menu-btn {
 	opacity: 1;
 }
 
@@ -595,6 +599,58 @@ select.input {
 	cursor: pointer;
 }
 
+/* Customizable select — Chrome 135+, graceful fallback elsewhere */
+@supports (appearance: base-select) {
+	select.input,
+	select.input::picker(select) {
+		appearance: base-select;
+	}
+
+	select.input {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		background-image: none;
+		padding-inline-end: var(--space-3);
+		white-space: nowrap;
+	}
+
+	select.input::picker-icon {
+		block-size: 1em;
+		opacity: 0.5;
+		transition: rotate var(--duration-fast) var(--ease-out);
+	}
+
+	select.input:open::picker-icon {
+		rotate: 180deg;
+	}
+
+	select.input::picker(select) {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background-color: var(--color-bg);
+		box-shadow: var(--shadow-md);
+		padding: var(--space-1);
+	}
+
+	select.input option {
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-sm);
+	}
+
+	select.input option:hover {
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	}
+
+	select.input option:checked {
+		font-weight: var(--font-weight-medium);
+	}
+
+	select.input option::checkmark {
+		display: none;
+	}
+}
+
 .label {
 	display: block;
 	font-size: var(--font-size-sm);
@@ -705,11 +761,6 @@ select.input {
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
 	flex: 1;
-}
-
-.tag-color-label {
-	font-size: var(--font-size-xs);
-	color: var(--color-fg-muted);
 }
 
 .tag-edit-name {
@@ -853,6 +904,14 @@ select.input {
 
 .video-header-title {
 	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--space-2);
+
+	& > :first-child {
+		margin-block-end: var(--space-1);
+	}
 
 	& h1 {
 		font-size: var(--font-size-xl);
@@ -882,23 +941,30 @@ select.input {
 .video-meta-grid {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--space-4);
+	align-items: center;
+	gap: var(--space-3);
 	margin-block-end: var(--space-4);
 }
 
-.meta-field {
-	& dt {
-		font-size: var(--font-size-xs);
-		color: var(--color-fg-muted);
-		font-weight: var(--font-weight-medium);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin-block-end: var(--space-1);
-	}
+.meta-pill {
+	font-size: var(--font-size-sm);
+	color: var(--color-fg-muted);
+}
 
-	& dd {
-		font-size: var(--font-size-sm);
-	}
+.meta-pill--id {
+	font-family: var(--font-mono);
+	font-size: var(--font-size-xs);
+	cursor: pointer;
+	opacity: 0.5;
+}
+
+.duration-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	font-size: var(--font-size-sm);
+	font-variant-numeric: tabular-nums;
+	color: var(--color-fg-muted);
 }
 
 .video-description {
@@ -925,12 +991,6 @@ select.input {
 		font-weight: var(--font-weight-bold);
 		margin-block-end: var(--space-2);
 	}
-}
-
-.video-tags-list {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--space-1);
 }
 
 /* ------- Editable fields ------- */
@@ -980,6 +1040,13 @@ select.input {
 	flex: 1;
 }
 
+.editable-input--title {
+	font-size: var(--font-size-xl);
+	font-weight: var(--font-weight-bold);
+	letter-spacing: -0.01em;
+	padding: var(--space-2) var(--space-3);
+}
+
 .editable-input-group {
 	display: flex;
 	align-items: center;
@@ -1009,13 +1076,40 @@ select.input {
 	color: var(--color-danger);
 }
 
-/* ------- Tag chips (on video page) ------- */
+/* ------- Tag picker ------- */
 
-.video-tags-control {
+.tag-picker {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--space-2);
+	gap: var(--space-1);
+	padding: var(--space-1) var(--space-2);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background-color: var(--color-bg);
+	min-block-size: 2.25rem;
+
+	&:focus-within {
+		outline: 2px solid var(--color-accent);
+		outline-offset: -1px;
+		border-color: var(--color-accent);
+	}
+}
+
+.tag-picker-add {
+	appearance: none;
+	border: none;
+	background: none;
+	padding: var(--space-1) var(--space-2);
+	font-size: var(--font-size-xs);
+	font-family: inherit;
+	color: var(--color-fg-muted);
+	cursor: pointer;
+	inline-size: auto;
+
+	&:focus {
+		outline: none;
+	}
 }
 
 .tag-chip {
@@ -1044,9 +1138,30 @@ select.input {
 	}
 }
 
-.tag-add-select {
-	inline-size: auto;
-	font-size: var(--font-size-xs);
+/* Tag toggle for form-based selection (upload page) */
+.tag-picker-toggle {
+	position: relative;
+	cursor: pointer;
+
+	& input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	& .tag-chip {
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		color: var(--color-fg-muted);
+		transition: background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out);
+	}
+
+	& input:checked + .tag-chip {
+		background-color: var(--chip-color, var(--neutral-400));
+		color: #fff;
+	}
 }
 
 /* ------- Video actions bar ------- */
@@ -1162,27 +1277,6 @@ select.input {
 	flex-direction: column;
 	gap: var(--space-4);
 	max-inline-size: 32rem;
-}
-
-.upload-tags {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-}
-
-.upload-tag-option {
-	cursor: pointer;
-
-	& input {
-		position: absolute;
-		opacity: 0;
-		pointer-events: none;
-	}
-
-	& input:checked + .badge {
-		outline: 2px solid var(--color-accent);
-		outline-offset: 2px;
-	}
 }
 
 .upload-progress {

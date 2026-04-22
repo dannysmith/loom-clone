@@ -31,7 +31,7 @@ export function TitleEdit({ video }: { video: Video }) {
       hx-swap="outerHTML"
     >
       <input
-        class="input editable-input"
+        class="input editable-input editable-input--title"
         type="text"
         name="title"
         value={video.title ?? ""}
@@ -226,27 +226,25 @@ export function VideoTagsControl({
   const available = allTags.filter((t) => !assignedIds.has(t.id));
 
   return (
-    <div id="field-tags" class="video-tags-control">
-      <div class="video-tags-list">
-        {videoTags.map((t) => (
-          <span class="tag-chip" style={`background-color: var(--tag-${t.color}); color: #fff`}>
-            {t.name}
-            <button
-              type="button"
-              class="tag-chip-remove"
-              hx-delete={`/admin/videos/${video.id}/tags/${t.id}`}
-              hx-target="#field-tags"
-              hx-swap="outerHTML"
-              aria-label={`Remove ${t.name}`}
-            >
-              &times;
-            </button>
-          </span>
-        ))}
-      </div>
+    <div id="field-tags" class="tag-picker">
+      {videoTags.map((t) => (
+        <span class="tag-chip" style={`background-color: var(--tag-${t.color}); color: #fff`}>
+          {t.name}
+          <button
+            type="button"
+            class="tag-chip-remove"
+            hx-delete={`/admin/videos/${video.id}/tags/${t.id}`}
+            hx-target="#field-tags"
+            hx-swap="outerHTML"
+            aria-label={`Remove ${t.name}`}
+          >
+            &times;
+          </button>
+        </span>
+      ))}
       {available.length > 0 && (
         <select
-          class="input tag-add-select"
+          class="tag-picker-add"
           hx-post={`/admin/videos/${video.id}/tags`}
           hx-target="#field-tags"
           hx-swap="outerHTML"

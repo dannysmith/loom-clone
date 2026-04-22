@@ -7,7 +7,7 @@
 
 body.admin {
 	display: grid;
-	grid-template-columns: 15rem 1fr;
+	grid-template-columns: 3.5rem 1fr;
 	min-block-size: 100dvh;
 }
 
@@ -22,8 +22,9 @@ body.admin--login {
 .admin-sidebar {
 	display: flex;
 	flex-direction: column;
-	gap: var(--space-5);
-	padding: var(--space-5);
+	align-items: center;
+	gap: var(--space-4);
+	padding: var(--space-3) var(--space-2);
 	border-inline-end: 1px solid var(--color-border);
 	background-color: var(--color-surface);
 }
@@ -33,7 +34,7 @@ body.admin--login {
 	font-size: var(--font-size-sm);
 	text-decoration: none;
 	color: var(--color-fg);
-	letter-spacing: -0.01em;
+	letter-spacing: -0.02em;
 }
 
 /* ------- Nav ------- */
@@ -45,11 +46,11 @@ body.admin--login {
 }
 
 .admin-nav-link {
-	display: block;
-	padding: var(--space-2) var(--space-3);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-2);
 	border-radius: var(--radius-md);
-	font-size: var(--font-size-sm);
-	font-weight: var(--font-weight-medium);
 	color: var(--color-fg-muted);
 	text-decoration: none;
 	transition: background-color var(--duration-fast) var(--ease-out),
@@ -64,7 +65,6 @@ body.admin--login {
 .admin-nav-link[aria-current="page"] {
 	color: var(--color-fg);
 	background-color: light-dark(var(--neutral-100), var(--neutral-800));
-	font-weight: var(--font-weight-bold);
 }
 
 /* ------- Main content ------- */
@@ -366,17 +366,27 @@ body.admin--login {
 }
 
 .video-card-popover {
-	margin: 0;
 	padding: var(--space-1);
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-md);
 	background-color: var(--color-bg);
 	box-shadow: var(--shadow-md);
 	min-inline-size: 10rem;
+
+	/* Anchor to the trigger button via implicit popovertarget anchor */
+	margin: 0;
+	position-area: block-end inline-end;
+	margin-block-start: var(--space-1);
+	position-try-fallbacks:
+		block-end inline-start,
+		block-start inline-end,
+		block-start inline-start;
 }
 
 .popover-item {
-	display: block;
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
 	inline-size: 100%;
 	padding: var(--space-2) var(--space-3);
 	border: none;
@@ -411,39 +421,6 @@ body.admin--login {
 	margin-block-start: var(--space-4);
 	inline-size: 100%;
 	justify-content: center;
-}
-
-/* ------- Visibility badges ------- */
-
-.badge--public {
-	color: var(--color-success);
-	background-color: var(--color-success-bg);
-}
-
-.badge--unlisted {
-	color: var(--color-warning);
-	background-color: var(--color-warning-bg);
-}
-
-.badge--private {
-	color: var(--color-danger);
-	background-color: var(--color-danger-bg);
-}
-
-/* Status badges */
-.badge--recording {
-	color: var(--color-info);
-	background-color: var(--color-info-bg);
-}
-
-.badge--healing {
-	color: var(--color-warning);
-	background-color: var(--color-warning-bg);
-}
-
-.badge--failed {
-	color: var(--color-danger);
-	background-color: var(--color-danger-bg);
 }
 
 /* ------- Login ------- */
@@ -499,12 +476,10 @@ body.admin--login {
 }
 
 .admin-logout-btn {
-	inline-size: 100%;
 	background: none;
 	border: none;
 	cursor: pointer;
 	font-family: inherit;
-	text-align: start;
 }
 
 /* ------- Buttons ------- */
@@ -514,6 +489,7 @@ body.admin--login {
 	align-items: center;
 	gap: var(--space-2);
 	padding: var(--space-2) var(--space-4);
+	text-decoration: none;
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-md);
 	font-size: var(--font-size-sm);
@@ -545,6 +521,7 @@ body.admin--login {
 .badge {
 	display: inline-flex;
 	align-items: center;
+	gap: var(--space-1);
 	padding: var(--space-1) var(--space-2);
 	border-radius: var(--radius-full);
 	font-size: var(--font-size-xs);
@@ -552,6 +529,36 @@ body.admin--login {
 	line-height: 1;
 	background-color: light-dark(var(--neutral-100), var(--neutral-800));
 	color: var(--color-fg-muted);
+}
+
+.badge--public {
+	color: var(--color-info);
+	background-color: var(--color-info-bg);
+}
+
+.badge--unlisted {
+	color: var(--color-fg-muted);
+	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+}
+
+.badge--private {
+	color: var(--color-danger);
+	background-color: var(--color-danger-bg);
+}
+
+.badge--recording {
+	color: var(--color-info);
+	background-color: var(--color-info-bg);
+}
+
+.badge--healing {
+	color: var(--color-warning);
+	background-color: var(--color-warning-bg);
+}
+
+.badge--failed {
+	color: var(--color-danger);
+	background-color: var(--color-danger-bg);
 }
 
 /* ------- Form elements ------- */
@@ -577,6 +584,15 @@ body.admin--login {
 	&::placeholder {
 		color: var(--color-fg-muted);
 	}
+}
+
+select.input {
+	appearance: none;
+	padding-inline-end: var(--space-7);
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right var(--space-2) center;
+	cursor: pointer;
 }
 
 .label {

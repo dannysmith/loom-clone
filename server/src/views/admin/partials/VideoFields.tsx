@@ -1,4 +1,5 @@
 import type { Tag, Video } from "../../../db/schema";
+import { VisibilityBadge } from "../components/Icons";
 
 // --- Title ---
 
@@ -164,7 +165,7 @@ export function DescriptionEdit({ video }: { video: Video }) {
 export function VisibilityDisplay({ video }: { video: Video }) {
   return (
     <div id="field-visibility" class="editable-field editable-field--inline">
-      <span class={`badge badge--${video.visibility}`}>{video.visibility}</span>
+      <VisibilityBadge visibility={video.visibility} />
       <button
         type="button"
         class="btn btn--sm editable-trigger"

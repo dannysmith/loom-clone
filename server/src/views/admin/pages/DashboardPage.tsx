@@ -1,6 +1,7 @@
 import type { Tag, Video } from "../../../db/schema";
 import type { DashboardFilters, DashboardSort } from "../../../lib/store";
 import { AdminLayout } from "../../layouts/AdminLayout";
+import { IconGrid, IconList, IconUpload } from "../components/Icons";
 import { VideoList } from "../partials/VideoList";
 
 type Props = {
@@ -31,6 +32,7 @@ export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props
       <div class="page-header">
         <h1>Dashboard</h1>
         <a href="/admin/upload" class="btn btn--primary">
+          <IconUpload size={16} />
           Upload
         </a>
       </div>
@@ -136,14 +138,14 @@ export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props
               class={`view-toggle-btn ${view === "grid" ? "active" : ""}`}
               aria-label="Grid view"
             >
-              Grid
+              <IconGrid size={16} />
             </a>
             <a
               href={viewToggleUrl(filters, "table")}
               class={`view-toggle-btn ${view === "table" ? "active" : ""}`}
               aria-label="Table view"
             >
-              Table
+              <IconList size={16} />
             </a>
           </div>
         </div>

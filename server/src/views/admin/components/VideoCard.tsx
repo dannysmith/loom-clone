@@ -1,5 +1,14 @@
 import type { Video } from "../../../db/schema";
 import { formatDate, formatDurationShort } from "../../../lib/format";
+import {
+  IconCopy,
+  IconDownload,
+  IconDuplicate,
+  IconEllipsis,
+  IconExternalLink,
+  IconTrash,
+  VisibilityBadge,
+} from "./Icons";
 
 type Props = {
   video: Video;
@@ -34,7 +43,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
               <span class="badge badge--private">trashed</span>
             ) : (
               <>
-                <span class={`badge badge--${video.visibility}`}>{video.visibility}</span>
+                <VisibilityBadge visibility={video.visibility} />
                 {video.status !== "complete" && (
                   <span class={`badge badge--${video.status}`}>{video.status}</span>
                 )}
@@ -62,20 +71,20 @@ export function VideoCard({ video, mode = "default" }: Props) {
             popovertarget={popoverId}
             aria-label="Video actions"
           >
-            &middot;&middot;&middot;
+            <IconEllipsis size={14} />
           </button>
           <div id={popoverId} popover="auto" class="video-card-popover">
             {isPublicOrUnlisted && (
               <>
                 <a href={`/${video.slug}`} target="_blank" rel="noopener" class="popover-item">
-                  Open public URL
+                  <IconExternalLink size={14} /> Open public URL
                 </a>
                 <button
                   type="button"
                   class="popover-item"
                   onclick={`copyToClipboard('/${video.slug}');this.closest('[popover]').hidePopover()`}
                 >
-                  Copy public URL
+                  <IconCopy size={14} /> Copy public URL
                 </button>
               </>
             )}
@@ -84,11 +93,11 @@ export function VideoCard({ video, mode = "default" }: Props) {
               download
               class="popover-item"
             >
-              Download
+              <IconDownload size={14} /> Download
             </a>
             <form method="post" action={`/admin/videos/${video.id}/duplicate`}>
               <button type="submit" class="popover-item">
-                Duplicate
+                <IconDuplicate size={14} /> Duplicate
               </button>
             </form>
             <form
@@ -97,7 +106,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
               hx-confirm="Move this video to trash?"
             >
               <button type="submit" class="popover-item popover-item--danger">
-                Trash
+                <IconTrash size={14} /> Trash
               </button>
             </form>
           </div>

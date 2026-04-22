@@ -1,4 +1,11 @@
 import type { Video } from "../../../db/schema";
+import {
+  IconCopy,
+  IconDownload,
+  IconDuplicate,
+  IconExternalLink,
+  IconTrash,
+} from "../components/Icons";
 
 export function VideoActions({ video }: { video: Video }) {
   const isPublicOrUnlisted = video.visibility !== "private";
@@ -9,21 +16,21 @@ export function VideoActions({ video }: { video: Video }) {
       {isPublicOrUnlisted && (
         <>
           <a href={publicUrl} target="_blank" rel="noopener" class="btn btn--sm">
-            Open public URL
+            <IconExternalLink size={14} /> Open public URL
           </a>
           <button type="button" class="btn btn--sm" onclick={`copyToClipboard('${publicUrl}')`}>
-            Copy public URL
+            <IconCopy size={14} /> Copy public URL
           </button>
         </>
       )}
 
       <a href={`/admin/videos/${video.id}/media/raw/source.mp4`} download class="btn btn--sm">
-        Download
+        <IconDownload size={14} /> Download
       </a>
 
       <form method="post" action={`/admin/videos/${video.id}/duplicate`}>
         <button type="submit" class="btn btn--sm">
-          Duplicate
+          <IconDuplicate size={14} /> Duplicate
         </button>
       </form>
 
@@ -40,7 +47,7 @@ export function VideoActions({ video }: { video: Video }) {
           hx-confirm="Move this video to trash?"
         >
           <button type="submit" class="btn btn--sm btn--danger">
-            Trash
+            <IconTrash size={14} /> Trash
           </button>
         </form>
       )}

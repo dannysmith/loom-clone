@@ -162,6 +162,48 @@ videoRoutes.get("/:id/partials/tabs", async (c) => {
   );
 });
 
+// --- File preview ---
+
+const LANG_MAP: Record<string, string> = {
+  ".json": "json",
+  ".m3u8": "plaintext",
+  ".xml": "xml",
+  ".html": "html",
+  ".css": "css",
+  ".js": "javascript",
+  ".ts": "typescript",
+  ".md": "markdown",
+};
+
+videoRoutes.get("/:id/partials/file-preview", async (c) => {
+  const id = c.req.param("id");
+  const filePath = c.req.query("path") ?? "";
+  if (!filePath || filePath.includes("..") || filePath.startsWith("/")) {
+    return c.text("Invalid path", 400);
+  }
+  const fullPath = `data/${id}/${filePath}`;
+  const file = Bun.file(fullPath);
+  if (!(await file.exists())) return c.text("File not found", 404);
+  const content = await file.text();
+  const ext = filePath.substring(filePath.lastIndexOf("."));
+  const lang = LANG_MAP[ext] ?? "plaintext";
+  return c.html(
+    <>
+      <div class="file-preview-header">
+        <span class="file-preview-filename">{filePath}</span>
+        <button type="button" class="btn btn--sm" onclick="this.closest('dialog').close()">
+          Close
+        </button>
+      </div>
+      <div class="file-preview-body">
+        <pre>
+          <code class={`language-${lang}`}>{content}</code>
+        </pre>
+      </div>
+    </>,
+  );
+});
+
 // --- Video tag assignment ---
 
 async function renderTagsControl(c: Context<AdminEnv>): Promise<Response> {

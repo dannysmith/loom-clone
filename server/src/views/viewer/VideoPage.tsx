@@ -1,6 +1,10 @@
+import { raw } from "hono/html";
+import { marked } from "marked";
 import { formatDate, formatDuration } from "../../lib/format";
 import type { Video } from "../../lib/store";
 import { ViewerLayout } from "../layouts/ViewerLayout";
+
+marked.setOptions({ breaks: true });
 
 type Props = {
   video: Video;
@@ -79,9 +83,36 @@ export function VideoPage({
       <div class="viewer-meta">
         {video.title && <h1 class="viewer-title">{video.title}</h1>}
         {(duration || date) && (
-          <p class="viewer-details">{[duration, date].filter(Boolean).join(" · ")}</p>
+          <p class="viewer-details">
+            {duration && (
+              <>
+                <svg
+                  class="viewer-icon"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                {" "}
+                {duration}
+              </>
+            )}
+            {duration && date && " · "}
+            {date}
+          </p>
         )}
-        {video.description && <p class="viewer-description">{video.description}</p>}
+        {video.description && (
+          <div class="viewer-description">{raw(marked.parse(video.description) as string)}</div>
+        )}
         <p class="viewer-attribution">
           <a href="https://danny.is" rel="noopener noreferrer" target="_blank">
             danny.is

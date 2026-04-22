@@ -17,6 +17,22 @@ function copyText(text) {
   }
 }
 
+// Open the file preview dialog and run syntax highlighting.
+function openFilePreview() {
+  var dialog = document.getElementById("file-preview-dialog");
+  if (dialog) dialog.showModal();
+  document.querySelectorAll("#file-preview-content pre code").forEach(function (el) {
+    if (window.hljs) hljs.highlightElement(el);
+  });
+}
+
+// Auto-open preview dialog when file content is swapped in.
+document.body.addEventListener("htmx:afterSwap", function (event) {
+  if (event.detail.target && event.detail.target.id === "file-preview-content") {
+    openFilePreview();
+  }
+});
+
 // Upload progress handler. Called via hx-on:htmx:xhr:progress on the
 // upload form. Updates the <progress> element.
 function updateProgress(event) {

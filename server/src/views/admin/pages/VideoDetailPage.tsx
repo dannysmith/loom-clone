@@ -3,7 +3,7 @@ import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
 import { AdminLayout } from "../../layouts/AdminLayout";
-import { IconClock } from "../components/Icons";
+import { FileTypeIcon, IconClock } from "../components/Icons";
 import { VideoActions } from "../partials/VideoActions";
 import {
   DescriptionDisplay,
@@ -39,6 +39,17 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />
+          <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css"
+            media="(prefers-color-scheme: light)"
+          />
+          <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css"
+            media="(prefers-color-scheme: dark)"
+          />
+          <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js" />
         </>
       }
     >
@@ -101,6 +112,10 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
 
       {/* --- Tabs --- */}
       <VideoTabsSection video={video} events={events} files={files} activeTab={activeTab} />
+
+      <dialog id="file-preview-dialog" class="file-preview-dialog">
+        <div id="file-preview-content" />
+      </dialog>
     </AdminLayout>
   );
 }
@@ -145,7 +160,11 @@ export function VideoTabsSection({
           Files ({files.filter((f) => !f.isDirectory).length})
         </a>
       </div>
-      {activeTab === "events" ? <EventLog events={events} /> : <FileBrowser files={files} />}
+      {activeTab === "events" ? (
+        <EventLog events={events} />
+      ) : (
+        <FileBrowser files={files} videoId={video.id} />
+      )}
     </div>
   );
 }
@@ -170,7 +189,25 @@ function EventLog({ events }: { events: VideoEvent[] }) {
   );
 }
 
-function FileBrowser({ files }: { files: FileEntry[] }) {
+const TEXT_EXTENSIONS = new Set([
+  ".json",
+  ".m3u8",
+  ".txt",
+  ".log",
+  ".xml",
+  ".html",
+  ".css",
+  ".js",
+  ".ts",
+  ".md",
+]);
+
+function isTextFile(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  return dot !== -1 && TEXT_EXTENSIONS.has(path.substring(dot));
+}
+
+function FileBrowser({ files, videoId }: { files: FileEntry[]; videoId: string }) {
   if (files.length === 0) {
     return <p class="empty-state">No files found.</p>;
   }
@@ -180,16 +217,26 @@ function FileBrowser({ files }: { files: FileEntry[] }) {
         const parts = f.path.split("/");
         const depth = f.isDirectory ? 0 : parts.length - 1;
         const displayName = parts[parts.length - 1] ?? f.path;
+        const previewable = !f.isDirectory && isTextFile(f.path);
         return (
           <div
-            class={`file-row ${f.isDirectory ? "file-row--dir" : ""}`}
+            class={`file-row ${f.isDirectory ? "file-row--dir" : ""} ${previewable ? "file-row--previewable" : ""}`}
             style={
               depth > 0
                 ? `padding-inline-start: calc(var(--space-3) + ${depth} * var(--space-5))`
                 : undefined
             }
+            {...(previewable
+              ? {
+                  "hx-get": `/admin/videos/${videoId}/partials/file-preview?path=${encodeURIComponent(f.path)}`,
+                  "hx-target": "#file-preview-content",
+                  "hx-swap": "innerHTML",
+                }
+              : {})}
           >
-            <span class="file-icon">{f.isDirectory ? "\uD83D\uDCC1" : "\uD83D\uDCC4"}</span>
+            <span class="file-icon">
+              <FileTypeIcon path={f.path} isDirectory={f.isDirectory} />
+            </span>
             <span class="file-path">{displayName}</span>
             {!f.isDirectory && <span class="file-size">{formatFileSize(f.size)}</span>}
           </div>

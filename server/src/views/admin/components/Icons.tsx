@@ -5,9 +5,10 @@
 type IconProps = {
   size?: number;
   class?: string;
+  style?: string;
 };
 
-function Svg({ size = 18, class: className, children }: IconProps & { children: unknown }) {
+function Svg({ size = 18, class: className, style, children }: IconProps & { children: unknown }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -20,6 +21,7 @@ function Svg({ size = 18, class: className, children }: IconProps & { children: 
       stroke-linecap="round"
       stroke-linejoin="round"
       class={className}
+      style={style}
       aria-hidden="true"
     >
       {children}
@@ -193,6 +195,159 @@ export function IconEye(props: IconProps) {
 }
 
 // --- Helpers ---
+
+// --- File type icons ---
+// All share the same dog-eared file outline with distinct internal details.
+
+function FileBase({ children }: { children?: unknown }) {
+  return (
+    <>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      {children}
+    </>
+  );
+}
+
+export function IconFolder(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </Svg>
+  );
+}
+
+export function IconFile(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase />
+    </Svg>
+  );
+}
+
+export function IconFileVideo(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <path d="m10 11 5 3-5 3v-6Z" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileText(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <path d="M9 13h6" />
+        <path d="M9 17h4" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileCode(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <path d="m10 14-2 1 2 1" />
+        <path d="m14 14 2 1-2 1" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileImage(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <circle cx="10" cy="13" r="1.5" />
+        <path d="m18 18-2.5-3-2 2-3-4L7 18" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileAudio(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <circle cx="11" cy="17" r="2" />
+        <path d="M13 17V11l4-2" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileSegment(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <rect x="8" y="11" width="3" height="3" rx="0.5" />
+        <rect x="13" y="11" width="3" height="3" rx="0.5" />
+        <rect x="8" y="16" width="3" height="3" rx="0.5" />
+        <rect x="13" y="16" width="3" height="3" rx="0.5" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+export function IconFileCog(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <FileBase>
+        <circle cx="12" cy="15" r="2" />
+        <path d="M12 11v2" />
+        <path d="M12 17v2" />
+        <path d="m9.17 13-1.73-1" />
+        <path d="m14.56 16 1.73 1" />
+        <path d="m9.17 17-1.73 1" />
+        <path d="m14.56 14 1.73-1" />
+      </FileBase>
+    </Svg>
+  );
+}
+
+// Map filenames/extensions to icon + color
+export function FileTypeIcon({ path, isDirectory }: { path: string; isDirectory: boolean }) {
+  if (isDirectory) return <IconFolder size={16} style="color: var(--tag-blue)" />;
+
+  const name = path.split("/").pop() ?? path;
+  const ext = name.substring(name.lastIndexOf(".")).toLowerCase();
+
+  // Specific filenames first
+  if (name === "recording.json") return <IconFileCog size={16} style="color: var(--tag-orange)" />;
+  if (name === "init.mp4")
+    return <IconFileSegment size={16} style="color: var(--color-fg-muted)" />;
+
+  // By extension
+  switch (ext) {
+    case ".mp4":
+    case ".mov":
+      return <IconFileVideo size={16} style="color: var(--tag-indigo)" />;
+    case ".m4s":
+      return <IconFileSegment size={16} style="color: var(--tag-purple)" />;
+    case ".m3u8":
+      return <IconFileText size={16} style="color: var(--tag-green)" />;
+    case ".json":
+      return <IconFileCode size={16} style="color: var(--tag-yellow)" />;
+    case ".jpg":
+    case ".jpeg":
+    case ".png":
+    case ".webp":
+      return <IconFileImage size={16} style="color: var(--tag-teal)" />;
+    case ".mp3":
+    case ".aac":
+    case ".wav":
+      return <IconFileAudio size={16} style="color: var(--tag-pink)" />;
+    case ".txt":
+    case ".md":
+    case ".log":
+      return <IconFileText size={16} style="color: var(--color-fg-muted)" />;
+    default:
+      return <IconFile size={16} style="color: var(--color-fg-muted)" />;
+  }
+}
 
 function visibilityIcon(visibility: string, size: number) {
   switch (visibility) {

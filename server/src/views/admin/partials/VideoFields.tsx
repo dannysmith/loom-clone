@@ -1,5 +1,9 @@
+import { raw } from "hono/html";
+import { marked } from "marked";
 import type { Tag, Video } from "../../../db/schema";
 import { VisibilityBadge } from "../components/Icons";
+
+marked.setOptions({ breaks: true });
 
 // --- Title ---
 
@@ -108,7 +112,9 @@ export function DescriptionDisplay({ video }: { video: Video }) {
   return (
     <div id="field-description" class="editable-field">
       {video.description ? (
-        <p class="editable-value editable-value--description">{video.description}</p>
+        <div class="editable-value editable-value--description">
+          {raw(marked.parse(video.description) as string)}
+        </div>
       ) : (
         <p class="editable-value editable-value--empty">No description</p>
       )}

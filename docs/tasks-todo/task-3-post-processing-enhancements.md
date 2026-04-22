@@ -21,9 +21,9 @@ The `videos` row represents **the canonical `source.mp4` only**. Its width, heig
 
 Reasons: aspect ratio is invariant across renditions (squashing is a bug); pixel dimensions communicate "this is a 1440p video" as a property of the video itself; per-variant accounting has no use case today. If per-variant storage breakdowns are ever wanted in admin, add a `video_variants` table then.
 
-### Uploaded videos can be 1440p
+### Uploaded videos can exceed 1080p
 
-Recorded videos top out at 1080p today (preset-limited), but the upload path accepts up to 1440p. A 1440p source means both a 1080p and a 720p variant should be generated in Phase 3. Source height determines what variants make sense — see that phase.
+Recorded videos top out at 1080p today (preset-limited), but the upload path at `server/src/routes/admin/upload.tsx` enforces no resolution cap — in practice a user could upload 1440p, 4K, or anything else. A source taller than 1080p means both a 1080p and a 720p variant should be generated in Phase 3. Source height determines what variants make sense — see that phase.
 
 ### Loudness target
 
@@ -60,6 +60,8 @@ Runs after all source-modifying recipes complete. Extract via ffprobe + read fro
 
 Single UPDATE per video. Idempotent — re-running the pipeline re-updates.
 
+**Backfilling existing rows.** The migration adds nullable columns, so videos already in the DB start with null values. Ship a one-off CLI (`bun run videos:backfill-metadata` or similar) that iterates all videos and runs the metadata extraction step against each. Existing rows stay null until either backfilled or re-derived.
+
 ### 1.3 Thumbnail candidate extraction
 
 Replaces the current single-frame recipe. The best thumbnail for most recordings is near the beginning — the presenter's "hey, here's a quick video about X" frame. Sampling is therefore deliberately front-loaded, with a sparse tail for videos long enough to warrant variety.
@@ -69,7 +71,7 @@ Replaces the current single-frame recipe. The best thumbnail for most recordings
 Start from the union of fixed anchors and percentage anchors:
 
 - Fixed (seconds from start): `2`, `5`, `15`
-- Percentage of duration: `10%`, `20%, `40%`, `60%`
+- Percentage of duration: `10%`, `20%`, `40%`, `60%`
 
 **Step 2: prune to what makes sense for this video.**
 
@@ -79,6 +81,10 @@ Start from the union of fixed anchors and percentage anchors:
 4. Dedupe by a minimum gap of `2s` — walk the sorted list and drop any candidate within 2 s of the previously kept one. This collapses overlap in short videos without a special case (e.g. on a 30 s video, `10% = 3s` falls within 2 s of the fixed `2s` or `5s` anchors and drops out; `20% = 6s` drops against `5s`; `40% = 12s` drops against `15s`; leaving roughly `{2, 5, 15, 18}`).
 
 Result: a variable-length set of between 1 (very short videos) and 7 (longer videos) timestamps, always front-loaded.
+
+**Fallback for pathologically short videos.** If pruning leaves an empty set (e.g. a 1.5 s recording), fall back to a single timestamp at `duration / 2`. There is always at least one candidate.
+
+**Seek accuracy.** The current `thumbnailRecipe` uses pre-input `-ss` (fast seek, keyframe-snapped). Modern ffmpeg usually decodes forward from the nearest keyframe to the requested time, making this accurate in practice — but with ~4 s HLS keyframe intervals this has edge cases. Verify frame accuracy on a real recording during implementation; if off, switch to post-input `-ss` (`-i source.mp4 -ss <t>`), which is slower but frame-exact.
 
 **Step 3: extract and score.**
 
@@ -97,7 +103,7 @@ Because the candidate set is already biased toward the beginning, "first non-bla
 UI and endpoints under the existing admin surface:
 
 - **List candidates.** Reads `derivatives/thumbnail-candidates/` and returns a JSON array of `{ id, url, kind: "auto" | "custom", promoted: boolean }`. `id` is the filename without extension.
-- **Upload custom.** Accepts a JPEG upload (size and dimension caps to enforce — suggest max 5 MB, max 3840 px wide). Scales down to 1280 px wide if larger. Writes as `custom-<ISO-timestamp>.jpg`.
+- **Upload custom.** Accepts a JPEG upload (size and dimension caps to enforce — suggest max 5 MB, max 3840 px wide). Scales down to 1280 px wide if larger. Writes as `custom-<basic-ISO-timestamp>.jpg` — use the compact form (`20260423T120000123Z`, no colons) to stay URL-safe and path-parser-friendly.
 - **Promote a candidate.** Body specifies a candidate id. The server atomically copies that file to `thumbnail.jpg` (via `.tmp` + rename).
 
 Admin UI presents the candidates as a grid. Clicking a candidate promotes. A separate button uploads a new JPEG and adds it to the grid. The currently-promoted candidate is highlighted.
@@ -126,6 +132,11 @@ highpass=f=80 → arnndn=m=<model>.rnnn → loudnorm=I=-14:TP=-1.5:LRA=11 (two-p
 - **`dynaudnorm` is explicitly not included** — consensus is that `loudnorm` in dynamic mode handles typical speech input, and `dynaudnorm` in front of it can raise the noise floor and make the denoiser's job harder.
 
 The full chain replaces the current `source.mp4` recipe. Video track stays `-c copy`; only the audio is re-encoded (AAC at 160 kbps). Atomic write pattern preserved.
+
+### Implementation notes
+
+- **Two-pass wiring.** Pass 1 applies the full `highpass → arnndn → loudnorm` chain with `print_format=json` on `loudnorm`; ffmpeg writes the JSON block to stderr. Parse it (Bun's subprocess stderr capture is straightforward), extract the five `input_i`, `input_tp`, `input_lra`, `input_thresh`, `target_offset` fields, and inject them as `measured_I=...:measured_TP=...:measured_LRA=...:measured_thresh=...:offset=...:linear=true` on pass 2. The denoise chain runs in both passes because the measurement must reflect the signal the listener actually hears.
+- **Pass-1 input source.** Decide between reading the HLS playlist twice or staging a temp decoded WAV/FLAC once. For long recordings the staging option halves total I/O at the cost of a scratch file. Recommended: stage to a temp file, delete at end. Not a blocker either way.
 
 ### Validation
 
@@ -164,9 +175,11 @@ ffmpeg -i source.mp4 \
 
 ### Player wiring
 
-The viewer page chooses the best variant per request based on source/variant presence. Preference order today: native 1440p/1080p `source.mp4` when connection hints suggest broadband, otherwise `720p.mp4`. Getting this exactly right is downstream of [task-x-view-layer.md](task-x-view-layer.md); this task just ensures the variants exist.
+Actual variant selection at playback time is downstream of [task-x-view-layer.md](task-x-view-layer.md) — detecting viewer bandwidth and picking the right rendition needs real client-side or edge logic. Multiple `<source>` elements in descending resolution order does **not** work: browsers pick by MIME-type compatibility, not bandwidth, so they'd always take the first (highest-resolution) one. Until the view-layer task lands, the viewer page continues to serve `source.mp4` by default. Phase 3's job is strictly to make the variants exist on disk, ready for the view-layer task to wire up.
 
-For the immediate win before the view-layer work lands, emit variant URLs in the page's `<video>` `<source>` elements in descending resolution order — browsers pick the first compatible one.
+### Encoding cost
+
+libx264 `medium` at CRF 20 for a 30-minute 1440p source can take 10–20 minutes per variant on a modest Hetzner CPU. Fire-and-forget recipes serialise correctly, but multiple recordings landing close together will queue behind each other — viewers may see "720p.mp4 not ready yet" for a while after a long recording. Not a blocker. Consider `-preset fast` as a starting point (slight quality loss, significant speed gain) and revisit if output quality is unsatisfying.
 
 ### Tests
 
@@ -177,18 +190,36 @@ For the immediate win before the view-layer work lands, emit variant URLs in the
 
 Generate a sprite sheet and accompanying WebVTT so Vidstack's `<media-slider-thumbnail>` shows preview frames on hover.
 
+### When to skip
+
+For videos shorter than **60 seconds**, skip storyboard generation entirely — hover-scrub on a short clip is not useful enough to justify the tiles, and a partial grid invites edge cases (see below).
+
 ### Recipe
 
-Duration-aware frame interval so the sheet stays 10×10 regardless of video length:
+Compute interval and grid dimensions dynamically so the sheet is fully populated regardless of duration:
 
 ```
 interval_seconds = max(5, round(duration / 100))
+expected_frames  = floor(duration / interval_seconds)
+cols             = min(10, expected_frames)
+rows             = ceil(expected_frames / cols)
 
 ffmpeg -i source.mp4 \
-  -vf "fps=1/${interval_seconds},scale=240:-1,tile=10x10" \
+  -vf "fps=1/${interval_seconds},scale=240:-2,tile=${cols}x${rows}" \
   -qscale:v 5 \
   storyboard.jpg.tmp
 ```
+
+Worked examples:
+
+| Duration | Interval | Frames | Grid    |
+| -------- | -------- | ------ | ------- |
+| 2 min    | 5 s      | 24     | 10 × 3  |
+| 5 min    | 5 s      | 60     | 10 × 6  |
+| 10 min   | 6 s      | 100    | 10 × 10 |
+| 1 hour   | 36 s     | 100    | 10 × 10 |
+
+`scale=240:-2` enforces even height (matching Phase 3's convention; `-1` can produce odd numbers that some encoders reject). The accompanying VTT generator must emit exactly `expected_frames` cues with coordinates computed from the same `cols` and `rows` values.
 
 Programmatically emit `storyboard.vtt` with one cue per tile, using the `image.jpg#xywh=x,y,w,h` spatial-fragment form that Vidstack expects:
 
@@ -210,8 +241,10 @@ Serve both files at `/:slug/storyboard.jpg` and `/:slug/storyboard.vtt`. Wire in
 
 ### Tests
 
-- Short fixture (< 10 min): confirms a single 10×10 sprite sheet lands with 100 tiles and a matching VTT.
-- Longer fixture (simulated): confirms the interval scales up so the grid stays 10×10.
+- Very short (< 60 s): confirms no storyboard is generated.
+- Medium (say 2 min): confirms a partial grid (e.g. 10 × 3) with the right number of cues in the VTT.
+- Long (simulated or trimmed): confirms interval scales so the grid maxes out at 10 × 10.
+- VTT alignment: confirms every tile in the sprite has a matching cue with correct `xywh` coordinates.
 
 ## Out of scope
 

@@ -23,7 +23,7 @@ Reasons: aspect ratio is invariant across renditions (squashing is a bug); pixel
 
 ### Uploaded videos can exceed 1080p
 
-Recorded videos top out at 1080p today (preset-limited), but the upload path at `server/src/routes/admin/upload.tsx` enforces no resolution cap — in practice a user could upload 1440p, 4K, or anything else. A source taller than 1080p means both a 1080p and a 720p variant should be generated in Phase 3. Source height determines what variants make sense — see that phase.
+Recorded videos generally top out at 1080p today, but the upload path at `server/src/routes/admin/upload.tsx` enforces no resolution cap — in practice a user could upload 1440p, 4K, or anything else. A source taller than 1080p means both a 1080p and a 720p variant should be generated in Phase 3. Source height determines what variants make sense — see that phase.
 
 ### Loudness target
 

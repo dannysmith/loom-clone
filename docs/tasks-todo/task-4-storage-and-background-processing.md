@@ -8,13 +8,13 @@ We use ffmpeg to generate `derivitives/` for completed videos in the background 
 
 This is the time to consider improving these background tasks. We should consider:
 
-- Using ffmpeg and ffprobe to extract metadata from the videos and update the SQL data records in a useful way?
+- Using ffmpeg and ffprobe to extract metadata from the videos and update the SQL data records in a useful way? This should 100% include adding the width and height fields (based on the max width/height possible). What other metadata could we extract here? 
 - Smarter thumbnail generation?
 - Audio cleanup post-processing?
 - Generating more derivitives:
   - 1080p.mp4 — downsampled variant if original > 1080p
   - 720p.mp4 — downsampled variant if original > 720p
-  - hls/master.m3u8 – adaptive-bitrate playlist
+  - hls/master.m3u8 – adaptive-bitrate playlist?
   - etc?
 
 ## Async background processing?

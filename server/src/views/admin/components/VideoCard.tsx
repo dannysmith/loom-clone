@@ -94,7 +94,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
             <form
               method="post"
               action={`/admin/videos/${video.id}/trash`}
-              onsubmit="return confirm('Move this video to trash?')"
+              hx-confirm="Move this video to trash?"
             >
               <button type="submit" class="popover-item popover-item--danger">
                 Trash

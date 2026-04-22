@@ -21,14 +21,14 @@ export function VideoActions({ video }: { video: Video }) {
         Download
       </a>
 
-      <form method="post" action={`/admin/videos/${video.id}/duplicate`} style="display:inline">
+      <form method="post" action={`/admin/videos/${video.id}/duplicate`}>
         <button type="submit" class="btn btn--sm">
           Duplicate
         </button>
       </form>
 
       {video.trashedAt ? (
-        <form method="post" action={`/admin/videos/${video.id}/untrash`} style="display:inline">
+        <form method="post" action={`/admin/videos/${video.id}/untrash`}>
           <button type="submit" class="btn btn--sm btn--primary">
             Restore from trash
           </button>
@@ -37,8 +37,7 @@ export function VideoActions({ video }: { video: Video }) {
         <form
           method="post"
           action={`/admin/videos/${video.id}/trash`}
-          style="display:inline"
-          onsubmit="return confirm('Move this video to trash?')"
+          hx-confirm="Move this video to trash?"
         >
           <button type="submit" class="btn btn--sm btn--danger">
             Trash

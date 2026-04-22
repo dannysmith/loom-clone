@@ -9,7 +9,7 @@ import {
   SlugDisplay,
   TitleDisplay,
   VideoTagsControl,
-  VisibilityControl,
+  VisibilityDisplay,
 } from "../partials/VideoFields";
 
 type Props = {
@@ -47,7 +47,7 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
           <TitleDisplay video={video} />
           <SlugDisplay video={video} />
         </div>
-        <VisibilityControl video={video} />
+        <VisibilityDisplay video={video} />
       </div>
 
       {/* --- Actions --- */}
@@ -63,7 +63,7 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
 
       {/* --- Metadata --- */}
       <div class="video-meta">
-        <div class="video-meta-grid">
+        <dl class="video-meta-grid">
           <MetaField label="Status">
             <span class={`badge badge--${video.status}`}>{video.status}</span>
           </MetaField>
@@ -78,7 +78,7 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
           {video.completedAt && (
             <MetaField label="Completed">{formatDate(video.completedAt)}</MetaField>
           )}
-        </div>
+        </dl>
 
         <div class="video-description">
           <h3>Description</h3>

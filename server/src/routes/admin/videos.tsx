@@ -21,7 +21,8 @@ import {
   TitleDisplay,
   TitleEdit,
   VideoTagsControl,
-  VisibilityControl,
+  VisibilityDisplay,
+  VisibilityEdit,
 } from "../../views/admin/partials/VideoFields";
 import { type AdminEnv, requireVideo } from "./helpers";
 
@@ -123,6 +124,18 @@ videoRoutes.patch("/:id/description", async (c) => {
   return c.html(<DescriptionDisplay video={video} />);
 });
 
+videoRoutes.get("/:id/partials/visibility", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<VisibilityDisplay video={result} />);
+});
+
+videoRoutes.get("/:id/partials/visibility/edit", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<VisibilityEdit video={result} />);
+});
+
 videoRoutes.patch("/:id/visibility", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.parseBody();
@@ -130,7 +143,7 @@ videoRoutes.patch("/:id/visibility", async (c) => {
   if (!["public", "unlisted", "private"].includes(visibility))
     return c.text("Invalid visibility", 400);
   const video = await updateVideo(id, { visibility });
-  return c.html(<VisibilityControl video={video} />);
+  return c.html(<VisibilityDisplay video={video} />);
 });
 
 // --- Video tag assignment ---

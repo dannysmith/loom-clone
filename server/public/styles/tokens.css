@@ -51,6 +51,9 @@
   /* Layout. */
   --content-max: 72rem;
 
+  /* Shadows. */
+  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.12);
+
   /* Primitive colours — neutrals + one accent. OKLCH for perceptual evenness.
      Tweak the accent's hue (third arg, 250 ≈ blue) to rebrand. */
   --neutral-0: oklch(99% 0.005 250);
@@ -66,6 +69,18 @@
   --accent-600: oklch(52% 0.18 250);
   --accent-fg: oklch(99% 0.005 250);
 
+  /* Tag palette — constrained colour set for labelling. */
+  --tag-gray: oklch(65% 0 0);
+  --tag-red: oklch(60% 0.2 25);
+  --tag-orange: oklch(65% 0.18 55);
+  --tag-yellow: oklch(75% 0.16 85);
+  --tag-green: oklch(60% 0.17 145);
+  --tag-teal: oklch(60% 0.12 185);
+  --tag-blue: oklch(55% 0.18 250);
+  --tag-indigo: oklch(50% 0.18 280);
+  --tag-purple: oklch(55% 0.2 300);
+  --tag-pink: oklch(60% 0.2 350);
+
   /* Semantic mappings — auto light/dark via prefers-color-scheme. */
   --color-bg: light-dark(var(--neutral-0), var(--neutral-900));
   --color-surface: light-dark(var(--neutral-50), var(--neutral-800));
@@ -75,6 +90,18 @@
   --color-accent: var(--accent-500);
   --color-accent-hover: var(--accent-600);
   --color-accent-fg: var(--accent-fg);
+
+  /* State colours — danger, success, warning, info. */
+  --color-danger: light-dark(oklch(55% 0.18 25), oklch(75% 0.14 25));
+  --color-danger-bg: light-dark(oklch(95% 0.04 25), oklch(20% 0.04 25));
+  --color-danger-border: light-dark(oklch(80% 0.06 25), oklch(35% 0.06 25));
+  --color-success: light-dark(oklch(45% 0.15 145), oklch(75% 0.12 145));
+  --color-success-bg: light-dark(oklch(95% 0.04 145), oklch(25% 0.04 145));
+  --color-success-border: light-dark(oklch(75% 0.12 145), oklch(35% 0.06 145));
+  --color-warning: light-dark(oklch(50% 0.12 60), oklch(75% 0.1 60));
+  --color-warning-bg: light-dark(oklch(95% 0.03 60), oklch(25% 0.03 60));
+  --color-info: light-dark(oklch(50% 0.15 250), oklch(75% 0.12 250));
+  --color-info-bg: light-dark(oklch(95% 0.03 250), oklch(25% 0.03 250));
 
   /* Viewer page — always dark regardless of system theme. Centralised here
      so the viewer palette moves with the neutral scale's hue. */

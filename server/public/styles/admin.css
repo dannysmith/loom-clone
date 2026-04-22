@@ -1,6 +1,8 @@
 /* Admin-only styles. Linked via <AdminLayout> head slot.
    Sidebar layout, nav, and foundation component classes. */
 
+@layer admin {
+
 /* ------- Layout ------- */
 
 body.admin {
@@ -152,7 +154,7 @@ body.admin--login {
 /* Grid view */
 [data-view="grid"] .video-list-items {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
 	gap: var(--space-4);
 }
 
@@ -213,6 +215,7 @@ body.admin--login {
 [data-view="grid"] .video-card-title {
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
+	min-inline-size: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -304,6 +307,7 @@ body.admin--login {
 [data-view="table"] .video-card-title {
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
+	min-inline-size: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -367,7 +371,7 @@ body.admin--login {
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-md);
 	background-color: var(--color-bg);
-	box-shadow: 0 4px 12px oklch(0% 0 0 / 0.12);
+	box-shadow: var(--shadow-md);
 	min-inline-size: 10rem;
 }
 
@@ -391,20 +395,10 @@ body.admin--login {
 }
 
 .popover-item--danger {
-	color: oklch(55% 0.18 25);
+	color: var(--color-danger);
 
 	&:hover {
-		background-color: oklch(95% 0.04 25);
-	}
-}
-
-@media (prefers-color-scheme: dark) {
-	.popover-item--danger {
-		color: oklch(75% 0.14 25);
-
-		&:hover {
-			background-color: oklch(20% 0.04 25);
-		}
+		background-color: var(--color-danger-bg);
 	}
 }
 
@@ -422,51 +416,34 @@ body.admin--login {
 /* ------- Visibility badges ------- */
 
 .badge--public {
-	color: oklch(45% 0.15 145);
-	background-color: oklch(95% 0.04 145);
+	color: var(--color-success);
+	background-color: var(--color-success-bg);
 }
 
 .badge--unlisted {
-	color: oklch(50% 0.12 60);
-	background-color: oklch(95% 0.03 60);
+	color: var(--color-warning);
+	background-color: var(--color-warning-bg);
 }
 
 .badge--private {
-	color: oklch(50% 0.12 25);
-	background-color: oklch(95% 0.03 25);
-}
-
-@media (prefers-color-scheme: dark) {
-	.badge--public {
-		color: oklch(75% 0.12 145);
-		background-color: oklch(25% 0.04 145);
-	}
-
-	.badge--unlisted {
-		color: oklch(75% 0.1 60);
-		background-color: oklch(25% 0.03 60);
-	}
-
-	.badge--private {
-		color: oklch(75% 0.1 25);
-		background-color: oklch(25% 0.03 25);
-	}
+	color: var(--color-danger);
+	background-color: var(--color-danger-bg);
 }
 
 /* Status badges */
 .badge--recording {
-	color: oklch(50% 0.15 250);
-	background-color: oklch(95% 0.03 250);
+	color: var(--color-info);
+	background-color: var(--color-info-bg);
 }
 
 .badge--healing {
-	color: oklch(50% 0.12 60);
-	background-color: oklch(95% 0.03 60);
+	color: var(--color-warning);
+	background-color: var(--color-warning-bg);
 }
 
 .badge--failed {
-	color: oklch(50% 0.15 25);
-	background-color: oklch(95% 0.03 25);
+	color: var(--color-danger);
+	background-color: var(--color-danger-bg);
 }
 
 /* ------- Login ------- */
@@ -495,21 +472,14 @@ body.admin--login {
 	gap: var(--space-4);
 }
 
-.login-error {
-	color: oklch(55% 0.2 25);
+.form-error {
+	color: var(--color-danger);
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
 	padding: var(--space-2) var(--space-3);
 	border-radius: var(--radius-md);
-	background-color: oklch(95% 0.03 25);
+	background-color: var(--color-danger-bg);
 	margin-block-end: var(--space-2);
-}
-
-@media (prefers-color-scheme: dark) {
-	.login-error {
-		color: oklch(75% 0.15 25);
-		background-color: oklch(20% 0.04 25);
-	}
 }
 
 .login-submit {
@@ -624,38 +594,12 @@ body.admin--login {
 }
 
 .btn--danger {
-	color: oklch(55% 0.18 25);
-	border-color: oklch(80% 0.06 25);
+	color: var(--color-danger);
+	border-color: var(--color-danger-border);
 
 	&:hover {
-		background-color: oklch(95% 0.04 25);
+		background-color: var(--color-danger-bg);
 	}
-}
-
-@media (prefers-color-scheme: dark) {
-	.btn--danger {
-		color: oklch(75% 0.14 25);
-		border-color: oklch(35% 0.06 25);
-
-		&:hover {
-			background-color: oklch(20% 0.04 25);
-		}
-	}
-}
-
-/* ------- Tag palette colors ------- */
-
-:root {
-	--tag-gray: oklch(65% 0 0);
-	--tag-red: oklch(60% 0.2 25);
-	--tag-orange: oklch(65% 0.18 55);
-	--tag-yellow: oklch(75% 0.16 85);
-	--tag-green: oklch(60% 0.17 145);
-	--tag-teal: oklch(60% 0.12 185);
-	--tag-blue: oklch(55% 0.18 250);
-	--tag-indigo: oklch(50% 0.18 280);
-	--tag-purple: oklch(55% 0.2 300);
-	--tag-pink: oklch(60% 0.2 350);
 }
 
 /* ------- Settings tabs ------- */
@@ -816,21 +760,14 @@ body.admin--login {
 
 .keys-new-token {
 	padding: var(--space-3);
-	border: 1px solid oklch(75% 0.12 145);
+	border: 1px solid var(--color-success-border);
 	border-radius: var(--radius-md);
-	background-color: oklch(97% 0.02 145);
+	background-color: var(--color-success-bg);
 	margin-block-end: var(--space-4);
 	font-size: var(--font-size-sm);
 
 	& p {
 		margin-block-end: var(--space-2);
-	}
-}
-
-@media (prefers-color-scheme: dark) {
-	.keys-new-token {
-		border-color: oklch(35% 0.06 145);
-		background-color: oklch(18% 0.02 145);
 	}
 }
 
@@ -918,7 +855,7 @@ body.admin--login {
 	margin-block-end: var(--space-5);
 	border-radius: var(--radius-md);
 	overflow: hidden;
-	background-color: #000;
+	background-color: oklch(0% 0 0);
 	max-inline-size: 56rem;
 }
 
@@ -1053,7 +990,7 @@ body.admin--login {
 
 .editable-error {
 	font-size: var(--font-size-xs);
-	color: oklch(55% 0.2 25);
+	color: var(--color-danger);
 }
 
 /* ------- Tag chips (on video page) ------- */
@@ -1154,6 +1091,7 @@ body.admin--login {
 .event-data {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
+	min-inline-size: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1251,3 +1189,5 @@ body.admin--login {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
 }
+
+} /* @layer admin */

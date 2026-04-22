@@ -11,7 +11,7 @@ export function LoginPage({ error }: { error?: string }) {
       <main class="login-container">
         <div class="login-card">
           <h1>Admin Login</h1>
-          {error && <p class="login-error">{error}</p>}
+          {error && <p class="form-error">{error}</p>}
           <form method="post" action="/admin/login" class="login-form">
             <div class="form-field">
               <label class="label" for="username">

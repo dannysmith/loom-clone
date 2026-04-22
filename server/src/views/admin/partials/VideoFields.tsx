@@ -161,24 +161,52 @@ export function DescriptionEdit({ video }: { video: Video }) {
 
 // --- Visibility ---
 
-export function VisibilityControl({ video }: { video: Video }) {
+export function VisibilityDisplay({ video }: { video: Video }) {
   return (
-    <div id="field-visibility">
-      <select
-        class="input"
-        name="visibility"
-        hx-patch={`/admin/videos/${video.id}/visibility`}
+    <div id="field-visibility" class="editable-field editable-field--inline">
+      <span class={`badge badge--${video.visibility}`}>{video.visibility}</span>
+      <button
+        type="button"
+        class="btn btn--sm editable-trigger"
+        hx-get={`/admin/videos/${video.id}/partials/visibility/edit`}
         hx-target="#field-visibility"
         hx-swap="outerHTML"
-        hx-confirm="Change visibility?"
       >
+        Edit
+      </button>
+    </div>
+  );
+}
+
+export function VisibilityEdit({ video }: { video: Video }) {
+  return (
+    <form
+      id="field-visibility"
+      class="editable-field editable-field--editing"
+      hx-patch={`/admin/videos/${video.id}/visibility`}
+      hx-target="#field-visibility"
+      hx-swap="outerHTML"
+    >
+      <select class="input editable-input" name="visibility">
         {(["public", "unlisted", "private"] as const).map((v) => (
           <option value={v} selected={video.visibility === v}>
             {v}
           </option>
         ))}
       </select>
-    </div>
+      <button type="submit" class="btn btn--primary btn--sm">
+        Save
+      </button>
+      <button
+        type="button"
+        class="btn btn--sm"
+        hx-get={`/admin/videos/${video.id}/partials/visibility`}
+        hx-target="#field-visibility"
+        hx-swap="outerHTML"
+      >
+        Cancel
+      </button>
+    </form>
   );
 }
 

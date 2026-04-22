@@ -8,7 +8,7 @@ export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
         <h1>Upload Video</h1>
       </div>
 
-      {error && <p class="login-error">{error}</p>}
+      {error && <p class="form-error">{error}</p>}
 
       <form
         class="upload-form"

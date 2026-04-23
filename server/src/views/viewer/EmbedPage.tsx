@@ -115,7 +115,7 @@ export function EmbedPage({
           </div>
         )}
 
-        <media-video-layout />
+        <media-video-layout thumbnails={`/${slug}/storyboard.vtt`} />
       </media-player>
     </RootLayout>
   );

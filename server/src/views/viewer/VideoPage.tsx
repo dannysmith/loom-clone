@@ -133,7 +133,7 @@ export function VideoPage({
 
       <media-player src={src} poster={poster ?? undefined} playsinline>
         <media-provider />
-        <media-video-layout />
+        <media-video-layout thumbnails={`/${video.slug}/storyboard.vtt`} />
       </media-player>
 
       <div class="viewer-meta">

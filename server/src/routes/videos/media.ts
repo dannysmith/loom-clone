@@ -50,6 +50,22 @@ media.get("/:slug/poster.jpg", async (c) => {
   return serveFileWithRange(c, path, "image/jpeg", "immutable");
 });
 
+media.get("/:slug/storyboard.jpg", async (c) => {
+  const { slug } = c.req.param();
+  const video = await resolveForMedia(slug);
+  if (!video) return c.text("Not found", 404);
+  const path = join(DATA_DIR, video.id, "derivatives", "storyboard.jpg");
+  return serveFileWithRange(c, path, "image/jpeg", "immutable");
+});
+
+media.get("/:slug/storyboard.vtt", async (c) => {
+  const { slug } = c.req.param();
+  const video = await resolveForMedia(slug);
+  if (!video) return c.text("Not found", 404);
+  const path = join(DATA_DIR, video.id, "derivatives", "storyboard.vtt");
+  return serveFileWithRange(c, path, "text/vtt", "immutable");
+});
+
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file
 // handler because Hono can't separate `:slug` from `.mp4` as param + literal.
 export async function handleMp4Redirect(c: Context, slug: string): Promise<Response> {

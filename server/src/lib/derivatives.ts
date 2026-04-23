@@ -4,6 +4,7 @@ import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
 import { DATA_DIR, getVideo } from "./store";
+import { generateStoryboard } from "./storyboard";
 import { extractAndPromoteThumbnails } from "./thumbnails";
 
 // Resolved absolutely so it survives test chdir() calls.
@@ -587,6 +588,23 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
     } catch (err) {
       console.error(
         `[derivatives] ${videoId} variant generation failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Post-recipe step 5: storyboard sprite sheet + VTT (skipped for short videos).
+  if (sourceExists && duration >= 60) {
+    const storyStarted = Date.now();
+    try {
+      const generated = await generateStoryboard(dir, duration);
+      if (generated) {
+        const ms = Date.now() - storyStarted;
+        console.log(`[derivatives] ${videoId}/storyboard generated (${ms}ms)`);
+      }
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} storyboard generation failed:`,
         err instanceof Error ? err.message : err,
       );
     }

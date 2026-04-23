@@ -36,8 +36,13 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 | `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream                                                                                     |
 | `stream.m3u8`               | After each PUT and after `/complete`             | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename                                                           |
 | `recording.json`            | On `/complete` (and re-`/complete` after heal)   | Server-side copy of the client's timeline, authoritative post-upload                                                                      |
-| `derivatives/source.mp4`    | Background task after each `complete` transition | Single-file MP4 stitched from the HLS segments with `-c copy` — the "download me" file, and what the viewer prefers over HLS when present |
-| `derivatives/thumbnail.jpg` | Same pass as `source.mp4`                        | Single-frame JPEG (~1280px wide) sampled at `min(1s, duration/2)`. Used as the viewer page poster when present                            |
+| `derivatives/source.mp4`    | Background task after each `complete` transition | Single-file MP4 stitched from HLS, then audio-processed (denoise + loudnorm). Video track is `-c copy`; audio is re-encoded AAC 160 kbps |
+| `derivatives/thumbnail.jpg` | Same pipeline                                    | Promoted from `thumbnail-candidates/` — the best auto-selected or admin-chosen frame. ~1280px wide JPEG |
+| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom |
+| `derivatives/720p.mp4`      | Same pipeline (if source > 720p)                 | Downsampled variant, libx264 CRF 23, audio copied from processed source |
+| `derivatives/1080p.mp4`     | Same pipeline (if source > 1080p)                | Downsampled variant, libx264 CRF 20, audio copied from processed source |
+| `derivatives/storyboard.jpg`| Same pipeline (if duration ≥ 60s)                | Sprite sheet of preview frames for scrubber hover thumbnails |
+| `derivatives/storyboard.vtt`| Same pipeline (if duration ≥ 60s)                | WebVTT mapping time ranges to sprite regions (`#xywh=`) for Vidstack |
 
 ## End-to-end flow of a recording
 
@@ -91,16 +96,26 @@ For each video being healed:
 
 ## Derivatives
 
-After every transition to `status: "complete"`, the server generates a set of derivative files in `data/<id>/derivatives/`. Today that's `source.mp4` (HLS segments stitched via `ffmpeg -c copy` with `+faststart`) and `thumbnail.jpg` (single frame ~1s in, scaled to 1280px wide). Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.
+After every transition to `status: "complete"`, the server runs a post-processing pipeline that generates derivative files in `data/<id>/derivatives/`. Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.
 
-A few properties worth keeping in mind:
+The pipeline runs these steps in order:
 
-- **Disk is truth.** Readiness of a derivative is the presence of its final file. No new fields in the `videos` row.
-- **Atomic writes.** Each recipe writes `<filename>.tmp` and renames to `<filename>` on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written final.
-- **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one ffmpeg run per recipe.
-- **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites the previous derivatives atomically.
-- **Failures are independent.** If `source.mp4` fails, `thumbnail.jpg` still runs against whatever `source.mp4` exists (or fails quietly). Failures never surface to `/complete` and never invalidate the m3u8.
-- **Recipe list is the extension point.** Future variants (`1080p.mp4`, `720p.mp4`, adaptive-bitrate master playlist) append to the recipe array in `server/src/lib/derivatives.ts`. No orchestrator changes, no directory reshuffling.
+1. **Stitch** — HLS segments → `source.mp4` via `ffmpeg -c copy` with `+faststart`.
+2. **Audio processing** — Denoise + loudness normalisation on `source.mp4` in-place (skipped if no audio track). See `docs/developer/audio-post-processing.md`.
+3. **Thumbnail candidates** — Multiple frames extracted, scored by luminance variance, best one promoted to `thumbnail.jpg`. Admin can override via the thumbnail picker.
+4. **Metadata extraction** — ffprobe on `source.mp4` for dimensions/file size, `recording.json` for camera/mic names and recording health. Written to the `videos` DB row.
+5. **Video variants** — Downsampled 720p/1080p MP4s generated if source height warrants it.
+6. **Storyboard** — Sprite sheet + WebVTT for scrubber hover previews (skipped for videos under 60s).
+
+Each step is fault-tolerant — a failure is logged and the pipeline continues with the remaining steps.
+
+Properties worth keeping in mind:
+
+- **Disk is truth.** Readiness of a derivative is the presence of its final file (except metadata, which writes to the DB).
+- **Atomic writes.** Recipes and post-recipe steps write to `.tmp` and rename on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written output.
+- **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one pipeline run.
+- **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites previous derivatives atomically.
+- **Failures are independent.** If audio processing fails, thumbnails and variants still run. Failures never surface to `/complete` and never invalidate the m3u8.
 
 ## Viewer
 

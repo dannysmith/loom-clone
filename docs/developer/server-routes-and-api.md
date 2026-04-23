@@ -105,8 +105,13 @@ Single video by id.
   "title": "string | null",
   "description": "string | null",
   "durationSeconds": 42.5,
-  "width": null,
-  "height": null,
+  "width": 1920,
+  "height": 1080,
+  "aspectRatio": 1.7778,
+  "fileBytes": 17000000,
+  "cameraName": "FaceTime HD Camera",
+  "microphoneName": "MacBook Pro Microphone",
+  "recordingHealth": "null | gpu_wobble | terminal_failure",
   "source": "recorded | uploaded",
   "createdAt": "ISO",
   "updatedAt": "ISO",
@@ -202,7 +207,7 @@ Chromeless player for iframe embeds. Same MP4-vs-HLS selection, no page chrome. 
 
 MP4 video variants with HTTP Range support. Serves from `data/<id>/derivatives/<file>`.
 
-**Filename allowlist**: `source.mp4`, `<N>p.mp4` (e.g. `720p.mp4`, `1080p.mp4`). Today only `source.mp4` exists; resolution variants are a future derivative.
+**Filename allowlist**: `source.mp4`, `<N>p.mp4` (e.g. `720p.mp4`, `1080p.mp4`).
 
 ### `/:slug/stream/:file`
 
@@ -215,6 +220,14 @@ The playlist uses relative segment URLs, so the player resolves `seg_001.m4s` re
 ### `/:slug/poster.jpg`
 
 Video thumbnail. Serves `data/<id>/derivatives/thumbnail.jpg`. Returns 404 until the derivative has been generated.
+
+### `/:slug/storyboard.jpg`
+
+Sprite sheet for scrubber hover previews. Serves `data/<id>/derivatives/storyboard.jpg`. Only generated for videos ≥ 60s. Returns 404 for shorter videos.
+
+### `/:slug/storyboard.vtt`
+
+WebVTT file mapping time ranges to regions in the sprite sheet via `#xywh=` spatial fragments. Vidstack uses this via the `thumbnails` attribute on `<media-video-layout>`.
 
 ### `/:slug.mp4`
 
@@ -319,6 +332,14 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | POST | `/admin/videos/:id/tags` | Add tag to video |
 | DELETE | `/admin/videos/:id/tags/:tagId` | Remove tag from video |
 
+### Thumbnail picker
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin/videos/:id/partials/thumbnails` | Thumbnail picker partial |
+| POST | `/admin/videos/:id/thumbnail/promote` | Promote a candidate to active thumbnail |
+| POST | `/admin/videos/:id/thumbnail/upload` | Upload custom JPEG, auto-promotes |
+
 ### Video actions
 
 | Method | Path | Purpose |
@@ -334,6 +355,7 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | GET | `/admin/videos/:id/media/raw/:file` | MP4 derivatives (source.mp4, Np.mp4) |
 | GET | `/admin/videos/:id/media/stream/:file` | HLS files (stream.m3u8, init.mp4, seg_*.m4s) |
 | GET | `/admin/videos/:id/media/poster.jpg` | Thumbnail |
+| GET | `/admin/videos/:id/media/thumbnail-candidates/:file` | Thumbnail candidate images |
 
 ### Settings mutations
 
@@ -356,6 +378,7 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | `.mp4`    | `video/mp4`                     | init segment, derivatives  |
 | `.jpg`    | `image/jpeg`                    | poster/thumbnail           |
 | `.json`   | `application/json`              | API responses, /:slug.json |
+| `.vtt`    | `text/vtt`                      | storyboard.vtt             |
 | `.md`     | `text/markdown`                 | /:slug.md                  |
 
 ## Range support
@@ -405,4 +428,6 @@ See `.env.example` for documentation and defaults.
 | Admin auth (sessions, middleware)         | `src/lib/admin-auth.ts`          |
 | Admin token CRUD                          | `src/lib/admin-tokens.ts`        |
 | Slug validation + store                   | `src/lib/store.ts`               |
+| Thumbnail candidates + admin picker       | `src/lib/thumbnails.ts`          |
+| Storyboard sprite sheet + VTT            | `src/lib/storyboard.ts`          |
 | Display formatting (duration, date)       | `src/lib/format.ts`              |

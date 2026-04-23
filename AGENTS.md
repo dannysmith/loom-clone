@@ -42,6 +42,7 @@ Three components exist today, plus a diagnostic tool:
 - `docs/developer/recording-pipeline.md` — how the macOS app captures, composites, encodes, and streams video. Actors, timing, mode switching, pause/resume, GPU recovery. Read before touching anything in `RecordingActor`, `CompositionActor`, `WriterActor`, or `UploadActor`.
 - `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
 - `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
+- `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm). Model choice, skip conditions, performance. Read before changing anything in the audio processing step in `derivatives.ts`.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
 - `docs/requirements.md` — refined requirements for the whole system.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.

@@ -27,9 +27,14 @@ export const videos = sqliteTable(
     description: text("description"),
     // Cached at completion so list views don't need to sum segment durations.
     durationSeconds: real("duration_seconds"),
-    // Metadata columns populated later (via ffprobe in a future phase).
+    // Metadata columns populated by the post-processing pipeline (ffprobe + recording.json).
     width: integer("width"),
     height: integer("height"),
+    aspectRatio: real("aspect_ratio"),
+    fileBytes: integer("file_bytes"),
+    cameraName: text("camera_name"),
+    microphoneName: text("microphone_name"),
+    recordingHealth: text("recording_health"),
     source: text("source", { enum: ["recorded", "uploaded"] })
       .notNull()
       .default("recorded"),

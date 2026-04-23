@@ -40,7 +40,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
           <div class="video-card-title">{title}</div>
           <div class="video-card-meta">
             {duration && (
-              <span class="duration-pill">
+              <span class="meta-pill">
                 <IconClock size={12} />
                 {duration}
               </span>

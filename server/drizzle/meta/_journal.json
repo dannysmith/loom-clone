@@ -29,6 +29,13 @@
       "when": 1776793191911,
       "tag": "0003_groovy_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1776900257115,
+      "tag": "0004_smart_captain_universe",
+      "breakpoints": true
     }
   ]
 }

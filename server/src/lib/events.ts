@@ -18,7 +18,9 @@ export type EventType =
   | "slug_changed"
   | "tag_added"
   | "tag_removed"
-  | "uploaded";
+  | "uploaded"
+  | "thumbnail_promoted"
+  | "thumbnail_uploaded";
 
 // Returns all events for a video, oldest first. The `data` field is raw
 // JSON text — callers parse it as needed for display.

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { listEvents } from "../../lib/events";
+import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
 import {
   ConflictError,
@@ -12,7 +12,13 @@ import {
   ValidationError,
 } from "../../lib/store";
 import { addTagToVideo, getVideoTags, listTags, removeTagFromVideo } from "../../lib/tags";
+import {
+  listThumbnailCandidates,
+  promoteCandidate,
+  saveCustomThumbnail,
+} from "../../lib/thumbnails";
 import { VideoDetailPage, VideoTabsSection } from "../../views/admin/pages/VideoDetailPage";
+import { ThumbnailPicker } from "../../views/admin/partials/ThumbnailPicker";
 import {
   DescriptionDisplay,
   DescriptionEdit,
@@ -36,11 +42,12 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = c.req.query("tab") === "files" ? "files" : "events";
-  const [videoTags, allTags, events, files] = await Promise.all([
+  const [videoTags, allTags, events, files, thumbnailCandidates] = await Promise.all([
     getVideoTags(video.id),
     listTags(),
     listEvents(video.id),
     listVideoFiles(video.id),
+    listThumbnailCandidates(video.id),
   ]);
 
   return c.html(
@@ -50,6 +57,7 @@ videoRoutes.get("/:id", async (c) => {
       allTags={allTags}
       events={events}
       files={files}
+      thumbnailCandidates={thumbnailCandidates}
       activeTab={activeTab}
     />,
   );
@@ -226,6 +234,96 @@ videoRoutes.post("/:id/tags", async (c) => {
 videoRoutes.delete("/:id/tags/:tagId", async (c) => {
   await removeTagFromVideo(c.req.param("id"), Number(c.req.param("tagId")));
   return renderTagsControl(c);
+});
+
+// --- Thumbnail picker ---
+
+videoRoutes.get("/:id/partials/thumbnails", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const candidates = await listThumbnailCandidates(result.id);
+  return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
+});
+
+videoRoutes.post("/:id/thumbnail/promote", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const candidateId = String(body.candidateId ?? "");
+  if (!candidateId) return c.text("Missing candidateId", 400);
+
+  const ok = await promoteCandidate(id, candidateId);
+  if (!ok) return c.text("Candidate not found", 404);
+
+  await logEvent(id, "thumbnail_promoted", { candidateId });
+
+  c.header("HX-Trigger", "video-updated");
+  const candidates = await listThumbnailCandidates(id);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
+});
+
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_UPLOAD_WIDTH = 3840;
+
+videoRoutes.post("/:id/thumbnail/upload", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const file = body.thumbnail;
+  if (!(file instanceof File)) return c.text("No file uploaded", 400);
+  if (file.size > MAX_UPLOAD_SIZE) return c.text("File too large (max 5 MB)", 400);
+  if (!file.type.startsWith("image/jpeg") && !file.type.startsWith("image/png")) {
+    return c.text("Only JPEG and PNG uploads accepted", 400);
+  }
+
+  const imageData = await file.arrayBuffer();
+
+  // Basic dimension check via ffprobe before saving.
+  const ffprobePath = Bun.which("ffprobe");
+  if (ffprobePath) {
+    const tmpPath = `data/${id}/derivatives/thumbnail-candidates/_upload-check.tmp`;
+    await Bun.write(tmpPath, imageData);
+    try {
+      const proc = Bun.spawn(
+        [
+          ffprobePath,
+          "-v",
+          "quiet",
+          "-print_format",
+          "json",
+          "-show_streams",
+          "-select_streams",
+          "v:0",
+          tmpPath,
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      if (exitCode === 0) {
+        const data = JSON.parse(stdout) as { streams?: Array<{ width?: number }> };
+        const width = data.streams?.[0]?.width ?? 0;
+        if (width > MAX_UPLOAD_WIDTH) {
+          return c.text(`Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)`, 400);
+        }
+      }
+    } finally {
+      const { rm } = await import("fs/promises");
+      await rm(tmpPath, { force: true }).catch(() => {});
+    }
+  }
+
+  const candidateId = await saveCustomThumbnail(id, imageData);
+  await logEvent(id, "thumbnail_uploaded", { candidateId });
+
+  // Auto-promote the newly uploaded custom thumbnail.
+  await promoteCandidate(id, candidateId);
+  await logEvent(id, "thumbnail_promoted", { candidateId });
+
+  c.header("HX-Trigger", "video-updated");
+  const candidates = await listThumbnailCandidates(id);
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
 });
 
 // --- Video actions ---

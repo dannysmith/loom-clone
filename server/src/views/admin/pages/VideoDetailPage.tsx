@@ -2,8 +2,20 @@ import type { Tag, Video, VideoEvent } from "../../../db/schema";
 import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
+import type { ThumbnailCandidate } from "../../../lib/thumbnails";
 import { AdminLayout } from "../../layouts/AdminLayout";
-import { FileTypeIcon, IconClock } from "../components/Icons";
+import {
+  FileTypeIcon,
+  IconAlertTriangle,
+  IconCalendar,
+  IconCamera,
+  IconClock,
+  IconHardDrive,
+  IconMic,
+  IconRuler,
+  IconUploadCloud,
+} from "../components/Icons";
+import { ThumbnailPicker } from "../partials/ThumbnailPicker";
 import { VideoActions } from "../partials/VideoActions";
 import {
   DescriptionDisplay,
@@ -19,10 +31,19 @@ type Props = {
   allTags: Tag[];
   events: VideoEvent[];
   files: FileEntry[];
+  thumbnailCandidates: ThumbnailCandidate[];
   activeTab: "events" | "files";
 };
 
-export function VideoDetailPage({ video, videoTags, allTags, events, files, activeTab }: Props) {
+export function VideoDetailPage({
+  video,
+  videoTags,
+  allTags,
+  events,
+  files,
+  thumbnailCandidates,
+  activeTab,
+}: Props) {
   const title = video.title || video.slug;
   const duration = formatDuration(video.durationSeconds);
   const hasMp4 = files.some((f) => f.path === "derivatives/source.mp4");
@@ -78,18 +99,51 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
         <div class="video-meta-grid">
           <span class={`badge badge--${video.status}`}>{video.status}</span>
           {duration && (
-            <span class="duration-pill">
+            <span class="meta-pill">
               <IconClock size={14} />
               {duration}
             </span>
           )}
+          <span class="meta-pill">
+            <IconCalendar size={14} />
+            {formatDate(video.createdAt)}
+          </span>
           {video.width && video.height && (
             <span class="meta-pill">
+              <IconRuler size={14} />
               {video.width}&times;{video.height}
             </span>
           )}
-          {video.source === "uploaded" && <span class="meta-pill">uploaded</span>}
-          <span class="meta-pill">{formatDate(video.createdAt)}</span>
+          {video.fileBytes != null && (
+            <span class="meta-pill">
+              <IconHardDrive size={14} />
+              {formatFileSize(video.fileBytes)}
+            </span>
+          )}
+          {video.source === "uploaded" && (
+            <span class="meta-pill">
+              <IconUploadCloud size={14} />
+              uploaded
+            </span>
+          )}
+          {video.cameraName && (
+            <span class="meta-pill" title="Camera">
+              <IconCamera size={14} />
+              {video.cameraName}
+            </span>
+          )}
+          {video.microphoneName && (
+            <span class="meta-pill" title="Microphone">
+              <IconMic size={14} />
+              {video.microphoneName}
+            </span>
+          )}
+          {video.recordingHealth && (
+            <span class="meta-pill meta-pill--warning" title="Recording health">
+              <IconAlertTriangle size={14} />
+              {video.recordingHealth.replace("_", " ")}
+            </span>
+          )}
           <span
             class="meta-pill meta-pill--id"
             title="Click to copy ID"
@@ -109,6 +163,9 @@ export function VideoDetailPage({ video, videoTags, allTags, events, files, acti
           <VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />
         </div>
       </div>
+
+      {/* --- Thumbnail picker --- */}
+      <ThumbnailPicker video={video} candidates={thumbnailCandidates} />
 
       {/* --- Tabs --- */}
       <VideoTabsSection video={video} events={events} files={files} activeTab={activeTab} />

@@ -947,8 +947,20 @@ select.input {
 }
 
 .meta-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
 	font-size: var(--font-size-sm);
+	font-variant-numeric: tabular-nums;
 	color: var(--color-fg-muted);
+
+	& svg {
+		flex-shrink: 0;
+	}
+}
+
+.meta-pill--warning {
+	color: var(--tag-orange);
 }
 
 .meta-pill--id {
@@ -956,15 +968,6 @@ select.input {
 	font-size: var(--font-size-xs);
 	cursor: pointer;
 	opacity: 0.5;
-}
-
-.duration-pill {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--space-1);
-	font-size: var(--font-size-sm);
-	font-variant-numeric: tabular-nums;
-	color: var(--color-fg-muted);
 }
 
 .video-description {
@@ -1392,6 +1395,79 @@ select.input {
 .upload-progress-text {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
+}
+
+/* ------- Thumbnail picker ------- */
+
+.thumbnail-picker {
+	margin-block-start: var(--space-4);
+}
+
+.thumbnail-picker h3 {
+	margin-block-end: var(--space-3);
+}
+
+.thumbnail-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: var(--space-3);
+	margin-block-end: var(--space-4);
+}
+
+.thumbnail-candidate {
+	position: relative;
+	padding: 0;
+	border: 2px solid var(--color-border);
+	border-radius: var(--radius-lg);
+	background: var(--color-surface);
+	cursor: pointer;
+	overflow: hidden;
+	transition: border-color var(--transition-fast);
+
+	&:hover {
+		border-color: var(--color-fg-muted);
+	}
+
+	& img {
+		display: block;
+		inline-size: 100%;
+		aspect-ratio: 16 / 9;
+		object-fit: cover;
+	}
+}
+
+.thumbnail-candidate--promoted {
+	border-color: var(--color-accent);
+
+	&:hover {
+		border-color: var(--color-accent);
+	}
+}
+
+.thumbnail-badge {
+	position: absolute;
+	inset-block-start: var(--space-1);
+	inset-inline-end: var(--space-1);
+	padding: var(--space-0) var(--space-2);
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-medium);
+	color: white;
+	background: var(--color-accent);
+	border-radius: var(--radius-sm);
+}
+
+.thumbnail-label {
+	display: block;
+	padding: var(--space-1) var(--space-2);
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
+	text-align: center;
+}
+
+.thumbnail-upload {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
 }
 
 } /* @layer admin */

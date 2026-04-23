@@ -62,8 +62,15 @@ media.get("/:slug/storyboard.vtt", async (c) => {
   const { slug } = c.req.param();
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-  const path = join(DATA_DIR, video.id, "derivatives", "storyboard.vtt");
-  return serveFileWithRange(c, path, "text/vtt", "immutable");
+  const filePath = join(DATA_DIR, video.id, "derivatives", "storyboard.vtt");
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) return c.text("Not found", 404);
+  // Rewrite bare `storyboard.jpg` references to `/{slug}/storyboard.jpg` so
+  // the browser resolves them correctly regardless of the page URL structure.
+  const raw = await file.text();
+  const rewritten = raw.replace(/^storyboard\.jpg/gm, `/${video.slug}/storyboard.jpg`);
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
+  return c.text(rewritten, 200, { "Content-Type": "text/vtt" });
 });
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file

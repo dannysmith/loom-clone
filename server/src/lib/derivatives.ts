@@ -436,8 +436,83 @@ export async function processAudio(sourcePath: string): Promise<void> {
   await rename(tmpOut, sourcePath);
 }
 
+// --- Video variant generation ---
+
+// Variant definitions: target height and CRF quality.
+const VARIANTS = [
+  { height: 1080, crf: 20 },
+  { height: 720, crf: 23 },
+] as const;
+
+// Determine which variants to generate based on source height.
+// ≤720p: nothing. 721–1080p: 720p only. ≥1081p: 1080p and 720p.
+function variantsForHeight(sourceHeight: number): Array<{ height: number; crf: number }> {
+  return VARIANTS.filter((v) => sourceHeight > v.height);
+}
+
+// Generate downsampled MP4 variants from source.mp4.
+export async function generateVariants(dir: string): Promise<void> {
+  const sourcePath = join(dir, "source.mp4");
+  const meta = await probeMetadata(sourcePath);
+  if (!meta) return;
+
+  const needed = variantsForHeight(meta.height);
+  if (needed.length === 0) return;
+
+  const fp = Bun.which("ffmpeg");
+  if (!fp) throw new Error("ffmpeg not found on PATH");
+
+  for (const variant of needed) {
+    const outFile = `${variant.height}p.mp4`;
+    const tmpPath = join(dir, `${outFile}.tmp`);
+    const finalPath = join(dir, outFile);
+    const started = Date.now();
+
+    const proc = Bun.spawn(
+      [
+        fp,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        sourcePath,
+        "-vf",
+        `scale=-2:${variant.height}`,
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        String(variant.crf),
+        "-profile:v",
+        "high",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        tmpPath,
+      ],
+      { stderr: "pipe", stdout: "pipe" },
+    );
+    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    if (exitCode !== 0) {
+      await rm(tmpPath, { force: true }).catch(() => {});
+      throw new Error(`variant ${outFile} failed (exit ${exitCode}): ${stderr.trim()}`);
+    }
+
+    await rename(tmpPath, finalPath);
+    const ms = Date.now() - started;
+    console.log(`[derivatives] ${outFile} generated (${ms}ms)`);
+  }
+}
+
 // Test-only: expose for direct testing.
-export { parseLoudnormJson as _parseLoudnormJson };
+export { parseLoudnormJson as _parseLoudnormJson, variantsForHeight as _variantsForHeight };
 
 async function generateDerivatives(videoId: string): Promise<void> {
   return generateFromRecipes(videoId, recipes);
@@ -503,5 +578,17 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
       `[derivatives] ${videoId} metadata extraction failed:`,
       err instanceof Error ? err.message : err,
     );
+  }
+
+  // Post-recipe step 4: generate downsampled variants (720p, 1080p).
+  if (sourceExists) {
+    try {
+      await generateVariants(dir);
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} variant generation failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 }

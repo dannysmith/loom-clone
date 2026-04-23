@@ -147,7 +147,7 @@ Before shipping, test on three or four real recordings representative of the use
 - Integration test: runs the full chain against a fixture, confirms the output LUFS measured by a second ffmpeg pass is within ±1 LU of target.
 - Failure test: confirms a missing `.rnnn` model surfaces a clear error rather than a silent fallback.
 
-## Phase 3: Video variants
+## Phase 3: Video variants [DONE]
 
 Generate downsampled MP4 renditions so slower connections have something to fall back to. Source height determines what's needed:
 
@@ -186,7 +186,7 @@ libx264 `medium` at CRF 20 for a 30-minute 1440p source can take 10–20 minutes
 - 1440p fixture generates both variants; 1080p generates only 720p; 720p generates nothing.
 - Each variant is a valid MP4 with expected dimensions (ffprobe check).
 
-## Phase 4: Storyboard / scrubber thumbnails
+## Phase 4: Storyboard / scrubber thumbnails [DONE]
 
 Generate a sprite sheet and accompanying WebVTT so Vidstack's `<media-slider-thumbnail>` shows preview frames on hover.
 

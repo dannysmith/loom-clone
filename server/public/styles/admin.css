@@ -430,8 +430,9 @@ body.admin--login {
 /* ------- Login ------- */
 
 .login-container {
-	display: grid;
-	place-items: center;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	min-block-size: 100dvh;
 	padding: var(--space-6);
 }

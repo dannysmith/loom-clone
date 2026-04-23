@@ -3,6 +3,7 @@ import { mkdir, rename, rm } from "fs/promises";
 import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
+import { logEvent } from "./events";
 import { DATA_DIR, getVideo } from "./store";
 import { generateStoryboard } from "./storyboard";
 import { extractAndPromoteThumbnails } from "./thumbnails";
@@ -522,6 +523,8 @@ async function generateDerivatives(videoId: string): Promise<void> {
 async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promise<void> {
   const dir = derivativesDir(videoId);
   await mkdir(dir, { recursive: true });
+  const pipelineStarted = Date.now();
+  const steps: string[] = [];
 
   for (const recipe of recipeList) {
     const tmp = join(dir, `${recipe.filename}.tmp`);
@@ -551,6 +554,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
       await processAudio(sourcePath);
       const ms = Date.now() - audioStarted;
       console.log(`[derivatives] ${videoId}/audio processed (${ms}ms)`);
+      steps.push("audio");
     } catch (err) {
       console.error(
         `[derivatives] ${videoId} audio processing failed:`,
@@ -565,6 +569,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   try {
     await extractAndPromoteThumbnails(dir, duration);
     console.log(`[derivatives] ${videoId}/thumbnail candidates extracted`);
+    steps.push("thumbnails");
   } catch (err) {
     console.error(
       `[derivatives] ${videoId} thumbnail extraction failed:`,
@@ -574,6 +579,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
 
   try {
     await extractMetadata(videoId);
+    steps.push("metadata");
   } catch (err) {
     console.error(
       `[derivatives] ${videoId} metadata extraction failed:`,
@@ -585,6 +591,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   if (sourceExists) {
     try {
       await generateVariants(dir);
+      steps.push("variants");
     } catch (err) {
       console.error(
         `[derivatives] ${videoId} variant generation failed:`,
@@ -601,12 +608,24 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
       if (generated) {
         const ms = Date.now() - storyStarted;
         console.log(`[derivatives] ${videoId}/storyboard generated (${ms}ms)`);
+        steps.push("storyboard");
       }
     } catch (err) {
       console.error(
         `[derivatives] ${videoId} storyboard generation failed:`,
         err instanceof Error ? err.message : err,
       );
+    }
+  }
+
+  // Log a single summary event so the admin activity feed shows when
+  // post-processing finished and what was produced.
+  if (steps.length > 0) {
+    const totalMs = Date.now() - pipelineStarted;
+    try {
+      await logEvent(videoId, "derivatives_ready", { steps, durationMs: totalMs });
+    } catch {
+      // DB may be gone in tests — don't let event logging crash the pipeline.
     }
   }
 }

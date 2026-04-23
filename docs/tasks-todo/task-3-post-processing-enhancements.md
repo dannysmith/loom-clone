@@ -33,7 +33,7 @@ Phase 2 normalises to `-14 LUFS integrated, -1.5 dBTP, LRA 11` — the dominant 
 
 Today's pipeline uses `-c copy`, so `source.mp4` is just the HLS segments concatenated. From Phase 2 onwards, audio gets re-encoded (AAC at ~160 kbps). Video stays `-c copy` unless Phase 3's variant generation comes from a different input — see that phase. The metadata step in Phase 1 runs last in the recipe chain, so it reads whatever `source.mp4` exists after all prior recipes have landed.
 
-## Phase 1: Metadata & thumbnails
+## Phase 1: Metadata & thumbnails [DONE]
 
 ### 1.1 Columns on `videos`
 
@@ -118,7 +118,7 @@ Admin UI presents the candidates as a grid. Clicking a candidate promotes. A sep
 
 All ffmpeg-dependent tests gated on `Bun.which("ffmpeg") !== null` per existing convention.
 
-## Phase 2: Audio improvements
+## Phase 2: Audio improvements [DONE]
 
 One pipeline, done properly up front. The received-wisdom chain for speech cleanup:
 

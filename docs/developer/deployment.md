@@ -78,6 +78,9 @@ If the VPS dies or you need to recreate this setup:
    ```bash
    cat > ~/loom-clone/server/.env <<'EOF'
    PUBLIC_URL=https://v.danny.is
+   ADMIN_USERNAME=admin
+   ADMIN_PASSWORD=<choose a long password and save it somewhere>
+   SESSION_SECRET=<generate with: openssl rand -base64 48>
    EOF
    ```
 

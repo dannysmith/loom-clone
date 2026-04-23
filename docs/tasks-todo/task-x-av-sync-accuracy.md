@@ -1,6 +1,6 @@
 # Task: Improving A/V sync accuracy for camera-only mode
 
-Follow-up to `docs/tasks-done/task-2026-04-16-1-av-sync.md`. That task got the file-timestamp alignment within 1ms and removed every obvious recording-time drift source. The pipeline is solid for `screenOnly` and `screenAndCamera` — the PiP is small enough that sub-frame drift isn't perceptible.
+Follow-up to `docs/tasks-done/task-2026-04-16-1-av-sync.md`. That task got the file-timestamp alignment within 1ms and removed every obvious recording-time drift source. The pipeline is solid for `screenOnly` and `screenAndCamera` — the PiP is small enough that sub-frame drift isn't that perceptible.
 
 The problem that remains is `cameraOnly` "talking-head" recordings. At that scale, the residual 5–30ms mismatch reads as "uncanny valley" — the lips don't quite match the words. This task explores what can be done on top of the already-landed work to get camera-only recordings genuinely frame-accurate.
 
@@ -56,7 +56,7 @@ Proposed earlier in the conversation as a way to cross-correlate cross-device. I
 Ruled out — two reasons:
 
 1. **Camera may not have a mic.** Pro cameras via capture cards, some webcams, and cameras where the user doesn't want that mic enabled would all fall back to solution #4 anyway.
-2. **Solution #4 dominates.** Once we have per-device waveform/motion calibration between the main mic and the camera's *video* stream, correlating with a second mic adds complexity without adding information — and only works for a subset of setups.
+2. Once we have per-device waveform/motion calibration between the main mic and the camera's *video* stream, correlating with a second mic adds complexity without adding information — and only works for a subset of setups.
 
 Not pursuing.
 

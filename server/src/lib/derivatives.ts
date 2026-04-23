@@ -1,10 +1,13 @@
 import { eq } from "drizzle-orm";
 import { mkdir, rename, rm } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
 import { DATA_DIR, getVideo } from "./store";
 import { extractAndPromoteThumbnails } from "./thumbnails";
+
+// Resolved absolutely so it survives test chdir() calls.
+const ARNNDN_MODEL = resolve(import.meta.dir, "../../assets/audio-models/cb.rnnn");
 
 // A derivative is any file produced from the converged HLS segments. Each
 // recipe declares its final output filename (relative to data/<id>/derivatives/)
@@ -274,6 +277,168 @@ export async function extractMetadata(videoId: string): Promise<void> {
   );
 }
 
+// --- Audio processing: highpass → arnndn → two-pass loudnorm ---
+
+// The audio filter chain applied to source.mp4. Denoises speech (arnndn with
+// the cb.rnnn model), removes sub-speech rumble (highpass at 80 Hz), and
+// normalises loudness to -14 LUFS (EBU R128 two-pass loudnorm). Video is
+// copied untouched; only the audio track is re-encoded to AAC at 160 kbps.
+
+type LoudnormMeasurement = {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  target_offset: string;
+};
+
+function audioFilterChain(): string {
+  return `highpass=f=80,arnndn=m=${ARNNDN_MODEL}`;
+}
+
+function loudnormPass1Filter(): string {
+  return `${audioFilterChain()},loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json`;
+}
+
+function loudnormPass2Filter(m: LoudnormMeasurement): string {
+  return (
+    `${audioFilterChain()},loudnorm=I=-14:TP=-1.5:LRA=11` +
+    `:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
+    `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}` +
+    `:offset=${m.target_offset}:linear=true`
+  );
+}
+
+// Parse the loudnorm JSON measurement block from ffmpeg stderr. The JSON
+// appears after a "[Parsed_loudnorm_N @ ...]" line.
+function parseLoudnormJson(stderr: string): LoudnormMeasurement {
+  // Find the last JSON object in the output — loudnorm prints it at the end.
+  const lastBrace = stderr.lastIndexOf("}");
+  if (lastBrace === -1) throw new Error("No loudnorm JSON found in ffmpeg output");
+  const firstBrace = stderr.lastIndexOf("{", lastBrace);
+  if (firstBrace === -1) throw new Error("No loudnorm JSON found in ffmpeg output");
+
+  const jsonStr = stderr.substring(firstBrace, lastBrace + 1);
+  const data = JSON.parse(jsonStr) as Record<string, string>;
+
+  const required = ["input_i", "input_tp", "input_lra", "input_thresh", "target_offset"];
+  for (const key of required) {
+    if (!(key in data)) throw new Error(`Missing "${key}" in loudnorm JSON`);
+  }
+
+  return data as unknown as LoudnormMeasurement;
+}
+
+// Checks whether the arnndn model file exists. If not, audio processing
+// is skipped with a clear error.
+async function checkAudioModel(): Promise<boolean> {
+  const file = Bun.file(ARNNDN_MODEL);
+  if (!(await file.exists())) {
+    console.error(
+      `[derivatives] arnndn model not found at ${ARNNDN_MODEL} — audio processing will be skipped. ` +
+        "Download cb.rnnn from https://github.com/richardpl/arnndn-models and place it in server/assets/audio-models/.",
+    );
+    return false;
+  }
+  return true;
+}
+
+// Check whether a file contains an audio stream.
+async function hasAudioStream(filePath: string): Promise<boolean> {
+  const ffprobePath = Bun.which("ffprobe");
+  if (!ffprobePath) return false;
+  try {
+    const proc = Bun.spawn(
+      [
+        ffprobePath,
+        "-v",
+        "quiet",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "csv=p=0",
+        filePath,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return exitCode === 0 && stdout.trim().includes("audio");
+  } catch {
+    return false;
+  }
+}
+
+// Two-pass audio processing on an existing source.mp4. Replaces it in-place
+// with the processed version (video copied, audio re-encoded).
+export async function processAudio(sourcePath: string): Promise<void> {
+  if (!(await hasAudioStream(sourcePath))) return;
+  if (!(await checkAudioModel())) return;
+
+  const fp = Bun.which("ffmpeg");
+  if (!fp) throw new Error("ffmpeg not found on PATH");
+
+  // Pass 1: measure loudness through the full denoise chain.
+  const pass1 = Bun.spawn(
+    [fp, "-y", "-hide_banner", "-i", sourcePath, "-af", loudnormPass1Filter(), "-f", "null", "-"],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [pass1Stderr, pass1Exit] = await Promise.all([
+    new Response(pass1.stderr).text(),
+    pass1.exited,
+  ]);
+  if (pass1Exit !== 0) {
+    throw new Error(`audio pass 1 failed (exit ${pass1Exit}): ${pass1Stderr.trim()}`);
+  }
+
+  const measurement = parseLoudnormJson(pass1Stderr);
+
+  // Pass 2: apply the measured values, encode audio as AAC 160 kbps.
+  const tmpOut = `${sourcePath}.audio-tmp`;
+  const pass2 = Bun.spawn(
+    [
+      fp,
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      sourcePath,
+      "-af",
+      loudnormPass2Filter(measurement),
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      "-ar",
+      "48000",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      tmpOut,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [pass2Stderr, pass2Exit] = await Promise.all([
+    new Response(pass2.stderr).text(),
+    pass2.exited,
+  ]);
+  if (pass2Exit !== 0) {
+    await rm(tmpOut, { force: true }).catch(() => {});
+    throw new Error(`audio pass 2 failed (exit ${pass2Exit}): ${pass2Stderr.trim()}`);
+  }
+
+  // Atomic replace: rename processed file over the original.
+  await rename(tmpOut, sourcePath);
+}
+
+// Test-only: expose for direct testing.
+export { parseLoudnormJson as _parseLoudnormJson };
+
 async function generateDerivatives(videoId: string): Promise<void> {
   return generateFromRecipes(videoId, recipes);
 }
@@ -300,7 +465,25 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
     }
   }
 
-  // Post-recipe steps: thumbnail candidates + metadata extraction.
+  // Post-recipe step 1: audio processing (denoise + loudnorm).
+  // Runs before thumbnails and metadata so they see the final file.
+  const sourcePath = join(dir, "source.mp4");
+  const sourceExists = await Bun.file(sourcePath).exists();
+  if (sourceExists) {
+    const audioStarted = Date.now();
+    try {
+      await processAudio(sourcePath);
+      const ms = Date.now() - audioStarted;
+      console.log(`[derivatives] ${videoId}/audio processed (${ms}ms)`);
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} audio processing failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Post-recipe step 2+3: thumbnail candidates + metadata extraction.
   // Both depend on source.mp4 existing.
   const duration = await videoDuration(videoId);
   try {

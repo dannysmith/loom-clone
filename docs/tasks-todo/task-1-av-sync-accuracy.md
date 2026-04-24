@@ -2,14 +2,14 @@
 
 Follow-up to `docs/tasks-done/task-2026-04-16-1-av-sync.md`. That task got the file-timestamp alignment within 1ms and removed every obvious recording-time drift source. The pipeline is solid for `screenOnly` and `screenAndCamera` — the PiP is small enough that sub-frame drift isn't that perceptible.
 
-The problem that remains is `cameraOnly` "talking-head" recordings. At that scale, the residual 5–30ms mismatch reads as "uncanny valley" — the lips don't quite match the words. This task explores what can be done on top of the already-landed work to get camera-only recordings genuinely frame-accurate.
+The problem that remains is `cameraOnly` "talking-head" recordings. At that scale, the residual 5-30ms mismatch reads as "uncanny valley" — the lips don't quite match the words. This task explores what can be done on top of the already-landed work to get camera-only recordings genuinely frame-accurate.
 
 ## Why residual error still exists
 
 Three things are left even with hardware capture PTS on both sides:
 
 1. **Mic and camera live on separate `AVCaptureSession` instances.** `MicrophoneCaptureManager.startCapture` and `CameraCaptureManager.startCapture` each build their own `AVCaptureSession`. Each session has its own `synchronizationClock` (the renamed `masterClock`). Apple's docs are explicit that this is a sync hazard — multi-session setups don't share a clock and the host-time mapping for each session can have slightly different slew/latency characteristics. A developer-forum thread shows ~1s offset between parallel sessions in pathological cases; in practice we're likely seeing tens of milliseconds, which is exactly our bug.
-2. **"Hardware PTS" means different things on each side.** Camera PTS is frame-exposure-start (or frame-arrival-at-host for UVC cameras that don't honor the convention). Audio PTS is the first sample of an A/D buffer, after the device's built-in latency and any Core Audio safety offset. They both claim to be "hardware PTS" but they're pointing at asymmetric events in the real world. Core Audio exposes the corrections needed (`kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, per-stream latency) — we just don't apply them.
+2. **"Hardware PTS" means different things on each side.** Camera PTS is frame-exposure-start (or frame-arrival-at-host for UVC cameras that don't honour the convention). Audio PTS is the first sample of an A/D buffer, after the device's built-in latency and any Core Audio safety offset. They both claim to be "hardware PTS" but they're pointing at asymmetric events in the real world. Core Audio exposes the corrections needed (`kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, per-stream latency) — we just don't apply them.
 3. **USB/UVC cameras (ZV-1, capture cards) are unknowns.** Their reported capture PTS may not reflect sensor exposure time at all, and AVFoundation can't tell us what convention the device is using. Any systematic per-device bias can only be measured, not computed.
 
 So the residual error is mostly *systematic per-device bias* plus a *small amount of cross-session clock jitter* — not random drift.
@@ -30,24 +30,38 @@ Full walkthrough in `docs/developer/recording-pipeline.md`. The bits that matter
 
 Apple's documented fix for exactly this problem. Adding the mic input to the camera's `AVCaptureSession` makes both outputs timestamped against the session's `synchronizationClock`. No cross-session clock mapping, no drift from that layer.
 
-Low-risk for us because:
+**Confirmed: no meaningful downsides.** Research and review of Apple's SDK headers, developer forums, and comparable apps (OBS, Panopto, Cap) confirm:
 
-- `AVCaptureAudioDataOutput` doesn't participate in `sessionPreset`, so the mic's native format is preserved — `audio.m4a` is byte-identical to today.
-- `sessionPreset` is already overridden by the explicit `device.activeFormat = best` line in `CameraCaptureManager`, so the camera's video format isn't affected by adding a mic input.
-- Screen capture is ScreenCaptureKit (separate framework) — untouched.
-
-Real trade-offs:
-
-- **Failure domains couple.** If the camera crashes, the mic session dies with it. Today they're independent. Probably fine (a mid-recording camera crash is already catastrophic), but worth calling out.
-- **Mic-only recording paths need a branch.** When the user has selected a camera, mic and camera go into one session. When the user has selected "None" for the camera (`screenOnly` mode), the mic still needs its own session since there's no camera session to join. The `prepareRecording` path that selects devices already knows both selections at setup time, so the branch is straightforward.
+- **Performance:** Adding an `AVCaptureAudioDataOutput` + audio device input to the camera's session does not degrade video frame delivery. Audio and video run on separate internal pipelines within the session. `alwaysDiscardsLateVideoFrames = true` remains effective. This is the standard configuration Apple documents and expects.
+- **Audio quality:** Audio sample buffers from `AVCaptureAudioDataOutput` are delivered in the same format (sample rate, bit depth, channels, buffer size) regardless of whether the session also has video. `sessionPreset` does not affect audio output format. When `device.activeFormat` is set explicitly (which our code does), the session flips to `.inputPriority` and stops managing formats entirely.
+- **`synchronizationClock` guarantee:** The SDK header states: *"All capture output sample buffer timestamps are on the masterClock timebase."* With a shared session, audio and video PTS values are directly comparable with sub-millisecond residual offset (hardware-level ADC vs sensor readout). This eliminates the 5-30ms cross-session jitter entirely.
+- **Failure domain coupling:** If the camera crashes/disconnects mid-recording, the shared session dies and the mic goes with it. This is acceptable: a mid-recording camera loss is already catastrophic. `AVCaptureSessionRuntimeErrorNotification` is available for future recovery work but not required. Mitigated further by our decision to keep a standalone mic session running in parallel (see Phase 1).
 
 ### 2. HAL input latency compensation
 
-Core Audio exposes per-device input latency via `kAudioDevicePropertyLatency` (input scope), `kAudioDevicePropertySafetyOffset` (input scope), per-stream latency, and buffer frame size. Sum them, divide by sample rate, and that's the systematic amount by which audio PTS is "late" relative to when sound actually hit the diaphragm.
+Core Audio exposes per-device input latency via four properties, all in frames (divide by sample rate for seconds):
 
-Cap reads these values in their `estimate_input_latency` function. We currently don't. This is likely a meaningful chunk of the per-device bias on USB mics (commonly 10–20ms of reported hardware latency that we're not compensating for).
+| Property | Scope | What it represents |
+|---|---|---|
+| `kAudioDevicePropertyLatency` | Input | Device-level ADC latency |
+| `kAudioDevicePropertySafetyOffset` | Input | HAL safety margin to prevent glitching |
+| `kAudioStreamPropertyLatency` | Per input stream | Per-stream pipeline latency |
+| `kAudioDevicePropertyBufferFrameSize` | Global | IO buffer size |
 
-Implementation is an offset applied to `handleAudioSample`'s `relativePTS` calculation — fixed per mic device, queried once when the mic starts. It applies to the HLS writer path AND the `audio.m4a` raw writer path, since both are on the same timeline.
+Total latency formula (matching Cap's implementation in `crates/audio/src/latency.rs`):
+
+```
+device_frames = kAudioDevicePropertyLatency + kAudioDevicePropertySafetyOffset + max(stream latency across input streams)
+total_latency = (device_frames / sample_rate) + (buffer_frame_size / sample_rate)
+```
+
+**Bridging AVCaptureDevice to AudioDeviceID:** `AVCaptureDevice.uniqueID` for audio devices is the same string as Core Audio's device UID. Use `kAudioHardwarePropertyTranslateUIDToDevice` with the UID as a qualifier to get the `AudioDeviceID` needed for property queries.
+
+**Direction of offset:** The audio PTS represents when audio data was delivered to the host. The actual acoustic event happened `L` seconds *earlier*. To align audio with video (where PTS reflects sensor exposure time), subtract `L` from audio PTS: `correctedPTS = originalPTS - totalInputLatency`.
+
+**Over-correction risk:** It's possible AVFoundation already partially compensates for HAL-reported latency internally when constructing the sample buffer's PTS. If so, subtracting the full HAL value would overshoot. Phase 0 will establish baseline values for our devices; Phase 2 will apply the correction and verify with clap tests. If clap tests show audio moving to the *wrong* side of video, we know AVFoundation was already compensating and we back off.
+
+Typical values: ~2-5ms for built-in mics, ~10-20ms for USB mics, ~80-200ms for Bluetooth (AirPods). Cap enforces a 120ms minimum floor for Bluetooth devices.
 
 ### 3. Camera's own microphone as sync reference
 
@@ -55,119 +69,167 @@ Proposed earlier in the conversation as a way to cross-correlate cross-device. I
 
 Ruled out — two reasons:
 
-1. **Camera may not have a mic.** Pro cameras via capture cards, some webcams, and cameras where the user doesn't want that mic enabled would all fall back to solution #4 anyway.
+1. **Camera may not have a mic.** Pro cameras via capture cards, some webcams, and cameras where the user doesn't want that mic enabled would all fall back to other solutions anyway.
 2. Once we have per-device waveform/motion calibration between the main mic and the camera's *video* stream, correlating with a second mic adds complexity without adding information — and only works for a subset of setups.
 
 Not pursuing.
 
-### 4. Per-device waveform↔motion calibration
+### 4. Per-device waveform/motion calibration
 
-Cap's open-source implementation is the reference here (`/Users/danny/dev/Cap/crates/audio/src/sync_analysis.rs`, `crates/recording/src/sync_calibration.rs`, local on this machine). Read these first. The algorithm:
+Cap's open-source implementation is the reference here (`/Users/danny/dev/Cap/crates/audio/src/sync_analysis.rs`, `crates/recording/src/sync_calibration.rs`, local on this machine). The algorithm correlates audio energy transients with video motion peaks to infer the systematic offset between audio and video for a given device pair. It's passive, runs on every recording, refines over time via exponential-decay weighted average, and requires zero user interaction. The learned offset is applied at record time as a PTS adjustment.
 
-1. **Audio transient detection.** Rolling 10ms RMS window, 2.5ms hop. Compare current frame's dB energy against a 9-frame average. Emit a transient when the current exceeds the average by ≥15dB AND current is ≥-30dB (absolute gate to ignore room-noise dynamics). Strength is the over-threshold amount, capped at 3x.
-2. **Video motion detection.** Per-frame luma diff against the previous frame, subsampled every 16 pixels. Frame motion score is mean absolute luma delta / 255. Local maxima with score > 0.3 are "motion peaks".
-3. **Correlation.** For each audio transient, find the nearest video peak within ±500ms, weighted by combined strength (audio × video).
-4. **Confidence.** Weighted mean offset across events ≥0.5 confidence, then consistency factor `1 / (1 + stddev * 10)`. Discard if overall confidence <0.5.
-5. **Persistence.** Store result keyed by `(camera_id, mic_id)`. On subsequent recordings, refine via exponential-decay weighted average of new + historical measurements.
-
-This is passive and silent — it runs on every recording, improves over time, requires zero user interaction. The learned offset is applied to subsequent recordings at record time (as another adjustment to the audio PTS).
-
-We can run this server-side during derivative generation, since the HLS segments converge there and we already have ffmpeg available. Per-device calibration is stored on the server (keyed by device IDs from the recording timeline, which already carries camera and mic `uniqueID`).
-
-Application to camera-only is direct: motion during speech is mouth movement. It's the exact case the algorithm is tuned for.
+**Not pursuing for now.** Our assessment is that this is only worth building if Phase 1 + Phase 2 don't close the gap. The approach has genuine value — it's device-independent and corrects for any source of offset, including ones that can't be computed from first principles (like capture cards that lie about their latency). But if we know the device latency from HAL properties and have eliminated cross-session clock jitter, the remaining error is likely below the perceptibility threshold. Cap implements this because they don't use a single shared session — their Rust capture layer uses separate audio and video pipelines, so they have more residual error to correct for. See "Deferred options" at the end for more detail.
 
 ### 5. Post-hoc ML sync detection (SyncNet / Synchformer / mouth-landmark correlation)
 
-Researched but ranked lower. Summary:
-
-- **SyncNet**: baseline ML model for AV sync. Temporal granularity is one video frame — at 30fps that's 33ms, which is at the coarse end of our problem. No CoreML port; you'd have to convert via ONNX.
-- **Synchformer / SparseSync**: newer but actually worse for talking-head — their temporal bins are 200ms for in-the-wild scenes.
-- **Apple Vision mouth-landmark cross-correlation**: `VNDetectFaceLandmarksRequest` gives lip-contour points at <10ms/frame on Apple Silicon. Cross-correlate mouth-open-area against audio energy, apply parabolic sub-sample interpolation, can reach 5–15ms accuracy. Same idea as solution #4 but with an explicit face signal rather than generic motion.
-
-The Vision-landmark approach is strictly better than solution #4 for camera-only (face is always visible during a talking-head recording), but it's a bigger implementation effort and only works for that mode. Solution #4 handles all modes uniformly. Recommend solution #4 as the primary path and treat Vision-landmark refinement as a potential Phase 4 if camera-only is still off after #1 + #2 + #4 land.
+Researched but ranked lower. SyncNet's temporal granularity is one video frame (33ms at 30fps), which is at the coarse end of our problem. The Apple Vision mouth-landmark approach (`VNDetectFaceLandmarksRequest`) is more promising for camera-only but is a larger implementation effort. Not pursuing unless Phase 1 + Phase 2 fail to close the gap.
 
 ## Recommended approach
 
-Layered, in order of effort vs. payoff:
+Two-phase fix, preceded by a diagnostic:
 
-1. Single `AVCaptureSession` for mic + camera when both are selected. Apple-documented fix for the cross-session-clock bias. Probably moves the needle on its own.
-2. HAL input latency compensation on the mic path. Removes the systematic "reported audio PTS is late by X ms" bias. Cheap, applies to all modes, no user interaction.
-3. Per-device waveform/motion calibration. Passive, learned, per-device-pair. Refines over time. Covers anything #1 and #2 don't.
-4. (Only if needed after the above) Vision-landmark mouth-motion cross-correlation as a camera-only refinement pass.
+0. **HAL latency diagnostic** — query Core Audio input latency properties for our actual mic devices. Read-only experiment that informs Phase 2.
+1. **Single `AVCaptureSession` for mic + camera** — eliminates the cross-session clock jitter that is the primary source of the 5-30ms error. Also embeds audio in `camera.mp4` and maintains an independent `audio.m4a` via the standalone mic session.
+2. **HAL input latency compensation** — removes the systematic "audio PTS is late by X ms" bias. Applied to the composited/HLS path's audio. Informed by Phase 0 measurements.
 
-## Phases
+## Implementation Pkan - Phases
 
-### Phase 1: Single AVCaptureSession for mic + camera
+### Phase 0: HAL latency diagnostic exploration
 
-Merge mic capture into the camera's session when both are selected. The mic still needs a standalone session path for screen-only recording.
+Query Core Audio's HAL input latency properties for each available mic device and print the results. This is a read-only diagnostic — no recording pipeline changes. The goal is to understand what values we're working with before committing to Phase 2.
 
-- Refactor `CameraCaptureManager` so it can optionally accept a mic device at start time and add an `AVCaptureDeviceInput` + `AVCaptureAudioDataOutput` to its session.
-- When the coordinator has selected both a camera and a mic, route both through the camera manager's session. When only a mic is selected (screen-only mode), keep `MicrophoneCaptureManager` as a standalone session.
-- Plumb the session reference through so the recording actor can pull `synchronizationClock` if we want to anchor `recordingStartTime` against it explicitly (currently anchoring against the cached frame's capture PTS — still correct, but worth a look).
-- No change to PTS stamping logic, no change to raw writers, no change to HLS output format.
-- **Test**: camera-only 1-minute clap test, measure audio-to-video offset with ffprobe. Expectation: residual error drops from "10–30ms variable" to "≤5ms and stable across recordings".
+**What to query:** The four properties listed in § "Solutions explored > HAL input latency compensation" above. For each mic device: resolve `AVCaptureDevice.uniqueID` → `AudioDeviceID` via `kAudioHardwarePropertyTranslateUIDToDevice`, then query device latency, safety offset, stream latency, and buffer frame size. Compute total input latency in milliseconds.
+
+**Devices to test:** MacBook built-in mic, Blue Yeti (USB), AirPods (Bluetooth). Caldigit TS4 3.5mm audio input if convenient but not required.
+
+**Reference algorithm (from Cap's `crates/audio/src/latency.rs`, `compute_input_latency`):**
+
+```
+Given: device (AudioDeviceID), sample_rate, fallback_buffer_frames
+
+1. transport_type = query kAudioDevicePropertyTransportType (global scope)
+   → classify: Bluetooth/BLE → wireless, ContinuityCapture → continuity, else → wired
+
+2. device_latency_frames = query kAudioDevicePropertyLatency (INPUT scope)     [default 0]
+   safety_offset_frames  = query kAudioDevicePropertySafetyOffset (INPUT scope) [default 0]
+   buffer_frames         = query kAudioDevicePropertyBufferFrameSize (global)   [default fallback]
+   stream_latency_frames = max(kAudioStreamPropertyLatency across input streams) [default 0]
+
+   To get input streams: query kAudioDevicePropertyStreams (INPUT scope),
+   then for each stream query kAudioStreamPropertyLatency. Take the max.
+
+3. effective_rate = device's nominal sample rate (or fallback to sample_rate)
+
+4. device_latency_secs = (device_latency_frames + safety_offset_frames + stream_latency_frames) / effective_rate
+   buffer_latency_secs = buffer_frames / effective_rate
+   total_latency_secs  = device_latency_secs + buffer_latency_secs
+```
+
+All property queries use `AudioObjectGetPropertyData` with `AudioObjectPropertyAddress`. Scope is `kAudioObjectPropertyScopeInput` for device/safety/stream properties, `kAudioObjectPropertyScopeGlobal` for buffer size. Element is `kAudioObjectPropertyElementMain` throughout.
+
+Cap also detects transport type to enforce minimum latency floors for wireless devices (~120ms for Bluetooth, similar for Continuity Camera). Worth logging transport type in the diagnostic output.
+
+**Output:** Table of values per device. This informs whether Phase 2 is worth doing (USB mic showing 15ms = yes, built-in mic showing 2ms = maybe, AirPods showing 150ms = definitely yes for Bluetooth).
+
+**Implementation:** This can be a standalone function added to the app and called from `prepareRecording` with results printed to console, or a throwaway test — whatever is quickest. The important thing is seeing real numbers from our actual hardware.
+
+### Phase 1: Single AVCaptureSession + audio in camera.mp4
+
+The main change. Eliminate cross-session clock jitter by putting camera and mic in one `AVCaptureSession` when both are selected. Also embed audio in `camera.mp4` for better manual recovery. Keep the standalone mic session running for `audio.m4a`.
+
+**Audio routing architecture:**
+
+When camera + mic are both selected:
+- **CameraCaptureManager** starts a shared session containing both camera video input/output AND mic audio input/output. The session's `synchronizationClock` applies to both.
+  - Camera video → `handleCameraFrame` (as today)
+  - Mic audio (from shared session) → composited/HLS writer + camera.mp4 raw writer (audio track)
+- **MicrophoneCaptureManager** ALSO starts with its own standalone session, as it does today.
+  - Audio → `audio.m4a` raw writer ONLY. Does NOT feed the composited/HLS path.
+- The standalone mic session code is unchanged from today. It always runs when a mic is selected.
+
+When no camera, mic selected (screen-only mode):
+- **MicrophoneCaptureManager** starts standalone session.
+  - Audio → composited/HLS writer + `audio.m4a` raw writer (current behaviour, unchanged).
+
+This means `MicrophoneCaptureManager` itself doesn't change at all. It always starts, always runs, always delivers samples. What changes is where its output gets routed — and `CameraCaptureManager` gains an optional audio capture capability.
+
+**Key changes:**
+
+1. **CameraCaptureManager** gains the ability to accept an optional mic `AVCaptureDevice` at start time. When provided, it adds an `AVCaptureDeviceInput` (audio) + `AVCaptureAudioDataOutput` to its session and delivers audio samples via a new callback (e.g. `onAudioSample`). When not provided, audio-only behaviour is unchanged.
+2. **Camera raw writer** (`camera.mp4`) gains an audio track. Currently `RawStreamWriter` with kind `.videoH264` is video-only. Extend it to support video+audio for the camera case. Audio samples from the shared session go to both the HLS writer and this raw writer.
+3. **RecordingActor's audio routing** in `wireCaptureCallbacks` / `handleAudioSample` branches on whether a camera is present: if yes, HLS audio comes from the shared session; if no, HLS audio comes from the standalone mic (current path). The standalone mic always feeds the raw `audio.m4a` writer regardless.
+4. **Writer warm-up ordering** must be preserved. The VideoToolbox tunings from `docs/tasks-done/task-2026-04-14-1-videotoolbox-best-practice-tunings.md` require writers to warm up before SCStream opens. The camera raw writer (now with audio) is still constructed after `cameraCapture.startCapture()` returns (it needs the delivered dims), which is fine — the important thing is that the HLS writer and screen/audio raw writers warm up in the quiet window before SCStream, as they do today.
+
+**What doesn't change:**
+- ScreenCaptureKit path — completely independent, untouched.
+- The composited/HLS output format (H.264 video + AAC audio) — identical.
+- The metronome, compositor, PTS stamping logic — identical.
+- `sessionPreset` handling — audio doesn't participate; explicit `activeFormat` still works.
+- All VideoToolbox tunings (`RealTime = false`, `AllowFrameReordering = false`, `MaxFrameDelayCount = 2`, hardware encoder requirement) — these are on the writers, not the capture sessions.
+
+**Why keep the standalone mic session when camera is present?** Two reasons: (a) the standalone session code has to exist anyway for the no-camera case, so running it always is zero additional code complexity; (b) if the camera session crashes, `screen.mov` survives (ScreenCaptureKit) and `audio.m4a` survives (standalone session), giving enough material for a manual FinalCut recovery of screen+voice content — which in many screen-share-heavy recordings is the important part.
+
+Running two sessions with the same mic device simultaneously is fine on macOS — audio devices are multi-client by design (unlike cameras, which are exclusive-access). The performance cost is negligible.
+
+**Test:** Camera-only 1-minute clap test, measure audio-to-video offset with ffprobe. Expectation: residual error drops from 5-30ms variable to sub-5ms stable.
 
 ### Phase 2: HAL input latency compensation
 
-Query Core Audio once when the mic starts, apply a fixed offset to audio PTS.
+Query Core Audio once when the mic starts, apply a fixed offset to audio PTS in the composited/HLS path.
 
-- Add a helper (likely in `Pipeline/` or a new `Capture/AudioLatency.swift`) that, given an `AVCaptureDevice`, resolves the underlying `AudioDeviceID` and reads `kAudioDevicePropertyLatency` + `kAudioDevicePropertySafetyOffset` on the input scope, plus per-stream latency and buffer frame size, then returns total-latency-in-seconds.
-- Cap's `compute_input_latency` in `crates/audio/src/latency.rs` is the reference. Same Core Audio properties, same formula.
-- Wire into `handleAudioSample`: the existing `relativePTS = originalPTS - startTime` becomes `(originalPTS - startTime) - hardwareLatency`. Same offset applied on both the HLS writer path and the raw audio writer path.
-- Store the queried latency in the recording timeline under inputs.microphone so we can diagnose later and so the server can see what was applied.
-- **Test**: same clap test, compare against Phase 1 result. Expect the systematic bias to drop further — particularly on USB mics where the reported latency is largest.
+**What to do:**
 
-### Phase 3: Per-device waveform/motion calibration (server-side)
+1. Add a helper that, given an `AVCaptureDevice` (audio), resolves the underlying `AudioDeviceID` and queries the four HAL properties, returning total input latency in seconds. Cap's `compute_input_latency` in `crates/audio/src/latency.rs` is the reference implementation — same properties, same formula.
+2. Call this helper once during `prepareRecording` for the selected mic device.
+3. Apply the offset to audio PTS in the composited/HLS path: `correctedPTS = originalPTS - hardwareLatency`. This adjustment sits alongside the existing `relativePTS = originalPTS - recordingStartTime` calculation in `handleAudioSample` (or its equivalent after Phase 1's routing changes). Apply to the HLS writer path only — the raw `audio.m4a` doesn't need it since it's a safety-net file for manual recovery.
+4. Store the queried latency value in the recording timeline under `inputs.microphone` so we can diagnose later and verify it against clap-test measurements.
 
-Implement the Cap-style algorithm on the server, during derivative generation, keyed on `(camera.uniqueID, microphone.uniqueID)` from the recording timeline.
+**Whether to apply this to the camera.mp4 audio track too:** Probably yes, since the camera.mp4 is meant to be a properly-synced A/V file. But verify with a clap test first — if Phase 1's shared session already makes the camera.mp4 sync tight, the HAL correction on that path may not be needed.
 
-- New server-side module (probably `server/src/lib/sync-calibration.ts`) with three responsibilities: (a) extract audio samples and per-frame motion scores from the input, (b) run the transient/peak/correlation/confidence algorithm, (c) persist per-device-pair calibration in a new SQLite table.
-- Schema: `device_sync_calibration` with `camera_id`, `mic_id`, `offset_ms`, `confidence`, `measurement_count`, `updated_at`. One row per pair.
-- Invocation: new recipe in `derivatives.ts` (after `source.mp4` lands). Runs fire-and-forget. Reads the recording timeline to get camera/mic IDs (and to skip silently if either is missing).
-- The algorithm update rule (Cap's exponential-decay blend) keeps the stored value from jumping around per-recording.
-- **Application at record time**: at `prepareRecording`, the app fetches the current calibration for `(selectedCamera, selectedMicrophone)` from the server and applies it to audio PTS (adds to Phase 2's hardware-latency offset). First recording of a new device pair has no calibration → no offset applied → runs as Phase 1+2. Second and later recordings get the learned offset.
-- Alternative if server-side fetch feels wrong for a recording-path: keep the calibration learned on the server but also return it in the `videos.complete` response, stashed in a per-pair `last_known_offsets.json` on the app side. Either works.
-- **Test**: 10 consecutive clap-test recordings, verify the offset converges. Then switch cameras, verify it diverges per-pair correctly.
+**Informed by Phase 0:** If the diagnostic shows that the relevant devices (built-in mic, Yeti) report small latency values (< 3ms), the practical benefit of this phase is marginal and it could be deferred. If AirPods show 100ms+, that alone justifies this phase. The Phase 0 data drives the decision.
 
-### Phase 4 (optional — only if still drifting)
-
-Vision-framework mouth-motion detection as a camera-only refinement pass. Probably overkill — worth trying only after Phase 1–3 land and if talking-head recordings still read as slightly off.
-
-- `VNDetectFaceLandmarksRequest` per frame gives lip-contour points.
-- Mouth-open-area = polygon area of inner lip contour, per frame.
-- Cross-correlate mouth-area signal against log-mel audio energy, parabolic sub-sample peak interpolation. Target accuracy 5–15ms.
-- Runs server-side during derivative generation. Only applies to recordings where mode was `cameraOnly` (face is reliably visible).
+**Test:** Same clap test as Phase 1, compare results. If audio-to-video offset improved further, keep it. If it got worse (audio now ahead of video where it was behind before), AVFoundation was already compensating and we should back off — either reduce the correction or remove it.
 
 ## Edge cases
 
-**Camera selected but camera device has no built-in mic.** Normal case for built-in FaceTime camera + external mic, or camera-via-capture-card + audio interface. No impact — Phase 1 puts both into the same session regardless of where the mic physically is. Phase 3 correlates against video motion, not camera-audio, so the camera's mic presence is irrelevant.
+**Camera selected but camera device has no built-in mic.** Normal case for built-in FaceTime camera + external mic, or camera-via-capture-card + audio interface. No impact — Phase 1 puts both into the same session regardless of where the mic physically is.
 
-**"None" selected for camera.** Only `screenOnly` mode is available (enforced by `availableModes` in `RecordingCoordinator`). No camera session exists, so Phase 1 keeps mic on its standalone `AVCaptureSession` (current behavior). Phase 2 (HAL latency compensation) still applies — improves screen-recording sync too. Phase 3 has no camera motion to correlate against, so it skips (already handled in Cap's code: returns early if `camera_device_id` is None). No regression for screen-only recordings.
+**"None" selected for camera.** Only `screenOnly` mode is available (enforced by `availableModes` in `RecordingCoordinator`). No camera session exists. `MicrophoneCaptureManager` runs standalone, feeds both the HLS writer and `audio.m4a` — current behaviour, unchanged. Phase 2 (HAL latency compensation) still applies.
 
-**"None" selected for mic.** No A/V sync problem exists — there's no audio track. All phases skip cleanly on a nil mic device.
+**"None" selected for mic.** No A/V sync problem exists — there's no audio track. Camera session is video-only. No `audio.m4a` or `camera.mp4` audio track. All phases skip cleanly.
 
-**Camera source is a capture card / DSLR via HDMI.** No camera `uniqueID` instability expected (AVFoundation assigns stable IDs to capture cards). Phase 3 treats each `(camera_id, mic_id)` pair as its own calibration bucket, which handles this naturally — switching cameras mid-session or between sessions just uses a different calibration.
+**Camera source is a capture card / DSLR via HDMI.** The shared session treats whatever `AVCaptureDevice` is selected as the camera. `synchronizationClock` still applies — the session handles the clock domain conversion internally regardless of device type.
 
-**User mid-recording mutes the mic or unplugs it.** Already handled by the existing pipeline. No new concern for this task.
+**User mid-recording mutes or unplugs the mic.** Already handled by the existing pipeline. If the mic is on the shared session and the mic device is disconnected, the session posts `AVCaptureSessionRuntimeErrorNotification`. The camera side dies too (coupled failure domain). The standalone mic session also loses its device. `screen.mov` survives via ScreenCaptureKit. This is the expected degradation path.
 
-**First recording of a new device pair.** No historical calibration → Phase 3 applies no offset at record time. The Phase 1 + Phase 2 improvements alone carry that first recording. After Phase 3 lands the offset learned from that first recording, subsequent recordings benefit.
+**Camera disconnected mid-recording.** Shared session dies — camera.mp4 and HLS audio stop. `screen.mov` (ScreenCaptureKit) and `audio.m4a` (standalone mic session) survive. Enough for manual recovery of screen+voice content.
 
-**No face visible during a cameraOnly recording** (e.g. user covered the camera, pointed it at their desk). Phase 3's generic motion detection still works for other kinds of movement. Phase 4 (if we land it) would fall back to Phase 3's motion-score when Vision can't find a face.
+**First recording after Phase 1 lands.** No per-device calibration needed — the `synchronizationClock` improvement is structural, not learned. Every recording benefits immediately.
 
-**Continuity Camera / iPhone as webcam.** Transport type `continuityCaptureWireless` per Core Audio — Cap's transport detection specifically calls this out because wireless transports have much larger inherent latency. Phase 2's HAL query reads the device's reported latency regardless of transport, so it should already compensate. Worth an explicit test on an iPhone-as-webcam recording though, since Continuity latency is large enough that mistakes would be visible.
+**Continuity Camera / iPhone as webcam.** Transport type `continuityCaptureWireless`. Wireless transports have larger inherent latency. Phase 2's HAL query reads the device's reported latency regardless of transport. Worth an explicit clap test on an iPhone-as-webcam recording since Continuity latency is large enough that mistakes would be visible.
+
+## Deferred/Disgarded options
+
+These are not planned for this task. Noted here for context in case Phase 1 + Phase 2 don't fully close the gap.
+
+**Per-device waveform/motion calibration (Cap-style).** Passive algorithm that correlates audio energy transients with video motion peaks to infer per-device-pair offset. Advantages: device-independent, self-refining. Disadvantages: significant implementation effort (server-side analysis, new DB table, client-side fetch at record time), and the problem it solves (systematic per-device bias) should largely be addressed by Phase 1 (eliminates cross-session jitter) and Phase 2 (removes known HAL-reported bias). Cap's reference implementation is at `/Users/danny/dev/Cap/crates/audio/src/sync_analysis.rs` and `/Users/danny/dev/Cap/crates/recording/src/sync_calibration.rs` if needed later.
+
+**Vision-framework mouth-motion detection.** `VNDetectFaceLandmarksRequest` gives lip-contour points at <10ms/frame on Apple Silicon. Cross-correlate mouth-open-area against audio energy with parabolic sub-sample interpolation. Strictly better than generic motion correlation for camera-only but much heavier to implement. Only relevant if talking-head recordings still read as slightly off after everything else lands.
 
 ## Open questions
 
-1. **Does Phase 1 alone close the gap?** If moving to a single `AVCaptureSession` drops the residual error below the perceptibility threshold, Phases 2–3 become polish rather than necessity. Worth landing Phase 1 as a self-contained change and measuring before committing to the rest.
-2. **Server-side vs client-side calibration storage.** Is it better for the server to own the calibration table (applied on recording-complete, returned as a hint for subsequent recordings) or for the app to own it locally (applied at record time, server never sees it)? Server-side feels right because (a) the server is already doing derivative work, (b) learning happens post-recording, (c) the app is single-user so a round-trip on every prepare is fine.
-3. **Scope of motion analysis for Phase 3.** Running the correlation on the full `source.mp4` is expensive for long recordings. Cap bounds it to audio-transient windows only. Probably adopt that same bound.
-4. **Anchoring against `synchronizationClock` explicitly.** Once mic and camera share a session (Phase 1), is it worth changing `commitRecording`'s anchor from "latest cached frame's capturePTS" to `CMClockGetTime(session.synchronizationClock)` with the same maxAnchorAge safety? Needs a careful read to confirm the two are equivalent when the session is shared — they probably are, but explicit is better than accidental.
+1. **Does Phase 1 alone close the gap?** If moving to a single `AVCaptureSession` drops the residual error below the perceptibility threshold, Phase 2 becomes polish rather than necessity. Worth landing Phase 1 as a self-contained change and measuring before committing to Phase 2.
+2. **Does AVFoundation already partially compensate for HAL-reported latency?** If Phase 2 makes sync worse rather than better, that's the answer — back off. The clap test is the arbiter.
+3. **Anchoring against `synchronizationClock` explicitly.** Once mic and camera share a session (Phase 1), is it worth changing `commitRecording`'s anchor from "latest cached frame's capturePTS" to `CMClockGetTime(session.synchronizationClock)` with the same maxAnchorAge safety? They're probably equivalent when the session is shared, but explicit is better than accidental. Worth a careful read during implementation.
 
 ## References
 
-- **Cap's calibration source** (local): `/Users/danny/dev/Cap/crates/audio/src/sync_analysis.rs`, `/Users/danny/dev/Cap/crates/recording/src/sync_calibration.rs`, `/Users/danny/dev/Cap/crates/audio/src/latency.rs`. Read these before implementing Phase 2 or Phase 3 — they're the working reference.
-- **Previous task**: `docs/tasks-done/task-2026-04-16-1-av-sync.md` — what we already fixed and how.
+- **Previous task**: `docs/tasks-done/task-2026-04-16-1-av-sync.md` — what we already fixed and how. Phases 1-5 of the original sync work.
+- **VideoToolbox tunings task**: `docs/tasks-done/task-2026-04-14-1-videotoolbox-best-practice-tunings.md` — writer tunings (`RealTime`, `AllowFrameReordering`, `MaxFrameDelayCount`, hardware encoder requirement, warm-up ordering) that must be preserved during Phase 1's restructuring.
 - **Pipeline doc**: `docs/developer/recording-pipeline.md` — architecture refresher.
-- **Apple docs**: `AVCaptureSession.synchronizationClock`, `AVCaptureMultiCamSession`, WWDC 2019 Session 249 (Multi-Camera Capture) — Apple's own guidance on shared-session sync.
-- **Apple developer forum thread 742022** — real-world example of multi-session sync drift.
-- **Core Audio property keys**: `kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, `kAudioDevicePropertyBufferFrameSize`, `kAudioStreamPropertyLatency` — the Phase 2 inputs.
+- **Audio post-processing doc**: `docs/developer/audio-post-processing.md` — server-side audio chain (highpass → arnndn → loudnorm). Not directly relevant to sync but documents what happens to audio after recording.
+- **Cap's latency source** (local): `/Users/danny/dev/Cap/crates/audio/src/latency.rs` — working reference for Phase 0 and Phase 2.
+- **Cap's sync calibration source** (local): `/Users/danny/dev/Cap/crates/audio/src/sync_analysis.rs`, `/Users/danny/dev/Cap/crates/recording/src/sync_calibration.rs` — reference for deferred waveform calibration option.
+- **Apple docs**: `AVCaptureSession.synchronizationClock`, WWDC 2019 Session 249 (Multi-Camera Capture) — Apple's own guidance on shared-session sync.
+- **Core Audio property keys**: `kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, `kAudioDevicePropertyBufferFrameSize`, `kAudioStreamPropertyLatency` — the Phase 0/2 inputs.
+- **Core Audio device bridge**: `kAudioHardwarePropertyTranslateUIDToDevice` — converts `AVCaptureDevice.uniqueID` to `AudioDeviceID` for HAL property queries.

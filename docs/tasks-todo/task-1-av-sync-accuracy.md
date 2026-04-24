@@ -94,7 +94,7 @@ Two-phase fix, preceded by a diagnostic:
 
 ## Implementation Pkan - Phases
 
-### Phase 0: HAL latency diagnostic exploration
+### Phase 0: HAL latency diagnostic exploration [DONE]
 
 Query Core Audio's HAL input latency properties for each available mic device and print the results. This is a read-only diagnostic — no recording pipeline changes. The goal is to understand what values we're working with before committing to Phase 2.
 
@@ -132,6 +132,38 @@ Cap also detects transport type to enforce minimum latency floors for wireless d
 **Output:** Table of values per device. This informs whether Phase 2 is worth doing (USB mic showing 15ms = yes, built-in mic showing 2ms = maybe, AirPods showing 150ms = definitely yes for Bluetooth).
 
 **Implementation:** This can be a standalone function added to the app and called from `prepareRecording` with results printed to console, or a throwaway test — whatever is quickest. The important thing is seeing real numbers from our actual hardware.
+
+#### Phase 0 results (2026-04-24)
+
+Ran via a throwaway `--hal-latency` flag on the test harness. Queried all four HAL properties for every connected audio input device. Full per-device breakdown below, summary table first.
+
+**Summary:**
+
+| Device | Transport | Rate (Hz) | DevLat | Safety | Stream | Buffer | Total ms |
+|---|---|---|---|---|---|---|---|
+| ZV-1 (Sony camera, USB) | USB | 48000 | 74 | 74 | 0 | 512 | 13.75 |
+| MacBook Pro Microphone | Built-in | 48000 | 0 | 50 | 1439 | 512 | 41.69 |
+| iPhone (Continuity Camera) | Continuity | 48000 | 6000 | 100 | 0 | 512 | 137.75 |
+| UGREEN-25854 (USB-C adapter) | USB | 48000 | 74 | 74 | 0 | 512 | 13.75 |
+| AirPods Pro | Bluetooth | 24000 | 240 | 0 | 0 | 480 | 30.00 |
+| CalDigit TS4 Audio - Rear | USB | 48000 | 74 | 74 | 0 | 512 | 13.75 |
+| Yeti Stereo Microphone | USB | 48000 | 74 | 74 | 0 | 512 | 13.75 |
+
+All frame counts are in the device's native sample rate. "DevLat" = `kAudioDevicePropertyLatency`, "Safety" = `kAudioDevicePropertySafetyOffset`, "Stream" = max `kAudioStreamPropertyLatency` across input streams, "Buffer" = `kAudioDevicePropertyBufferFrameSize`.
+
+**Observations:**
+
+1. **All four USB devices report identical values** (74 + 74 + 0 + 512 = 660 frames = 13.75ms). This includes devices from four different manufacturers (Sony, Actions Micro, CalDigit, Blue Microphones). The 74/74/0/512 pattern appears to be the macOS USB Audio Class driver's default, not per-device calibration. The devices likely all use the standard USB Audio Class 1.0 driver rather than custom drivers.
+
+2. **Built-in mic: 41.69ms is unexpectedly high.** The dominant component is 1439 frames of stream latency — the only device reporting nonzero stream latency. Device latency itself is 0. This large stream latency likely reflects Apple's internal DSP pipeline for the built-in mic array (beamforming, noise reduction, echo cancellation). It's plausible that AVFoundation already compensates for some or all of this internally when constructing the sample buffer PTS. The clap test in Phase 1 will tell us whether subtracting the full 41ms overcorrects.
+
+3. **AirPods Pro: 30ms is much lower than expected.** The task doc predicted 80-200ms for Bluetooth based on Cap's observations, and Cap enforces a 120ms minimum floor for Bluetooth devices. Our AirPods report only 30ms (240 frames at 24kHz + 480 buffer frames at 24kHz). Two possible explanations: (a) Apple's custom Bluetooth stack for AirPods (H2 chip, proprietary codec) genuinely has lower latency than generic Bluetooth audio; (b) the HAL-reported values understate the real end-to-end latency and there's additional buffering not captured by these four properties. Also notable: AirPods run at 24kHz, not 48kHz — the only device not at 48kHz. Phase 1 clap test will be the arbiter.
+
+4. **iPhone Continuity Camera: 137.75ms.** Dominated by 6000 frames of device latency (125ms at 48kHz). This is the wireless network transport cost. Unlikely to be used as a mic input in practice but confirms that wireless sources need large corrections.
+
+5. **Phase 2 verdict: justified.** Every device shows HAL-reported latency large enough to be perceptible (13-138ms). Even the USB devices at 13.75ms are nearly half a video frame at 30fps. Whether the correction *actually helps* (vs. AVFoundation already compensating internally) can only be answered by Phase 1's clap tests.
+
+**Note on virtual audio drivers:** Microsoft Teams' virtual loopback driver (`MSLoopbackDriverDevice_UID`) was present on this machine and causes a segfault on any Core Audio property query. The diagnostic skips it by filtering on AVCaptureDevice UID pattern. Worth noting for Phase 2's implementation — the HAL latency helper in the main app should guard against this. **WE WILL LIKELEY NEVER USE THIS SPECIFIC AUDIO SOURCE IN THE ACTUAL APP** But of course we should try to guard against if nececcary.
 
 ### Phase 1: Single AVCaptureSession + audio in camera.mp4
 

@@ -1,8 +1,6 @@
-# Task 4: Mac-Side Transcription
+# Task 2: Mac-Side Transcription
 
 Goal: generate subtitles and searchable transcripts for every recording by running Whisper locally on the Mac and uploading the result, instead of burdening the Hetzner box with CPU-only inference.
-
-Companion to [task 3](task-3-post-processing-enhancements.md) (server-side post-processing). The two can proceed independently.
 
 ## Why client-side
 
@@ -23,16 +21,20 @@ At single-user volume, running this on the Mac is massively faster, free (hardwa
 - **Server is transcription-agnostic.** The `/api/videos/:id/transcript` endpoint accepts an SRT (or VTT) payload and stores it. It does not care who produced it. This keeps the door open for a future server-side fallback without schema churn.
 - **No external LLMs, no external APIs.** All inference runs on the Mac.
 
-## Package choice
+## Package choice: WhisperKit
 
-Two candidates — pick at the start of implementation after a spike:
+**[WhisperKit](https://github.com/argmaxinc/WhisperKit)** — Swift-native, SPM distribution, Apple-Silicon-optimised via Core ML. Tight Swift integration, no subprocess plumbing. Actively maintained.
 
-- **[WhisperKit](https://github.com/argmaxinc/WhisperKit)** — Swift-native, SPM distribution, Apple-Silicon-optimised via Core ML. Tight Swift integration, no subprocess plumbing. Actively maintained.
-- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** directly — bundle the compiled `whisper-cli` binary and spawn it via `Process()`. More control over flags, easier to upgrade the binary independently, but we manage process lifecycle ourselves.
+Alternatives considered and rejected:
 
-Expected outcome: WhisperKit wins on integration ergonomics for a Swift app. Validate by running both on a real 10-minute recording and comparing setup complexity, runtime speed, and output quality.
+- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** — C/C++ port of Whisper. Smaller quantised model files (547 MB for large-v3-turbo Q5_0) but requires C bridging or subprocess management. Rougher Swift integration for marginal disk savings.
+- **[FluidAudio](https://github.com/FluidInference/FluidAudio) (Parakeet V3 via CoreML)** — dramatically faster (110–190× realtime vs ~15–25× for Whisper), but 2.69 GB model footprint (4× larger) and less battle-tested. Speed doesn't matter here because transcription runs in the background after recording.
+- **Sharing models with Handy** — investigated and ruled out. Handy uses Parakeet V3 in ONNX format via a Rust runtime (`transcribe-rs`). Completely different architecture from Whisper (FastConformer-TDT vs Encoder-Decoder Seq2Seq), different model format (ONNX vs CoreML), and different runtime. Zero model compatibility. Even using Parakeet via FluidAudio would download its own CoreML-converted copy — no overlap with Handy's ONNX files.
+- **Ollama** — does not support speech-to-text models at all.
 
-**Model**: `large-v3-turbo` quantised to Q5_0 (~500 MB on disk, ~1.5 GB RAM at inference). Current community consensus as the best quality/speed tradeoff for English transcription. Shipped via on-first-use download into the app support directory, cached thereafter.
+WhisperKit wins on Swift integration ergonomics, reasonable model size, and hardware isolation — it runs inference on the Neural Engine via CoreML, while Handy uses Metal GPU via `transcribe-rs`, so they don't compete for the same hardware when both are active.
+
+**Model**: `large-v3-turbo` quantised (~626 MB on disk, ~1.5 GB RAM at inference). Current community consensus as the best quality/speed tradeoff for English transcription. Shipped via on-first-use download into the app support directory, cached thereafter.
 
 ## Client-side flow
 
@@ -43,7 +45,7 @@ Expected outcome: WhisperKit wins on integration ergonomics for a Swift app. Val
 3. `TranscribeAgent`:
    - Checks for existing `.transcribed` sidecar → no-op if present.
    - Runs Whisper against `audio.m4a` in the recording dir.
-   - Writes `captions.srt` to the recording dir.
+   - Writes `captions.srt` to the recording dir (local backup).
    - PUTs SRT bytes to `/api/videos/:id/transcript`.
    - On success, writes `.transcribed` sidecar.
    - On failure, logs and exits (retry at next launch).
@@ -60,7 +62,7 @@ At app launch, `TranscribeAgent.runStartupScan()` walks the recordings directory
 
 | File                           | Purpose                                                        |
 | ------------------------------ | -------------------------------------------------------------- |
-| `captions.srt`                 | Local copy of the generated transcript                         |
+| `captions.srt`                 | Local copy of the generated transcript (backup)                |
 | `.transcribed`                 | Sentinel: upload succeeded, do not retry                       |
 | `.orphaned` (existing)         | Sentinel: server 404'd — skip transcription and healing alike  |
 
@@ -80,13 +82,13 @@ Body: raw SRT/VTT bytes
 
 - Bearer-authed (same `lck_` keys as segment uploads).
 - Writes bytes to `data/<id>/derivatives/captions.srt` atomically (`.tmp` → rename).
-- On success, parses the SRT into plain-text and upserts into an FTS5 virtual table (below).
+- On success, parses the SRT into plain-text and upserts into the `video_transcripts` table (below).
 - 404 if the video record does not exist (client writes `.orphaned`, stops).
 - Idempotent: re-uploading replaces the file and re-indexes.
 
 ### Schema additions
 
-New table:
+New table (separate from `videos` — consistent with `videoSegments`, `videoEvents`, `videoTags` pattern):
 
 ```sql
 video_transcripts(
@@ -98,18 +100,7 @@ video_transcripts(
 )
 ```
 
-FTS5 virtual table mirrors `plain_text` for full-library search:
-
-```sql
-CREATE VIRTUAL TABLE video_transcripts_fts USING fts5(
-  plain_text,
-  content='video_transcripts',
-  content_rowid='rowid',
-  tokenize='porter unicode61'
-)
-```
-
-Triggers keep FTS in sync on insert/update/delete.
+Add `transcript` column to the existing `videos_fts` FTS5 virtual table (which already indexes `title`, `description`, `slug` in `server/src/lib/search.ts`). This integrates transcript search directly into the admin search box that already exists — no new search endpoint needed.
 
 ### Viewer wiring
 
@@ -121,32 +112,16 @@ Triggers keep FTS in sync on insert/update/delete.
 
 Vidstack parses SRT natively (`type="srt"`). No conversion to VTT required.
 
-### Admin: library search
+### Metadata routes
 
-Admin UI (landing in its own task) gains a search box that hits an endpoint roughly like:
+Add transcript text to the existing metadata endpoints:
 
-```
-GET /admin/api/search?q=...
-```
+- **`/:slug.json`** — add a `transcript` field (plain text string, or `null` if not yet transcribed).
+- **`/:slug.md`** — add a `## Transcript` section at the end with the plain text.
 
-Returns `{ videos: [{ id, slug, title, snippet, timestamp }] }` by joining FTS hits against the `videos` table. Snippet is FTS5's native snippet output; timestamp is the nearest cue's start time (requires storing cue offsets — see extension below).
+### Admin: transcript tab
 
-### Optional extension: cue-level search
-
-If jump-to-timestamp from search results is wanted, add a per-cue table:
-
-```sql
-video_transcript_cues(
-  video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-  cue_index INTEGER NOT NULL,
-  start_seconds REAL NOT NULL,
-  end_seconds REAL NOT NULL,
-  text TEXT NOT NULL,
-  PRIMARY KEY (video_id, cue_index)
-)
-```
-
-FTS5 over `text` with content table pointing at this gives cue-resolution search hits. Decide whether this is worth the extra indexing work once the plain-text search is in use.
+The video detail page (`server/src/views/admin/pages/VideoDetailPage.tsx`) already has an Events/Files tab switcher. Add a third **Transcript** tab that displays the plain text transcript (from `video_transcripts.plain_text`), word count, and generated timestamp. Show a "not yet transcribed" state when no transcript exists.
 
 ## Out of scope
 
@@ -155,3 +130,4 @@ FTS5 over `text` with content table pointing at this gives cue-resolution search
 - **Auto-generated titles / descriptions / summaries.** Requires an LLM, ruled out as a dependency.
 - **Speaker diarisation.** Whisper alone does not produce speaker labels; a separate model (e.g. pyannote) would be needed. Not a priority for single-speaker recordings.
 - **Manual transcript correction UI.** Not in this task. If needed later, the stored SRT is a plain file that can be edited server-side and re-indexed.
+- **Cue-level search / jump-to-timestamp.** Not needed for now. Plain-text search across the full transcript is sufficient.

@@ -51,6 +51,13 @@ actor RecordingActor {
     /// CameraCaptureManager successfully added the mic to its session.
     var sharedSessionAudioActive = false
 
+    /// HAL-reported input latency for the selected mic, in seconds. Queried
+    /// once during `prepareRecording` and stored in `recording.json` for
+    /// diagnostics. Not applied as a PTS correction — testing showed that
+    /// AVFoundation already partially compensates for HAL latency internally,
+    /// so subtracting the full value overcorrects.
+    var audioInputLatency: Double = 0
+
     /// Structured account of the recording — metadata + events + segments.
     /// Written to `recording.json` alongside the segments and uploaded to the
     /// server as part of the complete payload.

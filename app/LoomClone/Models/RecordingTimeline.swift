@@ -113,6 +113,15 @@ struct RecordingTimeline: Encodable {
         struct Device: Encodable {
             let uniqueID: String
             let name: String
+            /// HAL-reported input latency in milliseconds (audio devices only).
+            /// Nil for non-audio devices (camera).
+            let halInputLatencyMs: Double?
+
+            init(uniqueID: String, name: String, halInputLatencyMs: Double? = nil) {
+                self.uniqueID = uniqueID
+                self.name = name
+                self.halInputLatencyMs = halInputLatencyMs
+            }
         }
     }
 

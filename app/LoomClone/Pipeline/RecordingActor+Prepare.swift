@@ -34,6 +34,12 @@ extension RecordingActor {
         let camera: AVCaptureDevice? = cameraID.flatMap { AVCaptureDevice(uniqueID: $0) }
         let microphone: AVCaptureDevice? = microphoneID.flatMap { AVCaptureDevice(uniqueID: $0) }
 
+        // Query HAL input latency for the mic (if selected) before any
+        // capture starts. This is a read-only Core Audio property query.
+        if let microphone {
+            audioInputLatency = HALInputLatency.totalInputLatency(for: microphone)
+        }
+
         // 2. Create server session
         let session = try await upload.createSession()
 
@@ -52,7 +58,11 @@ extension RecordingActor {
                 .init(uniqueID: $0.uniqueID, name: $0.localizedName)
             },
             microphone: microphone.map {
-                .init(uniqueID: $0.uniqueID, name: $0.localizedName)
+                .init(
+                    uniqueID: $0.uniqueID,
+                    name: $0.localizedName,
+                    halInputLatencyMs: audioInputLatency * 1000
+                )
             }
         )
 
@@ -224,6 +234,7 @@ extension RecordingActor {
         self.preset = preset
         isRecording = false
         sharedSessionAudioActive = false
+        audioInputLatency = 0
         recordingStartTime = nil
         pauseAccumulator = .zero
         pauseStartHostTime = nil

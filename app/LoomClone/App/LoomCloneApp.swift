@@ -10,7 +10,7 @@ struct LoomCloneApp: App {
         // (Cmd+, via the main menu, or opened from the popover's
         // Settings… link).
         Settings {
-            SettingsView()
+            SettingsView(transcribeAgent: appDelegate.transcribeAgent)
         }
     }
 }

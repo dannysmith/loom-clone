@@ -10,15 +10,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutManager = KeyboardShortcutManager()
     let coordinator = RecordingCoordinator()
     private let healAgent = HealAgent()
+    let transcribeAgent = TranscribeAgent()
 
     func applicationDidFinishLaunching(_: Notification) {
         setupStatusItem()
         setupPopover()
 
-        // Hand the heal agent to the coordinator so post-stop handoffs work,
-        // and kick off the startup scan for any previously unhealed recordings.
+        // Hand agents to the coordinator so post-stop handoffs work,
+        // and kick off startup scans for healing and transcription.
         coordinator.healAgent = healAgent
+        coordinator.transcribeAgent = transcribeAgent
         Task { await healAgent.runStartupScan() }
+        Task { await transcribeAgent.runStartupScan() }
 
         shortcutManager.register(
             coordinator: coordinator,

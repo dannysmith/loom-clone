@@ -167,6 +167,20 @@ export const adminTokens = sqliteTable("admin_tokens", {
   revokedAt: text("revoked_at"),
 });
 
+// Transcript storage — separate table (consistent with videoSegments,
+// videoEvents, videoTags pattern). 1:1 with videos; the SRT/VTT file
+// lives on disk at data/<id>/derivatives/captions.srt, this table holds
+// the parsed plain text for display and FTS search.
+export const videoTranscripts = sqliteTable("video_transcripts", {
+  videoId: text("video_id")
+    .primaryKey()
+    .references(() => videos.id, { onDelete: "cascade" }),
+  format: text("format").notNull(), // 'srt' | 'vtt'
+  plainText: text("plain_text").notNull(),
+  wordCount: integer("word_count").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(nowIso),
+});
+
 // Inferred types — export for use in store and routes.
 export type Video = typeof videos.$inferSelect;
 export type VideoInsert = typeof videos.$inferInsert;
@@ -175,5 +189,6 @@ export type SlugRedirect = typeof slugRedirects.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type VideoTag = typeof videoTags.$inferSelect;
 export type VideoEvent = typeof videoEvents.$inferSelect;
+export type VideoTranscript = typeof videoTranscripts.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type AdminToken = typeof adminTokens.$inferSelect;

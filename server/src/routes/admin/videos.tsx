@@ -5,6 +5,7 @@ import { listVideoFiles } from "../../lib/files";
 import {
   ConflictError,
   duplicateVideo,
+  getTranscript,
   trashVideo,
   untrashVideo,
   updateSlug,
@@ -36,18 +37,25 @@ const videoRoutes = new Hono<AdminEnv>();
 
 // --- Video detail ---
 
+function parseTab(q: string | undefined): "events" | "files" | "transcript" {
+  if (q === "files") return "files";
+  if (q === "transcript") return "transcript";
+  return "events";
+}
+
 videoRoutes.get("/:id", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   const video = result;
 
-  const activeTab = c.req.query("tab") === "files" ? "files" : "events";
-  const [videoTags, allTags, events, files, thumbnailCandidates] = await Promise.all([
+  const activeTab = parseTab(c.req.query("tab"));
+  const [videoTags, allTags, events, files, thumbnailCandidates, transcript] = await Promise.all([
     getVideoTags(video.id),
     listTags(),
     listEvents(video.id),
     listVideoFiles(video.id),
     listThumbnailCandidates(video.id),
+    getTranscript(video.id),
   ]);
 
   return c.html(
@@ -58,6 +66,7 @@ videoRoutes.get("/:id", async (c) => {
       events={events}
       files={files}
       thumbnailCandidates={thumbnailCandidates}
+      transcript={transcript}
       activeTab={activeTab}
     />,
   );
@@ -163,10 +172,20 @@ videoRoutes.patch("/:id/visibility", async (c) => {
 videoRoutes.get("/:id/partials/tabs", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
-  const activeTab = c.req.query("tab") === "files" ? "files" : "events";
-  const [events, files] = await Promise.all([listEvents(result.id), listVideoFiles(result.id)]);
+  const activeTab = parseTab(c.req.query("tab"));
+  const [events, files, transcript] = await Promise.all([
+    listEvents(result.id),
+    listVideoFiles(result.id),
+    getTranscript(result.id),
+  ]);
   return c.html(
-    <VideoTabsSection video={result} events={events} files={files} activeTab={activeTab} />,
+    <VideoTabsSection
+      video={result}
+      events={events}
+      files={files}
+      transcript={transcript}
+      activeTab={activeTab}
+    />,
   );
 });
 

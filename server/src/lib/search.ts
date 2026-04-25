@@ -4,15 +4,34 @@ import { getSqlite } from "../db/client";
 // every startup. The table is standalone (not content-linked) so it stores
 // its own copy of the indexed text. Triggers keep it in sync with the videos
 // table automatically.
+//
+// The `transcript` column is populated separately by updateFtsTranscript()
+// when a transcript is uploaded — video triggers only touch the video-owned
+// columns (title, description, slug).
 export function setupFts(): void {
   const db = getSqlite();
+
+  // Schema migration: if the old FTS table exists without the transcript
+  // column, drop it so the new schema can be created. FTS5 virtual tables
+  // don't support ALTER TABLE ADD COLUMN.
+  const cols = db.prepare("SELECT * FROM pragma_table_info('videos_fts')").all() as Array<{
+    name: string;
+  }>;
+  if (cols.length > 0 && !cols.some((c) => c.name === "transcript")) {
+    db.exec("DROP TABLE IF EXISTS videos_fts");
+    // Drop old triggers that reference the old schema.
+    db.exec("DROP TRIGGER IF EXISTS videos_fts_ai");
+    db.exec("DROP TRIGGER IF EXISTS videos_fts_au");
+    db.exec("DROP TRIGGER IF EXISTS videos_fts_ad");
+  }
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
       video_id UNINDEXED,
       title,
       description,
-      slug
+      slug,
+      transcript
     );
   `);
 
@@ -22,17 +41,20 @@ export function setupFts(): void {
   // After inserting a video, add it to the FTS index.
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS videos_fts_ai AFTER INSERT ON videos BEGIN
-      INSERT INTO videos_fts(video_id, title, description, slug)
-      VALUES (NEW.id, NEW.title, NEW.description, NEW.slug);
+      INSERT INTO videos_fts(video_id, title, description, slug, transcript)
+      VALUES (NEW.id, NEW.title, NEW.description, NEW.slug, '');
     END;
   `);
 
-  // After updating a video, delete old FTS row and insert new one.
+  // After updating a video, preserve the transcript column value.
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS videos_fts_au AFTER UPDATE ON videos BEGIN
       DELETE FROM videos_fts WHERE video_id = OLD.id;
-      INSERT INTO videos_fts(video_id, title, description, slug)
-      VALUES (NEW.id, NEW.title, NEW.description, NEW.slug);
+      INSERT INTO videos_fts(video_id, title, description, slug, transcript)
+      VALUES (
+        NEW.id, NEW.title, NEW.description, NEW.slug,
+        COALESCE((SELECT plain_text FROM video_transcripts WHERE video_id = NEW.id), '')
+      );
     END;
   `);
 
@@ -46,10 +68,28 @@ export function setupFts(): void {
   // Backfill: insert any videos that aren't in the FTS table yet.
   // This handles upgrading from a database that existed before FTS was added.
   db.exec(`
-    INSERT INTO videos_fts(video_id, title, description, slug)
-    SELECT id, title, description, slug FROM videos
-    WHERE id NOT IN (SELECT video_id FROM videos_fts);
+    INSERT INTO videos_fts(video_id, title, description, slug, transcript)
+    SELECT v.id, v.title, v.description, v.slug,
+           COALESCE(vt.plain_text, '')
+    FROM videos v
+    LEFT JOIN video_transcripts vt ON vt.video_id = v.id
+    WHERE v.id NOT IN (SELECT video_id FROM videos_fts);
   `);
+}
+
+// Updates just the transcript column in the FTS index for a given video.
+// Called when a transcript is uploaded or replaced.
+export function updateFtsTranscript(videoId: string, transcript: string): void {
+  const db = getSqlite();
+  // Read the current FTS row, update with the new transcript text.
+  const existing = db
+    .prepare("SELECT title, description, slug FROM videos_fts WHERE video_id = ?")
+    .get(videoId) as { title: string; description: string; slug: string } | undefined;
+  if (!existing) return;
+  db.prepare("DELETE FROM videos_fts WHERE video_id = ?").run(videoId);
+  db.prepare(
+    "INSERT INTO videos_fts(video_id, title, description, slug, transcript) VALUES (?, ?, ?, ?, ?)",
+  ).run(videoId, existing.title, existing.description, existing.slug, transcript);
 }
 
 // Searches the FTS index and returns matching video IDs. The query is

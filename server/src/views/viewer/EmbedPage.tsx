@@ -4,6 +4,7 @@ type Props = {
   slug: string;
   src: string;
   poster: string | null;
+  captionsUrl: string | null;
   title?: string;
   description?: string;
   duration?: string;
@@ -18,6 +19,7 @@ export function EmbedPage({
   slug,
   src,
   poster,
+  captionsUrl,
   title,
   description,
   duration,
@@ -67,7 +69,18 @@ export function EmbedPage({
         title={playerTitle || undefined}
         playsinline
       >
-        <media-provider />
+        <media-provider>
+          {captionsUrl && (
+            <track
+              src={captionsUrl}
+              kind="subtitles"
+              srclang="en"
+              label="English"
+              type="srt"
+              default
+            />
+          )}
+        </media-provider>
 
         {(title || duration) && (
           <div class="embed-overlay">

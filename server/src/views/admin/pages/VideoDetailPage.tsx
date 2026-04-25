@@ -1,4 +1,4 @@
-import type { Tag, Video, VideoEvent } from "../../../db/schema";
+import type { Tag, Video, VideoEvent, VideoTranscript } from "../../../db/schema";
 import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
@@ -32,7 +32,8 @@ type Props = {
   events: VideoEvent[];
   files: FileEntry[];
   thumbnailCandidates: ThumbnailCandidate[];
-  activeTab: "events" | "files";
+  transcript: VideoTranscript | undefined;
+  activeTab: "events" | "files" | "transcript";
 };
 
 export function VideoDetailPage({
@@ -42,6 +43,7 @@ export function VideoDetailPage({
   events,
   files,
   thumbnailCandidates,
+  transcript,
   activeTab,
 }: Props) {
   const title = video.title || video.slug;
@@ -168,7 +170,13 @@ export function VideoDetailPage({
       <ThumbnailPicker video={video} candidates={thumbnailCandidates} />
 
       {/* --- Tabs --- */}
-      <VideoTabsSection video={video} events={events} files={files} activeTab={activeTab} />
+      <VideoTabsSection
+        video={video}
+        events={events}
+        files={files}
+        transcript={transcript}
+        activeTab={activeTab}
+      />
 
       <dialog id="file-preview-dialog" class="file-preview-dialog">
         <div id="file-preview-content" />
@@ -181,12 +189,14 @@ export function VideoTabsSection({
   video,
   events,
   files,
+  transcript,
   activeTab,
 }: {
   video: Video;
   events: VideoEvent[];
   files: FileEntry[];
-  activeTab: "events" | "files";
+  transcript: VideoTranscript | undefined;
+  activeTab: "events" | "files" | "transcript";
 }) {
   return (
     <div
@@ -216,12 +226,44 @@ export function VideoTabsSection({
         >
           Files ({files.filter((f) => !f.isDirectory).length})
         </a>
+        <a
+          href={`/admin/videos/${video.id}?tab=transcript`}
+          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=transcript`}
+          hx-target="#video-tabs-section"
+          hx-swap="outerHTML"
+          hx-push-url="false"
+          class={`settings-tab ${activeTab === "transcript" ? "active" : ""}`}
+        >
+          Transcript{transcript ? ` (${transcript.wordCount} words)` : ""}
+        </a>
       </div>
       {activeTab === "events" ? (
         <EventLog events={events} />
+      ) : activeTab === "transcript" ? (
+        <TranscriptView transcript={transcript} />
       ) : (
         <FileBrowser files={files} videoId={video.id} />
       )}
+    </div>
+  );
+}
+
+function TranscriptView({ transcript }: { transcript: VideoTranscript | undefined }) {
+  if (!transcript) {
+    return (
+      <p class="empty-state">
+        No transcript available. Transcription runs automatically after recording.
+      </p>
+    );
+  }
+  return (
+    <div class="transcript-view">
+      <div class="transcript-meta">
+        <span class="meta-pill">{transcript.wordCount} words</span>
+        <span class="meta-pill">{transcript.format.toUpperCase()}</span>
+        <span class="meta-pill">{formatDateTime(transcript.createdAt)}</span>
+      </div>
+      <div class="transcript-text">{transcript.plainText}</div>
     </div>
   );
 }

@@ -7,7 +7,9 @@ import { z } from "zod";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { scheduleDerivatives } from "../../lib/derivatives";
 import { apiError, ErrorCode } from "../../lib/errors";
+import { logEvent } from "../../lib/events";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
+import { parseSrtToPlainText } from "../../lib/srt";
 import {
   addSegment,
   createVideo,
@@ -17,6 +19,7 @@ import {
   listVideosPaginated,
   setVideoStatus,
   updateVideo,
+  upsertTranscript,
   type Video,
 } from "../../lib/store";
 import { absoluteUrl, urlsForSlug } from "../../lib/url";
@@ -228,6 +231,50 @@ videos.post("/:id/complete", async (c) => {
     `[complete] ${video.slug} -> ${path} (status=${nextStatus}, missing=${missing.length})`,
   );
   return c.json({ path, url, slug: video.slug, missing });
+});
+
+// Upload a transcript (SRT or VTT). Writes the raw file to
+// data/<id>/derivatives/captions.srt, parses to plain text, and upserts
+// into video_transcripts + FTS. Idempotent — re-uploading replaces.
+// 5 MB limit — generous for text transcripts.
+videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
+  const { id } = c.req.param();
+  const video = await getVideo(id);
+  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+
+  const body = await c.req.text();
+  if (!body.trim()) {
+    return apiError(c, 400, "Empty transcript body", ErrorCode.VALIDATION_ERROR);
+  }
+
+  // Detect format from content or content-type header.
+  const contentType = c.req.header("content-type") ?? "";
+  const isVtt = contentType.includes("text/vtt") || body.trimStart().startsWith("WEBVTT");
+  const format = isVtt ? "vtt" : "srt";
+  const extension = isVtt ? "captions.vtt" : "captions.srt";
+
+  // Write to derivatives/ atomically (tmp → rename).
+  const derivDir = join(DATA_DIR, id, "derivatives");
+  const { mkdir } = await import("fs/promises");
+  await mkdir(derivDir, { recursive: true });
+  const tmpPath = join(derivDir, `${extension}.tmp`);
+  const finalPath = join(derivDir, extension);
+  await Bun.write(tmpPath, body);
+  const { rename } = await import("fs/promises");
+  await rename(tmpPath, finalPath);
+
+  // Parse to plain text and upsert into DB + FTS.
+  const plainText = parseSrtToPlainText(body);
+  await upsertTranscript(id, format, plainText);
+  await logEvent(id, "transcript_uploaded", {
+    format,
+    wordCount: plainText.split(/\s+/).filter(Boolean).length,
+  });
+
+  console.log(
+    `[transcript] ${id} (${format}, ${plainText.split(/\s+/).filter(Boolean).length} words)`,
+  );
+  return c.json({ ok: true });
 });
 
 // Cancel/delete a recording. Only allowed for non-complete videos — once a

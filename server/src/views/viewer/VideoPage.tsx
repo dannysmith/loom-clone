@@ -11,6 +11,7 @@ type Props = {
   video: Video;
   src: string;
   poster: string | null;
+  captionsUrl: string | null;
   canonicalUrl: string;
   posterAbsolute: string | null;
   embedAbsolute: string;
@@ -21,6 +22,7 @@ export function VideoPage({
   video,
   src,
   poster,
+  captionsUrl,
   canonicalUrl,
   posterAbsolute,
   embedAbsolute,
@@ -132,7 +134,18 @@ export function VideoPage({
       )}
 
       <media-player src={src} poster={poster ?? undefined} playsinline>
-        <media-provider />
+        <media-provider>
+          {captionsUrl && (
+            <track
+              src={captionsUrl}
+              kind="subtitles"
+              srclang="en"
+              label="English"
+              type="srt"
+              default
+            />
+          )}
+        </media-provider>
         <media-video-layout thumbnails={`/${video.slug}/storyboard.vtt`} />
       </media-player>
 

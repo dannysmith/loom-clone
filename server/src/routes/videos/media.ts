@@ -73,6 +73,30 @@ media.get("/:slug/storyboard.vtt", async (c) => {
   return c.text(rewritten, 200, { "Content-Type": "text/vtt" });
 });
 
+media.get("/:slug/captions.srt", async (c) => {
+  const { slug } = c.req.param();
+  const video = await resolveForMedia(slug);
+  if (!video) return c.text("Not found", 404);
+  const filePath = join(DATA_DIR, video.id, "derivatives", "captions.srt");
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) return c.text("Not found", 404);
+  c.header("Cache-Control", "public, max-age=3600");
+  c.header("Content-Type", "application/x-subrip");
+  return c.body(await file.text());
+});
+
+media.get("/:slug/captions.vtt", async (c) => {
+  const { slug } = c.req.param();
+  const video = await resolveForMedia(slug);
+  if (!video) return c.text("Not found", 404);
+  const filePath = join(DATA_DIR, video.id, "derivatives", "captions.vtt");
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) return c.text("Not found", 404);
+  c.header("Cache-Control", "public, max-age=3600");
+  c.header("Content-Type", "text/vtt");
+  return c.body(await file.text());
+});
+
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file
 // handler because Hono can't separate `:slug` from `.mp4` as param + literal.
 export async function handleMp4Redirect(c: Context, slug: string): Promise<Response> {

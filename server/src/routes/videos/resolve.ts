@@ -5,14 +5,20 @@ import { urlsForSlug, type VideoUrls } from "../../lib/url";
 // Checks which derivatives exist on disk so the viewer can pick the best
 // source (MP4 when ready, HLS fallback during healing) without any client
 // state. Shared between the video page and embed page.
-async function derivativeFlags(videoId: string): Promise<{ hasMp4: boolean; hasThumb: boolean }> {
+async function derivativeFlags(videoId: string): Promise<{
+  hasMp4: boolean;
+  hasThumb: boolean;
+  hasCaptions: boolean;
+}> {
   const mp4Path = join(DATA_DIR, videoId, "derivatives", "source.mp4");
   const thumbPath = join(DATA_DIR, videoId, "derivatives", "thumbnail.jpg");
-  const [hasMp4, hasThumb] = await Promise.all([
+  const captionsPath = join(DATA_DIR, videoId, "derivatives", "captions.srt");
+  const [hasMp4, hasThumb, hasCaptions] = await Promise.all([
     Bun.file(mp4Path).exists(),
     Bun.file(thumbPath).exists(),
+    Bun.file(captionsPath).exists(),
   ]);
-  return { hasMp4, hasThumb };
+  return { hasMp4, hasThumb, hasCaptions };
 }
 
 // Resolved video data ready for viewer rendering.
@@ -21,6 +27,7 @@ export type ViewerVideo = {
   urls: VideoUrls;
   src: string;
   poster: string | null;
+  captionsUrl: string | null;
 };
 
 // Result of resolving a slug for viewer-facing routes:
@@ -42,7 +49,7 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
   }
 
   const { video } = resolved;
-  const { hasMp4, hasThumb } = await derivativeFlags(video.id);
+  const { hasMp4, hasThumb, hasCaptions } = await derivativeFlags(video.id);
   const urls = urlsForSlug(video.slug);
 
   return {
@@ -50,5 +57,6 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     urls,
     src: hasMp4 ? urls.raw : urls.hls,
     poster: hasThumb ? urls.poster : null,
+    captionsUrl: hasCaptions ? `/${video.slug}/captions.srt` : null,
   };
 }

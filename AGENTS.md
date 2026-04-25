@@ -79,9 +79,9 @@ Direct commands (for reference or when you need different flags):
 │   ├── LoomClone/                        # macOS menubar app
 │   │   ├── App/                          #   coordinator, app entry, Settings scene
 │   │   ├── Capture/                      #   screen, camera, mic capture managers
-│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, APIKeyStore, APIKeyStatus
+│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, APIKeyStore, APIKeyStatus, TranscriptionModelStatus
 │   │   ├── Models/                       #   recording timeline, presets, modes
-│   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, APIClient
+│   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, TranscribeAgent, APIClient
 │   │   └── UI/                           #   SwiftUI views, overlay window, popover, SettingsView
 │   ├── TestHarness/                      # diagnostic tool (separate Xcode target)
 │   │   ├── Scripts/                      #   tier runner scripts + test-configs/

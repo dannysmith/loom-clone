@@ -20,10 +20,15 @@ enum AppEnvironment {
         static let appSupportSubdirectory = "LoomClone"
     #endif
 
+    /// App support root, isolated per build configuration.
+    static var appSupportDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent(appSupportSubdirectory)
+    }
+
     /// Base recordings directory, isolated per build configuration.
     static var recordingsDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("\(appSupportSubdirectory)/recordings")
+        appSupportDirectory.appendingPathComponent("recordings")
     }
 
     /// Shared UserDefaults suite — all app preferences go here.

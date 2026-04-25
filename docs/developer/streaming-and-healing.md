@@ -23,7 +23,9 @@ Two principles drive the design:
 | `screen.mov`     | During recording if a display was selected     | Raw screen master, ProRes 422 Proxy. Safety net for future re-composition                                           |
 | `camera.mp4`     | During recording if a camera was selected      | Raw camera master, H.264 native resolution. Includes an audio track (AAC) when mic is also selected                  |
 | `audio.m4a`      | During recording if a mic was selected         | Raw mic master, AAC                                                                                                 |
-| `.orphaned`      | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent from ever retrying this recording again                                                  |
+| `captions.srt`   | After transcription completes                  | Local backup of the generated SRT transcript                                                                        |
+| `.transcribed`   | After transcript upload succeeds               | Sentinel — TranscribeAgent skips this recording                                                                     |
+| `.orphaned`      | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent and TranscribeAgent from ever retrying this recording again                              |
 
 ### Server: `server/data/`
 
@@ -41,6 +43,7 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 | `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom |
 | `derivatives/720p.mp4`      | Same pipeline (if source > 720p)                 | Downsampled variant, libx264 CRF 23, audio copied from processed source |
 | `derivatives/1080p.mp4`     | Same pipeline (if source > 1080p)                | Downsampled variant, libx264 CRF 20, audio copied from processed source |
+| `derivatives/captions.srt`  | On `PUT /api/videos/:id/transcript`              | SRT transcript uploaded by the macOS app's TranscribeAgent after WhisperKit inference |
 | `derivatives/storyboard.jpg`| Same pipeline (if duration ≥ 60s)                | Sprite sheet of preview frames for scrubber hover thumbnails |
 | `derivatives/storyboard.vtt`| Same pipeline (if duration ≥ 60s)                | WebVTT mapping time ranges to sprite regions (`#xywh=`) for Vidstack |
 
@@ -138,11 +141,14 @@ UUIDs never appear in viewer-facing URLs. All media is served under the slug nam
 
 - Live upload queue and `/complete` call: `app/LoomClone/Pipeline/UploadActor.swift`
 - Heal work (both entry points + the core loop): `app/LoomClone/Pipeline/HealAgent.swift`
+- Transcription (WhisperKit inference, SRT gen, upload): `app/LoomClone/Pipeline/TranscribeAgent.swift`
+- Transcription model status (observable, gates all transcription): `app/LoomClone/Helpers/TranscriptionModelStatus.swift`
 - Timeline schema: `app/LoomClone/Models/RecordingTimeline.swift`
-- Segment / complete / delete routes: `server/src/routes/api/videos.ts`
+- Segment / complete / delete / transcript routes: `server/src/routes/api/videos.ts`
 - Video record persistence (DB-backed): `server/src/lib/store.ts`, schema in `server/src/db/schema.ts`
+- SRT parsing: `server/src/lib/srt.ts`
 - Playlist builder: `server/src/lib/playlist.ts`
 - Derivative generation (recipes, promise cache, ffmpeg): `server/src/lib/derivatives.ts`
-- Viewer page (MP4-vs-HLS selection): `server/src/routes/videos/page.tsx`
-- Media serving (raw, stream, poster): `server/src/routes/videos/media.ts`
+- Viewer page (MP4-vs-HLS selection, captions): `server/src/routes/videos/page.tsx`
+- Media serving (raw, stream, poster, captions): `server/src/routes/videos/media.ts`
 - URL builders: `server/src/lib/url.ts`

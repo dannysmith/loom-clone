@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { formatDate, formatDuration } from "../../lib/format";
-import { resolveSlug } from "../../lib/store";
+import { getTranscript, resolveSlug } from "../../lib/store";
 import { absoluteUrl, urlsForSlug } from "../../lib/url";
 
 // Machine-readable representations of a video for programmatic/LLM
@@ -15,6 +15,7 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
   }
   const { video } = resolved;
   const urls = urlsForSlug(video.slug);
+  const transcript = await getTranscript(video.id);
   return c.json({
     id: video.id,
     slug: video.slug,
@@ -28,6 +29,7 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
     createdAt: video.createdAt,
     updatedAt: video.updatedAt,
     completedAt: video.completedAt,
+    transcript: transcript?.plainText ?? null,
     url: absoluteUrl(urls.page),
     urls: {
       page: absoluteUrl(urls.page),
@@ -58,8 +60,8 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
   const embedUrl = absoluteUrl(`/${video.slug}/embed`);
   const jsonUrl = absoluteUrl(`/${video.slug}.json`);
 
-  // Sections joined by blank lines. Optional sections (description, meta)
-  // are only included when present, so the output stays clean either way.
+  // Sections joined by blank lines. Optional sections (description, meta,
+  // transcript) are only included when present, so the output stays clean.
   const sections: string[] = [`# ${heading}`];
   if (video.description) sections.push(video.description);
   if (meta) sections.push(meta);
@@ -74,6 +76,11 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
       `- [JSON metadata](${jsonUrl})`,
     ].join("\n"),
   );
+
+  const transcript = await getTranscript(video.id);
+  if (transcript) {
+    sections.push(`## Transcript\n\n${transcript.plainText}`);
+  }
 
   return c.text(`${sections.join("\n\n")}\n`, 200, {
     "content-type": "text/markdown; charset=utf-8",

@@ -2,10 +2,18 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } fr
 import { cp, mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
-import { slugRedirects, type Video, videoSegments, videos, videoTags } from "../db/schema";
+import {
+  slugRedirects,
+  type Video,
+  type VideoTranscript,
+  videoSegments,
+  videos,
+  videoTags,
+  videoTranscripts,
+} from "../db/schema";
 import { type EventType, logEvent } from "./events";
 import { nowIso } from "./format";
-import { searchVideoIds } from "./search";
+import { searchVideoIds, updateFtsTranscript } from "./search";
 
 export const DATA_DIR = "data";
 
@@ -794,4 +802,29 @@ function findAvailableTitle(baseTitle: string): string {
     return `${match[1]} (${Number(match[2]) + 1})`;
   }
   return `${baseTitle} (1)`;
+}
+
+// --- Transcripts ---
+
+export async function getTranscript(videoId: string): Promise<VideoTranscript | undefined> {
+  return getDb().select().from(videoTranscripts).where(eq(videoTranscripts.videoId, videoId)).get();
+}
+
+// Upserts a transcript record and updates the FTS index. Idempotent —
+// re-uploading replaces the previous transcript.
+export async function upsertTranscript(
+  videoId: string,
+  format: string,
+  plainText: string,
+): Promise<void> {
+  const wordCount = plainText.split(/\s+/).filter(Boolean).length;
+  const now = nowIso();
+  await getDb()
+    .insert(videoTranscripts)
+    .values({ videoId, format, plainText, wordCount, createdAt: now })
+    .onConflictDoUpdate({
+      target: videoTranscripts.videoId,
+      set: { format, plainText, wordCount, createdAt: now },
+    });
+  updateFtsTranscript(videoId, plainText);
 }

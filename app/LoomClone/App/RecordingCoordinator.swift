@@ -218,6 +218,10 @@ final class RecordingCoordinator {
     /// app lifetime (startup scan + post-stop handoff).
     var healAgent: HealAgent?
 
+    /// Set by `AppDelegate` at launch. Runs Whisper transcription in the
+    /// background after recording completes, uploads SRT to the server.
+    var transcribeAgent: TranscribeAgent?
+
     // MARK: - Pipeline
 
     private var recordingActor: RecordingActor?
@@ -520,6 +524,15 @@ final class RecordingCoordinator {
                 )
             }
 
+            // Hand off to TranscribeAgent. Fire-and-forget — runs Whisper
+            // in the background and uploads the SRT when done.
+            if let result, let transcribe = self.transcribeAgent {
+                transcribe.scheduleTranscription(
+                    videoId: result.videoId,
+                    localDir: result.localDir
+                )
+            }
+
             try? await Task.sleep(for: .seconds(8))
             if self.state == .stopped {
                 self.state = .idle
@@ -726,6 +739,13 @@ final class RecordingCoordinator {
                     localDir: result.localDir,
                     timelineData: result.timelineData,
                     missing: result.missing
+                )
+            }
+
+            if let result, let transcribe = self.transcribeAgent {
+                transcribe.scheduleTranscription(
+                    videoId: result.videoId,
+                    localDir: result.localDir
                 )
             }
 

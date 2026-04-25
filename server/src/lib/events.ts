@@ -21,7 +21,8 @@ export type EventType =
   | "uploaded"
   | "thumbnail_promoted"
   | "thumbnail_uploaded"
-  | "derivatives_ready";
+  | "derivatives_ready"
+  | "transcript_uploaded";
 
 // Returns all events for a video, oldest first. The `data` field is raw
 // JSON text — callers parse it as needed for display.

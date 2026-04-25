@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Settings window content. Manages server URL and API key configuration.
-/// Generate a key on the server with `bun run keys:create <name>` and paste it here.
+/// Settings window content. Manages server URL, API key, and transcription model.
 struct SettingsView: View {
     @State private var serverURL: String = AppEnvironment.serverURL
     @State private var keyText: String = ""
     @State private var status: SaveStatus = .idle
+    var transcribeAgent: TranscribeAgent?
 
     private enum SaveStatus: Equatable {
         case idle
@@ -90,10 +90,12 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            TranscriptionModelSection(transcribeAgent: transcribeAgent)
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 520, height: 340)
+        .frame(width: 520, height: 420)
     }
 
     private var trimmedKey: String {
@@ -148,6 +150,70 @@ struct SettingsView: View {
             status = .cleared
         } catch {
             status = .error("Clear failed: \(error)")
+        }
+    }
+}
+
+/// Leaf subview for the transcription model section. Reads from
+/// TranscriptionModelStatus in its own observation scope so changes
+/// don't trigger a full SettingsView re-render.
+private struct TranscriptionModelSection: View {
+    let transcribeAgent: TranscribeAgent?
+    private var modelStatus: TranscriptionModelStatus {
+        .shared
+    }
+
+    var body: some View {
+        Section {
+            HStack {
+                switch modelStatus.state {
+                case .notDownloaded:
+                    Label("Not downloaded", systemImage: "arrow.down.circle")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Download") {
+                        guard let agent = transcribeAgent else { return }
+                        Task { await agent.downloadModel() }
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                case .downloading:
+                    Label("Downloading…", systemImage: "arrow.down.circle.dotted")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.small)
+
+                case .ready:
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("Remove", role: .destructive) {
+                        modelStatus.deleteModel()
+                    }
+
+                case let .failed(message):
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("Retry") {
+                        guard let agent = transcribeAgent else { return }
+                        Task { await agent.downloadModel() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        } header: {
+            Text("Transcription")
+        } footer: {
+            Text(
+                "Downloads the Whisper large-v3-turbo model (~626 MB). Recordings are transcribed automatically after this model is installed."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

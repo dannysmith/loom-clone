@@ -7,18 +7,17 @@ How the macOS app captures, composites, encodes, and streams video. For what hap
 Four actors, each owning one concern, orchestrated by a coordinator on the main actor:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│   Screen    │     │   Camera    │     │  Microphone  │
-│  Capture    │     │  Capture    │     │   Capture    │
-└──────┬──────┘     └──────┬──────┘     └──────┬───────┘
-       │                   │                    │
-       ▼                   ▼                    ▼
-┌───────────────────────────────────────────────────────┐
-│            RecordingActor (orchestrator)               │
-│   frame caches · metronome · recording clock · pause  │
-│   raw safety-net writers (screen.mov, camera.mp4,     │
-│   audio.m4a)                                          │
-└───────────┬───────────────────────────┬───────────────┘
+┌─────────────┐     ┌─────────────────────┐     ┌──────────────┐
+│   Screen    │     │  Camera + Mic       │     │  Microphone  │
+│  Capture    │     │  (shared session)   │     │  (standalone)│
+└──────┬──────┘     └──────┬──────────────┘     └──────┬───────┘
+       │                   │ video + audio              │ audio
+       ▼                   ▼                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│            RecordingActor (orchestrator)                       │
+│   frame caches · metronome · recording clock · pause          │
+│   raw safety-net writers (screen.mov, camera.mp4, audio.m4a)  │
+└───────────┬───────────────────────────┬───────────────────────┘
             │                           │
             ▼                           ▼
 ┌───────────────────┐          ┌────────────────┐
@@ -43,7 +42,7 @@ All timestamps in the system derive from hardware capture PTS — never wall clo
 
 - **Anchor:** At commit time (T=0), `recordingStartTime` is set to the most recent cached source frame's hardware capture PTS. Not `CMClockGetTime`, not `Date()`.
 - **Elapsed time formula:** `(sampleCaptureTime - recordingStartTime) - pauseAccumulator`
-- **Why it matters:** Audio samples arrive from the mic with their own hardware PTS. Video frames arrive from the screen/camera with theirs. Both are relative to the same hardware clock. By anchoring to a source frame's PTS rather than a wall-clock snapshot, the start-of-stream for both tracks is inherently aligned.
+- **Why it matters:** Audio samples arrive from the mic with their own hardware PTS. Video frames arrive from the screen/camera with theirs. When camera and mic are both selected, they share a single `AVCaptureSession` (and therefore a single `synchronizationClock`), so their PTS values are directly comparable with sub-millisecond accuracy. When no camera is selected, the standalone mic session's PTS is still on the host time clock. By anchoring to a source frame's PTS rather than a wall-clock snapshot, the start-of-stream for both tracks is inherently aligned.
 
 ## Two-phase start
 
@@ -169,10 +168,12 @@ Three parallel writers run alongside the composited HLS pipeline:
 | Writer | Codec                       | File         | Purpose                       |
 | ------ | --------------------------- | ------------ | ----------------------------- |
 | Screen | ProRes 422 Proxy (hardware) | `screen.mov` | Full-resolution screen master |
-| Camera | H.264 High @ 12 Mbps        | `camera.mp4` | Full-resolution camera master |
+| Camera | H.264 High @ 12 Mbps + AAC  | `camera.mp4` | Full-resolution camera master |
 | Audio  | AAC-LC 192 kbps             | `audio.m4a`  | Full-quality mic master       |
 
 These write at native resolution and rate (not 30fps, not composited). They exist so that if the HLS path fails or the composition needs re-rendering later, the source material is never lost. They are NOT what viewers watch — the composited HLS segments (and the server's MP4 derivative) are the viewer-facing output.
+
+When camera and mic are both selected, `camera.mp4` includes an audio track from the shared session's mic (making it a self-contained A/V file for manual recovery). The standalone `audio.m4a` is always written separately regardless — it comes from the standalone mic session and serves as an independent safety net.
 
 Raw writers are retimed by the same pause accumulator as the main pipeline, so their timelines align with the composited output.
 
@@ -220,7 +221,7 @@ The timeline serves three purposes: debugging (correlate events with segment bou
 | Mode enum                                  | `Models/RecordingMode.swift`                        |
 | Coordinator (UI ↔ pipeline)                | `App/RecordingCoordinator.swift`                    |
 | Screen capture                             | `Capture/ScreenCaptureManager.swift`                |
-| Camera capture                             | `Capture/CameraCaptureManager.swift`                |
-| Microphone capture                         | `Capture/MicrophoneCaptureManager.swift`            |
+| Camera capture (+ shared mic session)      | `Capture/CameraCaptureManager.swift`                |
+| Microphone capture (standalone session)    | `Capture/MicrophoneCaptureManager.swift`            |
 | Circle mask for PiP                        | `Helpers/CircleMaskGenerator.swift`                 |
 | Timestamp adjuster (audio priming + pause) | `Helpers/TimestampAdjuster.swift`                   |

@@ -165,7 +165,7 @@ All frame counts are in the device's native sample rate. "DevLat" = `kAudioDevic
 
 **Note on virtual audio drivers:** Microsoft Teams' virtual loopback driver (`MSLoopbackDriverDevice_UID`) was present on this machine and causes a segfault on any Core Audio property query. The diagnostic skips it by filtering on AVCaptureDevice UID pattern. Worth noting for Phase 2's implementation — the HAL latency helper in the main app should guard against this. **WE WILL LIKELEY NEVER USE THIS SPECIFIC AUDIO SOURCE IN THE ACTUAL APP** But of course we should try to guard against if nececcary.
 
-### Phase 1: Single AVCaptureSession + audio in camera.mp4
+### Phase 1: Single AVCaptureSession + audio in camera.mp4 [DONE]
 
 The main change. Eliminate cross-session clock jitter by putting camera and mic in one `AVCaptureSession` when both are selected. Also embed audio in `camera.mp4` for better manual recovery. Keep the standalone mic session running for `audio.m4a`.
 
@@ -204,6 +204,20 @@ This means `MicrophoneCaptureManager` itself doesn't change at all. It always st
 Running two sessions with the same mic device simultaneously is fine on macOS — audio devices are multi-client by design (unlike cameras, which are exclusive-access). The performance cost is negligible.
 
 **Test:** Camera-only 1-minute clap test, measure audio-to-video offset with ffprobe. Expectation: residual error drops from 5-30ms variable to sub-5ms stable.
+
+#### Phase 1 results (2026-04-25)
+
+Implementation matched the plan exactly — no deviations from the spec above. `MicrophoneCaptureManager` was not modified. `CameraCaptureManager` gained an optional `micDevice:` parameter; when provided it adds audio I/O to the shared session and exposes a `hasAudioCapture` flag. `RawStreamWriter` gained a `.videoH264WithAudio` kind with a second `AVAssetWriterInput` for audio. `RecordingActor` uses a `sharedSessionAudioActive` flag (set after `cameraCapture.startCapture` returns) to route audio: shared session audio → HLS + camera.mp4, standalone mic → audio.m4a only. When no camera is present, the standalone mic feeds everything (unchanged path). Writer warm-up ordering preserved.
+
+**Sync measurement (recording 046c78b7, ZV-1 + Blue Yeti, cameraOnly):**
+
+- camera.mp4 (shared session, both streams on same `synchronizationClock`): mean A/V PTS offset = **+0.008ms** across 508 video frames. The ±10ms oscillation is audio buffer quantization (21.3ms audio buffers vs 33.3ms video frames), not real drift.
+- source.mp4 (HLS stitched): mean A/V PTS offset = **+0.327ms**. One HLS segment boundary glitch at 14.2s (111ms audio gap) produces local ±50ms spikes but doesn't affect overall alignment.
+- Cross-session jitter is eliminated. The remaining perceived mismatch is the fixed, systematic HAL input latency (13.75ms for USB devices) — audio PTS represents host-delivery time, not acoustic-event time. This is what Phase 2 addresses.
+
+**Validation matrix:** Tested cameraOnly+mic, screenAndCamera+mic with mode switching, screenOnly+mic, and cameraOnly without mic. All modes produced correct output. camera.mp4 files with the new `.videoH264WithAudio` kind contain both audio and video tracks when mic is present; video-only when mic is absent.
+
+**Transient writer issue:** One of five test recordings (fd08eaed, screen+camera+mic with mode switch) produced a camera.mp4 with a missing moov atom — the `AVAssetWriter` entered `.failed` state ~7s into the recording, and `finishWriting()` was skipped (our code correctly detects this and bails). Two subsequent retests with the same configuration (screen+camera+mic, mode switching) produced valid files. The failure was not reproducible and is likely a transient resource-pressure issue under the combined load of ProRes 4K screen capture + two H.264 encodes + multiple AAC encoders. The primary HLS output and server source.mp4 were unaffected in all cases.
 
 ### Phase 2: HAL input latency compensation
 

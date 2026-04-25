@@ -21,7 +21,7 @@ Two principles drive the design:
 | `seg_NNN.m4s`    | Every ~4s during recording                     | Composited HLS media segment (what viewers watch)                                                                   |
 | `recording.json` | At stop, again after each heal                 | Structured timeline — session info, events, per-segment `uploaded` flag. Schema in `Models/RecordingTimeline.swift` |
 | `screen.mov`     | During recording if a display was selected     | Raw screen master, ProRes 422 Proxy. Safety net for future re-composition                                           |
-| `camera.mp4`     | During recording if a camera was selected      | Raw camera master, H.264 native resolution                                                                          |
+| `camera.mp4`     | During recording if a camera was selected      | Raw camera master, H.264 native resolution. Includes an audio track (AAC) when mic is also selected                  |
 | `audio.m4a`      | During recording if a mic was selected         | Raw mic master, AAC                                                                                                 |
 | `.orphaned`      | When a heal attempt gets a 404 from the server | Sentinel — stops HealAgent from ever retrying this recording again                                                  |
 

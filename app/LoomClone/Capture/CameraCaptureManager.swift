@@ -4,9 +4,18 @@ import Foundation
 
 final class CameraCaptureManager: NSObject, @unchecked Sendable {
     var onCameraFrame: (@Sendable (CMSampleBuffer) -> Void)?
+    var onAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
 
     private var session: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "com.loomclone.camera-capture", qos: .userInteractive)
+    private let audioCaptureQueue = DispatchQueue(label: "com.loomclone.camera-audio-capture", qos: .userInteractive)
+    private var audioOutput: AVCaptureAudioDataOutput?
+
+    /// True when this session includes a mic audio input/output alongside
+    /// the camera video. Set during `startCapture` when a `micDevice` is
+    /// provided and successfully added to the session. Used by RecordingActor
+    /// to decide audio routing (shared session vs standalone mic).
+    private(set) var hasAudioCapture: Bool = false
 
     /// Minimum acceptable max frame rate when selecting a format. 29.0 fps
     /// with the tolerance lets NTSC cameras through (they advertise 29.97 =
@@ -64,7 +73,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// camera writer's dimensions.
     private(set) var nativePixelSize: CGSize = .zero
 
-    func startCapture(device: AVCaptureDevice, maxHeight: Int = Int.max) async {
+    func startCapture(device: AVCaptureDevice, maxHeight: Int = Int.max, micDevice: AVCaptureDevice? = nil) async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         guard granted else {
             print("[camera] Permission denied")
@@ -140,6 +149,29 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             session.addOutput(output)
         }
 
+        // Optional mic audio: when a mic device is provided, add it to this
+        // session so audio and video share a single synchronizationClock.
+        // This eliminates the cross-session clock jitter (5-30ms) that caused
+        // lip-sync issues in cameraOnly recordings.
+        if let micDevice {
+            do {
+                let audioInput = try AVCaptureDeviceInput(device: micDevice)
+                if session.canAddInput(audioInput) {
+                    session.addInput(audioInput)
+                    let audioOut = AVCaptureAudioDataOutput()
+                    audioOut.setSampleBufferDelegate(self, queue: audioCaptureQueue)
+                    if session.canAddOutput(audioOut) {
+                        session.addOutput(audioOut)
+                        audioOutput = audioOut
+                        hasAudioCapture = true
+                        print("[camera] Added mic to shared session: \(micDevice.localizedName)")
+                    }
+                }
+            } catch {
+                print("[camera] Failed to add mic to shared session: \(error) — standalone mic will be used")
+            }
+        }
+
         session.commitConfiguration()
         self.session = session
 
@@ -196,20 +228,28 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             }
         }
         self.session = nil
+        self.audioOutput = nil
+        self.hasAudioCapture = false
         print("[camera] Capture stopped")
     }
 }
 
-extension CameraCaptureManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension CameraCaptureManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(
-        _: AVCaptureOutput,
+        _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
         from _: AVCaptureConnection
     ) {
-        // Tag the pixel buffer with explicit Rec. 709 colour metadata before
-        // forwarding. Many USB cameras (ZV-1, generic
-        // capture cards) deliver buffers without YCbCrMatrix / TransferFunction
-        // / ColorPrimaries attachments — CIContext then runs an expensive
+        // Audio from the shared session's mic — route to the audio callback.
+        if output === audioOutput {
+            onAudioSample?(sampleBuffer)
+            return
+        }
+
+        // Video: tag the pixel buffer with explicit Rec. 709 colour metadata
+        // before forwarding. Many USB cameras (ZV-1, generic capture cards)
+        // deliver buffers without YCbCrMatrix / TransferFunction /
+        // ColorPrimaries attachments — CIContext then runs an expensive
         // multi-stage colourspace conversion chain on every frame because it
         // can't know the source space. Rec. 709 is the correct default for
         // SDR consumer cameras (Apple TN2227, QA1839). `.shouldPropagate` so

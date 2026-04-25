@@ -45,6 +45,12 @@ actor RecordingActor {
     var isRecording = false
     var localSavePath: URL?
 
+    /// True when the camera's AVCaptureSession includes the mic, so audio
+    /// samples from the shared session feed the HLS writer (instead of the
+    /// standalone mic). Set during `startCaptureSources` based on whether
+    /// CameraCaptureManager successfully added the mic to its session.
+    var sharedSessionAudioActive = false
+
     /// Structured account of the recording — metadata + events + segments.
     /// Written to `recording.json` alongside the segments and uploaded to the
     /// server as part of the complete payload.

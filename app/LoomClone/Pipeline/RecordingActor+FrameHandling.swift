@@ -41,8 +41,11 @@ extension RecordingActor {
         }
     }
 
-    /// Audio samples go to the HLS writer (via TimestampAdjuster) and the
-    /// raw audio writer (via RecordingActor's pause accumulator).
+    /// Audio samples go to the HLS writer (via TimestampAdjuster) and a raw
+    /// writer. When `sharedSessionAudioActive` is true this is called from
+    /// the camera's shared session and the raw copy goes to camera.mp4's
+    /// audio track. Otherwise it's called from the standalone mic and the
+    /// raw copy goes to audio.m4a.
     func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
         audioHasArrived = true
         guard isRecording else { return }
@@ -76,7 +79,9 @@ extension RecordingActor {
 
         // Raw audio path: independent retiming using RecordingActor's
         // pauseAccumulator (no priming offset — that's an HLS-only concern).
-        if let audioRawWriter, pauseStartHostTime == nil {
+        // Routes to camera.mp4 audio when shared session is active, or
+        // audio.m4a when the standalone mic feeds the HLS writer.
+        if pauseStartHostTime == nil {
             let rawAudioPTS = relativePTS - pauseAccumulator
             if rawAudioPTS >= .zero {
                 var rawTiming = CMSampleTimingInfo(
@@ -93,10 +98,36 @@ extension RecordingActor {
                     sampleBufferOut: &rawOut
                 )
                 if let rawOut {
-                    await audioRawWriter.append(rawOut)
+                    if sharedSessionAudioActive {
+                        await cameraRawWriter?.appendAudio(rawOut)
+                    } else {
+                        await audioRawWriter?.append(rawOut)
+                    }
                 }
             }
         }
+    }
+
+    /// Audio from the standalone mic session. When the camera's shared session
+    /// is the primary audio source for HLS, standalone mic audio only feeds
+    /// audio.m4a. When no camera is present, delegates to `handleAudioSample`
+    /// which feeds both HLS and audio.m4a.
+    func handleMicAudioSample(_ sampleBuffer: CMSampleBuffer) async {
+        if sharedSessionAudioActive {
+            await handleStandaloneAudioSample(sampleBuffer)
+        } else {
+            await handleAudioSample(sampleBuffer)
+        }
+    }
+
+    /// Audio that only goes to the standalone audio.m4a raw writer. Used for
+    /// the standalone mic session when camera + mic share a session (so the
+    /// shared session's audio is the one feeding HLS).
+    func handleStandaloneAudioSample(_ sampleBuffer: CMSampleBuffer) async {
+        audioHasArrived = true
+        guard let audioRawWriter,
+              let retimed = retimedSampleForRawWriter(sampleBuffer) else { return }
+        await audioRawWriter.append(retimed)
     }
 
     // MARK: - Metronome Frame Emission

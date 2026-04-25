@@ -25,6 +25,11 @@ actor RawStreamWriter {
         /// 2 s keyframe interval.
         case videoH264(width: Int, height: Int, bitrate: Int)
 
+        /// H.264 video + AAC audio in a single MP4. Used for the raw camera
+        /// writer when camera and mic share an AVCaptureSession, so camera.mp4
+        /// contains both tracks for manual recovery.
+        case videoH264WithAudio(width: Int, height: Int, bitrate: Int, audioBitrate: Int, sampleRate: Int, channels: Int)
+
         /// ProRes 422 Proxy via the hardware ProRes engine — a separate
         /// silicon block on M*Pro / M*Max chips, distinct from the H.264
         /// engine that handles the composited HLS writer and the raw camera
@@ -43,6 +48,7 @@ actor RawStreamWriter {
 
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?
     private var hasStartedSession = false
     private var didFinish = false
 
@@ -59,7 +65,7 @@ actor RawStreamWriter {
         try? FileManager.default.removeItem(at: url)
 
         let fileType: AVFileType = switch kind {
-        case .videoH264: .mp4
+        case .videoH264, .videoH264WithAudio: .mp4
         case .videoProRes: .mov
         case .audio: .m4a
         }
@@ -83,6 +89,29 @@ actor RawStreamWriter {
                 AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate) as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+
+        case let .videoH264WithAudio(width, height, bitrate, audioBitrate, sampleRate, channels):
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
+                AVVideoEncoderSpecificationKey: H264Settings.encoderSpecification as [String: Any],
+                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate) as [String: Any],
+            ]
+            input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: audioBitrate,
+            ]
+            let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            aInput.expectsMediaDataInRealTime = true
+            if writer.canAdd(aInput) {
+                writer.add(aInput)
+                self.audioInput = aInput
+            }
 
         case let .videoProRes(width, height):
             // ProRes 422 Proxy via the hardware ProRes engine. No
@@ -145,6 +174,15 @@ actor RawStreamWriter {
         input.append(sampleBuffer)
     }
 
+    /// Append an audio sample to the audio track. Only functional for the
+    /// `.videoH264WithAudio` kind — no-op otherwise.
+    func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+        guard hasStartedSession,
+              let audioInput,
+              audioInput.isReadyForMoreMediaData else { return }
+        audioInput.append(sampleBuffer)
+    }
+
     // MARK: - Finish
 
     func finish() async {
@@ -160,10 +198,12 @@ actor RawStreamWriter {
             try? FileManager.default.removeItem(at: url)
             self.writer = nil
             self.input = nil
+            self.audioInput = nil
             return
         }
 
         input?.markAsFinished()
+        audioInput?.markAsFinished()
 
         // CRITICAL: AVAssetWriter.finishWriting does NOT call its completion
         // handler when the writer is in .failed status (Apple docs: "If the
@@ -174,6 +214,7 @@ actor RawStreamWriter {
             print("[raw-writer] \(url.lastPathComponent) FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
             self.writer = nil
             self.input = nil
+            self.audioInput = nil
             return
         }
 
@@ -189,6 +230,7 @@ actor RawStreamWriter {
 
         self.writer = nil
         self.input = nil
+        self.audioInput = nil
     }
 
     // MARK: - File metadata

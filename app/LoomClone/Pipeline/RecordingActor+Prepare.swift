@@ -223,6 +223,7 @@ extension RecordingActor {
         self.mode = mode
         self.preset = preset
         isRecording = false
+        sharedSessionAudioActive = false
         recordingStartTime = nil
         pauseAccumulator = .zero
         pauseStartHostTime = nil
@@ -308,12 +309,28 @@ extension RecordingActor {
                 self.onCameraSampleForOverlay?(buffer)
                 Task { await self.handleCameraFrame(buffer) }
             }
+
+            // When camera + mic share a session, the shared session's audio
+            // feeds the HLS writer directly (eliminating cross-session clock
+            // jitter). This callback only fires if startCapture added the mic
+            // to the camera session successfully.
+            if hasMicrophone {
+                cameraCapture.onAudioSample = { [weak self] buffer in
+                    guard let self else { return }
+                    Task { await self.handleAudioSample(buffer) }
+                }
+            }
         }
 
         if hasMicrophone {
+            // handleMicAudioSample checks sharedSessionAudioActive at call
+            // time: when the camera's shared session is the primary audio
+            // source, standalone mic audio only feeds audio.m4a. When no
+            // camera is present, it delegates to handleAudioSample (HLS +
+            // audio.m4a).
             micCapture.onAudioSample = { [weak self] buffer in
                 guard let self else { return }
-                Task { await self.handleAudioSample(buffer) }
+                Task { await self.handleMicAudioSample(buffer) }
             }
         }
     }
@@ -339,8 +356,9 @@ extension RecordingActor {
         }
 
         if let camera {
-            await cameraCapture.startCapture(device: camera, maxHeight: preset.height)
-            await configureCameraRawWriter()
+            await cameraCapture.startCapture(device: camera, maxHeight: preset.height, micDevice: microphone)
+            sharedSessionAudioActive = cameraCapture.hasAudioCapture
+            await configureCameraRawWriter(withAudio: sharedSessionAudioActive)
         }
 
         if let microphone {
@@ -359,8 +377,10 @@ extension RecordingActor {
     }
 
     /// Configure the camera raw writer using actual delivered dimensions
-    /// from the running capture session.
-    private func configureCameraRawWriter() async {
+    /// from the running capture session. When `withAudio` is true, the
+    /// writer includes an audio track so camera.mp4 is a self-contained
+    /// A/V file for manual recovery.
+    private func configureCameraRawWriter(withAudio: Bool = false) async {
         guard let localDir = localSavePath else { return }
         let nativeSize = cameraCapture.nativePixelSize
         let width = Int(nativeSize.width)
@@ -371,12 +391,20 @@ extension RecordingActor {
         }
         let bitrate = 12_000_000
         let url = localDir.appendingPathComponent("camera.mp4")
-        let w = RawStreamWriter(url: url, kind: .videoH264(width: width, height: height, bitrate: bitrate))
+        let kind: RawStreamWriter.Kind = if withAudio {
+            .videoH264WithAudio(
+                width: width, height: height, bitrate: bitrate,
+                audioBitrate: 192_000, sampleRate: 48000, channels: 2
+            )
+        } else {
+            .videoH264(width: width, height: height, bitrate: bitrate)
+        }
+        let w = RawStreamWriter(url: url, kind: kind)
         do {
             try await w.configure()
             cameraRawWriter = w
             rawCameraDims = (width, height, bitrate)
-            print("[recording] Raw camera writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps")
+            print("[recording] Raw camera writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps\(withAudio ? " + audio" : "")")
         } catch {
             print("[recording] Failed to configure raw camera writer: \(error)")
         }

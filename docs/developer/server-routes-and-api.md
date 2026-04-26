@@ -183,6 +183,20 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 
 **Error** `404`: `VIDEO_NOT_FOUND`
 
+### `PUT /api/videos/:id/transcript`
+
+Upload a transcript (SRT or VTT). Idempotent — re-uploading replaces the file and re-indexes.
+
+**Body**: raw SRT or VTT text. 5 MB limit.
+
+**Content-Type**: `application/x-subrip` for SRT, `text/vtt` for VTT. Auto-detected from body prefix if header is ambiguous.
+
+**Response** `200`: `{ "ok": true }`
+
+**Errors**: `400` `VALIDATION_ERROR` (empty body) | `404` `VIDEO_NOT_FOUND`
+
+**Side effects**: writes `data/<id>/derivatives/captions.srt` (or `.vtt`), parses to plain text, upserts into `video_transcripts` table + FTS index, logs `transcript_uploaded` event.
+
 ### `DELETE /api/videos/:id`
 
 Cancel/delete a recording. Only works for non-complete videos.
@@ -197,7 +211,7 @@ All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonica
 
 ### `/:slug`
 
-HTML video page. Prefers the MP4 derivative (`/:slug/raw/source.mp4`) when present; falls back to HLS (`/:slug/stream/stream.m3u8`). Poster set from `/:slug/poster.jpg` when available. Uses Vidstack player (CDN-hosted via jsDelivr).
+HTML video page. Prefers the MP4 derivative (`/:slug/raw/source.mp4`) when present; falls back to HLS (`/:slug/stream/stream.m3u8`). Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses Vidstack player (CDN-hosted via jsDelivr).
 
 Includes below the player: title (if set), formatted duration + date, description, and attribution link.
 
@@ -233,6 +247,14 @@ Sprite sheet for scrubber hover previews. Serves `data/<id>/derivatives/storyboa
 
 WebVTT file mapping time ranges to regions in the sprite sheet via `#xywh=` spatial fragments. Vidstack uses this via the `thumbnails` attribute on `<media-video-layout>`.
 
+### `/:slug/captions.srt`
+
+SRT transcript/subtitles. Serves `data/<id>/derivatives/captions.srt`. Returns 404 until a transcript has been uploaded. `Content-Type: application/x-subrip`. Cached for 1 hour.
+
+### `/:slug/captions.vtt`
+
+VTT variant of the transcript, if the original upload was VTT format. Same behaviour as the SRT route. `Content-Type: text/vtt`.
+
 ### `/:slug.mp4`
 
 Convenience redirect. **302** to `/:slug/raw/source.mp4`. 302 (not 301) because the canonical "default raw" may change as new resolution variants are added.
@@ -246,6 +268,7 @@ JSON metadata for programmatic/LLM consumption. All URLs are absolute.
   "id": "uuid", "slug": "...", "status": "...", "visibility": "...",
   "title": "...", "description": "...", "durationSeconds": 42.5,
   "durationFormatted": "42s", "source": "recorded",
+  "transcript": "Plain text transcript or null",
   "createdAt": "ISO", "updatedAt": "ISO", "completedAt": "ISO",
   "url": "https://example.com/my-slug",
   "urls": { "page", "raw", "hls", "poster", "embed", "json", "md", "mp4" }
@@ -254,7 +277,7 @@ JSON metadata for programmatic/LLM consumption. All URLs are absolute.
 
 ### `/:slug.md`
 
-Markdown metadata. Includes heading (title or slug), description, formatted duration + date, watch link, and a "Links" section with bulleted URLs (page, MP4 download, embed, JSON). All URLs absolute.
+Markdown metadata. Includes heading (title or slug), description, formatted duration + date, watch link, and a "Links" section with bulleted URLs (page, MP4 download, embed, JSON). Includes a "Transcript" section with the full plain text when a transcript exists. All URLs absolute.
 
 ## Back-compat redirects
 
@@ -310,7 +333,7 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | GET | `/admin/login` | Login page |
 | POST | `/admin/login` | Authenticate (sets session cookie, redirects to `/admin`) |
 | POST | `/admin/logout` | Clear session, redirect to login |
-| GET | `/admin/videos/:id` | Video detail — player, metadata, event log, file browser |
+| GET | `/admin/videos/:id` | Video detail — player, metadata, tabs (events, files, transcript) |
 | GET | `/admin/upload` | Upload form |
 | POST | `/admin/upload` | Upload MP4, create video, redirect to detail page |
 | GET | `/admin/settings` | Settings — General pane |
@@ -382,7 +405,8 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | `.mp4`    | `video/mp4`                     | init segment, derivatives  |
 | `.jpg`    | `image/jpeg`                    | poster/thumbnail           |
 | `.json`   | `application/json`              | API responses, /:slug.json |
-| `.vtt`    | `text/vtt`                      | storyboard.vtt             |
+| `.vtt`    | `text/vtt`                      | storyboard.vtt, captions.vtt |
+| `.srt`    | `application/x-subrip`          | captions.srt               |
 | `.md`     | `text/markdown`                 | /:slug.md                  |
 
 ## Range support

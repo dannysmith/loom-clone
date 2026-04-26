@@ -33,14 +33,14 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 
 `server/data/<video-id>/`
 
-| File                        | Written when                                     | Purpose                                                                                                                                   |
+| File                        | Written when                                     | Purpose / lifecycle                                                                                                                       |
 | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream                                                                                     |
-| `stream.m3u8`               | After each PUT and after `/complete`             | The HLS playlist — rebuilt from the on-disk segment listing, sorted by filename                                                           |
+| `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream. **Cleaned up 10 days post-complete** (source.mp4 takes over for playback)           |
+| `stream.m3u8`               | After each PUT and after `/complete`             | The HLS playlist — rebuilt from the on-disk segment listing. **Cleaned up with segments**                                                 |
 | `recording.json`            | On `/complete` (and re-`/complete` after heal)   | Server-side copy of the client's timeline, authoritative post-upload                                                                      |
 | `derivatives/source.mp4`    | Background task after each `complete` transition | Single-file MP4 stitched from HLS, then audio-processed (denoise + loudnorm). Video track is `-c copy`; audio is re-encoded AAC 160 kbps |
 | `derivatives/thumbnail.jpg` | Same pipeline                                    | Promoted from `thumbnail-candidates/` — the best auto-selected or admin-chosen frame. ~1280px wide JPEG |
-| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom |
+| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom. **Cleaned up 10 days post-complete** |
 | `derivatives/720p.mp4`      | Same pipeline (if source > 720p)                 | Downsampled variant, libx264 CRF 23, audio copied from processed source |
 | `derivatives/1080p.mp4`     | Same pipeline (if source > 1080p)                | Downsampled variant, libx264 CRF 20, audio copied from processed source |
 | `derivatives/captions.srt`  | On `PUT /api/videos/:id/transcript`              | SRT transcript uploaded by the macOS app's TranscribeAgent after WhisperKit inference |
@@ -119,6 +119,7 @@ Properties worth keeping in mind:
 - **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one pipeline run.
 - **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites previous derivatives atomically.
 - **Failures are independent.** If audio processing fails, thumbnails and variants still run. Failures never surface to `/complete` and never invalidate the m3u8.
+- **Stale file cleanup.** A daily timer removes HLS segments (`init.mp4`, `seg_*.m4s`, `stream.m3u8`) and `thumbnail-candidates/` from videos that have been complete for >10 days and have a valid `source.mp4`. This is safe because the viewer only falls back to HLS when `source.mp4` is absent. Code: `src/lib/cleanup.ts`.
 
 ## Viewer
 

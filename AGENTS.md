@@ -2,7 +2,7 @@
 
 ## About This Project
 
-Building a personal Loom replacement — a native macOS recording app, backend server, and video delivery system. See `docs/requirements.md` for full context.
+Building a personal Loom replacement — a native macOS recording app, backend server, and video delivery system.
 
 ## What This Is
 
@@ -43,10 +43,10 @@ Three components exist today, plus a diagnostic tool:
 - `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
 - `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
 - `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm). Model choice, skip conditions, performance. Read before changing anything in the audio processing step in `derivatives.ts`.
+- `docs/developer/transcription.md` — how subtitles are generated (WhisperKit on Mac, TranscribeAgent lifecycle, model management, server-side indexing). Read before touching `TranscribeAgent`, `TranscriptionModelStatus`, or the transcript endpoint.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
-- `docs/requirements.md` — refined requirements for the whole system.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
-- `docs/archive/` — incident records and completed research audits. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
+- `docs/archive/` — incident records, completed research audits, and the original requirements doc. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
 
 ## Building & Running
 
@@ -117,8 +117,7 @@ Direct commands (for reference or when you need different flags):
 │   ├── tasks-todo/                       # active/upcoming work
 │   ├── tasks-done/                       # completed task write-ups
 │   ├── research/                         # historical: initial research (pre-prototype)
-│   ├── archive/                          # incident records, completed audits
-│   └── requirements.md                   # refined system requirements
+│   └── archive/                          # incident records, completed audits, original requirements
 ├── test-runs/                            # test harness output (gitignored except *.md summaries)
 ├── AGENTS.md                             # this file (also referenced by CLAUDE.md)
 └── CLAUDE.md                             # points at AGENTS.md

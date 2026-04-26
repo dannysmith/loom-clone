@@ -74,7 +74,7 @@ public/
 - **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.
 - **DOCTYPE**: `RootLayout` emits `<!DOCTYPE html>` via `raw()` from `hono/html`. Don't repeat it elsewhere.
 - **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
-- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module (Phase 6.4).
+- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module.
 
 **CSS**:
 
@@ -102,7 +102,7 @@ Preferences:
 ## Gotchas
 
 - **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory in `src/app.ts` is the side-effect-free entry — import that from tests, not `index.ts`.
-- **`DATA_DIR = "data"`** is relative. Tests depend on this. When deployment comes it'll likely become env-configurable; until then, don't hard-code absolute paths.
+- **`DATA_DIR = "data"`** is relative. Tests depend on this. In production the Docker bind-mount maps it to `/mnt/data/loom-clone` — don't hard-code absolute paths.
 - **Segment filename allowlist** in `routes/api/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists. Similar allowlists exist in `routes/videos/media.ts` for raw and stream routes.
 - **Derivatives are fire-and-forget.** `scheduleDerivatives(id)` returns immediately; the `/complete` response never waits on ffmpeg. Tests use `_inFlightPromise(id)` to await completion.
 - **Default queries hide trashed videos.** `getVideo` / `getVideoBySlug` / `resolveSlug` / `listVideos` all accept `{ includeTrashed: true }` to opt in. Admin-side code needs the opt-in; public routes should never use it.

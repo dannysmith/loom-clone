@@ -153,7 +153,8 @@ actor CompositionActor {
     func compositeFrame(
         screenBuffer: CVPixelBuffer?,
         cameraBuffer: CVPixelBuffer?,
-        mode: RecordingMode
+        mode: RecordingMode,
+        pipPosition: PipPosition = .bottomRight
     ) async -> Result<CVPixelBuffer, CompositionError>? {
         guard let output = outputPool.createBuffer() else {
             print("[composition] Failed to create output buffer")
@@ -192,7 +193,7 @@ actor CompositionActor {
                 break
             }
 
-            let overlay = createCircularOverlay(camera)
+            let overlay = createCircularOverlay(camera, position: pipPosition)
             composited = overlay.composited(over: screenScaled)
         }
 
@@ -337,8 +338,9 @@ actor CompositionActor {
             .transformed(by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY))
     }
 
-    /// Create a circular camera overlay positioned in the bottom-right corner.
-    private func createCircularOverlay(_ camera: CIImage) -> CIImage {
+    /// Create a circular camera overlay positioned in the given corner.
+    /// CIImage origin is bottom-left, so posY=padding means bottom edge.
+    private func createCircularOverlay(_ camera: CIImage, position: PipPosition) -> CIImage {
         let diameter = overlayDiameter
         let padding = overlayPadding
 
@@ -377,9 +379,23 @@ actor CompositionActor {
             kCIInputBackgroundImageKey: CIImage.empty(),
         ])
 
-        // Position in bottom-right corner (CIImage origin is bottom-left)
-        let posX = CGFloat(outputWidth) - diameter - padding
-        let posY = padding
+        // Position based on quadrant (CIImage origin is bottom-left)
+        let posX: CGFloat
+        let posY: CGFloat
+        switch position {
+        case .bottomRight:
+            posX = CGFloat(outputWidth) - diameter - padding
+            posY = padding
+        case .bottomLeft:
+            posX = padding
+            posY = padding
+        case .topRight:
+            posX = CGFloat(outputWidth) - diameter - padding
+            posY = CGFloat(outputHeight) - diameter - padding
+        case .topLeft:
+            posX = padding
+            posY = CGFloat(outputHeight) - diameter - padding
+        }
         return masked.transformed(by: CGAffineTransform(translationX: posX, y: posY))
     }
 }

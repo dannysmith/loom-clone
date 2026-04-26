@@ -83,6 +83,7 @@ struct RecordingTimeline: Encodable {
         let id: String
         let slug: String
         var initialMode: String
+        var initialPipPosition: String
         var startedAt: String // ISO8601, set at commit
         var endedAt: String? // ISO8601, set at stop
         var durationSeconds: Double? // logical duration (minus pauses)
@@ -190,6 +191,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
     private var sessionId: String = ""
     private var slug: String = ""
     private var initialMode: RecordingMode = .screenAndCamera
+    private var initialPipPosition: PipPosition = .bottomRight
     private var startedAt: Date?
     private var endedAt: Date?
     private var durationSeconds: Double?
@@ -215,10 +217,11 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         return f
     }()
 
-    func setSession(id: String, slug: String, initialMode: RecordingMode) {
+    func setSession(id: String, slug: String, initialMode: RecordingMode, initialPipPosition: PipPosition) {
         self.sessionId = id
         self.slug = slug
         self.initialMode = initialMode
+        self.initialPipPosition = initialPipPosition
     }
 
     func setPreset(_ preset: OutputPreset) {
@@ -284,6 +287,17 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         appendEvent(
             t: t,
             kind: "mode.switched",
+            data: [
+                "from": .string(from.rawValue),
+                "to": .string(to.rawValue),
+            ]
+        )
+    }
+
+    func recordPipPositionChanged(from: PipPosition, to: PipPosition, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "pip.position.changed",
             data: [
                 "from": .string(from.rawValue),
                 "to": .string(to.rawValue),
@@ -415,6 +429,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
                 id: sessionId,
                 slug: slug,
                 initialMode: initialMode.rawValue,
+                initialPipPosition: initialPipPosition.rawValue,
                 startedAt: startedAt.map { Self.isoFormatter.string(from: $0) } ?? "",
                 endedAt: endedAt.map { Self.isoFormatter.string(from: $0) },
                 durationSeconds: durationSeconds

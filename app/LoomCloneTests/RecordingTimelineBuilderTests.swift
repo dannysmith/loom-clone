@@ -4,7 +4,7 @@ import XCTest
 final class RecordingTimelineBuilderTests: XCTestCase {
     private func makeBuilder() -> RecordingTimelineBuilder {
         let b = RecordingTimelineBuilder()
-        b.setSession(id: "test-id", slug: "test-slug", initialMode: .screenAndCamera)
+        b.setSession(id: "test-id", slug: "test-slug", initialMode: .screenAndCamera, initialPipPosition: .bottomRight)
         b.setPreset(.p1080)
         b.setInputs(
             display: .init(id: 1, width: 3840, height: 2160),

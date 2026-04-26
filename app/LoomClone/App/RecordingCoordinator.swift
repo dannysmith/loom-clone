@@ -392,6 +392,14 @@ final class RecordingCoordinator {
                 overlay?.enqueue(sampleBuffer)
             }
 
+            // Wire the PiP quadrant callback. When the user drags the
+            // overlay into a different quadrant, update the compositor's
+            // position so the composited output matches.
+            self.cameraOverlay?.onQuadrantChanged = { [weak self] newPosition in
+                guard let self else { return }
+                Task { await self.recordingActor?.switchPipPosition(to: newPosition) }
+            }
+
             // Wire the terminal-error callback. Fires at most once per
             // recording, from a detached task inside the actor, when the
             // compositor reports a failure that rebuild can't recover from.

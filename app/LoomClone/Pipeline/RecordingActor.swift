@@ -41,6 +41,7 @@ actor RecordingActor {
     // MARK: - State
 
     var mode: RecordingMode = .screenAndCamera
+    var pipPosition: PipPosition = .bottomRight
     var preset: OutputPreset = .default
     var isRecording = false
     var localSavePath: URL?
@@ -476,6 +477,16 @@ actor RecordingActor {
         mode = newMode
         timeline.recordModeSwitch(from: previous, to: newMode, t: timeline.now())
         print("[recording] Mode switched to: \(newMode)")
+    }
+
+    func switchPipPosition(to newPosition: PipPosition) {
+        let previous = pipPosition
+        guard newPosition != previous else { return }
+        pipPosition = newPosition
+        if isRecording {
+            timeline.recordPipPositionChanged(from: previous, to: newPosition, t: timeline.now())
+        }
+        print("[recording] PiP position switched to: \(newPosition)")
     }
 
     // MARK: - Segment Handling

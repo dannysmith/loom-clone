@@ -160,7 +160,8 @@ extension RecordingActor {
             result = await composition.compositeFrame(
                 screenBuffer: screen.pixelBuffer,
                 cameraBuffer: camera.pixelBuffer,
-                mode: .screenAndCamera
+                mode: .screenAndCamera,
+                pipPosition: pipPosition
             )
         case .cameraOnly:
             guard !cameraFrameQueue.isEmpty else { return false }

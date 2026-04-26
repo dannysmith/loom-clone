@@ -45,6 +45,15 @@ final class CameraOverlayWindow: @unchecked Sendable {
     @MainActor private var currentStyle: Style = .circle
     nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
+    /// Last known quadrant so we only fire the callback on actual changes.
+    @MainActor private var currentQuadrant: PipPosition = .bottomRight
+
+    /// Fired when the user drags the overlay into a different screen quadrant.
+    /// Set by the coordinator before recording starts.
+    @MainActor var onQuadrantChanged: ((PipPosition) -> Void)?
+
+    @MainActor private var moveObserver: NSObjectProtocol?
+
     /// Optional shared camera-adjustments state. Forwarded into the preview
     /// layer on every `show()` so the overlay reflects slider moves live.
     @MainActor private var adjustmentsState: CameraAdjustmentsState?
@@ -120,6 +129,7 @@ final class CameraOverlayWindow: @unchecked Sendable {
             positionPanel(on: screen)
         }
         panel.orderFrontRegardless()
+        observePanelMoves()
     }
 
     @MainActor
@@ -143,6 +153,38 @@ final class CameraOverlayWindow: @unchecked Sendable {
         return result
     }
 
+    // MARK: - Quadrant Detection
+
+    @MainActor
+    private func observePanelMoves() {
+        if let old = moveObserver {
+            NotificationCenter.default.removeObserver(old)
+        }
+        guard let panel else { return }
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handlePanelMoved()
+            }
+        }
+    }
+
+    @MainActor
+    private func handlePanelMoved() {
+        guard let panel else { return }
+        let frame = panel.frame
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
+        let screen = panel.screen ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else { return }
+        let quadrant = PipPosition.from(point: centre, in: visibleFrame)
+        guard quadrant != currentQuadrant else { return }
+        currentQuadrant = quadrant
+        onQuadrantChanged?(quadrant)
+    }
+
     /// Enqueue a sample buffer for display. Thread-safe — call from any queue.
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
         previewView?.enqueue(sampleBuffer)
@@ -155,6 +197,10 @@ final class CameraOverlayWindow: @unchecked Sendable {
 
     @MainActor
     private func tearDownPanel() {
+        if let observer = moveObserver {
+            NotificationCenter.default.removeObserver(observer)
+            moveObserver = nil
+        }
         previewView?.flush()
         panel?.orderOut(nil)
         panel = nil

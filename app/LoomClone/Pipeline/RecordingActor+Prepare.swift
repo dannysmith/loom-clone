@@ -44,7 +44,7 @@ extension RecordingActor {
         let session = try await upload.createSession()
 
         // Populate timeline session + inputs now that we've resolved devices.
-        timeline.setSession(id: session.id, slug: session.slug, initialMode: mode)
+        timeline.setSession(id: session.id, slug: session.slug, initialMode: mode, initialPipPosition: pipPosition)
         timeline.setPreset(preset)
         timeline.setInputs(
             display: display.map {

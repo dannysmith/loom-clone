@@ -104,7 +104,7 @@ After every transition to `status: "complete"`, the server runs a post-processin
 The pipeline runs these steps in order:
 
 1. **Stitch** — HLS segments → `source.mp4` via `ffmpeg -c copy` with `+faststart`.
-2. **Audio processing** — Denoise + loudness normalisation on `source.mp4` in-place (skipped if no audio track). See `docs/developer/audio-post-processing.md`.
+2. **Audio processing** — Denoise + loudness normalisation on `source.mp4` in-place (skipped if no audio track). See [Audio Post-Processing](audio-post-processing.md).
 3. **Thumbnail candidates** — Multiple frames extracted, scored by luminance variance, best one promoted to `thumbnail.jpg`. Admin can override via the thumbnail picker.
 4. **Metadata extraction** — ffprobe on `source.mp4` for dimensions/file size, `recording.json` for camera/mic names and recording health. Written to the `videos` DB row.
 5. **Video variants** — Downsampled 720p/1080p MP4s generated if source height warrants it.
@@ -127,7 +127,7 @@ The playback page at `/:slug` checks `data/<id>/derivatives/source.mp4` on each 
 
 The check is per-request with no state tracked client-side: a freshly-stopped recording serves HLS for a second or two, then upgrades to MP4 on the next page load. A recording still healing stays on HLS for as long as healing takes and upgrades once derivatives land.
 
-UUIDs never appear in viewer-facing URLs. All media is served under the slug namespace — `/:slug/raw/*` for MP4 derivatives, `/:slug/stream/*` for HLS segments, `/:slug/poster.jpg` for the thumbnail. The slug-to-id lookup happens per request (indexed, fast). See `docs/developer/server-routes-and-api.md` for the full route reference.
+UUIDs never appear in viewer-facing URLs. All media is served under the slug namespace — `/:slug/raw/*` for MP4 derivatives, `/:slug/stream/*` for HLS segments, `/:slug/poster.jpg` for the thumbnail. The slug-to-id lookup happens per request (indexed, fast). See [Server Routes & API](server-routes-and-api.md) for the full route reference.
 
 ## Corner cases worth knowing about
 
@@ -142,7 +142,7 @@ UUIDs never appear in viewer-facing URLs. All media is served under the slug nam
 
 - Live upload queue and `/complete` call: `app/LoomClone/Pipeline/UploadActor.swift`
 - Heal work (both entry points + the core loop): `app/LoomClone/Pipeline/HealAgent.swift`
-- Transcription (WhisperKit inference, SRT gen, upload): `app/LoomClone/Pipeline/TranscribeAgent.swift`
+- Transcription (WhisperKit inference, SRT gen, upload): `app/LoomClone/Pipeline/TranscribeAgent.swift` — see [Transcription](transcription.md)
 - Transcription model status (observable, gates all transcription): `app/LoomClone/Helpers/TranscriptionModelStatus.swift`
 - Timeline schema: `app/LoomClone/Models/RecordingTimeline.swift`
 - Segment / complete / delete / transcript routes: `server/src/routes/api/videos.ts`

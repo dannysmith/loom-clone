@@ -35,7 +35,7 @@ Hetzner Storage Box BX11
   └── 10 automated Hetzner-level snapshots (outside restic, outside our scripts)
 ```
 
-The backup script runs on the VPS **host**, not inside the Docker container. It reads `/mnt/data/loom-clone/` directly (the same volume bind-mounted into the container at `/app/data`).
+The backup script runs on the VPS **host**, not inside the Docker container (see [Deployment](deployment.md) for the VPS/Docker architecture). It reads `/mnt/data/loom-clone/` directly (the same volume bind-mounted into the container at `/app/data`).
 
 ## One-time setup
 

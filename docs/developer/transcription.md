@@ -40,7 +40,7 @@ Apple Silicon runs Whisper `large-v3-turbo` at 15–25× realtime via Core ML (N
 
 ## TranscribeAgent lifecycle
 
-`TranscribeAgent` is an actor — all transcription is serialised (one recording at a time). Two entry points, mirroring `HealAgent`:
+`TranscribeAgent` is an actor — all transcription is serialised (one recording at a time). Two entry points, mirroring `HealAgent` (see [Streaming & Healing](streaming-and-healing.md#healing)):
 
 ### Post-stop handoff
 
@@ -80,7 +80,7 @@ Re-uploading replaces the file and re-indexes — fully idempotent.
 
 When `derivatives/captions.srt` exists, the viewer page at `/:slug` includes a `<track>` element. Vidstack parses SRT natively — no VTT conversion needed. Captions are served at `/:slug/captions.srt` (and `/:slug/captions.vtt` if that format was uploaded).
 
-The metadata routes (`/:slug.json`, `/:slug.md`) include the transcript plain text when available.
+The metadata routes (`/:slug.json`, `/:slug.md`) include the transcript plain text when available. See [Server Routes & API](server-routes-and-api.md#viewer-routes-slug) for the full route reference.
 
 ## Where the code lives
 

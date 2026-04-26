@@ -34,4 +34,4 @@ This builds a Release configuration, copies it to `/Applications/LoomClone.app`,
 
 For normal development, just run from Xcode (Debug config) or `cd app && make build`. This hits your local server at `localhost:3000`. You don't need Docker running — bare `bun run dev` in `server/` is the fastest iteration loop.
 
-The Docker setup (see `docs/developer/deployment.md`) is for verifying the containerised server works and for production deployment. It's not part of the normal dev workflow.
+The Docker setup (see [Deployment](deployment.md)) is for verifying the containerised server works and for production deployment. It's not part of the normal dev workflow.

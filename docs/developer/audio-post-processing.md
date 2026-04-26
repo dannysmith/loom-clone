@@ -1,6 +1,6 @@
 # Audio Post-Processing
 
-How the server processes audio in recorded and uploaded videos. Runs as part of the derivatives pipeline after `source.mp4` is stitched, before thumbnails and metadata extraction.
+How the server processes audio in recorded and uploaded videos. Runs as part of the [derivatives pipeline](streaming-and-healing.md#derivatives) after `source.mp4` is stitched, before thumbnails and metadata extraction.
 
 ## The chain
 

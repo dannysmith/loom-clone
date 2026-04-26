@@ -1,6 +1,6 @@
 # Server Routes & API
 
-Complete reference for every route the Hono server exposes. For how segments flow end-to-end during a recording, see `streaming-and-healing.md`. For the auth system, see `auth.md`.
+Complete reference for every route the Hono server exposes. For how segments flow end-to-end during a recording, see [Streaming & Healing](streaming-and-healing.md). For the auth system, see [Auth](auth.md).
 
 ## Route modules
 

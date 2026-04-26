@@ -1,6 +1,6 @@
 # Recording Pipeline
 
-How the macOS app captures, composites, encodes, and streams video. For what happens once segments reach the server, see `streaming-and-healing.md`.
+How the macOS app captures, composites, encodes, and streams video. For what happens once segments reach the server, see [Streaming & Healing](streaming-and-healing.md).
 
 ## Architecture at a glance
 
@@ -190,7 +190,7 @@ The `RecordingTimeline` is a structured JSON artifact built incrementally during
 - **Raw streams (optional):** codec, dimensions, bitrate, final bytes for each raw writer.
 - **Composition stats (optional):** error/stall/rebuild counts, only present if non-zero.
 
-The timeline serves three purposes: debugging (correlate events with segment boundaries), server-side forensics (what the client believed it uploaded), and as the authoritative segment list for healing (see `streaming-and-healing.md`).
+The timeline serves three purposes: debugging (correlate events with segment boundaries), server-side forensics (what the client believed it uploaded), and as the authoritative segment list for healing (see [Streaming & Healing](streaming-and-healing.md)).
 
 ## Coordinator and UI
 

@@ -587,6 +587,25 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
     );
   }
 
+  // Post-recipe step: delete upload.mp4 now that source.mp4 is confirmed valid.
+  // For uploaded videos, upload.mp4 is the input that produced source.mp4 — keeping
+  // both is pure waste. Gate on metadata success (fileBytes populated) so we never
+  // delete the only copy of a video.
+  if (sourceExists && steps.includes("metadata")) {
+    const uploadPath = join(DATA_DIR, videoId, "upload.mp4");
+    if (await Bun.file(uploadPath).exists()) {
+      try {
+        await rm(uploadPath, { force: true });
+        console.log(`[derivatives] ${videoId} upload.mp4 deleted (source.mp4 confirmed)`);
+      } catch (err) {
+        console.error(
+          `[derivatives] ${videoId} failed to delete upload.mp4:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
   // Post-recipe step 4: generate downsampled variants (720p, 1080p).
   if (sourceExists) {
     try {

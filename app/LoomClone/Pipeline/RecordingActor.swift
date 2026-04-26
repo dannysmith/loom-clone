@@ -266,50 +266,7 @@ actor RecordingActor {
         // parallel with the composited finish; this is the join point.
         await rawFinishTask.value
 
-        // Populate timeline raw stream metadata now that the files are on
-        // disk and we can read their final byte sizes.
-        if let dims = rawScreenDims, let w = screenRawWriter {
-            // ProRes is roughly CBR-per-frame with no target-bitrate setting,
-            // so compute the observed average from actual bytes ÷ logical
-            // duration rather than parroting a fictitious target. Guard
-            // against tiny durations to avoid division blowups on a recording
-            // that stopped almost immediately.
-            let bytes = w.bytesOnDisk() ?? 0
-            let observedBitrate = logicalDuration > 0.1
-                ? Int(Double(bytes) * 8.0 / logicalDuration)
-                : 0
-            timeline.setRawScreen(
-                filename: w.url.lastPathComponent,
-                width: dims.width,
-                height: dims.height,
-                codec: "prores422proxy",
-                bitrate: observedBitrate,
-                bytes: bytes
-            )
-        }
-        if let dims = rawCameraDims, let w = cameraRawWriter {
-            timeline.setRawCamera(
-                filename: w.url.lastPathComponent,
-                width: dims.width,
-                height: dims.height,
-                codec: "h264",
-                bitrate: dims.bitrate,
-                bytes: w.bytesOnDisk() ?? 0
-            )
-        }
-        if let cfg = rawAudioConfig, let w = audioRawWriter {
-            timeline.setRawAudio(
-                filename: w.url.lastPathComponent,
-                codec: "aac-lc",
-                bitrate: cfg.bitrate,
-                sampleRate: cfg.sampleRate,
-                channels: cfg.channels,
-                bytes: w.bytesOnDisk() ?? 0
-            )
-        }
-        screenRawWriter = nil
-        cameraRawWriter = nil
-        audioRawWriter = nil
+        finalizeRawWriterMetadata(logicalDuration: logicalDuration)
 
         // NOW the builder is fully up-to-date: all segments, all pauses,
         // all mode switches, all upload results. Snapshot it.
@@ -358,6 +315,54 @@ actor RecordingActor {
             print("[recording] Complete failed: \(error)")
             return nil
         }
+    }
+
+    /// Populate timeline raw stream metadata from the finished writers, then
+    /// nil them out. Called once at the end of `stopRecording` after all raw
+    /// writers have flushed.
+    private func finalizeRawWriterMetadata(logicalDuration: Double) {
+        if let dims = rawScreenDims, let w = screenRawWriter {
+            // ProRes is roughly CBR-per-frame with no target-bitrate setting,
+            // so compute the observed average from actual bytes ÷ logical
+            // duration rather than parroting a fictitious target. Guard
+            // against tiny durations to avoid division blowups on a recording
+            // that stopped almost immediately.
+            let bytes = w.bytesOnDisk() ?? 0
+            let observedBitrate = logicalDuration > 0.1
+                ? Int(Double(bytes) * 8.0 / logicalDuration)
+                : 0
+            timeline.setRawScreen(
+                filename: w.url.lastPathComponent,
+                width: dims.width,
+                height: dims.height,
+                codec: "prores422proxy",
+                bitrate: observedBitrate,
+                bytes: bytes
+            )
+        }
+        if let dims = rawCameraDims, let w = cameraRawWriter {
+            timeline.setRawCamera(
+                filename: w.url.lastPathComponent,
+                width: dims.width,
+                height: dims.height,
+                codec: "h264",
+                bitrate: dims.bitrate,
+                bytes: w.bytesOnDisk() ?? 0
+            )
+        }
+        if let cfg = rawAudioConfig, let w = audioRawWriter {
+            timeline.setRawAudio(
+                filename: w.url.lastPathComponent,
+                codec: "aac-lc",
+                bitrate: cfg.bitrate,
+                sampleRate: cfg.sampleRate,
+                channels: cfg.channels,
+                bytes: w.bytesOnDisk() ?? 0
+            )
+        }
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
     }
 
     private func encodeTimeline(_ timeline: RecordingTimeline) -> Data? {

@@ -185,11 +185,12 @@ actor RawStreamWriter {
 
     // MARK: - Finish
 
-    func finish() async {
-        guard !didFinish else { return }
+    @discardableResult
+    func finish() async -> FinishResult {
+        guard !didFinish else { return .ok }
         didFinish = true
 
-        guard let writer else { return }
+        guard let writer else { return .ok }
 
         // If the session never started (cancelled during prepare/countdown),
         // there's nothing to finish — finishWriting() on an unstarted writer
@@ -199,7 +200,7 @@ actor RawStreamWriter {
             self.writer = nil
             self.input = nil
             self.audioInput = nil
-            return
+            return .neverStarted
         }
 
         input?.markAsFinished()
@@ -211,26 +212,31 @@ actor RawStreamWriter {
         // Wrapping it in withCheckedContinuation would hang the actor forever.
         // Check status first and bail with a log if the writer already failed.
         if writer.status == .failed {
-            print("[raw-writer] \(url.lastPathComponent) FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
+            let desc = writer.error?.localizedDescription ?? "unknown"
+            print("[raw-writer] \(url.lastPathComponent) FAILED before finish: \(desc)")
             self.writer = nil
             self.input = nil
             self.audioInput = nil
-            return
+            return .failed(desc)
         }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writer.finishWriting { continuation.resume() }
         }
 
+        let result: FinishResult
         if let error = writer.error {
             print("[raw-writer] \(url.lastPathComponent) finished with error: \(error)")
+            result = .failed(error.localizedDescription)
         } else {
             print("[raw-writer] \(url.lastPathComponent) finished, status: \(writer.status.rawValue)")
+            result = .ok
         }
 
         self.writer = nil
         self.input = nil
         self.audioInput = nil
+        return result
     }
 
     // MARK: - File metadata
@@ -242,6 +248,16 @@ actor RawStreamWriter {
             return nil
         }
         return (attrs[.size] as? NSNumber)?.int64Value
+    }
+
+    /// Outcome of `finish()`. Lets the caller distinguish "file is valid" from
+    /// "writer entered .failed state and the file is truncated/unplayable."
+    enum FinishResult {
+        case ok
+        /// Writer was never started (cancelled during prepare/countdown). File removed.
+        case neverStarted
+        /// AVAssetWriter entered `.failed` before or during `finishWriting()`.
+        case failed(String)
     }
 
     enum RawWriterError: Error {

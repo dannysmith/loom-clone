@@ -15,7 +15,7 @@ import Foundation
 ///
 /// Schema is versioned from day one so we can evolve it without ambiguity.
 struct RecordingTimeline: Encodable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let schemaVersion: Int
     var session: Session
@@ -57,6 +57,23 @@ struct RecordingTimeline: Encodable {
             let videoCodec: String
             let bitrate: Int
             let bytes: Int64
+            /// True when AVAssetWriter failed — file is truncated. Nil on healthy recordings.
+            let failed: Bool? // swiftlint:disable:this discouraged_optional_boolean
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(filename, forKey: .filename)
+                try c.encode(width, forKey: .width)
+                try c.encode(height, forKey: .height)
+                try c.encode(videoCodec, forKey: .videoCodec)
+                try c.encode(bitrate, forKey: .bitrate)
+                try c.encode(bytes, forKey: .bytes)
+                try c.encodeIfPresent(failed, forKey: .failed)
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case filename, width, height, videoCodec, bitrate, bytes, failed
+            }
         }
 
         struct AudioStream: Encodable {
@@ -66,6 +83,23 @@ struct RecordingTimeline: Encodable {
             let sampleRate: Int
             let channels: Int
             let bytes: Int64
+            /// True when AVAssetWriter failed — file is truncated. Nil on healthy recordings.
+            let failed: Bool? // swiftlint:disable:this discouraged_optional_boolean
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(filename, forKey: .filename)
+                try c.encode(audioCodec, forKey: .audioCodec)
+                try c.encode(bitrate, forKey: .bitrate)
+                try c.encode(sampleRate, forKey: .sampleRate)
+                try c.encode(channels, forKey: .channels)
+                try c.encode(bytes, forKey: .bytes)
+                try c.encodeIfPresent(failed, forKey: .failed)
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case filename, audioCodec, bitrate, sampleRate, channels, bytes, failed
+            }
         }
     }
 
@@ -228,36 +262,39 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         self.preset = preset
     }
 
-    func setRawScreen(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64) {
+    func setRawScreen(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64, failed: Bool = false) {
         rawScreen = .init(
             filename: filename,
             width: width,
             height: height,
             videoCodec: codec,
             bitrate: bitrate,
-            bytes: bytes
+            bytes: bytes,
+            failed: failed ? true : nil
         )
     }
 
-    func setRawCamera(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64) {
+    func setRawCamera(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64, failed: Bool = false) {
         rawCamera = .init(
             filename: filename,
             width: width,
             height: height,
             videoCodec: codec,
             bitrate: bitrate,
-            bytes: bytes
+            bytes: bytes,
+            failed: failed ? true : nil
         )
     }
 
-    func setRawAudio(filename: String, codec: String, bitrate: Int, sampleRate: Int, channels: Int, bytes: Int64) {
+    func setRawAudio(filename: String, codec: String, bitrate: Int, sampleRate: Int, channels: Int, bytes: Int64, failed: Bool = false) {
         rawAudio = .init(
             filename: filename,
             audioCodec: codec,
             bitrate: bitrate,
             sampleRate: sampleRate,
             channels: channels,
-            bytes: bytes
+            bytes: bytes,
+            failed: failed ? true : nil
         )
     }
 
@@ -395,6 +432,19 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
             t: t,
             kind: "composition.terminalFailure",
             data: data.isEmpty ? nil : data
+        )
+    }
+
+    /// Called when a raw stream writer finished in `.failed` state — the file
+    /// is truncated and unplayable. Records a timeline event for diagnostics.
+    func recordRawWriterFailed(file: String, error: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "raw.writer.failed",
+            data: [
+                "file": .string(file),
+                "error": .string(error),
+            ]
         )
     }
 

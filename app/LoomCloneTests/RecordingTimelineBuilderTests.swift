@@ -248,7 +248,7 @@ final class RecordingTimelineBuilderTests: XCTestCase {
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         XCTAssertNotNil(obj)
-        XCTAssertEqual(obj?["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(obj?["schemaVersion"] as? Int, RecordingTimeline.currentSchemaVersion)
 
         let session = obj?["session"] as? [String: Any]
         XCTAssertEqual(session?["id"] as? String, "test-id")

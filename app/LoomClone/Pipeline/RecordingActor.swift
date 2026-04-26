@@ -209,6 +209,13 @@ actor RecordingActor {
         let missing: [String]
     }
 
+    /// Finish results for the three raw writers, collected in parallel.
+    struct RawFinishResults {
+        var screen: RawStreamWriter.FinishResult?
+        var camera: RawStreamWriter.FinishResult?
+        var audio: RawStreamWriter.FinishResult?
+    }
+
     /// Stop a committed recording. Cancels the metronome, stops captures,
     /// finishes the writer, completes the upload session.
     func stopRecording() async -> StopResult? {
@@ -239,11 +246,22 @@ actor RecordingActor {
         let screenW = screenRawWriter
         let cameraW = cameraRawWriter
         let audioW = audioRawWriter
+
         let rawFinishTask = Task { [screenW, cameraW, audioW] in
-            await withTaskGroup(of: Void.self) { group in
-                if let w = screenW { group.addTask { await w.finish() } }
-                if let w = cameraW { group.addTask { await w.finish() } }
-                if let w = audioW { group.addTask { await w.finish() } }
+            await withTaskGroup(of: (String, RawStreamWriter.FinishResult).self) { group -> RawFinishResults in
+                if let w = screenW { group.addTask { await ("screen", w.finish()) } }
+                if let w = cameraW { group.addTask { await ("camera", w.finish()) } }
+                if let w = audioW { group.addTask { await ("audio", w.finish()) } }
+                var results = RawFinishResults()
+                for await (key, result) in group {
+                    switch key {
+                    case "screen": results.screen = result
+                    case "camera": results.camera = result
+                    case "audio": results.audio = result
+                    default: break
+                    }
+                }
+                return results
             }
         }
 
@@ -264,9 +282,12 @@ actor RecordingActor {
 
         // Wait for raw writers to finish flushing. They've been running in
         // parallel with the composited finish; this is the join point.
-        await rawFinishTask.value
+        let rawResults = await rawFinishTask.value
 
-        finalizeRawWriterMetadata(logicalDuration: logicalDuration)
+        // Record timeline events for any raw writer that failed.
+        recordRawWriterFailures(rawResults)
+
+        finalizeRawWriterMetadata(logicalDuration: logicalDuration, rawResults: rawResults)
 
         // NOW the builder is fully up-to-date: all segments, all pauses,
         // all mode switches, all upload results. Snapshot it.
@@ -317,10 +338,25 @@ actor RecordingActor {
         }
     }
 
+    /// Emit a `raw.writer.failed` timeline event for each raw writer that
+    /// entered `.failed` state during the recording.
+    private func recordRawWriterFailures(_ results: RawFinishResults) {
+        let t = timeline.now()
+        if case let .failed(error) = results.screen {
+            timeline.recordRawWriterFailed(file: "screen.mov", error: error, t: t)
+        }
+        if case let .failed(error) = results.camera {
+            timeline.recordRawWriterFailed(file: "camera.mp4", error: error, t: t)
+        }
+        if case let .failed(error) = results.audio {
+            timeline.recordRawWriterFailed(file: "audio.m4a", error: error, t: t)
+        }
+    }
+
     /// Populate timeline raw stream metadata from the finished writers, then
     /// nil them out. Called once at the end of `stopRecording` after all raw
     /// writers have flushed.
-    private func finalizeRawWriterMetadata(logicalDuration: Double) {
+    private func finalizeRawWriterMetadata(logicalDuration: Double, rawResults: RawFinishResults) {
         if let dims = rawScreenDims, let w = screenRawWriter {
             // ProRes is roughly CBR-per-frame with no target-bitrate setting,
             // so compute the observed average from actual bytes ÷ logical
@@ -331,33 +367,39 @@ actor RecordingActor {
             let observedBitrate = logicalDuration > 0.1
                 ? Int(Double(bytes) * 8.0 / logicalDuration)
                 : 0
+            let screenFailed = if case .failed = rawResults.screen { true } else { false }
             timeline.setRawScreen(
                 filename: w.url.lastPathComponent,
                 width: dims.width,
                 height: dims.height,
                 codec: "prores422proxy",
                 bitrate: observedBitrate,
-                bytes: bytes
+                bytes: bytes,
+                failed: screenFailed
             )
         }
         if let dims = rawCameraDims, let w = cameraRawWriter {
+            let cameraFailed = if case .failed = rawResults.camera { true } else { false }
             timeline.setRawCamera(
                 filename: w.url.lastPathComponent,
                 width: dims.width,
                 height: dims.height,
                 codec: "h264",
                 bitrate: dims.bitrate,
-                bytes: w.bytesOnDisk() ?? 0
+                bytes: w.bytesOnDisk() ?? 0,
+                failed: cameraFailed
             )
         }
         if let cfg = rawAudioConfig, let w = audioRawWriter {
+            let audioFailed = if case .failed = rawResults.audio { true } else { false }
             timeline.setRawAudio(
                 filename: w.url.lastPathComponent,
                 codec: "aac-lc",
                 bitrate: cfg.bitrate,
                 sampleRate: cfg.sampleRate,
                 channels: cfg.channels,
-                bytes: w.bytesOnDisk() ?? 0
+                bytes: w.bytesOnDisk() ?? 0,
+                failed: audioFailed
             )
         }
         screenRawWriter = nil

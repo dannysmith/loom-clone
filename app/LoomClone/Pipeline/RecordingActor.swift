@@ -49,6 +49,9 @@ actor RecordingActor {
     /// is about to be torn down anyway.
     var isStopping = false
     var localSavePath: URL?
+    /// Tracks which raw writers have already had a mid-recording failure
+    /// reported to the timeline, to avoid duplicate events.
+    var rawWriterFailureReported: Set<String> = []
 
     /// True when the camera's AVCaptureSession includes the mic, so audio
     /// samples from the shared session feed the HLS writer (instead of the
@@ -412,6 +415,24 @@ actor RecordingActor {
         audioRawWriter = nil
     }
 
+    /// Check each raw writer for mid-recording failure and emit a timeline
+    /// event the first time one is detected. Called at each segment boundary.
+    private func checkRawWriterStatus() async {
+        let t = logicalElapsedSeconds()
+        if let w = screenRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("screen") {
+            rawWriterFailureReported.insert("screen")
+            timeline.recordRawWriterFailed(file: "screen.mov", error: "detected at segment boundary", t: t)
+        }
+        if let w = cameraRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("camera") {
+            rawWriterFailureReported.insert("camera")
+            timeline.recordRawWriterFailed(file: "camera.mp4", error: "detected at segment boundary", t: t)
+        }
+        if let w = audioRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("audio") {
+            rawWriterFailureReported.insert("audio")
+            timeline.recordRawWriterFailed(file: "audio.m4a", error: "detected at segment boundary", t: t)
+        }
+    }
+
     private func encodeTimeline(_ timeline: RecordingTimeline) -> Data? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -563,6 +584,11 @@ actor RecordingActor {
                 duration: emission.duration,
                 emittedAt: logicalElapsedSeconds()
             )
+
+            // Probe raw writers for mid-recording failures. This surfaces the
+            // failure in the timeline at the first segment boundary after it
+            // occurs, rather than waiting until finish().
+            await checkRawWriterStatus()
         }
 
         // Write to local disk FIRST — the upload path reads bytes from this

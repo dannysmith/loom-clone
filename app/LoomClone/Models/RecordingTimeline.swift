@@ -435,6 +435,15 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
+    /// Called when a raw stream writer begins accepting samples.
+    func recordRawWriterStarted(file: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "raw.writer.started",
+            data: ["file": .string(file)]
+        )
+    }
+
     /// Called when a raw stream writer finished in `.failed` state — the file
     /// is truncated and unplayable. Records a timeline event for diagnostics.
     func recordRawWriterFailed(file: String, error: String, t: Double) {

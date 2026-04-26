@@ -124,7 +124,13 @@ extension RecordingActor {
         // `logicalElapsedSeconds()` returns 0 before commit).
         await writer.startWriting()
         await screenRawWriter?.startWriting()
+        if screenRawWriter != nil {
+            timeline.recordRawWriterStarted(file: "screen.mov", t: timeline.now())
+        }
         await audioRawWriter?.startWriting()
+        if audioRawWriter != nil {
+            timeline.recordRawWriterStarted(file: "audio.m4a", t: timeline.now())
+        }
 
         // 7. Wire capture callbacks. Frames that arrive now will populate the
         // caches but won't be encoded — the metronome only starts in commit()
@@ -199,6 +205,9 @@ extension RecordingActor {
         // still warmed up serially, still before the metronome feeds any
         // frames.
         await cameraRawWriter?.startWriting()
+        if cameraRawWriter != nil {
+            timeline.recordRawWriterStarted(file: "camera.mp4", t: timeline.now())
+        }
 
         // Start the 30fps metronome — emits frames from the cache regardless
         // of what the underlying sources are doing.

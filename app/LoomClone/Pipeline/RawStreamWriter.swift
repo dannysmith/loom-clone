@@ -51,6 +51,9 @@ actor RawStreamWriter {
     private var audioInput: AVAssetWriterInput?
     private var hasStartedSession = false
     private var didFinish = false
+    /// Guards so we only log the mid-recording failure once rather than
+    /// spamming on every subsequent append call.
+    private(set) var hasFailed = false
 
     init(url: URL, kind: Kind) {
         self.url = url
@@ -168,18 +171,35 @@ actor RawStreamWriter {
     // MARK: - Append
 
     func append(_ sampleBuffer: CMSampleBuffer) {
-        guard hasStartedSession,
+        guard hasStartedSession, !hasFailed,
               let input,
               input.isReadyForMoreMediaData else { return }
+        // Detect mid-recording failure: the writer entered .failed between
+        // frames. Log once and stop further appends (they'd be silently
+        // dropped anyway, but this surfaces the failure moment in the console).
+        if writer?.status == .failed {
+            hasFailed = true
+            print(
+                "[raw-writer] \(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
+            )
+            return
+        }
         input.append(sampleBuffer)
     }
 
     /// Append an audio sample to the audio track. Only functional for the
     /// `.videoH264WithAudio` kind — no-op otherwise.
     func appendAudio(_ sampleBuffer: CMSampleBuffer) {
-        guard hasStartedSession,
+        guard hasStartedSession, !hasFailed,
               let audioInput,
               audioInput.isReadyForMoreMediaData else { return }
+        if writer?.status == .failed {
+            hasFailed = true
+            print(
+                "[raw-writer] \(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
+            )
+            return
+        }
         audioInput.append(sampleBuffer)
     }
 

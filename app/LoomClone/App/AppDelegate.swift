@@ -166,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Copy URL to clipboard when available
         Task {
             try? await Task.sleep(for: .seconds(1))
-            if let url = coordinator.lastVideoURL {
+            if let url = coordinator.lastVideo?.url {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
                 print("[app] URL copied to clipboard: \(url)")

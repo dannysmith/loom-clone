@@ -25,6 +25,9 @@ export const ErrorCode = {
 
   // Validation (400) — added in 6.13
   VALIDATION_ERROR: "VALIDATION_ERROR",
+
+  // Slug conflict (409)
+  SLUG_CONFLICT: "SLUG_CONFLICT",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

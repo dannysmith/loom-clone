@@ -201,6 +201,9 @@ actor RecordingActor {
     struct StopResult {
         let url: String
         let videoId: String
+        let slug: String
+        let title: String?
+        let visibility: String
         let localDir: URL
         let timelineData: Data
         let missing: [String]
@@ -333,6 +336,9 @@ actor RecordingActor {
                 return StopResult(
                     url: result.url,
                     videoId: "",
+                    slug: result.slug,
+                    title: result.title,
+                    visibility: result.visibility,
                     localDir: URL(fileURLWithPath: "/"),
                     timelineData: timelineData ?? Data(),
                     missing: []
@@ -341,6 +347,9 @@ actor RecordingActor {
             return StopResult(
                 url: result.url,
                 videoId: videoId,
+                slug: result.slug,
+                title: result.title,
+                visibility: result.visibility,
                 localDir: localDir,
                 timelineData: timelineData ?? Data(),
                 missing: result.missing

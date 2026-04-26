@@ -212,6 +212,9 @@ actor UploadActor {
 
     struct CompleteResult {
         let url: String
+        let slug: String
+        let title: String?
+        let visibility: String
         let missing: [String]
     }
 
@@ -249,7 +252,13 @@ actor UploadActor {
         let videoURL = json.url
         let missing = json.missing ?? []
         print("[upload] Complete: \(videoURL) (missing: \(missing.count))")
-        return CompleteResult(url: videoURL, missing: missing)
+        return CompleteResult(
+            url: videoURL,
+            slug: json.slug,
+            title: json.title,
+            visibility: json.visibility ?? "unlisted",
+            missing: missing
+        )
     }
 
     // MARK: - Cancel
@@ -307,6 +316,8 @@ actor UploadActor {
         /// Path-only URL (e.g. "/my-video").
         let path: String?
         let slug: String
+        let title: String?
+        let visibility: String?
         /// Absent in pre-Phase-2 servers; treat as empty when missing.
         let missing: [String]?
     }

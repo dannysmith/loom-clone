@@ -12,14 +12,17 @@ import { buildPlaylist, writePlaylist } from "../../lib/playlist";
 import { parseSrtToPlainText } from "../../lib/srt";
 import {
   addSegment,
+  ConflictError,
   createVideo,
   DATA_DIR,
   deleteVideo,
   getVideo,
   listVideosPaginated,
   setVideoStatus,
+  updateSlug,
   updateVideo,
   upsertTranscript,
+  ValidationError,
   type Video,
 } from "../../lib/store";
 import { absoluteUrl, urlsForSlug } from "../../lib/url";
@@ -105,11 +108,12 @@ videos.get("/:id", async (c) => {
   return c.json(videoToApiJson(video));
 });
 
-// Edit title, description, or visibility. Returns the updated video.
+// Edit title, description, visibility, or slug. Returns the updated video.
 const patchSchema = z.object({
   title: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   visibility: z.enum(["public", "unlisted", "private"]).optional(),
+  slug: z.string().optional(),
 });
 
 videos.patch(
@@ -123,8 +127,33 @@ videos.patch(
     const { id } = c.req.param();
     const existing = await getVideo(id);
     if (!existing) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
-    const patch = c.req.valid("json");
-    const updated = await updateVideo(id, patch);
+    const { slug, ...rest } = c.req.valid("json");
+
+    // Apply title/description/visibility first.
+    let updated: Video = existing;
+    if (
+      rest.title !== undefined ||
+      rest.description !== undefined ||
+      rest.visibility !== undefined
+    ) {
+      updated = await updateVideo(id, rest);
+    }
+
+    // Slug change is separate — it creates a redirect from the old slug.
+    if (slug !== undefined) {
+      try {
+        updated = await updateSlug(id, slug);
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          return apiError(c, 400, err.message, ErrorCode.VALIDATION_ERROR);
+        }
+        if (err instanceof ConflictError) {
+          return apiError(c, 409, err.message, ErrorCode.SLUG_CONFLICT);
+        }
+        throw err;
+      }
+    }
+
     return c.json(videoToApiJson(updated));
   },
 );
@@ -230,7 +259,14 @@ videos.post("/:id/complete", async (c) => {
   console.log(
     `[complete] ${video.slug} -> ${path} (status=${nextStatus}, missing=${missing.length})`,
   );
-  return c.json({ path, url, slug: video.slug, missing });
+  return c.json({
+    path,
+    url,
+    slug: video.slug,
+    title: video.title,
+    visibility: video.visibility,
+    missing,
+  });
 });
 
 // Upload a transcript (SRT or VTT). Writes the raw file to

@@ -35,7 +35,8 @@ Error codes:
 | `INVALID_SEGMENT_FILENAME` | 400    | Filename doesn't match the allowlist       |
 | `VIDEO_ALREADY_COMPLETE`   | 409    | DELETE attempted on a completed video      |
 | `VALIDATION_ERROR`         | 400    | Request body fails zod schema validation   |
-| `CONFLICT`                 | 409    | Store-level conflict (e.g. slug collision) |
+| `SLUG_CONFLICT`            | 409    | Slug already in use by another video/redirect |
+| `CONFLICT`                 | 409    | Store-level conflict (generic)             |
 
 All 401 responses include `WWW-Authenticate: Bearer realm="loom-clone"`.
 
@@ -130,20 +131,21 @@ Single video by id.
 
 ### `PATCH /api/videos/:id`
 
-Edit title, description, or visibility. Returns the updated video (same shape as GET). Zod-validated.
+Edit title, description, visibility, or slug. Returns the updated video (same shape as GET). Zod-validated.
 
 **Request body**:
 ```json
 {
   "title": "string | null",
   "description": "string | null",
-  "visibility": "public | unlisted | private"
+  "visibility": "public | unlisted | private",
+  "slug": "string"
 }
 ```
 
-All fields are optional. Only provided fields are updated; omitted fields are left unchanged.
+All fields are optional. Only provided fields are updated; omitted fields are left unchanged. Slug changes create a redirect from the old slug so existing URLs continue to work.
 
-**Error** `400`: `VALIDATION_ERROR` (invalid body) | `404`: `VIDEO_NOT_FOUND`
+**Errors**: `400` `VALIDATION_ERROR` (invalid body or slug format) | `404` `VIDEO_NOT_FOUND` | `409` `SLUG_CONFLICT` (slug already taken)
 
 ### `PUT /api/videos/:id/segments/:filename`
 
@@ -171,11 +173,13 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
   "path": "/a1b2c3d4",
   "url": "https://loom.example.com/a1b2c3d4",
   "slug": "a1b2c3d4",
+  "title": null,
+  "visibility": "unlisted",
   "missing": ["seg_002.m4s", "seg_003.m4s"]
 }
 ```
 
-`url` is the absolute URL for the clipboard. `path` is the path-only form. `missing` is empty when the server has all segments.
+`url` is the absolute URL for the clipboard. `path` is the path-only form. `title` and `visibility` reflect the video's current metadata (used by the macOS app's post-recording editor). `missing` is empty when the server has all segments.
 
 **Error** `404`: `VIDEO_NOT_FOUND`
 

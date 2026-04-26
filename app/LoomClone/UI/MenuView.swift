@@ -150,31 +150,15 @@ struct MenuView: View {
             .controlSize(.large)
             .disabled(!canRecord)
 
-            // Last video URL
-            if let url = coordinator.lastVideoURL {
-                HStack {
-                    Text(url)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    if let videoId = coordinator.lastVideoId {
-                        Button("Admin") {
-                            let adminURL = "\(AppEnvironment.serverURL)/admin/videos/\(videoId)"
-                            if let nsURL = URL(string: adminURL) {
-                                NSWorkspace.shared.open(nsURL)
-                            }
-                        }
-                        .font(.caption)
-                    }
-                    Button("Open") {
-                        if let nsURL = URL(string: url) {
-                            NSWorkspace.shared.open(nsURL)
-                        }
-                    }
-                    .font(.caption)
-                }
+            // Last video — inline metadata editor
+            if let info = coordinator.lastVideo {
+                LastVideoEditorView(
+                    videoId: info.videoId,
+                    initialURL: info.url,
+                    initialSlug: info.slug,
+                    initialTitle: info.title,
+                    initialVisibility: info.visibility
+                )
             }
 
             Divider()

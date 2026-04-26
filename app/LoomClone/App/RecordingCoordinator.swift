@@ -211,8 +211,15 @@ final class RecordingCoordinator {
 
     // MARK: - Result
 
-    private(set) var lastVideoURL: String?
-    private(set) var lastVideoId: String?
+    struct LastVideoInfo {
+        let url: String
+        let videoId: String
+        let slug: String
+        let title: String?
+        let visibility: String
+    }
+
+    private(set) var lastVideo: LastVideoInfo?
 
     /// Set by `AppDelegate` at launch. Owned there because heal work spans
     /// app lifetime (startup scan + post-stop handoff).
@@ -353,8 +360,7 @@ final class RecordingCoordinator {
         // Reset run state
         accumulatedBeforePause = 0
         elapsedSeconds = 0
-        lastVideoURL = nil
-        lastVideoId = nil
+        lastVideo = nil
         recordingStartDate = nil
 
         // Enter the countdown state immediately so the panel renders.
@@ -517,8 +523,15 @@ final class RecordingCoordinator {
 
         Task {
             let result = await recordingActor?.stopRecording()
-            self.lastVideoURL = result?.url
-            self.lastVideoId = result?.videoId
+            if let result {
+                self.lastVideo = LastVideoInfo(
+                    url: result.url,
+                    videoId: result.videoId,
+                    slug: result.slug,
+                    title: result.title,
+                    visibility: result.visibility
+                )
+            }
             self.recordingActor = nil
 
             // Hand off any missing segments to HealAgent. Fire-and-forget —
@@ -585,8 +598,7 @@ final class RecordingCoordinator {
         Task {
             await recordingActor?.cancelRecording()
             self.recordingActor = nil
-            self.lastVideoURL = nil
-            self.lastVideoId = nil
+            self.lastVideo = nil
             self.state = .idle
         }
         return true
@@ -737,8 +749,15 @@ final class RecordingCoordinator {
 
         Task { @MainActor in
             let result = await recordingActor?.stopRecording()
-            self.lastVideoURL = result?.url
-            self.lastVideoId = result?.videoId
+            if let result {
+                self.lastVideo = LastVideoInfo(
+                    url: result.url,
+                    videoId: result.videoId,
+                    slug: result.slug,
+                    title: result.title,
+                    visibility: result.visibility
+                )
+            }
             self.recordingActor = nil
 
             if let result, !result.missing.isEmpty, let heal = self.healAgent {

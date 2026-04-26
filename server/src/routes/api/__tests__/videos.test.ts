@@ -278,6 +278,8 @@ describe("POST /:id/complete", () => {
     expect(body.url).toContain(`/${slug}`);
     expect(body.url).toMatch(/^https?:\/\//);
     expect(body.missing).toEqual([]);
+    expect(body.title).toBeNull();
+    expect(body.visibility).toBe("unlisted");
     expect((await getVideo(id))?.status).toBe("complete");
   });
 
@@ -294,6 +296,8 @@ describe("POST /:id/complete", () => {
     });
     const body = await res.json();
     expect(body.missing).toEqual([]);
+    expect(body.title).toBeNull();
+    expect(body.visibility).toBe("unlisted");
     expect((await getVideo(id))?.status).toBe("complete");
     // recording.json is persisted
     expect(await Bun.file(join(DATA_DIR, id, "recording.json")).exists()).toBe(true);
@@ -390,6 +394,61 @@ describe("PATCH /:id", () => {
       body: JSON.stringify({ title: 42 }),
     });
     expect(res.status).toBe(400);
+  });
+
+  test("updates slug and returns updated video", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "my-custom-slug" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.slug).toBe("my-custom-slug");
+  });
+
+  test("updates slug and title together", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "combo-test", title: "Combo" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.slug).toBe("combo-test");
+    expect(body.title).toBe("Combo");
+  });
+
+  test("rejects invalid slug format with 400", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "UPPER CASE!" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("VALIDATION_ERROR");
+  });
+
+  test("rejects conflicting slug with 409", async () => {
+    const v1 = await createVideoViaApi();
+    const v2 = await createVideoViaApi();
+    // Set v1's slug to something known
+    await videos.request(`/${v1.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "taken-slug" }),
+    });
+    // Try to set v2's slug to the same thing
+    const res = await videos.request(`/${v2.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "taken-slug" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("SLUG_CONFLICT");
   });
 });
 

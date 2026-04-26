@@ -44,6 +44,10 @@ actor RecordingActor {
     var pipPosition: PipPosition = .bottomRight
     var preset: OutputPreset = .default
     var isRecording = false
+    /// Set true in the stop flow before `cancelMetronome()`. When true,
+    /// `handleCompositionFailure` skips the rebuild + timeout — the context
+    /// is about to be torn down anyway.
+    var isStopping = false
     var localSavePath: URL?
 
     /// True when the camera's AVCaptureSession includes the mic, so audio
@@ -220,6 +224,7 @@ actor RecordingActor {
     /// finishes the writer, completes the upload session.
     func stopRecording() async -> StopResult? {
         isRecording = false
+        isStopping = true
 
         // Finalise the timeline BEFORE finishing the writer so the stop event
         // is timestamped at the user-visible stop moment, not after the

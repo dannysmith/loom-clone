@@ -19,6 +19,15 @@ extension RecordingActor {
     // lands).
 
     func handleCompositionFailure(_ error: CompositionError) async {
+        // If the stop flow is already in progress, don't wait for the 2s
+        // rebuild — the context is about to be torn down. This avoids a
+        // spurious gpu_wobble flag when the final metronome tick races the
+        // stop signal.
+        if isStopping {
+            print("[recording] Composition failure during stop — skipping rebuild")
+            return
+        }
+
         let t = logicalElapsedSeconds()
         let kind: String
         let detail: String

@@ -136,6 +136,11 @@ extension RecordingActor {
     /// was actually appended (source available, composition succeeded, PTS
     /// strictly monotonic).
     func emitMetronomeFrame() async -> Bool {
+        // Bail immediately if the stop flow has already fired. The metronome
+        // loop's `while` guard may have passed before `isRecording` flipped,
+        // but by the time we enter here the stop is in progress — submitting
+        // a render task now just races against teardown.
+        guard isRecording else { return false }
         guard let start = recordingStartTime else { return false }
 
         let result: Result<CVPixelBuffer, CompositionError>?

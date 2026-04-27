@@ -313,6 +313,40 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   return c.json({ ok: true });
 });
 
+// Accept an AI-suggested title. Only applies if the video's title is still
+// null (user hasn't manually set one). Idempotent — re-calling after a user
+// edit is a silent no-op.
+const suggestTitleSchema = z.object({
+  title: z.string().min(1).max(200),
+});
+
+videos.put(
+  "/:id/suggest-title",
+  zValidator("json", suggestTitleSchema, (result, c) => {
+    if (!result.success) {
+      return apiError(c, 400, result.error.message, ErrorCode.VALIDATION_ERROR);
+    }
+  }),
+  async (c) => {
+    const { id } = c.req.param();
+    const video = await getVideo(id);
+    if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+
+    const { title } = c.req.valid("json");
+
+    if (video.title !== null) {
+      // User already set a title — don't overwrite.
+      await logEvent(id, "title_suggested", { title, applied: false });
+      return c.json({ applied: false });
+    }
+
+    await updateVideo(id, { title });
+    await logEvent(id, "title_suggested", { title, applied: true });
+    console.log(`[suggest-title] ${id}: "${title}"`);
+    return c.json({ applied: true });
+  },
+);
+
 // Cancel/delete a recording. Only allowed for non-complete videos — once a
 // video is complete it's shareable and deletion is an admin act.
 videos.delete("/:id", async (c) => {

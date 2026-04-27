@@ -39,6 +39,7 @@ struct LastVideoEditorView: View {
             currentTitle = initialTitle ?? ""
             currentSlug = initialSlug
             currentVisibility = initialVisibility
+            Task { await refreshFromServer() }
         }
     }
 
@@ -155,6 +156,38 @@ struct LastVideoEditorView: View {
         draftVisibility = currentVisibility
         errorMessage = nil
         editing = true
+        Task { await refreshFromServer() }
+    }
+
+    /// Fetch the video's current state from the server so we pick up any
+    /// changes made elsewhere (AI title suggestion, admin panel edits, etc.).
+    private func refreshFromServer() async {
+        do {
+            let client = APIClient.shared
+            let request = try client.authorizedRequest(path: "/api/videos/\(videoId)")
+            let (data, http) = try await client.send(request)
+            guard http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+
+            if let slug = json["slug"] as? String { currentSlug = slug }
+            if let title = json["title"] as? String {
+                currentTitle = title
+            } else if json["title"] is NSNull {
+                currentTitle = ""
+            }
+            if let vis = json["visibility"] as? String { currentVisibility = vis }
+
+            // If currently editing, also update drafts to reflect server state
+            // (prevents saving stale values).
+            if editing {
+                draftTitle = currentTitle
+                draftSlug = currentSlug
+                draftVisibility = currentVisibility
+            }
+        } catch {
+            // Silent — best-effort refresh, don't disrupt the UI.
+        }
     }
 
     private func save() async {

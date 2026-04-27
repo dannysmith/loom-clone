@@ -152,6 +152,10 @@ actor TranscribeAgent {
             return
         }
 
+        // Suggest a title using on-device Foundation Models (fire-and-forget,
+        // never blocks .transcribed sidecar).
+        await suggestTitle(videoId: videoId, localDir: localDir, srt: srt)
+
         let now = ISO8601DateFormatter().string(from: Date())
         try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)
         print("[transcribe] \(videoId): complete")
@@ -244,6 +248,77 @@ actor TranscribeAgent {
         if http.statusCode == 404 { throw TranscribeError.orphaned }
         guard http.statusCode == 200 else {
             throw TranscribeError.server("status \(http.statusCode)")
+        }
+    }
+
+    // MARK: - Title Suggestion
+
+    /// Attempts to generate and upload a title suggestion using on-device
+    /// Foundation Models. Failures are logged and swallowed — never blocks
+    /// the transcription flow.
+    private func suggestTitle(videoId: String, localDir: URL, srt: String) async {
+        #if canImport(FoundationModels)
+            guard #available(macOS 26, *) else { return }
+
+            // Build context preamble from recording.json
+            let recordingJsonURL = localDir.appendingPathComponent("recording.json")
+            let preamble = RecordingContextBuilder.buildPreamble(from: recordingJsonURL)
+                ?? "video recording"
+
+            // Strip SRT timestamps to get plain text for the prompt
+            let plainText = stripSrtTimestamps(srt)
+            guard !plainText.isEmpty else { return }
+
+            guard let title = await TitleSuggestionGenerator.suggest(
+                transcript: plainText,
+                preamble: preamble
+            ) else {
+                print("[title-suggest] \(videoId): no usable suggestion")
+                return
+            }
+
+            // Upload to server
+            do {
+                try await uploadSuggestedTitle(videoId: videoId, title: title)
+                print("[title-suggest] \(videoId): \"\(title)\"")
+            } catch {
+                print("[title-suggest] \(videoId): upload failed: \(error)")
+            }
+        #endif
+    }
+
+    /// Strip SRT cue numbers and timestamps, returning just the spoken text.
+    private func stripSrtTimestamps(_ srt: String) -> String {
+        srt.components(separatedBy: .newlines)
+            .filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                // Skip cue numbers (bare integers)
+                if Int(trimmed) != nil { return false }
+                // Skip timestamp lines (contain " --> ")
+                if trimmed.contains(" --> ") { return false }
+                // Skip empty lines
+                if trimmed.isEmpty { return false }
+                return true
+            }
+            .joined(separator: " ")
+    }
+
+    private func uploadSuggestedTitle(videoId: String, title: String) async throws {
+        var request = try apiClient.authorizedRequest(
+            path: "/api/videos/\(videoId)/suggest-title"
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = try JSONSerialization.data(
+            withJSONObject: ["title": title]
+        )
+        request.httpBody = body
+
+        let (_, http) = try await apiClient.send(request)
+        // 404 is fine — video was deleted, not our problem here.
+        // Any 2xx is fine (applied or not).
+        guard http.statusCode == 200 || http.statusCode == 404 else {
+            throw TranscribeError.server("suggest-title status \(http.statusCode)")
         }
     }
 

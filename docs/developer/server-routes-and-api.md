@@ -197,6 +197,20 @@ Upload a transcript (SRT or VTT). Idempotent — re-uploading replaces the file 
 
 **Side effects**: writes `data/<id>/derivatives/captions.srt` (or `.vtt`), parses to plain text, upserts into `video_transcripts` table + FTS index, logs `transcript_uploaded` event.
 
+### `PUT /api/videos/:id/suggest-title`
+
+Accept an AI-suggested title. Only applies if the video's title is still null (user hasn't manually set one). Idempotent — re-calling after a user edit is a silent no-op.
+
+**Body**: `{ "title": "<string, 1-200 chars>" }`
+
+**Content-Type**: `application/json`
+
+**Response** `200`: `{ "applied": true }` if the title was set, `{ "applied": false }` if the video already had a user-set title.
+
+**Errors**: `400` `VALIDATION_ERROR` (empty/missing title, over 200 chars) | `404` `VIDEO_NOT_FOUND`
+
+**Side effects**: when applied, updates the video title (logs `title_changed` event via `updateVideo`). Always logs a `title_suggested` event with `{ title, applied }` data regardless of whether the title was applied.
+
 ### `DELETE /api/videos/:id`
 
 Cancel/delete a recording. Only works for non-complete videos.

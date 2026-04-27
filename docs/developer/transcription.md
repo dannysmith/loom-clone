@@ -61,7 +61,8 @@ At app launch, `TranscribeAgent.runStartupScan()` walks the recordings directory
 7. PUT SRT bytes to `/api/videos/:id/transcript` with `Content-Type: application/x-subrip`.
 8. On 404 → write `.orphaned` sidecar, stop (server record was deleted).
 9. On other failure → log, exit (retries at next startup scan).
-10. On success → write `.transcribed` sidecar with timestamp.
+10. On success → suggest a title via Apple Intelligence (see below). Failures are logged and swallowed.
+11. Write `.transcribed` sidecar with timestamp.
 
 ## Server-side handling
 
@@ -82,13 +83,40 @@ When `derivatives/captions.srt` exists, the viewer page at `/:slug` includes a `
 
 The metadata routes (`/:slug.json`, `/:slug.md`) include the transcript plain text when available. See [Server Routes & API](server-routes-and-api.md#viewer-routes-slug) for the full route reference.
 
+## AI title suggestion
+
+After the transcript is successfully uploaded, `TranscribeAgent` attempts to generate a title for the video using Apple's on-device Foundation Models framework (`FoundationModels`, macOS 26+). This is entirely optional — if the framework isn't available or generation fails, the video simply keeps its null title and the 3-word slug remains the only identifier.
+
+### How it works
+
+1. Read `recording.json` from the local session directory.
+2. Build a deterministic context preamble from the timeline metadata — e.g. "3-minute with voiceover screenshare" — using `RecordingContextBuilder`.
+3. Strip SRT timestamps from the transcript to get plain text, truncated to ~500 words (the on-device model's context window is 4096 tokens total).
+4. Create a `LanguageModelSession` and call `respond(to:generating:)` with a `@Generable` struct that has a `topic` field (forces the model to identify the subject first) and a `title` field.
+5. Validate the result: non-empty, 2+ words, ≤80 characters, not a refusal.
+6. `PUT /api/videos/:id/suggest-title` with `{ "title": "..." }`.
+7. The server applies the title only if `video.title` is still null (user hasn't edited it). Returns `{ applied: true/false }`.
+
+### Failure posture
+
+Same philosophy as transcription itself: failures are silent and non-blocking. No retry at next startup scan — if it didn't work this time, the video just stays untitled. The user can always set a title manually in the admin panel or the macOS popover.
+
+### Gating
+
+- `#if canImport(FoundationModels)` — compile-time check.
+- `#available(macOS 26, *)` — runtime check.
+- No equivalent of `TranscriptionModelStatus` needed — the Foundation Model is a system capability, not a downloaded asset.
+
 ## Where the code lives
 
 | Concern | File |
 |---|---|
-| TranscribeAgent (inference + upload) | `app/LoomClone/Pipeline/TranscribeAgent.swift` |
+| TranscribeAgent (inference + upload + title suggestion) | `app/LoomClone/Pipeline/TranscribeAgent.swift` |
+| Title suggestion generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/TitleSuggestion.swift` |
+| Recording context preamble builder | `app/LoomClone/Helpers/RecordingContextBuilder.swift` |
 | Model status (observable, gates transcription) | `app/LoomClone/Helpers/TranscriptionModelStatus.swift` |
 | Transcript upload endpoint | `server/src/routes/api/videos.ts` |
+| Suggest-title endpoint | `server/src/routes/api/videos.ts` |
 | SRT parsing (cues → plain text) | `server/src/lib/srt.ts` |
 | Transcript DB access (upsert, query) | `server/src/lib/store.ts` |
 | Captions serving (/:slug/captions.*) | `server/src/routes/videos/media.ts` |

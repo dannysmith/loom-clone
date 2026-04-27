@@ -69,6 +69,16 @@ export function EmbedPage({
           <meta name="twitter:title" content={pageTitle} />
           {ogDescription && <meta name="twitter:description" content={ogDescription} />}
           {posterAbsolute && <meta name="twitter:image" content={posterAbsolute} />}
+
+          {/* Analytics */}
+          <script async src="https://scripts.simpleanalyticscdn.com/latest.js" />
+          <noscript>
+            <img
+              src="https://queue.simpleanalyticscdn.com/noscript.gif"
+              alt=""
+              referrerpolicy="no-referrer-when-downgrade"
+            />
+          </noscript>
         </>
       }
     >

@@ -148,6 +148,16 @@ export function VideoPage({
             href="/feed.json"
             title={siteConfig.name}
           />
+
+          {/* Analytics */}
+          <script async src="https://scripts.simpleanalyticscdn.com/latest.js" />
+          <noscript>
+            <img
+              src="https://queue.simpleanalyticscdn.com/noscript.gif"
+              alt=""
+              referrerpolicy="no-referrer-when-downgrade"
+            />
+          </noscript>
         </>
       }
     >

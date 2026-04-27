@@ -95,7 +95,7 @@ export function EmbedPage({
               kind="subtitles"
               srclang="en"
               label="English"
-              type="srt"
+              data-type="srt"
               default
             />
           )}

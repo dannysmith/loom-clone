@@ -194,7 +194,7 @@ export function VideoPage({
               kind="subtitles"
               srclang="en"
               label="English"
-              type="srt"
+              data-type="srt"
               default
             />
           )}

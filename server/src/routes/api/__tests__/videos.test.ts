@@ -148,7 +148,7 @@ describe("POST /", () => {
   test("creates a video and returns id + slug", async () => {
     const body = await createVideoViaApi();
     expect(body.id).toBeTruthy();
-    expect(body.slug).toMatch(/^[0-9a-f]{8}$/);
+    expect(body.slug).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
     expect(getVideo(body.id)).toBeTruthy();
   });
 });

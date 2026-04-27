@@ -49,7 +49,7 @@ Slugs are the public identifier for videos. They appear in every viewer-facing U
 - **Reserved words**: `admin`, `api`, `static`, `data`, `v`, `robots`, `favicon`, `sitemap`, `humans`, `manifest`, `apple-touch-icon`, `health`, `login`, `logout`, `auth`, `signup`, `embed`, `raw`, `stream`, `poster`, `feed`, `rss`, `search`. Attempting to create or rename to a reserved slug returns 409.
 - **Globally unique**: a slug cannot match any current video's slug OR any entry in the `slug_redirects` table. This ensures old URLs never silently resolve to the wrong video.
 
-Validation happens at write time in `lib/store.ts` via `validateSlugFormat()`. Auto-generated slugs (8-char hex from `createVideo()`) always satisfy these constraints.
+Validation happens at write time in `lib/store.ts` via `validateSlugFormat()`. Auto-generated slugs (3-word adjective-noun-verb from `human-id`, e.g. `calm-dogs-dream`) always satisfy these constraints.
 
 ## API routes (`/api/*`)
 

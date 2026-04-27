@@ -44,10 +44,10 @@ afterEach(async () => {
 });
 
 describe("createVideo", () => {
-  test("returns a record with id, 8-char hex slug, sensible defaults", async () => {
+  test("returns a record with id, word-based slug, sensible defaults", async () => {
     const video = await createVideo();
     expect(video.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(video.slug).toMatch(/^[0-9a-f]{8}$/);
+    expect(video.slug).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
     expect(video.status).toBe("recording");
     expect(video.visibility).toBe("unlisted");
     expect(video.source).toBe("recorded");

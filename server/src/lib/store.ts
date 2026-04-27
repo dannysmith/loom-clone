@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { cp, mkdir } from "fs/promises";
+import { humanId } from "human-id";
 import { join } from "path";
 import { getDb } from "../db/client";
 import {
@@ -144,13 +145,10 @@ export type VideoPatch = {
 };
 
 function generateSlug(): string {
-  // 8 hex chars from 4 random bytes. Re-roll if it lands on a reserved word —
-  // none currently match the 8-char hex shape, but the loop costs nothing and
-  // means the reserved list can grow without revisiting this function.
+  // 3-word slug from human-id (adjective-noun-verb, ~15M combinations).
+  // Re-roll if it lands on a reserved word — unlikely but the loop costs nothing.
   while (true) {
-    const slug = crypto
-      .getRandomValues(new Uint8Array(4))
-      .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+    const slug = humanId({ separator: "-", capitalize: false });
     if (!RESERVED_SLUGS.has(slug)) return slug;
   }
 }
@@ -788,10 +786,8 @@ async function findAvailableSlug(baseSlug: string): Promise<string> {
       .get();
     if (!existing && !redirect) return candidate;
   }
-  // Fallback: random slug
-  return crypto
-    .getRandomValues(new Uint8Array(4))
-    .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+  // Fallback: fresh random slug
+  return generateSlug();
 }
 
 // Appends " (1)" to a title, stripping any existing " (N)" suffix first.

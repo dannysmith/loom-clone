@@ -12,7 +12,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   if (!result) return c.text("Not found", 404);
   if ("redirect" in result) return c.redirect(`/${result.redirect}`, 301);
 
-  const { video, src, poster, captionsUrl, urls } = result;
+  const { video, src, sources, poster, captionsUrl, urls } = result;
   const canonicalUrl = absoluteUrl(urls.page);
   const posterAbsolute = poster ? absoluteUrl(urls.poster) : null;
   const embedAbsolute = absoluteUrl(`/${video.slug}/embed`);
@@ -26,6 +26,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
     <VideoPage
       video={video}
       src={src}
+      sources={sources}
       poster={poster}
       captionsUrl={captionsUrl}
       canonicalUrl={canonicalUrl}

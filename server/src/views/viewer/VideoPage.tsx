@@ -4,13 +4,15 @@ import { formatDate, formatDuration, formatDurationIso } from "../../lib/format"
 import { siteConfig } from "../../lib/site-config";
 import type { Video } from "../../lib/store";
 import { absoluteUrl } from "../../lib/url";
+import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 
 marked.setOptions({ breaks: true });
 
 type Props = {
   video: Video;
-  src: string;
+  src: string | null;
+  sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
   canonicalUrl: string;
@@ -22,6 +24,7 @@ type Props = {
 export function VideoPage({
   video,
   src,
+  sources,
   poster,
   captionsUrl,
   canonicalUrl,
@@ -29,6 +32,9 @@ export function VideoPage({
   embedAbsolute,
   adminUrl,
 }: Props) {
+  // contentUrl for JSON-LD: prefer the highest-quality source if we have
+  // a sources array, otherwise the single src (HLS fallback).
+  const contentUrl = sources?.[0]?.src ?? src;
   const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;
   const ogDescription =
@@ -48,7 +54,7 @@ export function VideoPage({
     ...(posterAbsolute && { thumbnailUrl: posterAbsolute }),
     uploadDate,
     ...(isoDuration && { duration: isoDuration }),
-    contentUrl: absoluteUrl(src),
+    ...(contentUrl && { contentUrl: absoluteUrl(contentUrl) }),
     embedUrl: embedAbsolute,
     ...(video.width &&
       video.height && {
@@ -160,8 +166,16 @@ export function VideoPage({
         </a>
       )}
 
-      <media-player src={src} poster={poster ?? undefined} playsinline>
+      <media-player src={src ?? undefined} poster={poster ?? undefined} playsinline>
         <media-provider>
+          {sources?.map((s) => (
+            <source
+              src={s.src}
+              type={s.type}
+              data-width={s.width !== undefined ? String(s.width) : undefined}
+              data-height={s.height !== undefined ? String(s.height) : undefined}
+            />
+          ))}
           {captionsUrl && (
             <track
               src={captionsUrl}

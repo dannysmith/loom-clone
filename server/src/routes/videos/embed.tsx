@@ -23,6 +23,7 @@ embed.get("/:slug/embed", async (c) => {
     <EmbedPage
       slug={video.slug}
       src={result.src}
+      sources={result.sources}
       poster={result.poster}
       captionsUrl={captionsUrl}
       title={video.title ?? undefined}

@@ -2,30 +2,58 @@ import { join } from "path";
 import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
 import { urlsForSlug, type VideoUrls } from "../../lib/url";
 
-// Checks which derivatives exist on disk so the viewer can pick the best
-// source (MP4 when ready, HLS fallback during healing) without any client
-// state. Shared between the video page and embed page.
+// Variant heights we ever generate, in highest-first order. Matches the
+// VARIANTS list in lib/derivatives.ts. Order here is the order the player
+// sees them in <source> children, which biases its initial pick.
+const VARIANT_HEIGHTS = [1080, 720] as const;
+
+// Checks which derivative files exist on disk. The MP4 set drives whether
+// we serve the multi-source quality menu or fall back to live HLS.
 async function derivativeFlags(videoId: string): Promise<{
-  hasMp4: boolean;
+  hasSource: boolean;
+  variantHeights: number[];
   hasThumb: boolean;
   hasCaptions: boolean;
 }> {
-  const mp4Path = join(DATA_DIR, videoId, "derivatives", "source.mp4");
-  const thumbPath = join(DATA_DIR, videoId, "derivatives", "thumbnail.jpg");
-  const captionsPath = join(DATA_DIR, videoId, "derivatives", "captions.srt");
-  const [hasMp4, hasThumb, hasCaptions] = await Promise.all([
-    Bun.file(mp4Path).exists(),
+  const dir = join(DATA_DIR, videoId, "derivatives");
+  const sourcePath = join(dir, "source.mp4");
+  const thumbPath = join(dir, "thumbnail.jpg");
+  const captionsPath = join(dir, "captions.srt");
+  const variantPaths = VARIANT_HEIGHTS.map((h) => join(dir, `${h}p.mp4`));
+  const [hasSource, hasThumb, hasCaptions, ...variantExists] = await Promise.all([
+    Bun.file(sourcePath).exists(),
     Bun.file(thumbPath).exists(),
     Bun.file(captionsPath).exists(),
+    ...variantPaths.map((p) => Bun.file(p).exists()),
   ]);
-  return { hasMp4, hasThumb, hasCaptions };
+  const variantHeights = VARIANT_HEIGHTS.filter((_, i) => variantExists[i]);
+  return { hasSource, variantHeights, hasThumb, hasCaptions };
 }
 
-// Resolved video data ready for viewer rendering.
+// One entry in the player's `<source>` list. `width`/`height` populate
+// Vidstack's `player.qualities` via `data-width`/`data-height` so the
+// default settings menu surfaces a Quality submenu.
+export type SourceDescriptor = {
+  src: string;
+  type: string;
+  width?: number;
+  height?: number;
+};
+
+// Mirrors `ffmpeg scale=-2:H` — output width is height × aspect rounded to
+// the nearest even number.
+function computeVariantWidth(targetHeight: number, aspectRatio: number): number {
+  return Math.round((targetHeight * aspectRatio) / 2) * 2;
+}
+
+// Resolved video data ready for viewer rendering. Either `src` (HLS
+// fallback while derivatives haven't landed) or `sources` (one or more
+// MP4 variants) is set, never both.
 export type ViewerVideo = {
   video: Video;
   urls: VideoUrls;
-  src: string;
+  src: string | null;
+  sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
 };
@@ -49,13 +77,47 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
   }
 
   const { video } = resolved;
-  const { hasMp4, hasThumb, hasCaptions } = await derivativeFlags(video.id);
+  const { hasSource, variantHeights, hasThumb, hasCaptions } = await derivativeFlags(video.id);
   const urls = urlsForSlug(video.slug);
+
+  let src: string | null = null;
+  let sources: SourceDescriptor[] | null = null;
+
+  if (hasSource) {
+    // Use DB aspect when available, else fall back to width/height, else
+    // skip dimensions entirely (no Quality menu, but the player still
+    // works). Source.mp4 always leads — highest-first ordering biases the
+    // player's initial pick toward the better experience.
+    const aspect =
+      video.aspectRatio ?? (video.width && video.height ? video.width / video.height : null);
+
+    const sourceEntry: SourceDescriptor = { src: urls.raw, type: "video/mp4" };
+    if (video.width && video.height) {
+      sourceEntry.width = video.width;
+      sourceEntry.height = video.height;
+    }
+
+    sources = [sourceEntry];
+    for (const height of variantHeights) {
+      const entry: SourceDescriptor = {
+        src: `/${video.slug}/raw/${height}p.mp4`,
+        type: "video/mp4",
+      };
+      if (aspect) {
+        entry.width = computeVariantWidth(height, aspect);
+        entry.height = height;
+      }
+      sources.push(entry);
+    }
+  } else {
+    src = urls.hls;
+  }
 
   return {
     video,
     urls,
-    src: hasMp4 ? urls.raw : urls.hls,
+    src,
+    sources,
     poster: hasThumb ? urls.poster : null,
     captionsUrl: hasCaptions ? `/${video.slug}/captions.srt` : null,
   };

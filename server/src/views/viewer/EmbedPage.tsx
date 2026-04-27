@@ -1,9 +1,11 @@
 import { siteConfig } from "../../lib/site-config";
+import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { RootLayout } from "../layouts/RootLayout";
 
 type Props = {
   slug: string;
-  src: string;
+  src: string | null;
+  sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
   title?: string;
@@ -19,6 +21,7 @@ type Props = {
 export function EmbedPage({
   slug,
   src,
+  sources,
   poster,
   captionsUrl,
   title,
@@ -65,12 +68,20 @@ export function EmbedPage({
       }
     >
       <media-player
-        src={src}
+        src={src ?? undefined}
         poster={poster ?? undefined}
         title={playerTitle || undefined}
         playsinline
       >
         <media-provider>
+          {sources?.map((s) => (
+            <source
+              src={s.src}
+              type={s.type}
+              data-width={s.width !== undefined ? String(s.width) : undefined}
+              data-height={s.height !== undefined ? String(s.height) : undefined}
+            />
+          ))}
           {captionsUrl && (
             <track
               src={captionsUrl}

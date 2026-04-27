@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { siteConfig } from "../../../lib/site-config";
 import { createVideo, setVideoStatus, updateVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import wellKnown from "../well-known";
@@ -12,13 +13,34 @@ afterEach(async () => {
 });
 
 describe("GET /", () => {
-  test("returns 200 HTML landing page", async () => {
-    const res = await wellKnown.request("/");
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/html");
-    const html = await res.text();
-    expect(html).toMatch(/^<!DOCTYPE html>/i);
-    expect(html).toContain("loom-clone");
+  test("returns 302 redirect to author URL", async () => {
+    const res = await wellKnown.request("/", { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(siteConfig.authorUrl);
+  });
+
+  test("includes HTML body with feed hints for curl/AI agents", async () => {
+    const res = await wellKnown.request("/", { redirect: "manual" });
+    const body = await res.text();
+    expect(body).toContain("<!DOCTYPE html>");
+    expect(body).toContain("/llms.txt");
+    expect(body).toContain("/feed.xml");
+    expect(body).toContain("/feed.json");
+    expect(body).toContain("/sitemap.xml");
+  });
+
+  test("includes Link header for RSS autodiscovery", async () => {
+    const res = await wellKnown.request("/", { redirect: "manual" });
+    const link = res.headers.get("link");
+    expect(link).toContain("/feed.xml");
+    expect(link).toContain("application/rss+xml");
+  });
+
+  test("does not contain loom-clone in public body", async () => {
+    const res = await wellKnown.request("/", { redirect: "manual" });
+    const body = await res.text();
+    expect(body.toLowerCase()).not.toContain("loom-clone");
+    expect(body.toLowerCase()).not.toContain("loom clone");
   });
 });
 

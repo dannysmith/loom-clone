@@ -2,22 +2,47 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
+import { siteConfig } from "../../lib/site-config";
 import { absoluteUrl } from "../../lib/url";
-import { RootLayout } from "../../views/layouts/RootLayout";
 
 // Root + well-known files. Open, no auth.
 const wellKnown = new Hono();
 
-wellKnown.get("/", (c) =>
-  c.html(
-    <RootLayout title="loom-clone">
-      <main style="padding: 2rem; font-family: system-ui;">
-        <h1>loom-clone</h1>
-        <p>Personal video host.</p>
-      </main>
-    </RootLayout>,
-  ),
-);
+// 302 temporary redirect to the author's site. The HTML body is never
+// rendered by browsers (they follow the Location header) but IS displayed
+// by curl (without -L), wget --max-redirect=0, and AI agents — giving
+// them pointers to /llms.txt and the feeds before they follow the redirect.
+wellKnown.get("/", (c) => {
+  const body = [
+    "<!DOCTYPE html>",
+    '<html lang="en">',
+    "<head>",
+    '  <meta charset="utf-8">',
+    `  <title>Redirecting to ${siteConfig.authorUrl.replace(/^https?:\/\//, "")}</title>`,
+    `  <link rel="alternate" type="application/rss+xml" title="${siteConfig.name}" href="/feed.xml">`,
+    `  <link rel="alternate" type="application/feed+json" title="${siteConfig.name}" href="/feed.json">`,
+    "</head>",
+    "<body>",
+    `  <h1>${siteConfig.name}</h1>`,
+    `  <p>Redirecting to <a href="${siteConfig.authorUrl}">${siteConfig.authorUrl.replace(/^https?:\/\//, "")}</a>.</p>`,
+    "  <hr>",
+    "  <p>Looking for videos? Try:</p>",
+    "  <ul>",
+    `    <li><a href="/llms.txt">/llms.txt</a> — machine-readable site index</li>`,
+    `    <li><a href="/feed.xml">/feed.xml</a> — RSS feed</li>`,
+    `    <li><a href="/feed.json">/feed.json</a> — JSON feed</li>`,
+    `    <li><a href="/sitemap.xml">/sitemap.xml</a> — sitemap</li>`,
+    "  </ul>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  return c.body(body, 302, {
+    Location: siteConfig.authorUrl,
+    "content-type": "text/html; charset=utf-8",
+    Link: `</feed.xml>; rel="alternate"; type="application/rss+xml"; title="${siteConfig.name}"`,
+  });
+});
 
 wellKnown.get("/robots.txt", (c) =>
   c.text("User-agent: *\nDisallow: /admin\nDisallow: /api\n", 200, {

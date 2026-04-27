@@ -122,6 +122,20 @@ export function VideoPage({
             href={`/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`}
             title={pageTitle}
           />
+
+          {/* Feed discovery */}
+          <link
+            rel="alternate"
+            type="application/rss+xml"
+            href="/feed.xml"
+            title={siteConfig.name}
+          />
+          <link
+            rel="alternate"
+            type="application/feed+json"
+            href="/feed.json"
+            title={siteConfig.name}
+          />
         </>
       }
     >

@@ -6,6 +6,7 @@ services:
       - /mnt/data/loom-clone:/app/data
     environment:
       - PUBLIC_URL=https://v.danny.is
+      - BUNNY_CDN_API_KEY=${BUNNY_CDN_API_KEY}
     networks:
       - caddy-net
 

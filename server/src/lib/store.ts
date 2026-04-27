@@ -12,6 +12,7 @@ import {
   videoTags,
   videoTranscripts,
 } from "../db/schema";
+import { purgeGlobalFeeds, purgeSlugRename, purgeVideo } from "./cdn";
 import { type EventType, logEvent } from "./events";
 import { nowIso } from "./format";
 import { searchVideoIds, updateFtsTranscript } from "./search";
@@ -560,6 +561,7 @@ export async function setVideoStatus(id: string, status: Video["status"]): Promi
   if (status === "complete") {
     const eventType = existing.status === "healing" ? "healed" : "completed";
     await logEvent(id, eventType);
+    purgeGlobalFeeds();
   }
 
   return video;
@@ -576,6 +578,7 @@ export async function deleteVideo(id: string): Promise<Video | undefined> {
   if (!video) return undefined;
   // FK cascades handle video_segments, slug_redirects, video_tags, video_events.
   await db.delete(videos).where(eq(videos.id, id));
+  purgeVideo(video.slug);
   return video;
 }
 
@@ -617,6 +620,7 @@ export async function updateVideo(id: string, patch: VideoPatch): Promise<Video>
   for (const event of events) {
     await logEvent(id, event.type, event.data);
   }
+  purgeVideo(updated.slug);
   return updated;
 }
 
@@ -645,6 +649,7 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
   });
 
   await logEvent(id, "slug_changed", { from: oldSlug, to: newSlug });
+  purgeSlugRename(oldSlug, newSlug);
 
   const updated = await getVideo(id, { includeTrashed: true });
   if (!updated) throw new Error(`Video ${id} not found post-update`);
@@ -668,6 +673,7 @@ export async function trashVideo(id: string): Promise<Video> {
   if (!updated) throw new Error(`Video ${id} not found`);
 
   await logEvent(id, "trashed");
+  purgeVideo(updated.slug);
   return updated;
 }
 
@@ -687,6 +693,7 @@ export async function untrashVideo(id: string): Promise<Video> {
   if (!updated) throw new Error(`Video ${id} not found`);
 
   await logEvent(id, "untrashed");
+  purgeGlobalFeeds();
   return updated;
 }
 

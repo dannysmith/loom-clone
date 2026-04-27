@@ -37,6 +37,7 @@ oembed.get("/oembed", async (c) => {
   const embedUrl = absoluteUrl(`/${video.slug}/embed`);
   const posterUrl = absoluteUrl(`/${video.slug}/poster.jpg`);
 
+  c.header("Cache-Control", "public, max-age=3600");
   return c.json({
     version: "1.0",
     type: "video",

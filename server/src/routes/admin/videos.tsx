@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { purgeVideo } from "../../lib/cdn";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
 import {
@@ -274,11 +275,12 @@ videoRoutes.post("/:id/thumbnail/promote", async (c) => {
   if (!ok) return c.text("Candidate not found", 404);
 
   await logEvent(id, "thumbnail_promoted", { candidateId });
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  purgeVideo(result.slug);
 
   c.header("HX-Trigger", "video-updated");
   const candidates = await listThumbnailCandidates(id);
-  const result = await requireVideo(c);
-  if (result instanceof Response) return result;
   return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
 });
 
@@ -338,10 +340,12 @@ videoRoutes.post("/:id/thumbnail/upload", async (c) => {
   await promoteCandidate(id, candidateId);
   await logEvent(id, "thumbnail_promoted", { candidateId });
 
-  c.header("HX-Trigger", "video-updated");
-  const candidates = await listThumbnailCandidates(id);
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
+  purgeVideo(result.slug);
+
+  c.header("HX-Trigger", "video-updated");
+  const candidates = await listThumbnailCandidates(id);
   return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
 });
 

@@ -132,6 +132,52 @@ extension RecordingActor {
 
     // MARK: - Metronome Frame Emission
 
+    /// Acquire source frames for the current mode, composite them, and return
+    /// the rendered buffer along with the source capture PTS. Returns nil when
+    /// source frames aren't available or composition fails.
+    private func compositeForCurrentMode() async -> (CVPixelBuffer, CMTime)? {
+        let result: Result<CVPixelBuffer, CompositionError>?
+        let sourcePTS: CMTime
+        switch mode {
+        case .screenOnly:
+            guard let screen = latestScreenFrame else { return nil }
+            sourcePTS = screen.capturePTS
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: nil,
+                mode: .screenOnly
+            )
+        case .screenAndCamera:
+            guard let screen = latestScreenFrame else { return nil }
+            guard let camera = cameraFrameQueue.last else { return nil }
+            sourcePTS = camera.capturePTS
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: camera.pixelBuffer,
+                mode: .screenAndCamera,
+                pipPosition: pipPosition
+            )
+        case .cameraOnly:
+            guard !cameraFrameQueue.isEmpty else { return nil }
+            let camera = cameraFrameQueue.removeFirst()
+            sourcePTS = camera.capturePTS
+            result = await composition.compositeFrame(
+                screenBuffer: nil,
+                cameraBuffer: camera.pixelBuffer,
+                mode: .cameraOnly
+            )
+        }
+
+        guard let result else { return nil }
+        switch result {
+        case let .success(buffer):
+            return (buffer, sourcePTS)
+        case let .failure(compositionError):
+            await handleCompositionFailure(compositionError)
+            return nil
+        }
+    }
+
     /// Compose and append a single metronome frame. Returns true if a frame
     /// was actually appended (source available, composition succeeded, PTS
     /// strictly monotonic).
@@ -143,52 +189,11 @@ extension RecordingActor {
         guard isRecording else { return false }
         guard let start = recordingStartTime else { return false }
 
-        let result: Result<CVPixelBuffer, CompositionError>?
         // `sourcePTS` is the capture time of the visible content. We stamp
         // the emitted video frame with this (not wall-clock-now) so audio
         // and video share the same notion of "when the content was at the
         // hardware."
-        let sourcePTS: CMTime
-        switch mode {
-        case .screenOnly:
-            guard let screen = latestScreenFrame else { return false }
-            sourcePTS = screen.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: nil,
-                mode: .screenOnly
-            )
-        case .screenAndCamera:
-            guard let screen = latestScreenFrame else { return false }
-            guard let camera = cameraFrameQueue.last else { return false }
-            sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .screenAndCamera,
-                pipPosition: pipPosition
-            )
-        case .cameraOnly:
-            guard !cameraFrameQueue.isEmpty else { return false }
-            let camera = cameraFrameQueue.removeFirst()
-            sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: nil,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .cameraOnly
-            )
-        }
-
-        guard let result else { return false }
-
-        let output: CVPixelBuffer
-        switch result {
-        case let .success(buffer):
-            output = buffer
-        case let .failure(compositionError):
-            await handleCompositionFailure(compositionError)
-            return false
-        }
+        guard let (output, sourcePTS) = await compositeForCurrentMode() else { return false }
 
         guard sourcePTS.isValid else { return false }
         let elapsedLogical = (sourcePTS - start) - pauseAccumulator

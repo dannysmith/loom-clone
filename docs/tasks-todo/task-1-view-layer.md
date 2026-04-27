@@ -181,10 +181,23 @@ This is critical for privacy/security: when a video's visibility changes or it's
 
 ### DNS & Routing
 
+- **Origin hostname required.** After `v.danny.is` is CNAMEd to BunnyCDN, it can't be used as the pull zone's origin (that would loop). A dedicated origin hostname is needed — `origin.v.danny.is` as an A record → Hetzner IP, with a Caddy site block routing it to the LoomClone container. BunnyCDN's pull zone origin = `https://origin.v.danny.is`. This must exist and be working before the DNS cutover.
+- **Forward Host Header: OFF** (BunnyCDN default). BunnyCDN sends `Host: origin.v.danny.is` to Caddy, matching the site block. If Forward Host Header were ON, Caddy would see `Host: v.danny.is` and fail to match. Leave it off.
+- **Origin SSL verification: ON.** Caddy auto-provisions a Let's Encrypt cert for `origin.v.danny.is`. BunnyCDN verifies it. Secure.
 - `v.danny.is` gets CNAMEd to `<zone>.b-cdn.net` in DNSimple. All viewer-facing traffic flows through BunnyCDN.
 - Edge Rules bypass cache for `/api/*` and `/admin/*` (proxied through BunnyCDN but not cached).
 - Optionally: `api.v.danny.is` as a direct A record to Hetzner, with Caddy routing it to the LoomClone container. This keeps macOS app API traffic (especially segment uploads during recording) off the CDN entirely. The latency overhead of routing API traffic through BunnyCDN is negligible (~5-15ms), so this is a nice-to-have rather than a blocker.
 - Admin traffic through BunnyCDN is fine and may even benefit from edge-cached static assets when accessing from abroad.
+- **Caddy cleanup:** After the CNAME change, Caddy can no longer renew certs for `v.danny.is` (DNS doesn't point to it). Remove or replace the old `v.danny.is` site block to avoid failed ACME renewal noise in logs.
+
+### App Code Compatibility
+
+Verified that the Hono app works correctly behind a CDN proxy with no code changes:
+
+- **URL generation:** All absolute URLs are built via `getPublicBaseUrl()` in `src/lib/url.ts`, which reads the `PUBLIC_URL` env var (currently `https://v.danny.is` in docker-compose.prod.yml). No Host header sniffing, no `X-Forwarded-*` dependence. No change needed.
+- **Cookies:** Admin session cookies have no explicit `domain` attribute — the browser scopes them to the request URL host (`v.danny.is`), which is correct. Works transparently through CDN.
+- **`isSecureContext()`** in admin-auth.ts only checks for localhost/127.0.0.1 to decide the Secure cookie flag. Fine with any origin hostname.
+- **oEmbed responses** currently have no explicit `Cache-Control` header. Should add one (e.g., `max-age=3600`) so BunnyCDN caches them predictably rather than relying on default behavior.
 
 ### Private / Non-Public Videos
 
@@ -204,51 +217,78 @@ During an active recording, HLS segments stream to Hetzner in real-time. The HLS
 
 ## Implementation Plan
 
-### Phase 1 — BunnyCDN Setup & DNS
+### Phase 1 — Origin Prep (manual, on VPS + DNSimple)
 
-Set up the pull zone and cut over DNS.
+Before touching BunnyCDN, prepare a dedicated origin hostname for the CDN to pull from. This must be done first because after `v.danny.is` is CNAMEd to BunnyCDN, Caddy can't renew its cert and the hostname loops.
 
-- Create BunnyCDN account, add prepaid credit (low initial amount, e.g. $10)
-- Create a pull zone with origin = Hetzner VPS IP (or `server.danny.is`)
-- Enable "Optimize for Video Delivery" on the pull zone
-- Enable "Serve stale while origin offline"
-- Add `v.danny.is` as a custom hostname on the pull zone
-- In DNSimple: change `v.danny.is` from A record → CNAME to `<zone>.b-cdn.net`
-- BunnyCDN provisions Let's Encrypt cert (requires CNAME to be live first)
-- Edge Rules:
-  - Bypass cache for requests where URL path starts with `/api/`
-  - Bypass cache for requests where URL path starts with `/admin/`
-- Set a billing alert at a sensible threshold
+1. **DNS:** Create `origin.v.danny.is` A record in DNSimple → Hetzner VPS IP
+2. **Caddy:** Add a site block for `origin.v.danny.is` that proxies to the LoomClone container (same as the existing `v.danny.is` block). Caddy auto-provisions a Let's Encrypt cert for it.
+3. **Verify:** `curl -I https://origin.v.danny.is/api/health` returns 200. Video pages load at `https://origin.v.danny.is/<slug>`.
 
-### Phase 2 — Verification & Testing
+### Phase 2 — BunnyCDN Setup (manual, in BunnyCDN dashboard)
 
-Verify everything works correctly before moving on.
+Set up the pull zone and Edge Rules. Everything here can be done while `v.danny.is` still points directly at Hetzner — no downtime yet.
 
-- Verify: video playback works end-to-end (MP4 sources, quality switching, seeking via Range requests)
-- Verify: HLS fallback works for in-progress or healing recordings
-- Verify: HTML pages cache with correct short TTL (check `Age` and `X-Cache` response headers)
-- Verify: private/non-public videos are NOT cached (check `Cache-Control: private` is respected)
-- Verify: oEmbed responses work (Slack/Notion unfurling)
-- Verify: feeds, sitemap, llms.txt serve correctly
-- Verify: `/admin/*` and `/api/*` bypass cache (check response headers)
-- Verify: macOS app recording + upload still works through the CDN proxy
-- Check BunnyCDN dashboard for cache hit ratio, bandwidth, errors
+1. Create BunnyCDN account, add prepaid credit (low initial amount, e.g. $10)
+2. Create a pull zone:
+   - Origin URL: `https://origin.v.danny.is`
+   - Forward Host Header: **OFF** (default — BunnyCDN sends `Host: origin.v.danny.is` to Caddy, matching the site block)
+   - Origin SSL verification: **ON**
+3. Enable "Optimize for Video Delivery" (5MB cache slicing for large files — required for seeking on uncached videos)
+4. Enable "Serve stale while origin offline"
+5. Edge Rules:
+   - Bypass cache for requests where URL path starts with `/api/`
+   - Bypass cache for requests where URL path starts with `/admin/`
+6. Add `v.danny.is` as a custom hostname on the pull zone (cert provisioning happens after DNS cutover)
+7. Set a billing alert at a sensible threshold
+8. **Verify pull zone works** via its `<zone>.b-cdn.net` URL before cutting DNS: load a video page, check media plays, check response headers.
+
+### Phase 3 — DNS Cutover (brief HTTPS gap)
+
+The actual switch. There will be a brief window (seconds to ~2 minutes) where HTTPS for `v.danny.is` may not work while BunnyCDN provisions the Let's Encrypt cert. Do this during a quiet period.
+
+1. **DNSimple:** Change `v.danny.is` from A record → CNAME to `<zone>.b-cdn.net`
+2. **BunnyCDN dashboard:** Trigger SSL provisioning for `v.danny.is` (click "Verify & Activate SSL" once the CNAME is live)
+3. Wait for cert provisioning (typically seconds to ~2 minutes)
+4. **Verify HTTPS:** `curl -I https://v.danny.is/<slug>` works and returns BunnyCDN headers (look for `CDN-Cache` or `X-Cache` headers)
+
+### Phase 4 — Verification & Caddy Cleanup
+
+Thorough testing, then clean up the old Caddy config.
+
+**Testing:**
+- Video playback works end-to-end (MP4 sources, quality switching, seeking via Range requests)
+- HLS fallback works for in-progress or healing recordings
+- HTML pages cache with correct short TTL (check `Age` and `X-Cache` response headers)
+- Private/non-public videos are NOT cached (`Cache-Control: private` is respected)
+- oEmbed responses work (paste a video URL into Slack or Notion)
+- Feeds (`/feed.xml`, `/feed.json`), sitemap, llms.txt serve correctly
+- `/admin/*` and `/api/*` bypass cache (check response headers confirm no caching)
+- macOS app recording + upload still works through the CDN proxy
+- BunnyCDN dashboard: check cache hit ratio, bandwidth usage, errors
 - Test from a non-EU location (VPN or similar) to confirm edge delivery is working
 
-### Phase 3 — Cache Purge Integration
+**Caddy cleanup:**
+- Remove the old `v.danny.is` site block from Caddy (it can't renew certs anymore — DNS doesn't point at the server for that hostname)
+- Keep `origin.v.danny.is` and `server.danny.is` blocks
+- Restart Caddy, verify `origin.v.danny.is` still serves correctly
 
-Add server-side logic to purge BunnyCDN when content changes.
+### Phase 5 — Cache Purge Integration (code change)
 
-- Store the BunnyCDN API key as an environment variable on the server
-- Implement a `purgeCdnCache(slugOrUrls)` helper in the Hono app that calls BunnyCDN's purge API
-- On video visibility change (public→private, unlisted→private, any→trashed): wildcard purge `https://v.danny.is/<slug>/*`
-- On video trash/delete: same wildcard purge
-- On slug rename: purge both old and new slug paths
-- On any public video change (add, rename, trash, visibility): purge the global dynamic routes (`/sitemap.xml`, `/feed.xml`, `/feed.json`, `/llms.txt`)
-- Consider adding `CDN-Tag` headers to video responses (e.g. `CDN-Tag: video-<slug>`) for future tag-based purging if we ever enable Perma-Cache
-- Consider whether oEmbed responses need an explicit cache header (currently none set — BunnyCDN may cache based on default behavior)
+Add server-side logic to purge BunnyCDN when content changes. This is the only phase that involves code changes in the Hono app.
 
-### Phase 4 — API Subdomain (Optional)
+- Store the BunnyCDN API key as an environment variable on the server (add to docker-compose.prod.yml)
+- Implement a `purgeCdnCache(slugOrUrls)` helper that calls BunnyCDN's purge API — plain `fetch()` to `https://api.bunny.net/purge?url=<url>` with `AccessKey` header
+- Trigger points:
+  - On video visibility change (public→private, unlisted→private, any→trashed): wildcard purge `https://v.danny.is/<slug>/*`
+  - On video trash/delete: same wildcard purge
+  - On slug rename: purge both old and new slug wildcard paths
+  - On any public video state change (add, rename, trash, visibility): purge the global dynamic routes (`/sitemap.xml`, `/feed.xml`, `/feed.json`, `/llms.txt`, `/oembed?url=...`)
+- Add an explicit `Cache-Control` header to oEmbed responses (e.g., `max-age=3600` or `max-age=60, s-w-r=300`) so BunnyCDN caches them predictably
+- Consider adding `CDN-Tag` headers to video responses (e.g., `CDN-Tag: video-<slug>`) for future tag-based purging if Perma-Cache is ever enabled
+- Purge calls should be fire-and-forget (don't block the admin action on CDN response) but log failures
+
+### Phase 6 — API Subdomain (Optional)
 
 Separate macOS app API traffic from CDN-proxied viewer traffic.
 

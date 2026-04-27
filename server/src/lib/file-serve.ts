@@ -78,8 +78,10 @@ export function parseRange(header: string, size: number): { start: number; end: 
     start = Number.parseInt(startStr, 10);
     end = endStr === "" ? size - 1 : Number.parseInt(endStr, 10);
   }
-  if (Number.isNaN(start) || Number.isNaN(end) || start > end || end >= size) {
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= size) {
     return null;
   }
+  // RFC 7233: clamp end to file boundary rather than rejecting the range.
+  end = Math.min(end, size - 1);
   return { start, end };
 }

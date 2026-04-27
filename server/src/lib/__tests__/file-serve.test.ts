@@ -37,8 +37,14 @@ describe("parseRange", () => {
     expect(parseRange("bytes=500-100", size)).toBeNull();
   });
 
-  test("returns null when range exceeds file size", () => {
-    expect(parseRange("bytes=0-1000", size)).toBeNull(); // end >= size
+  test("clamps end to file boundary (RFC 7233)", () => {
+    // End beyond file size → clamped to last byte, not rejected
+    expect(parseRange("bytes=0-1000", size)).toEqual({ start: 0, end: 999 });
+    expect(parseRange("bytes=0-5242879", size)).toEqual({ start: 0, end: 999 });
+    expect(parseRange("bytes=900-2000", size)).toEqual({ start: 900, end: 999 });
+  });
+
+  test("returns null when start is at or beyond file size", () => {
     expect(parseRange("bytes=1000-1000", size)).toBeNull(); // start >= size
     expect(parseRange("bytes=1001-", size)).toBeNull();
   });

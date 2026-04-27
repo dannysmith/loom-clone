@@ -86,8 +86,7 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
   if (hasSource) {
     // Use DB aspect when available, else fall back to width/height, else
     // skip dimensions entirely (no Quality menu, but the player still
-    // works). Source.mp4 always leads — highest-first ordering biases the
-    // player's initial pick toward the better experience.
+    // works).
     const aspect =
       video.aspectRatio ?? (video.width && video.height ? video.width / video.height : null);
 
@@ -97,8 +96,7 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
       sourceEntry.height = video.height;
     }
 
-    sources = [sourceEntry];
-    for (const height of variantHeights) {
+    const variantEntries: SourceDescriptor[] = variantHeights.map((height) => {
       const entry: SourceDescriptor = {
         src: `/${video.slug}/raw/${height}p.mp4`,
         type: "video/mp4",
@@ -107,7 +105,21 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
         entry.width = computeVariantWidth(height, aspect);
         entry.height = height;
       }
-      sources.push(entry);
+      return entry;
+    });
+
+    // Default playback should be at most 1080p. Browsers pick the first
+    // compatible <source> as the default, so when a 1080p.mp4 derivative
+    // exists (i.e. source > 1080p) we promote it to first. Otherwise
+    // source.mp4 leads — it is already ≤1080p in that case. Vidstack's
+    // Quality menu sorts by data-width/height internally, so the visible
+    // menu order is unchanged regardless of DOM order.
+    const variant1080 = variantEntries.find((e) => e.height === 1080);
+    if (variant1080) {
+      const others = variantEntries.filter((e) => e !== variant1080);
+      sources = [variant1080, sourceEntry, ...others];
+    } else {
+      sources = [sourceEntry, ...variantEntries];
     }
   } else {
     src = urls.hls;

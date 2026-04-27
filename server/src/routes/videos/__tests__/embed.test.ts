@@ -28,6 +28,27 @@ describe("GET /:slug/embed", () => {
     expect(html).not.toContain("viewer.css");
   });
 
+  test("media-player has preload=auto and load=eager", async () => {
+    const video = await createVideo();
+    const res = await embed.request(`/${video.slug}/embed`);
+    const html = await res.text();
+    expect(html).toContain('preload="auto"');
+    expect(html).toContain('load="eager"');
+  });
+
+  test("head includes modulepreload for the Vidstack JS module", async () => {
+    const video = await createVideo();
+    const res = await embed.request(`/${video.slug}/embed`);
+    const html = await res.text();
+    expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
+  });
+
+  test("Cache-Control is set with private/public scope by visibility", async () => {
+    const unlisted = await createVideo();
+    const r1 = await embed.request(`/${unlisted.slug}/embed`);
+    expect(r1.headers.get("cache-control")).toBe("private, max-age=60, stale-while-revalidate=300");
+  });
+
   test("old slug 301-redirects to current slug embed URL", async () => {
     const video = await createVideo();
     const oldSlug = video.slug;

@@ -22,6 +22,12 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
     c.header("X-Robots-Tag", "noindex");
   }
 
+  // Short cache + stale-while-revalidate so repeat visits and any future
+  // intermediate caches skip a render. `private` for non-public videos so
+  // shared caches (CDN) never store them.
+  const cacheScope = video.visibility === "public" ? "public" : "private";
+  c.header("Cache-Control", `${cacheScope}, max-age=60, stale-while-revalidate=300`);
+
   return c.html(
     <VideoPage
       video={video}

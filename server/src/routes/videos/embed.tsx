@@ -19,6 +19,11 @@ embed.get("/:slug/embed", async (c) => {
   const canonicalUrl = absoluteUrl(urls.page);
   const posterAbsolute = poster ? absoluteUrl(urls.poster) : null;
 
+  // Short cache + stale-while-revalidate. `private` for non-public videos
+  // so shared caches (CDN) never store them.
+  const cacheScope = video.visibility === "public" ? "public" : "private";
+  c.header("Cache-Control", `${cacheScope}, max-age=60, stale-while-revalidate=300`);
+
   return c.html(
     <EmbedPage
       slug={video.slug}

@@ -32,9 +32,11 @@ export function VideoPage({
   embedAbsolute,
   adminUrl,
 }: Props) {
-  // contentUrl for JSON-LD: prefer the highest-quality source if we have
-  // a sources array, otherwise the single src (HLS fallback).
-  const contentUrl = sources?.[0]?.src ?? src;
+  // contentUrl for JSON-LD points at the canonical archive (source.mp4)
+  // regardless of which variant the player picks for default playback.
+  const sourceMp4Url = `/${video.slug}/raw/source.mp4`;
+  const contentUrl = sources?.find((s) => s.src === sourceMp4Url)?.src ?? sources?.[0]?.src ?? src;
+  const defaultSourceUrl = sources?.[0]?.src ?? null;
   const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;
   const ogDescription =
@@ -74,6 +76,10 @@ export function VideoPage({
       head={
         <>
           <link rel="preconnect" href="https://cdn.vidstack.io" />
+          <link rel="modulepreload" href="https://cdn.vidstack.io/player" />
+          {defaultSourceUrl && (
+            <link rel="preload" as="video" fetchpriority="high" href={defaultSourceUrl} />
+          )}
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <link rel="stylesheet" href="/static/styles/player.css" />
@@ -166,7 +172,13 @@ export function VideoPage({
         </a>
       )}
 
-      <media-player src={src ?? undefined} poster={poster ?? undefined} playsinline>
+      <media-player
+        src={src ?? undefined}
+        poster={poster ?? undefined}
+        preload="auto"
+        load="eager"
+        playsinline
+      >
         <media-provider>
           {sources?.map((s) => (
             <source

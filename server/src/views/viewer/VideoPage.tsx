@@ -1,6 +1,7 @@
 import { raw } from "hono/html";
 import { marked } from "marked";
 import { formatDate, formatDuration, formatDurationIso } from "../../lib/format";
+import { siteConfig } from "../../lib/site-config";
 import type { Video } from "../../lib/store";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
@@ -28,7 +29,7 @@ export function VideoPage({
   embedAbsolute,
   adminUrl,
 }: Props) {
-  const pageTitle = video.title ?? `Video ${video.slug}`;
+  const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;
   const ogDescription =
     description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
@@ -56,8 +57,8 @@ export function VideoPage({
       }),
     author: {
       "@type": "Person",
-      name: "Danny Smith",
-      url: "https://danny.is",
+      name: siteConfig.authorName,
+      url: siteConfig.authorUrl,
     },
   };
 
@@ -77,7 +78,7 @@ export function VideoPage({
           <link rel="canonical" href={canonicalUrl} />
           {noindex && <meta name="robots" content="noindex" />}
           {description && <meta name="description" content={description} />}
-          <meta name="author" content="Danny Smith" />
+          <meta name="author" content={siteConfig.authorName} />
 
           {/* Open Graph */}
           <meta property="og:type" content="video.other" />
@@ -87,8 +88,14 @@ export function VideoPage({
           {posterAbsolute && <meta property="og:image" content={posterAbsolute} />}
           <meta property="og:video" content={embedAbsolute} />
           <meta property="og:video:type" content="text/html" />
-          <meta property="og:video:width" content="1280" />
-          <meta property="og:video:height" content="720" />
+          <meta
+            property="og:video:width"
+            content={String(siteConfig.defaultOgEmbedDimensions.width)}
+          />
+          <meta
+            property="og:video:height"
+            content={String(siteConfig.defaultOgEmbedDimensions.height)}
+          />
 
           {/* Twitter Card */}
           <meta name="twitter:card" content="player" />
@@ -96,8 +103,14 @@ export function VideoPage({
           {ogDescription && <meta name="twitter:description" content={ogDescription} />}
           {posterAbsolute && <meta name="twitter:image" content={posterAbsolute} />}
           <meta name="twitter:player" content={embedAbsolute} />
-          <meta name="twitter:player:width" content="1280" />
-          <meta name="twitter:player:height" content="720" />
+          <meta
+            name="twitter:player:width"
+            content={String(siteConfig.defaultOgEmbedDimensions.width)}
+          />
+          <meta
+            name="twitter:player:height"
+            content={String(siteConfig.defaultOgEmbedDimensions.height)}
+          />
 
           {/* Structured data */}
           <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
@@ -182,8 +195,8 @@ export function VideoPage({
           <div class="viewer-description">{raw(marked.parse(video.description) as string)}</div>
         )}
         <p class="viewer-attribution">
-          <a href="https://danny.is" rel="noopener noreferrer" target="_blank">
-            danny.is
+          <a href={siteConfig.authorUrl} rel="noopener noreferrer" target="_blank">
+            {siteConfig.authorUrl.replace(/^https?:\/\//, "")}
           </a>
         </p>
       </div>

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { siteConfig } from "../../lib/site-config";
 import { resolveSlug } from "../../lib/store";
 import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
 
@@ -26,8 +27,9 @@ oembed.get("/oembed", async (c) => {
   if (!resolved) return c.json({ error: "Not found" }, 404);
   const { video } = resolved;
 
-  const maxwidth = Math.min(Number(c.req.query("maxwidth") ?? 1280), 1280);
-  const maxheight = Math.min(Number(c.req.query("maxheight") ?? 720), 720);
+  const { width: defW, height: defH } = siteConfig.defaultOgEmbedDimensions;
+  const maxwidth = Math.min(Number(c.req.query("maxwidth") ?? defW), defW);
+  const maxheight = Math.min(Number(c.req.query("maxheight") ?? defH), defH);
   // Maintain 16:9 aspect ratio within the constraints.
   const width = Math.min(maxwidth, Math.round(maxheight * (16 / 9)));
   const height = Math.round(width * (9 / 16));
@@ -39,8 +41,8 @@ oembed.get("/oembed", async (c) => {
     version: "1.0",
     type: "video",
     title: video.title ?? video.slug,
-    author_name: "Danny Smith",
-    provider_name: "loom-clone",
+    author_name: siteConfig.authorName,
+    provider_name: siteConfig.name,
     provider_url: base,
     html: `<iframe src="${embedUrl}" width="${width}" height="${height}" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>`,
     width,

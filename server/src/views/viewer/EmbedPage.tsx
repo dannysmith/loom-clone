@@ -1,3 +1,4 @@
+import { siteConfig } from "../../lib/site-config";
 import { RootLayout } from "../layouts/RootLayout";
 
 type Props = {
@@ -27,7 +28,7 @@ export function EmbedPage({
   posterAbsolute,
 }: Props) {
   const playerTitle = [title, duration].filter(Boolean).join(" · ");
-  const pageTitle = title ?? `Video ${slug}`;
+  const pageTitle = title ?? siteConfig.defaultVideoTitle(slug);
   const ogDescription =
     description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
   return (
@@ -46,7 +47,7 @@ export function EmbedPage({
           {/* Canonical points at the main video page, not the embed */}
           <link rel="canonical" href={canonicalUrl} />
           {description && <meta name="description" content={description} />}
-          <meta name="author" content="Danny Smith" />
+          <meta name="author" content={siteConfig.authorName} />
 
           {/* OG tags — so an accidentally-pasted embed URL still gets a rich preview */}
           <meta property="og:type" content="video.other" />

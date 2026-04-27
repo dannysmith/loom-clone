@@ -41,6 +41,13 @@ admin.post("/login", async (c) => {
 
 // --- Auth + CSRF on everything below ---
 
+// Prevent CDN/proxy caching of any admin response — defense in depth on top
+// of BunnyCDN edge rules. Authenticated HTML must never be served from cache.
+admin.use("*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "no-store");
+});
+
 admin.use("*", requireAdmin());
 
 // CSRF protection for cookie-based auth only. Bearer token requests are

@@ -10,7 +10,7 @@ The server is split into four route modules, each with its own auth profile:
 | -------- | ---------- | --------------------------------------------- | ------------------------------------------------ |
 | `api`    | `/api`     | Bearer on `/api/videos/*`; `/api/health` open | JSON API for macOS app + programmatic clients    |
 | `admin`  | `/admin`   | Session cookie or `lca_` bearer token         | Admin panel (HTML pages + HTMX partials)         |
-| `site`   | `/`        | Open                                          | Root landing, well-known files, oEmbed discovery |
+| `site`   | `/`        | Open                                          | Root redirect, well-known files, feeds (RSS/JSON/llms.txt), oEmbed |
 | `videos` | `/` (last) | Open                                          | Viewer-facing `/:slug` surface, catch-all        |
 
 Modules are mounted in the order above in `app.ts`. The `videos` module is deliberately last since its `/:slug` catch-all would swallow anything more specific if it went first. In practice Hono's trie router matches by specificity regardless of mount order, but the ordering documents intent.
@@ -287,7 +287,11 @@ Markdown metadata. Includes heading (title or slug), description, formatted dura
 
 | Path           | Response                                                                             |
 | -------------- | ------------------------------------------------------------------------------------ |
-| `/`            | Minimal HTML landing page                                                            |
+| `/`            | 302 redirect to `https://danny.is`. HTML body contains feed/llms.txt hints for curl and AI agents. `Link` header for RSS autodiscovery. |
+| `/feed.xml`    | RSS 2.0 + Media RSS feed of all public, complete, non-trashed videos. Includes `<enclosure>`, `<media:content>`, `<media:thumbnail>` per item. |
+| `/rss`         | 301 redirect to `/feed.xml`                                                          |
+| `/feed.json`   | JSON Feed 1.1. Includes `info_for_llms` top-level key, truncated transcript excerpts (~200 words), per-video `_urls` map, media attachments. Served as `application/feed+json`. |
+| `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, and links to feeds/sitemap/author website. |
 | `/robots.txt`  | Disallows `/admin` and `/api`                                                        |
 | `/favicon.ico` | 204 No Content (placeholder)                                                         |
 | `/sitemap.xml` | Video sitemap (public + complete + non-trashed only, with `<video:video>` extension) |
@@ -308,7 +312,7 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
   "type": "video",
   "title": "...",
   "author_name": "Danny Smith",
-  "provider_name": "loom-clone",
+  "provider_name": "Danny's Videos",
   "provider_url": "https://example.com",
   "html": "<iframe src=\".../embed\" ...></iframe>",
   "width": 640, "height": 360,
@@ -405,6 +409,9 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | `.mp4`    | `video/mp4`                     | init segment, derivatives  |
 | `.jpg`    | `image/jpeg`                    | poster/thumbnail           |
 | `.json`   | `application/json`              | API responses, /:slug.json |
+| `.json`   | `application/feed+json`         | /feed.json (JSON Feed 1.1) |
+| `.xml`    | `application/rss+xml`           | /feed.xml (RSS + MRSS)     |
+| `.txt`    | `text/plain`                    | /llms.txt                  |
 | `.vtt`    | `text/vtt`                      | storyboard.vtt, captions.vtt |
 | `.srt`    | `application/x-subrip`          | captions.srt               |
 | `.md`     | `text/markdown`                 | /:slug.md                  |
@@ -442,7 +449,9 @@ See `.env.example` for documentation and defaults.
 | Video CRUD routes                         | `src/routes/api/videos.ts`       |
 | Admin module (routes, auth, CSRF)         | `src/routes/admin/index.tsx`     |
 | Site (root, well-known)                   | `src/routes/site/well-known.tsx` |
+| Feeds (RSS, JSON Feed, llms.txt)          | `src/routes/site/feeds.ts`       |
 | oEmbed endpoint                           | `src/routes/site/oembed.ts`      |
+| Site-level metadata config                | `src/lib/site-config.ts`         |
 | Viewer HTML page                          | `src/routes/videos/page.tsx`     |
 | Embed page                                | `src/routes/videos/embed.tsx`    |
 | Viewer slug resolution + derivatives      | `src/routes/videos/resolve.ts`   |

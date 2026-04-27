@@ -33,7 +33,7 @@ These are the real-world situations this tool needs to serve:
 Three components exist today, plus a diagnostic tool:
 
 - **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
-- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). `server/data/` holds per-video directories.
+- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). Public feeds (RSS, JSON Feed, llms.txt) are served by the site module. `server/data/` holds per-video directories.
 - **Viewer Layer** — not yet built as a separate component. Currently the server handles playback directly at `/:slug` using Vidstack, with media served under `/:slug/raw/*` and `/:slug/stream/*`. Future plan is Cloudflare Workers + KV for CDN-backed delivery.
 - **Test Harness** (`app/TestHarness/`, `test-runs/`) — diagnostic tool for probing AVFoundation/VideoToolbox/Metal configurations in isolation, without going through the real recording pipeline. Separate Xcode target (`LoomCloneTestHarness`), not a shipping component. Has its own `README.md` and `CLAUDE.md` with detailed usage instructions.
 
@@ -102,12 +102,12 @@ Direct commands (for reference or when you need different flags):
 │       ├── index.ts                      #   entry — initDb() + boots createApp()
 │       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)
 │       ├── test-utils.ts                 #   temp-dir test isolation helpers
-│       ├── lib/                          #   store, playlist, derivatives, errors, url, file-serve — co-located __tests__/
+│       ├── lib/                          #   store, playlist, derivatives, errors, url, file-serve, site-config — co-located __tests__/
 │       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
 │       └── routes/                       #   four modules, each with co-located __tests__/
 │           ├── api/                      #     /api/* — bearer-authed JSON API (health, videos CRUD)
 │           ├── admin/                    #     /admin — session/bearer-authed admin panel
-│           ├── site/                     #     root, well-known files (robots, favicon, sitemap)
+│           ├── site/                     #     root redirect, well-known files, feeds (RSS, JSON, llms.txt), oEmbed
 │           └── videos/                   #     /:slug viewer surface (page, embed, media, metadata)
 ├── docs/
 │   ├── developer/                        # living developer docs

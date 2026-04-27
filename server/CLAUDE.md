@@ -50,7 +50,7 @@ Four modules in `src/routes/`, each with its own auth profile. Full route refere
 | --------- | ---------- | ------------------------------------- | ----------------------------------- |
 | `api/`    | `/api`     | Bearer on `/videos/*`; `/health` open | JSON API for macOS app              |
 | `admin/`  | `/admin`   | Session cookie or `lca_` bearer       | Admin panel                         |
-| `site/`   | `/`        | Open                                  | Root, well-known files, oEmbed      |
+| `site/`   | `/`        | Open                                  | Root redirect, well-known files, feeds, oEmbed |
 | `videos/` | `/` (last) | Open                                  | `/:slug` viewer surface (catch-all) |
 
 - **Auth at the mount**: bearer middleware is applied in `app.ts` to `/api/videos/*` only, keeping the api router itself auth-agnostic and easy to test.

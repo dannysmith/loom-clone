@@ -451,6 +451,7 @@ The Range-aware file serving logic lives in `src/lib/file-serve.ts`.
 | `ADMIN_PASSWORD` | *(unset)*                | Admin login password. When unset, admin auth is bypassed.   |
 | `ADMIN_USERNAME` | `admin`                  | Admin login username.                                       |
 | `SESSION_SECRET` | *(unset)*                | HMAC key for session cookies. Required with `ADMIN_PASSWORD`.|
+| `BUNNY_CDN_API_KEY` | *(unset)*             | BunnyCDN API key for cache purging. When unset, purge calls no-op. |
 
 See `.env.example` for documentation and defaults.
 
@@ -465,6 +466,7 @@ See `.env.example` for documentation and defaults.
 | Site (root, well-known)                   | `src/routes/site/well-known.tsx` |
 | Feeds (RSS, JSON Feed, llms.txt)          | `src/routes/site/feeds.ts`       |
 | oEmbed endpoint                           | `src/routes/site/oembed.ts`      |
+| CDN cache purge helpers                    | `src/lib/cdn.ts`                 |
 | Site-level metadata config                | `src/lib/site-config.ts`         |
 | Viewer HTML page                          | `src/routes/videos/page.tsx`     |
 | Embed page                                | `src/routes/videos/embed.tsx`    |

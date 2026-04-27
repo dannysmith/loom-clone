@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
+import { srtToVtt } from "../../lib/srt";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
 
 // Allowlists constrain which on-disk files each route can serve, preventing
@@ -89,12 +90,19 @@ media.get("/:slug/captions.vtt", async (c) => {
   const { slug } = c.req.param();
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-  const filePath = join(DATA_DIR, video.id, "derivatives", "captions.vtt");
-  const file = Bun.file(filePath);
-  if (!(await file.exists())) return c.text("Not found", 404);
+  const derivDir = join(DATA_DIR, video.id, "derivatives");
+  const vttFile = Bun.file(join(derivDir, "captions.vtt"));
+  if (await vttFile.exists()) {
+    c.header("Cache-Control", "public, max-age=3600");
+    c.header("Content-Type", "text/vtt");
+    return c.body(await vttFile.text());
+  }
+  // Fall back to converting SRT → VTT on the fly
+  const srtFile = Bun.file(join(derivDir, "captions.srt"));
+  if (!(await srtFile.exists())) return c.text("Not found", 404);
   c.header("Cache-Control", "public, max-age=3600");
   c.header("Content-Type", "text/vtt");
-  return c.body(await file.text());
+  return c.body(srtToVtt(await srtFile.text()));
 });
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file

@@ -189,14 +189,7 @@ export function VideoPage({
             />
           ))}
           {captionsUrl && (
-            <track
-              src={captionsUrl}
-              kind="subtitles"
-              srclang="en"
-              label="English"
-              data-type="srt"
-              default
-            />
+            <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
         </media-provider>
         <media-video-layout thumbnails={`/${video.slug}/storyboard.vtt`} />

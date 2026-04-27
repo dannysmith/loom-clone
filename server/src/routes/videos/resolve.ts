@@ -18,14 +18,19 @@ async function derivativeFlags(videoId: string): Promise<{
   const dir = join(DATA_DIR, videoId, "derivatives");
   const sourcePath = join(dir, "source.mp4");
   const thumbPath = join(dir, "thumbnail.jpg");
-  const captionsPath = join(dir, "captions.srt");
+  const captionsSrtPath = join(dir, "captions.srt");
+  const captionsVttPath = join(dir, "captions.vtt");
   const variantPaths = VARIANT_HEIGHTS.map((h) => join(dir, `${h}p.mp4`));
-  const [hasSource, hasThumb, hasCaptions, ...variantExists] = await Promise.all([
-    Bun.file(sourcePath).exists(),
-    Bun.file(thumbPath).exists(),
-    Bun.file(captionsPath).exists(),
-    ...variantPaths.map((p) => Bun.file(p).exists()),
-  ]);
+  const [hasSource, hasThumb, hasCaptionsSrt, hasCaptionsVtt, ...variantExists] = await Promise.all(
+    [
+      Bun.file(sourcePath).exists(),
+      Bun.file(thumbPath).exists(),
+      Bun.file(captionsSrtPath).exists(),
+      Bun.file(captionsVttPath).exists(),
+      ...variantPaths.map((p) => Bun.file(p).exists()),
+    ],
+  );
+  const hasCaptions = hasCaptionsSrt || hasCaptionsVtt;
   const variantHeights = VARIANT_HEIGHTS.filter((_, i) => variantExists[i]);
   return { hasSource, variantHeights, hasThumb, hasCaptions };
 }
@@ -131,6 +136,6 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     src,
     sources,
     poster: hasThumb ? urls.poster : null,
-    captionsUrl: hasCaptions ? `/${video.slug}/captions.srt` : null,
+    captionsUrl: hasCaptions ? `/${video.slug}/captions.vtt` : null,
   };
 }

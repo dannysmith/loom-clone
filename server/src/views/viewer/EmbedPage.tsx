@@ -90,14 +90,7 @@ export function EmbedPage({
             />
           ))}
           {captionsUrl && (
-            <track
-              src={captionsUrl}
-              kind="subtitles"
-              srclang="en"
-              label="English"
-              data-type="srt"
-              default
-            />
+            <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
         </media-provider>
 

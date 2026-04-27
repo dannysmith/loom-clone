@@ -2,6 +2,13 @@
 // Only handles the subset we need: strip sequence numbers, timestamps, and
 // blank separators, returning the spoken words as a single string.
 
+export function srtToVtt(srt: string): string {
+  const normalised = srt.replace(/\r\n/g, "\n");
+  // Replace commas with dots in timestamp lines (00:00:01,000 → 00:00:01.000)
+  const converted = normalised.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return `WEBVTT\n\n${converted}`;
+}
+
 export function parseSrtToPlainText(srt: string): string {
   const lines = srt.replace(/\r\n/g, "\n").split("\n");
   const textLines: string[] = [];

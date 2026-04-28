@@ -4,6 +4,8 @@
 
 ## Why I built this
 
+
+
 ## Overview: The fundamental Requirements
 
 1. macOS menubar app
@@ -27,7 +29,7 @@
 ## The Recording UI
 
 - Mode Switching
-- The Preview Overlay
+- The Preview Overlay & Swapping Quadrants
 - Pausing & Cancelling
 
 ## The Backend API
@@ -54,8 +56,15 @@
 
 ### `/:slug/embed`
 
+### The CDN
+
+### Caching/HTML Etc
+
 ## What get's stored locally
 
+## Mid-Recording Resilliance & Recovery
+
+## Healing
 
 ## Server-Side Post-Processing
 
@@ -67,11 +76,9 @@
 
 ### Storyboard & Scrubber Generation
 
-## Mid-Recording Resilliance & Recovery
+### Transcription & Subtitles
 
-## Healing
-
-## Transcription & Subtitles
+### AI Title Generation
 
 ## The Admin Interface
 

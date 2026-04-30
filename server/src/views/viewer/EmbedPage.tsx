@@ -1,4 +1,5 @@
 import { siteConfig } from "../../lib/site-config";
+import { staticUrl } from "../../lib/static-assets";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { RootLayout } from "../layouts/RootLayout";
 
@@ -48,8 +49,8 @@ export function EmbedPage({
           )}
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-          <link rel="stylesheet" href="/static/styles/player.css" />
-          <link rel="stylesheet" href="/static/styles/embed.css" />
+          <link rel="stylesheet" href={staticUrl("styles/player.css")} />
+          <link rel="stylesheet" href={staticUrl("styles/embed.css")} />
           <script type="module" src="https://cdn.vidstack.io/player" />
 
           {/* Canonical points at the main video page, not the embed */}

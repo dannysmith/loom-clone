@@ -1,15 +1,11 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { resolve } from "path";
 import { requireApiKey } from "./lib/auth";
+import { getRewrittenCss, PUBLIC_ROOT } from "./lib/static-assets";
 import admin from "./routes/admin";
 import api from "./routes/api";
 import site from "./routes/site";
 import videos from "./routes/videos";
-
-// Absolute path so serveStatic doesn't resolve against the current cwd.
-// Tests chdir into a temp dir, which would otherwise break /static/*.
-const PUBLIC_ROOT = resolve(import.meta.dir, "..", "public");
 
 // Factory — kept side-effect-free so tests can construct a fresh app
 // without touching the on-disk database. The entry point in `index.ts`
@@ -29,11 +25,37 @@ export function createApp(): Hono {
   app.use("/api/videos/*", requireApiKey());
   app.route("/api", api);
 
+  // Serve CSS files with @import URLs rewritten to include the version
+  // hash, so CDN-cached sub-files are busted along with the entry point.
+  app.use("/static/styles/*", async (c, next) => {
+    const rel = c.req.path.replace(/^\/static\//, "");
+    const rewritten = getRewrittenCss(rel);
+    if (rewritten) {
+      c.header("Content-Type", "text/css; charset=utf-8");
+      c.header("Cache-Control", "public, max-age=31536000, immutable");
+      return c.body(rewritten);
+    }
+    return next();
+  });
+
   // CSS, fonts, future client assets. Separate from `/data/*` (per-video
   // media, on the site module) which has its own Range-aware handler.
+  // Versioned files get aggressive caching — the URL changes on redeploy.
+  // Admin-only files (bypassed at the CDN via Edge Rule) get no-cache so
+  // the browser always revalidates.
   app.use(
     "/static/*",
-    serveStatic({ root: PUBLIC_ROOT, rewriteRequestPath: (p) => p.replace(/^\/static/, "") }),
+    serveStatic({
+      root: PUBLIC_ROOT,
+      rewriteRequestPath: (p) => p.replace(/^\/static/, ""),
+      onFound: (path, c) => {
+        if (path.endsWith("/admin.css") || path.endsWith("/admin.js")) {
+          c.header("Cache-Control", "no-cache");
+        } else {
+          c.header("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }),
   );
 
   app.route("/admin", admin);

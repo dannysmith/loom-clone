@@ -2,6 +2,7 @@ import { raw } from "hono/html";
 import { marked } from "marked";
 import { formatDate, formatDuration, formatDurationIso } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
+import { staticUrl } from "../../lib/static-assets";
 import type { Video } from "../../lib/store";
 import { absoluteUrl } from "../../lib/url";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
@@ -82,8 +83,8 @@ export function VideoPage({
           )}
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-          <link rel="stylesheet" href="/static/styles/player.css" />
-          <link rel="stylesheet" href="/static/styles/viewer.css" />
+          <link rel="stylesheet" href={staticUrl("styles/player.css")} />
+          <link rel="stylesheet" href={staticUrl("styles/viewer.css")} />
           <script type="module" src="https://cdn.vidstack.io/player" />
 
           {/* Canonical + robots */}

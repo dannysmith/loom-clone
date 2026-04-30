@@ -18,9 +18,8 @@ import {
 } from "./edit-transcript";
 import { logEvent } from "./events";
 import { nowIso } from "./format";
-import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo, upsertTranscript } from "./store";
-import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
+import { generateStoryboard } from "./storyboard";
 
 export type Edl = {
   version: number;
@@ -96,7 +95,10 @@ async function runEditPipeline(videoId: string): Promise<void> {
     );
   }
 
-  // 6. Regenerate storyboards + peaks from edited output.
+  // 6. Regenerate the viewer-facing storyboard from the edited output.
+  // Editor-specific files (editor-storyboard, peaks.json) are NOT
+  // regenerated — the editor always works from source.mp4, so those
+  // must reflect the original source, not the edited version.
   const editedDuration = await probeDuration(outputPath);
 
   if (editedDuration !== null && editedDuration >= 60) {
@@ -106,30 +108,6 @@ async function runEditPipeline(videoId: string): Promise<void> {
     } catch (err) {
       console.error(
         `[edit-pipeline] ${videoId} storyboard regeneration failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  if (editedDuration !== null && editedDuration >= 5) {
-    try {
-      await generateEditorStoryboard(derivDir, editedDuration, outputPath);
-      console.log(`[edit-pipeline] ${videoId}/editor-storyboard regenerated`);
-    } catch (err) {
-      console.error(
-        `[edit-pipeline] ${videoId} editor storyboard regeneration failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  if (editedDuration !== null) {
-    try {
-      await generatePeaks(derivDir, editedDuration, outputPath);
-      console.log(`[edit-pipeline] ${videoId}/peaks.json regenerated`);
-    } catch (err) {
-      console.error(
-        `[edit-pipeline] ${videoId} peaks regeneration failed:`,
         err instanceof Error ? err.message : err,
       );
     }

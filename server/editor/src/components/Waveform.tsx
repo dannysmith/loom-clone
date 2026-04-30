@@ -22,7 +22,80 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const [ready, setReady] = useState(false);
-  const updatingFromEdl = useRef(false);
+  // Use refs for edits/callbacks so we can call syncRegions from both
+  // the ready handler and the effect without stale closures.
+  const editsRef = useRef(edl.edits);
+  editsRef.current = edl.edits;
+  const onEditsChangeRef = useRef(onEditsChange);
+  onEditsChangeRef.current = onEditsChange;
+  const suppressRegionEvents = useRef(false);
+
+  // Sync regions onto the waveform. Called both when edits change
+  // and when wavesurfer becomes ready.
+  const syncRegions = useCallback(() => {
+    const regions = regionsRef.current;
+    if (!regions) return;
+
+    suppressRegionEvents.current = true;
+    regions.clearRegions();
+
+    const edits = editsRef.current;
+    const trim = edits.find((e) => e.type === "trim");
+    const trimStart = trim?.startTime ?? 0;
+    const trimEnd = trim?.endTime ?? duration;
+
+    // Dimmed region before trim start.
+    if (trimStart > 0.01) {
+      regions.addRegion({
+        start: 0,
+        end: trimStart,
+        color: DIMMED_COLOR,
+        drag: false,
+        resize: false,
+      });
+    }
+
+    // Dimmed region after trim end.
+    if (trimEnd < duration - 0.01) {
+      regions.addRegion({
+        start: trimEnd,
+        end: duration,
+        color: DIMMED_COLOR,
+        drag: false,
+        resize: false,
+      });
+    }
+
+    // Trim region — the active area with draggable handles.
+    regions.addRegion({
+      id: "trim",
+      start: trimStart,
+      end: trimEnd,
+      color: TRIM_HANDLE_COLOR,
+      drag: false,
+      resize: true,
+    });
+
+    // Cut regions.
+    edits
+      .filter((e) => e.type === "cut")
+      .forEach((cut, i) => {
+        regions.addRegion({
+          id: `cut-${i}`,
+          start: cut.startTime,
+          end: cut.endTime,
+          color: CUT_COLOR,
+          drag: true,
+          resize: true,
+        });
+      });
+
+    // Delay clearing the suppression flag to avoid picking up
+    // events from the programmatic additions above.
+    requestAnimationFrame(() => {
+      suppressRegionEvents.current = false;
+    });
+  }, [duration]);
 
   // Initialize wavesurfer.
   useEffect(() => {
@@ -54,113 +127,36 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
         ws.load("", [peaksData.data], duration);
       })
       .catch(() => {
-        // No peaks available — show empty waveform.
         const empty = Array.from({ length: Math.floor(duration * 50) }, () => 0.1);
         ws.load("", [empty], duration);
       });
 
-    ws.on("ready", () => setReady(true));
-    ws.on("interaction", (time: number) => onSeek(time));
-
-    return () => {
-      ws.destroy();
-      wsRef.current = null;
-      regionsRef.current = null;
-      setReady(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoId, duration]);
-
-  // Sync cursor position with video time.
-  useEffect(() => {
-    if (wsRef.current && ready) {
-      wsRef.current.setTime(currentTime);
-    }
-  }, [currentTime, ready]);
-
-  // Sync regions with EDL state.
-  useEffect(() => {
-    const regions = regionsRef.current;
-    if (!regions || !ready) return;
-
-    updatingFromEdl.current = true;
-    regions.clearRegions();
-
-    const trim = edl.edits.find((e) => e.type === "trim");
-    const trimStart = trim?.startTime ?? 0;
-    const trimEnd = trim?.endTime ?? duration;
-
-    // Dimmed region before trim start.
-    if (trimStart > 0.01) {
-      regions.addRegion({
-        start: 0,
-        end: trimStart,
-        color: DIMMED_COLOR,
-        drag: false,
-        resize: false,
-      });
-    }
-
-    // Dimmed region after trim end.
-    if (trimEnd < duration - 0.01) {
-      regions.addRegion({
-        start: trimEnd,
-        end: duration,
-        color: DIMMED_COLOR,
-        drag: false,
-        resize: false,
-      });
-    }
-
-    // Trim region — the active area with draggable handles.
-    // Only show when the trim range differs from the full duration
-    // (otherwise there's nothing to indicate it's draggable).
-    regions.addRegion({
-      id: "trim",
-      start: trimStart,
-      end: trimEnd,
-      color: TRIM_HANDLE_COLOR,
-      drag: false,
-      resize: true,
+    ws.on("ready", () => {
+      setReady(true);
+      // Sync regions immediately when wavesurfer is ready,
+      // using the latest edits from the ref.
+      syncRegions();
     });
 
-    // Cut regions.
-    edl.edits
-      .filter((e) => e.type === "cut")
-      .forEach((cut, i) => {
-        regions.addRegion({
-          id: `cut-${i}`,
-          start: cut.startTime,
-          end: cut.endTime,
-          color: CUT_COLOR,
-          drag: true,
-          resize: true,
-        });
-      });
+    ws.on("interaction", (time: number) => onSeek(time));
 
-    updatingFromEdl.current = false;
-  }, [edl.edits, duration, ready]);
+    // Handle region drag/resize → update EDL.
+    regions.on("region-updated", (region: Region) => {
+      if (suppressRegionEvents.current) return;
 
-  // Handle region changes -> update EDL.
-  useEffect(() => {
-    const regions = regionsRef.current;
-    if (!regions || !ready) return;
-
-    const handleUpdate = (region: Region) => {
-      if (updatingFromEdl.current) return;
-
+      const currentEdits = editsRef.current;
       const newEdits: Edit[] = [];
 
       if (region.id === "trim") {
         newEdits.push({ type: "trim", startTime: region.start, endTime: region.end });
-        for (const e of edl.edits) {
+        for (const e of currentEdits) {
           if (e.type === "cut") newEdits.push(e);
         }
       } else if (region.id?.startsWith("cut-")) {
-        const trim2 = edl.edits.find((e) => e.type === "trim");
+        const trim2 = currentEdits.find((e) => e.type === "trim");
         if (trim2) newEdits.push(trim2);
         const cutIndex = parseInt(region.id.split("-")[1]!, 10);
-        const cuts = edl.edits.filter((e) => e.type === "cut");
+        const cuts = currentEdits.filter((e) => e.type === "cut");
         cuts.forEach((cut, i) => {
           if (i === cutIndex) {
             newEdits.push({ type: "cut", startTime: region.start, endTime: region.end });
@@ -171,15 +167,32 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       }
 
       if (newEdits.length > 0) {
-        onEditsChange(newEdits);
+        onEditsChangeRef.current(newEdits);
       }
-    };
+    });
 
-    regions.on("region-updated", handleUpdate);
     return () => {
-      regions.un("region-updated", handleUpdate);
+      ws.destroy();
+      wsRef.current = null;
+      regionsRef.current = null;
+      setReady(false);
     };
-  }, [edl.edits, onEditsChange, ready]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoId, duration]);
+
+  // Re-sync regions when edits change (after wavesurfer is ready).
+  useEffect(() => {
+    if (ready) {
+      syncRegions();
+    }
+  }, [edl.edits, ready, syncRegions]);
+
+  // Sync cursor position with video time.
+  useEffect(() => {
+    if (wsRef.current && ready) {
+      wsRef.current.setTime(currentTime);
+    }
+  }, [currentTime, ready]);
 
   // Double-click to add a cut at the clicked position.
   const handleDoubleClick = useCallback(

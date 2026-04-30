@@ -95,11 +95,27 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     const aspect =
       video.aspectRatio ?? (video.width && video.height ? video.width / video.height : null);
 
-    const sourceEntry: SourceDescriptor = { src: urls.raw, type: "video/mp4" };
-    if (video.width && video.height) {
-      sourceEntry.width = video.width;
-      sourceEntry.height = video.height;
-    }
+    // When edits have been applied, a resolution-named file at the source's
+    // own height (e.g. 1080p.mp4 for a 1080p source) replaces source.mp4 as
+    // the primary playback file. source.mp4 is the unedited original and
+    // must not be offered to viewers. The resolution file is already in
+    // variantHeights if it exists on disk.
+    const isEdited = !!video.lastEditedAt;
+    const sourceHeight = video.height;
+
+    // For edited videos, the source-resolution file is in variantHeights.
+    // For unedited videos, source.mp4 is the highest-quality option.
+    const sourceEntry: SourceDescriptor | null =
+      isEdited && sourceHeight && variantHeights.includes(sourceHeight)
+        ? null // source-resolution file is already in variantEntries
+        : (() => {
+            const entry: SourceDescriptor = { src: urls.raw, type: "video/mp4" };
+            if (video.width && video.height) {
+              entry.width = video.width;
+              entry.height = video.height;
+            }
+            return entry;
+          })();
 
     const variantEntries: SourceDescriptor[] = variantHeights.map((height) => {
       const entry: SourceDescriptor = {
@@ -116,15 +132,19 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     // Default playback should be at most 1080p. Browsers pick the first
     // compatible <source> as the default, so when a 1080p.mp4 derivative
     // exists (i.e. source > 1080p) we promote it to first. Otherwise
-    // source.mp4 leads — it is already ≤1080p in that case. Vidstack's
+    // the source entry leads — it is already ≤1080p in that case. Vidstack's
     // Quality menu sorts by data-width/height internally, so the visible
     // menu order is unchanged regardless of DOM order.
     const variant1080 = variantEntries.find((e) => e.height === 1080);
-    if (variant1080) {
+    if (variant1080 && sourceEntry) {
       const others = variantEntries.filter((e) => e !== variant1080);
       sources = [variant1080, sourceEntry, ...others];
-    } else {
+    } else if (sourceEntry) {
       sources = [sourceEntry, ...variantEntries];
+    } else {
+      // Edited video — no source.mp4 entry, just the variant files.
+      // Put the highest quality first.
+      sources = variantEntries;
     }
   } else {
     src = urls.hls;

@@ -219,27 +219,36 @@ WhisperKit transcribes `audio.m4a` locally, producing timestamps relative to t=0
 
 Currently transcription only runs for videos > 60 seconds. Lower this to ~5 seconds so that most real videos get transcripts (excluding only very short test recordings).
 
-## Phases
+## Implementation status
 
-### Phase 1 — Transcription enhancements (macOS app + server)
+All phases are implemented. See `docs/developer/admin-editor.md` for the full developer guide.
 
-Enable word-level timestamps in WhisperKit. Send `words.json` alongside the SRT to the server. Add server endpoint/storage for word-level data. Lower the transcript duration threshold to ~5 seconds. This is independent of the editor and useful on its own.
+### Phase 1 — Transcription enhancements (done)
 
-### Phase 2 — Server-side editor infrastructure
+Word-level timestamps enabled in WhisperKit. `words.json` sent alongside SRT. Server endpoint at `PUT /api/videos/:id/words`. Transcript duration threshold lowered to 5 seconds.
 
-Add the `lastEditedAt` field to the DB schema. Add the editor storyboard generation step to the derivatives pipeline (dense frame extraction). Add the audio peaks generation step (`peaks.json`). Build the API endpoints: load EDL, save EDL, commit edits (trigger ffmpeg processing + derivative regeneration + DB/CDN updates). Implement the ffmpeg edit pipeline (trim, cut with audio crossfade, full re-encode). Implement edited transcript derivation from `words.json` + EDL.
+### Phase 2 — Server-side editor infrastructure (done)
 
-### Phase 3 — Editor UI (Vite + React app)
+`lastEditedAt` field on videos table. Editor storyboard + audio peaks generation in the derivatives pipeline. EDL API endpoints (load, save, commit). ffmpeg edit pipeline with trim/cut, audio crossfade, full re-encode. Edited transcript derivation from `words.json` + EDL. `"processing"` status during edit pipeline execution with guards against concurrent edits.
 
-Set up the Vite + React project within the server directory. Build the editor page shell (Hono route with auth, HTML wrapper that loads the React bundle). Implement the core editor: video preview, wavesurfer.js waveform with Regions, timeline thumbnail strip, trim/cut interactions, undo/redo, keyboard shortcuts, commit flow with confirmation. Wire up to the Phase 2 API endpoints.
+### Phase 3 — Editor UI (done)
 
-### Phase 4 — Word-level transcript overlay
+Vite + React app at `server/editor/`. Video preview, wavesurfer.js waveform with Regions, timeline thumbnail strip with drag-to-scrub, trim/cut toolbar buttons with keyboard shortcut indicators, undo/redo, commit flow with spinner and navigation.
 
-Display words along the editor timeline from `words.json`, aligned with the waveform. Visible when zoomed in to help identify filler words for precise cuts. Only shown when word data is available — the editor works without it.
+### Phase 4 — Word-level transcript overlay (done)
 
-### Phase 5 — Admin integration and polish
+Words displayed along the timeline from `words.json`. Current word highlighted during playback. Words in cut regions shown with strikethrough, trimmed words dimmed. Click-to-seek.
 
-Add "Edit" button to the video detail page action bar. Add "Edited" badge (driven by `lastEditedAt`) with link to editor. Ensure the detail page shows the correct (edited) duration, file size, and transcript. Ensure viewer-facing routes serve the edited versions correctly. Verify CDN cache purging works end-to-end.
+### Phase 5 — Admin integration and polish (done)
+
+"Edit video" button on detail page (complete videos only). "Edited" badge driven by `lastEditedAt`. Detail page player and download links serve the edited version via `activeRawFilename()`. All viewer-facing routes (page, embed, feeds, sitemap, metadata, API) serve the correct file via centralised `urlsForVideo()` and `activeRawFilename()`. CDN cache purging on commit. Backup script includes `edits.json` and `words.json`.
+
+### Remaining work and known issues
+
+- The waveform region rendering when re-opening an edited video may have timing issues — the regions sync depends on React effect ordering with wavesurfer's ready event. Needs testing with more real-world use.
+- The timing alignment between WhisperKit word timestamps and source.mp4 playback should be validated empirically — see the Timing alignment section above.
+- No zoom control on the timeline yet. For precise cuts on long videos, a zoom mechanism would help.
+- No visual indicator on the thumbnail strip for which sections are cut/trimmed.
 
 ## Research references
 

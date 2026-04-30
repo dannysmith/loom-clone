@@ -114,13 +114,17 @@ Edits are stored as a JSON file alongside the derivatives:
 
 Stored at `derivatives/edits.json`. This is the recipe for producing the edited output from source.mp4. It can be viewed, modified, or deleted to revert to the original.
 
+The EDL is always a complete description — not incremental. When the user re-opens the editor for a previously edited video, the existing `edits.json` is loaded and the current edit state is shown. The user can modify (add/remove cuts, adjust trim) and re-commit. Each commit re-derives everything from `source.mp4` + the updated EDL.
+
 OpenTimelineIO (the industry standard from Pixar/ASWF) was considered but is C++/Python only and vastly overcomplicated for single-video trim/cut. The simple JSON format is easily extensible for future multi-track or overlay features.
 
 ## Server-side processing
 
 ### ffmpeg operations
 
-Full re-encode for all committed edits. This is simpler than partial stream-copy and guarantees frame-accurate cuts and clean audio. For a 5-minute 1080p video, re-encoding takes seconds. For 30-40 minute videos, a minute or two — acceptable.
+Full re-encode for all committed edits. This is simpler than partial stream-copy and guarantees frame-accurate cuts and clean audio.
+
+Use a fast encoding preset (`-preset fast` or `-preset veryfast`) — the visual quality difference is negligible for screen recordings and talking head content, and it significantly affects processing time on the Hetzner VPS (modest x86, no GPU). With a fast preset, a 5-minute 1080p video processes in well under a minute. A 40-minute video may take a few minutes.
 
 Audio joins at cut points use a short crossfade (~20-50ms) to eliminate clicks/pops from hard splices.
 

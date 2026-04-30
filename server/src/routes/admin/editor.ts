@@ -1,13 +1,74 @@
 import { zValidator } from "@hono/zod-validator";
+import { readFileSync } from "fs";
 import { Hono } from "hono";
+import { raw } from "hono/html";
 import { join } from "path";
 import { z } from "zod";
 import { applyEdits } from "../../lib/edit-pipeline";
 import { serveFileWithRange } from "../../lib/file-serve";
+import { PUBLIC_ROOT } from "../../lib/static-assets";
 import { DATA_DIR } from "../../lib/store";
 import { type AdminEnv, requireVideo } from "./helpers";
 
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
 const editor = new Hono<AdminEnv>();
+
+// --- Editor page (serves the React shell) ---
+editor.get("/:id/editor", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const video = result;
+
+  let scripts: string;
+  const manifestPath = join(PUBLIC_ROOT, "editor", ".vite", "manifest.json");
+  const manifestExists = await Bun.file(manifestPath).exists();
+
+  if (manifestExists) {
+    // Production: load built assets from the Vite manifest.
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
+      string,
+      { file: string; css?: string[] }
+    >;
+    const entry = manifest["index.html"];
+    const css = (entry?.css ?? [])
+      .map((f: string) => `<link rel="stylesheet" href="/static/editor/${f}">`)
+      .join("\n    ");
+    scripts = `${css}\n    <script type="module" src="/static/editor/${entry?.file}"></script>`;
+  } else {
+    // Dev: load from Vite dev server for HMR.
+    scripts = [
+      '<script type="module" src="http://localhost:5173/static/editor/@vite/client"></script>',
+      '<script type="module" src="http://localhost:5173/static/editor/src/main.tsx"></script>',
+    ].join("\n    ");
+  }
+
+  const title = escapeAttr(video.title || video.slug);
+
+  return c.html(
+    raw(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor &middot; ${title}</title>
+  <link rel="stylesheet" href="/static/styles/app.css">
+  ${scripts}
+</head>
+<body>
+  <div id="editor-root"
+    data-video-id="${video.id}"
+    data-video-slug="${escapeAttr(video.slug)}"
+    data-video-duration="${video.durationSeconds ?? 0}"
+    data-video-title="${title}"
+    data-video-height="${video.height ?? 0}"
+  ></div>
+</body>
+</html>`),
+  );
+});
 
 // --- Load EDL ---
 // Returns the current edit decision list, or a default empty one if no edits exist.

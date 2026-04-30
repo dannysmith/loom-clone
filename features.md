@@ -234,19 +234,73 @@ For a 60+ second video with all input sources, we’ll end up with the following
 
 The *videos* table in our SQL database will have a record something like this…
 
-[Insert video table row with fields in left column and example values in right column]
+| Field            | Value                                  |
+| ---------------- | -------------------------------------- |
+| id               | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| slug             | `how-to-use-the-new-dashboard`         |
+| status           | `complete`                             |
+| visibility       | `unlisted`                             |
+| title            | `How to Use the New Dashboard`         |
+| description      | `null`                                 |
+| duration_seconds | `187.4`                                |
+| width            | `2560`                                 |
+| height           | `1440`                                 |
+| aspect_ratio     | `1.778`                                |
+| file_bytes       | `48291840`                             |
+| camera_name      | `FaceTime HD Camera`                   |
+| microphone_name  | `MacBook Pro Microphone`               |
+| recording_health | `null`                                 |
+| source           | `recorded`                             |
+| created_at       | `2026-04-30T14:22:03.841Z`             |
+| updated_at       | `2026-04-30T14:29:17.205Z`             |
+| completed_at     | `2026-04-30T14:25:44.012Z`             |
+| trashed_at       | `null`                                 |
 
 ### On Disk (Server)
 
-The volume attached to our server will have a `data/[UUID]` directory which looks something like this…
+The volume attached to our server will have a directory which looks something like this…
 
-[Insert tree as code block with all files on server with # comments explaining what they are]
+```
+data/a1b2c3d4-e5f6-7890-abcd-ef1234567890/
+├── init.mp4                          # HLS initialization segment (codec headers)
+├── seg_000.m4s                       # ~4s media segments streamed during recording
+├── seg_001.m4s
+├── ...
+├── seg_046.m4s
+├── stream.m3u8                       # HLS playlist referencing init.mp4 + segments
+├── recording.json                    # Timeline, events and segment log from the client
+└── derivatives/
+    ├── source.mp4                    # Stitched single-file MP4 with enhanced audio
+    ├── 1080p.mp4                     # Downsampled variant (source is 1440p)
+    ├── 720p.mp4                      # Downsampled variant
+    ├── thumbnail.jpg                 # Auto-selected best frame
+    ├── thumbnail-candidates/
+    │   ├── auto-01.jpg               # Other candidate frames (cleaned up after 10 days)
+    │   ├── auto-02.jpg
+    │   └── auto-03.jpg
+    ├── captions.srt                  # Subtitles uploaded by the macOS app
+    ├── storyboard.jpg                # Sprite sheet of preview frames (videos ≥ 60s)
+    └── storyboard.vtt                # Maps time ranges to sprite regions
+```
 
 ### On Disk (Local)
 
 Our mac will have a directory in `~/Application Support/LoomClone/recordings/[UUID]` which looks something like this…
 
-[Insert tree as code block with all files in local with # comments explaining what they are]
+```
+~/Library/Application Support/LoomClone/recordings/a1b2c3d4-e5f6-7890-abcd-ef1234567890/
+├── init.mp4                          # HLS initialization segment
+├── seg_000.m4s                       # Composited ~4s segments (uploaded to server)
+├── seg_001.m4s
+├── ...
+├── seg_046.m4s
+├── screen.mov                        # Raw ProRes screen capture
+├── camera.mp4                        # Raw H.264 camera + audio
+├── audio.m4a                         # Raw AAC mic audio
+├── recording.json                    # Timeline, events and segment log
+├── captions.srt                      # Local backup of generated subtitles
+└── .transcribed                      # Sentinel: transcription complete
+```
 
 
 ## The Admin Interface

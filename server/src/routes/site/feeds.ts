@@ -4,7 +4,7 @@ import { getDb } from "../../db/client";
 import { type Video, videos, videoTranscripts } from "../../db/schema";
 import { formatDuration } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
-import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
+import { absoluteUrl, activeRawFilename, getPublicBaseUrl } from "../../lib/url";
 
 // Public feeds: RSS, JSON Feed, llms.txt. No auth.
 const feeds = new Hono();
@@ -31,7 +31,7 @@ feeds.get("/feed.xml", async (c) => {
 
   const items = rows.map((v) => {
     const pageUrl = absoluteUrl(`/${v.slug}`);
-    const mp4Url = absoluteUrl(`/${v.slug}/raw/source.mp4`);
+    const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
     const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
     const title = v.title ?? v.slug;
     const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;
@@ -128,7 +128,7 @@ feeds.get("/feed.json", async (c) => {
       ...(transcriptExcerpt && { _transcript_excerpt: transcriptExcerpt }),
       attachments: [
         {
-          url: absoluteUrl(`/${v.slug}/raw/source.mp4`),
+          url: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
           mime_type: "video/mp4",
           ...(durationSec != null && { duration_in_seconds: durationSec }),
         },
@@ -138,7 +138,7 @@ feeds.get("/feed.json", async (c) => {
         embed: absoluteUrl(`/${v.slug}/embed`),
         json: absoluteUrl(`/${v.slug}.json`),
         md: absoluteUrl(`/${v.slug}.md`),
-        raw: absoluteUrl(`/${v.slug}/raw/source.mp4`),
+        raw: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
         poster: absoluteUrl(`/${v.slug}/poster.jpg`),
       },
     };

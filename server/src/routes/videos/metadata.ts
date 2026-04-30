@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { formatDate, formatDuration } from "../../lib/format";
 import { getTranscript, resolveSlug } from "../../lib/store";
-import { absoluteUrl, urlsForSlug } from "../../lib/url";
+import { absoluteUrl, urlsForVideo } from "../../lib/url";
 
 // Machine-readable representations of a video for programmatic/LLM
 // consumption. Shapes are designed to be stable — add fields freely,
@@ -14,7 +14,7 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
     return c.redirect(`/${resolved.video.slug}.json`, 301);
   }
   const { video } = resolved;
-  const urls = urlsForSlug(video.slug);
+  const urls = urlsForVideo(video);
   const transcript = await getTranscript(video.id);
   return c.json({
     id: video.id,

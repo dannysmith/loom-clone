@@ -11,6 +11,40 @@ export type VideoUrls = {
   poster: string;
 };
 
+// The filename of the "active" raw MP4 for a video — the file viewers should
+// see. For unedited videos this is source.mp4 (the original). For edited
+// videos this is the resolution-named file (e.g. 1080p.mp4) which contains
+// the edits applied to source.mp4. source.mp4 is always preserved as the
+// unedited original for re-editing and backups.
+export function activeRawFilename(video: {
+  lastEditedAt: string | null;
+  height: number | null;
+}): string {
+  if (video.lastEditedAt && video.height) {
+    return `${video.height}p.mp4`;
+  }
+  return "source.mp4";
+}
+
+// Build viewer-facing URLs for a video. Uses activeRawFilename to point
+// `raw` at the correct file (edited or original).
+export function urlsForVideo(video: {
+  slug: string;
+  lastEditedAt: string | null;
+  height: number | null;
+}): VideoUrls {
+  const filename = activeRawFilename(video);
+  return {
+    page: `/${video.slug}`,
+    raw: `/${video.slug}/raw/${filename}`,
+    hls: `/${video.slug}/stream/stream.m3u8`,
+    poster: `/${video.slug}/poster.jpg`,
+  };
+}
+
+// Slug-only URL builder for cases where we don't have video metadata.
+// Always points raw at source.mp4. Prefer urlsForVideo() when you have
+// the video object.
 export function urlsForSlug(slug: string): VideoUrls {
   return {
     page: `/${slug}`,

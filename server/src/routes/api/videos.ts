@@ -25,7 +25,7 @@ import {
   ValidationError,
   type Video,
 } from "../../lib/store";
-import { absoluteUrl, urlsForSlug } from "../../lib/url";
+import { absoluteUrl, urlsForVideo } from "../../lib/url";
 
 // Timeline segment shape we care about — loose typing to stay tolerant of
 // schema evolution. We only need the filename list for diffing.
@@ -66,7 +66,7 @@ async function onDiskFilenames(id: string): Promise<Set<string>> {
 
 // Shared JSON shape for a single video in API responses.
 function videoToApiJson(video: Video) {
-  const urls = urlsForSlug(video.slug);
+  const urls = urlsForVideo(video);
   return {
     id: video.id,
     slug: video.slug,

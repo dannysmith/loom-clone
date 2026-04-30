@@ -1,5 +1,6 @@
 import type { Video } from "../../../db/schema";
 import { formatDate, formatDurationShort } from "../../../lib/format";
+import { activeRawFilename } from "../../../lib/url";
 import {
   IconClock,
   IconCopy,
@@ -95,7 +96,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
               </>
             )}
             <a
-              href={`/admin/videos/${video.id}/media/raw/source.mp4`}
+              href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
               download
               class="popover-item"
             >

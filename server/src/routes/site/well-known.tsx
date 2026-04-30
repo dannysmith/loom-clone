@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { siteConfig } from "../../lib/site-config";
-import { absoluteUrl } from "../../lib/url";
+import { absoluteUrl, activeRawFilename } from "../../lib/url";
 
 // Root + well-known files. Open, no auth.
 const wellKnown = new Hono();
@@ -67,7 +67,7 @@ wellKnown.get("/sitemap.xml", async (c) => {
   const entries = rows.map((v) => {
     const pageUrl = absoluteUrl(`/${v.slug}`);
     const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
-    const mp4Url = absoluteUrl(`/${v.slug}/raw/source.mp4`);
+    const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
     const embedUrl = absoluteUrl(`/${v.slug}/embed`);
     const title = v.title ?? v.slug;
     const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;

@@ -4,7 +4,7 @@ import { formatDate, formatDuration, formatDurationIso } from "../../lib/format"
 import { siteConfig } from "../../lib/site-config";
 import { staticUrl } from "../../lib/static-assets";
 import type { Video } from "../../lib/store";
-import { absoluteUrl } from "../../lib/url";
+import { absoluteUrl, activeRawFilename } from "../../lib/url";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 
@@ -33,10 +33,11 @@ export function VideoPage({
   embedAbsolute,
   adminUrl,
 }: Props) {
-  // contentUrl for JSON-LD points at the canonical archive (source.mp4)
-  // regardless of which variant the player picks for default playback.
-  const sourceMp4Url = `/${video.slug}/raw/source.mp4`;
-  const contentUrl = sources?.find((s) => s.src === sourceMp4Url)?.src ?? sources?.[0]?.src ?? src;
+  // contentUrl for JSON-LD points at the active raw file (source.mp4 for
+  // unedited videos, the resolution file for edited ones).
+  const rawFilename = activeRawFilename(video);
+  const rawUrl = `/${video.slug}/raw/${rawFilename}`;
+  const contentUrl = sources?.find((s) => s.src === rawUrl)?.src ?? sources?.[0]?.src ?? src;
   const defaultSourceUrl = sources?.[0]?.src ?? null;
   const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;

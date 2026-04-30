@@ -1,5 +1,5 @@
 import type { Video } from "../../../db/schema";
-import { absoluteUrl } from "../../../lib/url";
+import { absoluteUrl, activeRawFilename } from "../../../lib/url";
 import {
   IconCode,
   IconCopy,
@@ -49,7 +49,11 @@ export function VideoActions({ video }: { video: Video }) {
         </a>
       )}
 
-      <a href={`/admin/videos/${video.id}/media/raw/source.mp4`} download class="btn btn--sm">
+      <a
+        href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
+        download
+        class="btn btn--sm"
+      >
         <IconDownload size={14} /> Download
       </a>
 

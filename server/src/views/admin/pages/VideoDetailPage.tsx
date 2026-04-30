@@ -3,6 +3,7 @@ import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
 import type { ThumbnailCandidate } from "../../../lib/thumbnails";
+import { activeRawFilename } from "../../../lib/url";
 import { AdminLayout } from "../../layouts/AdminLayout";
 import {
   FileTypeIcon,
@@ -49,17 +50,9 @@ export function VideoDetailPage({
   const title = video.title || video.slug;
   const duration = formatDuration(video.durationSeconds);
   const hasMp4 = files.some((f) => f.path === "derivatives/source.mp4");
-  // When edits have been applied, play the edited version (resolution-named
-  // file) instead of the unedited source.mp4.
-  const editedFile =
-    video.lastEditedAt && video.height
-      ? files.find((f) => f.path === `derivatives/${video.height}p.mp4`)
-      : null;
-  const playerSrc = editedFile
-    ? `/admin/videos/${video.id}/media/raw/${video.height}p.mp4`
-    : hasMp4
-      ? `/admin/videos/${video.id}/media/raw/source.mp4`
-      : `/admin/videos/${video.id}/media/stream/stream.m3u8`;
+  const playerSrc = hasMp4
+    ? `/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`
+    : `/admin/videos/${video.id}/media/stream/stream.m3u8`;
   const posterSrc = `/admin/videos/${video.id}/media/poster.jpg`;
 
   return (

@@ -271,7 +271,7 @@ VTT variant of the transcript, if the original upload was VTT format. Same behav
 
 ### `/:slug.mp4`
 
-Convenience redirect. **302** to `/:slug/raw/source.mp4`. 302 (not 301) because the canonical "default raw" may change as new resolution variants are added.
+Convenience redirect. **302** to the "active" raw MP4 — `source.mp4` for unedited videos, or the resolution-named edited file (e.g. `1080p.mp4`) when edits have been applied. Uses `activeRawFilename()` from `lib/url.ts`. 302 (not 301) because the target changes when edits are committed or reverted.
 
 ### `/:slug.json`
 
@@ -457,6 +457,30 @@ The Range-aware file serving logic lives in `src/lib/file-serve.ts`.
 
 See `.env.example` for documentation and defaults.
 
+## Edited video file resolution
+
+When a video has been edited via the admin editor, the "active" raw MP4 is a resolution-named file (e.g. `1080p.mp4` for a 1080p source) rather than `source.mp4`. This is tracked by the `lastEditedAt` timestamp on the video record.
+
+**File layout after editing a 1080p source:**
+```
+derivatives/
+  source.mp4          # untouched original — never modified, used by the editor
+  edits.json          # the edit decision list (trim/cut instructions)
+  1080p.mp4           # edited output at source resolution
+  720p.mp4            # downscaled from the edited output
+  words.json          # word-level timestamps (from original transcription)
+  peaks.json          # audio peaks from source.mp4 (for the editor waveform)
+  editor-storyboard.* # dense thumbnails from source.mp4 (for the editor timeline)
+  storyboard.*        # viewer-facing thumbnails (regenerated from edited output)
+  captions.srt        # edited captions (words in cut regions removed)
+```
+
+**URL resolution rule:** `activeRawFilename(video)` in `lib/url.ts` returns `source.mp4` when `lastEditedAt` is null, or `{height}p.mp4` when the video has been edited. This single function is used by all URL builders — `urlsForVideo()`, `handleMp4Redirect()`, feeds, sitemap, API responses, admin views, and download links.
+
+**Why not always generate a resolution-named file:** Most videos are never edited. For an unedited 1080p video, creating `1080p.mp4` as an exact copy of `source.mp4` would waste disk space. The resolution file at the source's own height is only created when edits are committed — its existence on disk is a consequence of editing, not a prerequisite.
+
+**Editor-specific files are never regenerated during editing:** `peaks.json` and `editor-storyboard.*` always reflect `source.mp4` because the editor always plays the original. Viewer-facing derivatives (storyboard, captions, resolution variants) are regenerated from the edited output.
+
 ## Where the code lives
 
 | Concern                                   | File                             |
@@ -478,7 +502,12 @@ See `.env.example` for documentation and defaults.
 | Videos module aggregator + /v/ redirects  | `src/routes/videos/index.ts`     |
 | Error codes + helper                      | `src/lib/errors.ts`              |
 | Range-aware file serving                  | `src/lib/file-serve.ts`          |
-| URL builders                              | `src/lib/url.ts`                 |
+| URL builders + `activeRawFilename()`      | `src/lib/url.ts`                 |
+| Edit pipeline (ffmpeg trim/cut + post-edit) | `src/lib/edit-pipeline.ts`     |
+| Edit transcript derivation                | `src/lib/edit-transcript.ts`     |
+| Audio peaks for editor waveform           | `src/lib/peaks.ts`               |
+| Admin editor routes (EDL, commit, media)  | `src/routes/admin/editor.ts`     |
+| Editor UI (Vite + React)                  | `editor/` (separate sub-project) |
 | API key middleware                        | `src/lib/auth.ts`                |
 | Admin auth (sessions, middleware)         | `src/lib/admin-auth.ts`          |
 | Admin token CRUD                          | `src/lib/admin-tokens.ts`        |

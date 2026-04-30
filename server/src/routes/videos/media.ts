@@ -4,6 +4,7 @@ import { join } from "path";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { srtToVtt } from "../../lib/srt";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
+import { activeRawFilename } from "../../lib/url";
 
 // Allowlists constrain which on-disk files each route can serve, preventing
 // traversal and keeping the public surface focused.
@@ -107,22 +108,11 @@ media.get("/:slug/captions.vtt", async (c) => {
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file
 // handler because Hono can't separate `:slug` from `.mp4` as param + literal.
-// When edits have been applied, a resolution-named file (e.g. 1080p.mp4)
-// exists at the source's own resolution — serve that instead of source.mp4.
+// Uses activeRawFilename to resolve to the correct file (edited or original).
 export async function handleMp4Redirect(c: Context, slug: string): Promise<Response> {
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-
-  // If an edited version exists at the source resolution, redirect to that.
-  if (video.height) {
-    const editedFile = `${video.height}p.mp4`;
-    const editedPath = join(DATA_DIR, video.id, "derivatives", editedFile);
-    if (await Bun.file(editedPath).exists()) {
-      return c.redirect(`/${video.slug}/raw/${editedFile}`, 302);
-    }
-  }
-
-  return c.redirect(`/${video.slug}/raw/source.mp4`, 302);
+  return c.redirect(`/${video.slug}/raw/${activeRawFilename(video)}`, 302);
 }
 
 export default media;

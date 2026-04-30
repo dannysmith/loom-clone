@@ -140,6 +140,7 @@ async function _runEditPipelineInner(
   // 7. Derive edited captions from words.json + EDL.
   try {
     await deriveEditedCaptions(videoId, derivDir, keptSegments);
+    console.log(`[edit-pipeline] ${videoId}/captions derived`);
   } catch (err) {
     console.error(
       `[edit-pipeline] ${videoId} caption derivation failed:`,

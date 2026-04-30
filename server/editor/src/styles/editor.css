@@ -153,6 +153,16 @@ body {
   background: oklch(0.38 0.1 25);
 }
 
+.editor-btn-delete-cut {
+  background: oklch(0.28 0.06 25);
+  border-color: oklch(0.38 0.08 25);
+  color: oklch(0.8 0.1 25);
+}
+
+.editor-btn-delete-cut:hover:not(:disabled) {
+  background: oklch(0.35 0.08 25);
+}
+
 .editor-btn-commit {
   background: oklch(0.45 0.12 250);
   border-color: oklch(0.5 0.14 250);

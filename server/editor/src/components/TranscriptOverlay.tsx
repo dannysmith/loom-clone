@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadWords } from "../api";
 import type { Edit, Word } from "../types";
 
@@ -11,6 +11,7 @@ type Props = {
 
 export function TranscriptOverlay({ videoId, currentTime, edits, onSeek }: Props) {
   const [words, setWords] = useState<Word[]>([]);
+  const currentWordRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     loadWords(videoId)
@@ -51,6 +52,16 @@ export function TranscriptOverlay({ videoId, currentTime, edits, onSeek }: Props
     return -1;
   }, [words, currentTime]);
 
+  // Auto-scroll to keep the current word visible.
+  useEffect(() => {
+    if (currentWordRef.current) {
+      currentWordRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [currentWordIndex]);
+
   if (words.length === 0) return null;
 
   return (
@@ -64,6 +75,7 @@ export function TranscriptOverlay({ videoId, currentTime, edits, onSeek }: Props
           return (
             <span
               key={i}
+              ref={isCurrent ? currentWordRef : undefined}
               className={[
                 "editor-transcript-word",
                 isCurrent ? "is-current" : "",

@@ -8,6 +8,7 @@ type Props = {
   saving: boolean;
   currentTime: number;
   duration: number;
+  hasCutAtPlayhead: boolean;
   onPlayPause: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -16,6 +17,7 @@ type Props = {
   onSetTrimIn: () => void;
   onSetTrimOut: () => void;
   onAddCut: () => void;
+  onDeleteCut: () => void;
 };
 
 function formatTime(seconds: number): string {
@@ -34,6 +36,7 @@ export function Toolbar({
   saving,
   currentTime,
   duration,
+  hasCutAtPlayhead,
   onPlayPause,
   onUndo,
   onRedo,
@@ -42,6 +45,7 @@ export function Toolbar({
   onSetTrimIn,
   onSetTrimOut,
   onAddCut,
+  onDeleteCut,
 }: Props) {
   return (
     <div className="editor-toolbar">
@@ -71,6 +75,11 @@ export function Toolbar({
         <button onClick={onAddCut} className="editor-btn editor-btn-cut" title="Add a cut at the playhead">
           Add cut <kbd>X</kbd>
         </button>
+        {hasCutAtPlayhead && (
+          <button onClick={onDeleteCut} className="editor-btn editor-btn-delete-cut" title="Delete the cut under the playhead">
+            Delete cut <kbd>D</kbd>
+          </button>
+        )}
       </div>
 
       <div className="editor-toolbar-right">

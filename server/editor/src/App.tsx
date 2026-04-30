@@ -53,6 +53,22 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
     edlState.addCut(cutStart, cutEnd);
   }, [playback.currentTime, duration, edlState]);
 
+  const deleteCutAtPlayhead = useCallback(() => {
+    const t = playback.currentTime;
+    const cuts = edlState.edl.edits.filter((e) => e.type === "cut");
+    const index = cuts.findIndex((c) => t >= c.startTime && t <= c.endTime);
+    if (index !== -1) {
+      edlState.removeCut(index);
+    }
+  }, [playback.currentTime, edlState]);
+
+  const hasCutAtPlayhead = useMemo(() => {
+    const t = playback.currentTime;
+    return edlState.edl.edits.some(
+      (e) => e.type === "cut" && t >= e.startTime && t <= e.endTime,
+    );
+  }, [playback.currentTime, edlState.edl.edits]);
+
   const keyboardActions = useMemo(
     () => ({
       togglePlayPause: playback.togglePlayPause,
@@ -64,8 +80,9 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
       setTrimIn,
       setTrimOut,
       addCut: addCutAtPlayhead,
+      deleteCut: deleteCutAtPlayhead,
     }),
-    [playback, edlState, setTrimIn, setTrimOut, addCutAtPlayhead],
+    [playback, edlState, setTrimIn, setTrimOut, addCutAtPlayhead, deleteCutAtPlayhead],
   );
 
   useKeyboard(keyboardActions);
@@ -94,6 +111,8 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
         onSetTrimIn={setTrimIn}
         onSetTrimOut={setTrimOut}
         onAddCut={addCutAtPlayhead}
+        onDeleteCut={deleteCutAtPlayhead}
+        hasCutAtPlayhead={hasCutAtPlayhead}
       />
 
       <VideoPreview

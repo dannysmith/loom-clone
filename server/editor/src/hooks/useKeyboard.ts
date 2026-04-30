@@ -10,6 +10,7 @@ type KeyboardActions = {
   setTrimIn: () => void;
   setTrimOut: () => void;
   addCut: () => void;
+  deleteCut: () => void;
 };
 
 export function useKeyboard(actions: KeyboardActions) {
@@ -79,6 +80,13 @@ export function useKeyboard(actions: KeyboardActions) {
           if (!mod) {
             e.preventDefault();
             actions.addCut();
+          }
+          break;
+
+        case "d":
+          if (!mod) {
+            e.preventDefault();
+            actions.deleteCut();
           }
           break;
       }

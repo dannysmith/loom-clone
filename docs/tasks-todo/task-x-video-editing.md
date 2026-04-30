@@ -15,7 +15,9 @@ The editor runs in the browser. The actual video processing (applying edits) hap
 
 Quick recordings often have rough starts/ends ("okay let me share my screen..."), false starts, filler sections, or mistakes mid-recording that should be cut before sharing. Currently there's no way to clean these up without downloading the video, editing locally, and re-uploading.
 
-### Future scope (not in this task, but informs technology choices)
+### Possible Future scope (not in this task, but informs technology choices)
+
+We may never end up building these, but it's worth being aware of them for now. 
 
 - **Multi-track editing** — when the macOS app's raw camera, screen, and audio tracks are uploaded separately, a richer editing experience with per-track control and re-composition.
 - **Overlay graphics** — pre-built overlays for lower thirds, titles, logos. Libraries like Diffusion Studio Core or Etro.js could handle client-side preview of these, with server-side ffmpeg for final rendering.

@@ -43,6 +43,7 @@ export const videos = sqliteTable(
     // Set on first transition to `complete` and not overwritten on re-complete.
     completedAt: text("completed_at"),
     trashedAt: text("trashed_at"),
+    lastEditedAt: text("last_edited_at"),
   },
   (t) => [
     index("videos_trashed_at_idx").on(t.trashedAt),

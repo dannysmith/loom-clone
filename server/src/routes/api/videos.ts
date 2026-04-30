@@ -313,6 +313,45 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   return c.json({ ok: true });
 });
 
+// Upload word-level timestamp data (JSON array from WhisperKit). Writes to
+// data/<id>/derivatives/words.json. Idempotent — re-uploading replaces.
+// 10 MB limit — generous for word-level JSON.
+videos.put("/:id/words", bodyLimit({ maxSize: 10 * 1024 * 1024 }), async (c) => {
+  const { id } = c.req.param();
+  const video = await getVideo(id);
+  if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+
+  const contentType = c.req.header("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return apiError(c, 400, "Content-Type must be application/json", ErrorCode.VALIDATION_ERROR);
+  }
+
+  let words: unknown;
+  try {
+    words = await c.req.json();
+  } catch {
+    return apiError(c, 400, "Malformed JSON body", ErrorCode.VALIDATION_ERROR);
+  }
+
+  if (!Array.isArray(words) || words.length === 0) {
+    return apiError(c, 400, "Expected non-empty JSON array", ErrorCode.VALIDATION_ERROR);
+  }
+
+  // Write to derivatives/ atomically (tmp → rename).
+  const derivDir = join(DATA_DIR, id, "derivatives");
+  const { mkdir, rename: fsRename } = await import("fs/promises");
+  await mkdir(derivDir, { recursive: true });
+  const tmpPath = join(derivDir, "words.json.tmp");
+  const finalPath = join(derivDir, "words.json");
+  await Bun.write(tmpPath, JSON.stringify(words));
+  await fsRename(tmpPath, finalPath);
+
+  await logEvent(id, "words_uploaded", { wordCount: (words as unknown[]).length });
+
+  console.log(`[words] ${id} (${(words as unknown[]).length} words)`);
+  return c.json({ ok: true });
+});
+
 // Accept an AI-suggested title. Only applies if the video's title is still
 // null (user hasn't manually set one). Idempotent — re-calling after a user
 // edit is a silent no-op.

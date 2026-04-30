@@ -43,6 +43,13 @@
       "when": 1777106186063,
       "tag": "0005_bored_photon",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777580358462,
+      "tag": "0006_deep_lilandra",
+      "breakpoints": true
     }
   ]
 }

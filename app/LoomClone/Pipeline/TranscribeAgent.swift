@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import WhisperKit
 
@@ -13,6 +14,7 @@ import WhisperKit
 /// `downloadModel()`. All transcription is serialized through the actor.
 actor TranscribeAgent {
     private static let startupWindow: TimeInterval = 3 * 24 * 60 * 60
+    private static let minTranscriptionDuration: TimeInterval = 5
     private static let modelName = "large-v3-v20240930_626MB"
 
     private let apiClient: APIClient
@@ -117,12 +119,22 @@ actor TranscribeAgent {
             return
         }
 
+        // Skip very short recordings — not worth transcribing.
+        let asset = AVURLAsset(url: audioPath)
+        if let duration = try? await asset.load(.duration),
+           CMTimeGetSeconds(duration) < Self.minTranscriptionDuration
+        {
+            print("[transcribe] \(videoId): audio too short (\(CMTimeGetSeconds(duration))s) — skipping")
+            return
+        }
+
         print("[transcribe] \(videoId): starting")
 
         let results: [TranscriptionResult]
         do {
             let pipe = try await getOrLoadPipeline()
-            results = try await pipe.transcribe(audioPath: audioPath.path)
+            let options = DecodingOptions(wordTimestamps: true)
+            results = try await pipe.transcribe(audioPath: audioPath.path, decodeOptions: options)
         } catch {
             print("[transcribe] \(videoId): whisper failed: \(error)")
             return
@@ -134,12 +146,24 @@ actor TranscribeAgent {
         }
 
         let srt = buildSrt(from: results)
+        let wordsData = buildWordsJson(from: results)
 
         let captionsPath = localDir.appendingPathComponent("captions.srt")
         do {
             try Data(srt.utf8).write(to: captionsPath)
         } catch {
             print("[transcribe] \(videoId): failed to write local SRT: \(error)")
+        }
+
+        // Write words.json locally as a backup alongside captions.srt.
+        if !wordsData.isEmpty {
+            let wordsPath = localDir.appendingPathComponent("words.json")
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: wordsData, options: [.sortedKeys])
+                try jsonData.write(to: wordsPath)
+            } catch {
+                print("[transcribe] \(videoId): failed to write local words.json: \(error)")
+            }
         }
 
         do {
@@ -150,6 +174,16 @@ actor TranscribeAgent {
         } catch {
             print("[transcribe] \(videoId): upload failed: \(error) — will retry next launch")
             return
+        }
+
+        // Upload word-level timestamps. Non-fatal — SRT is the primary artifact.
+        if !wordsData.isEmpty {
+            do {
+                try await uploadWords(videoId: videoId, words: wordsData)
+                print("[transcribe] \(videoId): words.json uploaded (\(wordsData.count) words)")
+            } catch {
+                print("[transcribe] \(videoId): words upload failed: \(error)")
+            }
         }
 
         // Suggest a title using on-device Foundation Models (fire-and-forget,
@@ -191,7 +225,26 @@ actor TranscribeAgent {
         return try await WhisperKit(config)
     }
 
-    // MARK: - SRT Generation
+    // MARK: - SRT & Word-Level Generation
+
+    private func buildWordsJson(from results: [TranscriptionResult]) -> [[String: Any]] {
+        var words: [[String: Any]] = []
+        for result in results {
+            for segment in result.segments {
+                guard let wordTimings = segment.words else { continue }
+                for word in wordTimings {
+                    let cleaned = stripSpecialTokens(word.word)
+                    guard !cleaned.isEmpty else { continue }
+                    words.append([
+                        "word": cleaned,
+                        "start": Double(word.start),
+                        "end": Double(word.end),
+                    ])
+                }
+            }
+        }
+        return words
+    }
 
     private func buildSrt(from results: [TranscriptionResult]) -> String {
         var lines: [String] = []
@@ -248,6 +301,22 @@ actor TranscribeAgent {
         if http.statusCode == 404 { throw TranscribeError.orphaned }
         guard http.statusCode == 200 else {
             throw TranscribeError.server("status \(http.statusCode)")
+        }
+    }
+
+    private func uploadWords(videoId: String, words: [[String: Any]]) async throws {
+        var request = try apiClient.authorizedRequest(
+            path: "/api/videos/\(videoId)/words"
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let jsonData = try JSONSerialization.data(withJSONObject: words)
+        request.httpBody = jsonData
+
+        let (_, http) = try await apiClient.send(request)
+        if http.statusCode == 404 { throw TranscribeError.orphaned }
+        guard http.statusCode == 200 else {
+            throw TranscribeError.server("words status \(http.statusCode)")
         }
     }
 

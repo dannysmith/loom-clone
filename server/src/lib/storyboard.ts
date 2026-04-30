@@ -64,14 +64,18 @@ export function generateVtt(
 
 // Generate the storyboard sprite sheet and VTT file for a video.
 // Files are written to the derivatives directory: storyboard.jpg + storyboard.vtt.
-export async function generateStoryboard(derivDir: string, duration: number): Promise<boolean> {
+export async function generateStoryboard(
+  derivDir: string,
+  duration: number,
+  inputPath?: string,
+): Promise<boolean> {
   const params = computeStoryboardParams(duration);
   if (!params) return false;
 
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
-  const sourcePath = join(derivDir, "source.mp4");
+  const sourcePath = inputPath ?? join(derivDir, "source.mp4");
   const spriteFile = "storyboard.jpg";
   const spriteTmp = join(derivDir, `${spriteFile}.tmp`);
   const spriteFinal = join(derivDir, spriteFile);
@@ -94,6 +98,8 @@ export async function generateStoryboard(derivDir: string, duration: number): Pr
       `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
       "-qscale:v",
       "5",
+      "-frames:v",
+      "1",
       "-f",
       "image2",
       spriteTmp,
@@ -114,6 +120,109 @@ export async function generateStoryboard(derivDir: string, duration: number): Pr
 
   // Generate and write the VTT file.
   const vttContent = generateVtt(params, tileWidth, tileHeight);
+  await Bun.write(vttFinal, vttContent);
+
+  return true;
+}
+
+// --- Editor storyboard (dense frame extraction for the editing timeline) ---
+
+const EDITOR_TILE_WIDTH = 200;
+const EDITOR_MIN_DURATION = 5;
+
+export type EditorStoryboardParams = {
+  interval: number;
+  expectedFrames: number;
+  cols: number;
+  rows: number;
+};
+
+// 1 fps up to 10 minutes, 0.5 fps beyond.
+export function computeEditorStoryboardParams(duration: number): EditorStoryboardParams | null {
+  if (duration < EDITOR_MIN_DURATION) return null;
+
+  const interval = duration <= 600 ? 1 : 2;
+  const expectedFrames = Math.floor(duration / interval);
+  const cols = Math.min(10, expectedFrames);
+  const rows = Math.ceil(expectedFrames / cols);
+
+  return { interval, expectedFrames, cols, rows };
+}
+
+export function generateEditorVtt(
+  params: EditorStoryboardParams,
+  tileWidth: number,
+  tileHeight: number,
+): string {
+  const lines: string[] = ["WEBVTT", ""];
+
+  for (let i = 0; i < params.expectedFrames; i++) {
+    const startTime = i * params.interval;
+    const endTime = (i + 1) * params.interval;
+    const col = i % params.cols;
+    const row = Math.floor(i / params.cols);
+    const x = col * tileWidth;
+    const y = row * tileHeight;
+
+    lines.push(`${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`);
+    lines.push(`editor-storyboard.jpg#xywh=${x},${y},${tileWidth},${tileHeight}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+export async function generateEditorStoryboard(
+  derivDir: string,
+  duration: number,
+  inputPath?: string,
+): Promise<boolean> {
+  const params = computeEditorStoryboardParams(duration);
+  if (!params) return false;
+
+  const ffmpegPath = Bun.which("ffmpeg");
+  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
+
+  const sourcePath = inputPath ?? join(derivDir, "source.mp4");
+  const spriteFile = "editor-storyboard.jpg";
+  const spriteTmp = join(derivDir, `${spriteFile}.tmp`);
+  const spriteFinal = join(derivDir, spriteFile);
+  const vttFile = "editor-storyboard.vtt";
+  const vttFinal = join(derivDir, vttFile);
+
+  await mkdir(derivDir, { recursive: true });
+
+  const proc = Bun.spawn(
+    [
+      ffmpegPath,
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      sourcePath,
+      "-vf",
+      `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
+      "-qscale:v",
+      "5",
+      "-frames:v",
+      "1",
+      "-f",
+      "image2",
+      spriteTmp,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exitCode !== 0) {
+    await rm(spriteTmp, { force: true }).catch(() => {});
+    throw new Error(`editor storyboard generation failed (exit ${exitCode}): ${stderr.trim()}`);
+  }
+
+  await rename(spriteTmp, spriteFinal);
+
+  const { tileWidth, tileHeight } = await probeTileDimensions(spriteFinal, params);
+  const vttContent = generateEditorVtt(params, tileWidth, tileHeight);
   await Bun.write(vttFinal, vttContent);
 
   return true;

@@ -11,6 +11,7 @@ import { listVideosFiltered } from "../../lib/store";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { TrashBinPage } from "../../views/admin/pages/TrashBinPage";
 import dashboard from "./dashboard";
+import editor from "./editor";
 import type { AdminEnv } from "./helpers";
 import media from "./media";
 import settings from "./settings";
@@ -80,6 +81,7 @@ admin.get("/trash", async (c) => {
 admin.route("/", dashboard);
 admin.route("/videos", videoRoutes);
 admin.route("/videos", media);
+admin.route("/videos", editor);
 admin.route("/upload", upload);
 admin.route("/settings", settings);
 

@@ -4,8 +4,9 @@ import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
 import { logEvent } from "./events";
+import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo } from "./store";
-import { generateStoryboard } from "./storyboard";
+import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
 import { extractAndPromoteThumbnails } from "./thumbnails";
 
 // Resolved absolutely so it survives test chdir() calls.
@@ -632,6 +633,42 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
     } catch (err) {
       console.error(
         `[derivatives] ${videoId} storyboard generation failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Post-recipe step 6: editor storyboard (dense frame extraction for the editing timeline).
+  if (sourceExists && duration >= 5) {
+    const editorStoryStarted = Date.now();
+    try {
+      const generated = await generateEditorStoryboard(dir, duration);
+      if (generated) {
+        const ms = Date.now() - editorStoryStarted;
+        console.log(`[derivatives] ${videoId}/editor-storyboard generated (${ms}ms)`);
+        steps.push("editor-storyboard");
+      }
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} editor storyboard generation failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Post-recipe step 7: audio peaks for wavesurfer.js.
+  if (sourceExists && duration >= 1) {
+    const peaksStarted = Date.now();
+    try {
+      const generated = await generatePeaks(dir, duration);
+      if (generated) {
+        const ms = Date.now() - peaksStarted;
+        console.log(`[derivatives] ${videoId}/peaks.json generated (${ms}ms)`);
+        steps.push("peaks");
+      }
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} peaks generation failed:`,
         err instanceof Error ? err.message : err,
       );
     }

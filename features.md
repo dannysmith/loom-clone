@@ -256,6 +256,8 @@ The *videos* table in our SQL database will have a record something like this…
 | completed_at     | `2026-04-30T14:25:44.012Z`             |
 | trashed_at       | `null`                                 |
 
+The `video_transcripts` table will also have a row for this video, holding the plain text of the transcript, a word count, and the format (`srt`). The actual subtitle file lives on disk as `captions.srt` — the database stores the parsed plain text for display and search.
+
 ### On Disk (Server)
 
 The volume attached to our server will have a directory which looks something like this…

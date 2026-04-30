@@ -90,6 +90,13 @@ body {
   white-space: nowrap;
 }
 
+.editor-toolbar-divider {
+  width: 1px;
+  height: 1.2rem;
+  background: #444;
+  margin: 0 0.25rem;
+}
+
 /* Buttons */
 
 .editor-btn {
@@ -115,6 +122,15 @@ body {
 
 .editor-btn-play {
   min-width: 4rem;
+}
+
+.editor-btn-cut {
+  background: oklch(0.3 0.08 25);
+  border-color: oklch(0.4 0.1 25);
+}
+
+.editor-btn-cut:hover:not(:disabled) {
+  background: oklch(0.38 0.1 25);
 }
 
 .editor-btn-commit {
@@ -161,6 +177,8 @@ body {
   background: #222;
   border-bottom: 1px solid #2a2a2a;
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
 }
 
 .editor-timeline-strip {
@@ -210,6 +228,17 @@ body {
   justify-content: center;
   color: #666;
   font-size: 0.8rem;
+}
+
+.editor-waveform-hint {
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.7rem;
+  color: #666;
+  pointer-events: none;
 }
 
 /* Transcript overlay */

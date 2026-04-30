@@ -54,6 +54,7 @@ function parseVttTime(str: string): number {
 export function Timeline({ videoId, duration, currentTime, onSeek }: Props) {
   const [cues, setCues] = useState<StoryboardCue[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
   const spriteUrl = editorMediaUrl(videoId, "editor-storyboard.jpg");
 
   useEffect(() => {
@@ -68,22 +69,49 @@ export function Timeline({ videoId, duration, currentTime, onSeek }: Props) {
       });
   }, [videoId]);
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
+  const seekFromPointer = useCallback(
+    (clientX: number) => {
       if (!containerRef.current || duration <= 0) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
+      const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       onSeek(x * duration);
     },
     [duration, onSeek],
   );
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      isDragging.current = true;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      seekFromPointer(e.clientX);
+    },
+    [seekFromPointer],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isDragging.current) return;
+      seekFromPointer(e.clientX);
+    },
+    [seekFromPointer],
+  );
+
+  const handlePointerUp = useCallback(() => {
+    isDragging.current = false;
+  }, []);
 
   if (cues.length === 0) return null;
 
   const playheadPct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="editor-timeline" ref={containerRef} onClick={handleClick}>
+    <div
+      className="editor-timeline"
+      ref={containerRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
       <div className="editor-timeline-strip">
         {cues.map((cue, i) => (
           <div

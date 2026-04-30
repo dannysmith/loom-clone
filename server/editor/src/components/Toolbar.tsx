@@ -13,6 +13,9 @@ type Props = {
   onRedo: () => void;
   onSave: () => void;
   onCommitClick: () => void;
+  onSetTrimIn: () => void;
+  onSetTrimOut: () => void;
+  onAddCut: () => void;
 };
 
 function formatTime(seconds: number): string {
@@ -36,6 +39,9 @@ export function Toolbar({
   onRedo,
   onSave,
   onCommitClick,
+  onSetTrimIn,
+  onSetTrimOut,
+  onAddCut,
 }: Props) {
   return (
     <div className="editor-toolbar">
@@ -53,6 +59,18 @@ export function Toolbar({
         <span className="editor-time">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+
+        <span className="editor-toolbar-divider" />
+
+        <button onClick={onSetTrimIn} className="editor-btn" title="Set trim start at playhead (I)">
+          Trim start
+        </button>
+        <button onClick={onSetTrimOut} className="editor-btn" title="Set trim end at playhead (O)">
+          Trim end
+        </button>
+        <button onClick={onAddCut} className="editor-btn editor-btn-cut" title="Add a cut at the playhead">
+          Add cut
+        </button>
       </div>
 
       <div className="editor-toolbar-right">

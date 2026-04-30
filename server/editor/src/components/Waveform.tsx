@@ -13,16 +13,15 @@ type Props = {
   onEditsChange: (edits: Edit[]) => void;
 };
 
-const TRIM_COLOR = "rgba(255, 255, 255, 0.08)";
-const CUT_COLOR = "rgba(239, 68, 68, 0.35)";
-const DIMMED_COLOR = "rgba(0, 0, 0, 0.6)";
+const CUT_COLOR = "rgba(239, 68, 68, 0.4)";
+const DIMMED_COLOR = "rgba(0, 0, 0, 0.65)";
+const TRIM_HANDLE_COLOR = "rgba(255, 255, 255, 0.15)";
 
 export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const [ready, setReady] = useState(false);
-  const updatingFromRegions = useRef(false);
   const updatingFromEdl = useRef(false);
 
   // Initialize wavesurfer.
@@ -35,9 +34,9 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     const ws = WaveSurfer.create({
       container: containerRef.current,
       height: 80,
-      waveColor: "oklch(0.7 0.1 250)",
-      progressColor: "oklch(0.6 0.15 250)",
-      cursorColor: "oklch(0.95 0 0)",
+      waveColor: "oklch(0.65 0.12 250)",
+      progressColor: "oklch(0.55 0.15 250)",
+      cursorColor: "#fff",
       cursorWidth: 2,
       barWidth: 2,
       barGap: 1,
@@ -56,7 +55,8 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       })
       .catch(() => {
         // No peaks available — show empty waveform.
-        ws.load("", [new Float32Array(duration * 50).fill(0.1) as unknown as number[]], duration);
+        const empty = Array.from({ length: Math.floor(duration * 50) }, () => 0.1);
+        ws.load("", [empty], duration);
       });
 
     ws.on("ready", () => setReady(true));
@@ -68,7 +68,6 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       regionsRef.current = null;
       setReady(false);
     };
-    // Only re-init when videoId or duration changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoId, duration]);
 
@@ -85,8 +84,6 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     if (!regions || !ready) return;
 
     updatingFromEdl.current = true;
-
-    // Clear existing regions.
     regions.clearRegions();
 
     const trim = edl.edits.find((e) => e.type === "trim");
@@ -94,7 +91,7 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     const trimEnd = trim?.endTime ?? duration;
 
     // Dimmed region before trim start.
-    if (trimStart > 0) {
+    if (trimStart > 0.01) {
       regions.addRegion({
         start: 0,
         end: trimStart,
@@ -105,7 +102,7 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     }
 
     // Dimmed region after trim end.
-    if (trimEnd < duration) {
+    if (trimEnd < duration - 0.01) {
       regions.addRegion({
         start: trimEnd,
         end: duration,
@@ -115,12 +112,14 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       });
     }
 
-    // Trim region (the active area — draggable handles).
+    // Trim region — the active area with draggable handles.
+    // Only show when the trim range differs from the full duration
+    // (otherwise there's nothing to indicate it's draggable).
     regions.addRegion({
       id: "trim",
       start: trimStart,
       end: trimEnd,
-      color: TRIM_COLOR,
+      color: TRIM_HANDLE_COLOR,
       drag: false,
       resize: true,
     });
@@ -142,29 +141,24 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     updatingFromEdl.current = false;
   }, [edl.edits, duration, ready]);
 
-  // Handle region changes → update EDL.
+  // Handle region changes -> update EDL.
   useEffect(() => {
     const regions = regionsRef.current;
     if (!regions || !ready) return;
 
     const handleUpdate = (region: Region) => {
       if (updatingFromEdl.current) return;
-      updatingFromRegions.current = true;
 
       const newEdits: Edit[] = [];
 
       if (region.id === "trim") {
         newEdits.push({ type: "trim", startTime: region.start, endTime: region.end });
-        // Preserve existing cuts.
         for (const e of edl.edits) {
           if (e.type === "cut") newEdits.push(e);
         }
       } else if (region.id?.startsWith("cut-")) {
-        // Preserve trim.
-        const trim = edl.edits.find((e) => e.type === "trim");
-        if (trim) newEdits.push(trim);
-
-        // Update the modified cut, preserve others.
+        const trim2 = edl.edits.find((e) => e.type === "trim");
+        if (trim2) newEdits.push(trim2);
         const cutIndex = parseInt(region.id.split("-")[1]!, 10);
         const cuts = edl.edits.filter((e) => e.type === "cut");
         cuts.forEach((cut, i) => {
@@ -179,7 +173,6 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       if (newEdits.length > 0) {
         onEditsChange(newEdits);
       }
-      updatingFromRegions.current = false;
     };
 
     regions.on("region-updated", handleUpdate);
@@ -195,7 +188,6 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
       const rect = containerRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
       const time = x * duration;
-      // Create a 2-second cut centered on the click.
       const cutStart = Math.max(0, time - 1);
       const cutEnd = Math.min(duration, time + 1);
       const newEdits = [...edl.edits, { type: "cut" as const, startTime: cutStart, endTime: cutEnd }];
@@ -208,6 +200,11 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     <div className="editor-waveform" onDoubleClick={handleDoubleClick}>
       <div ref={containerRef} className="editor-waveform-container" />
       {!ready && <div className="editor-waveform-loading">Loading waveform...</div>}
+      {ready && edl.edits.length === 0 && (
+        <div className="editor-waveform-hint">
+          Use the toolbar buttons or press I / O to set trim points. Double-click the waveform to add a cut.
+        </div>
+      )}
     </div>
   );
 }

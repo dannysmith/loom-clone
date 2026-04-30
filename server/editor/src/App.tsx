@@ -45,6 +45,13 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
     edlState.setTrim(trim?.startTime ?? 0, playback.currentTime);
   }, [edlState, playback.currentTime]);
 
+  const addCutAtPlayhead = useCallback(() => {
+    const t = playback.currentTime;
+    const cutStart = Math.max(0, t - 1);
+    const cutEnd = Math.min(duration, t + 1);
+    edlState.addCut(cutStart, cutEnd);
+  }, [playback.currentTime, duration, edlState]);
+
   const keyboardActions = useMemo(
     () => ({
       togglePlayPause: playback.togglePlayPause,
@@ -82,6 +89,9 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
         onRedo={edlState.redo}
         onSave={edlState.save}
         onCommitClick={() => setShowCommitDialog(true)}
+        onSetTrimIn={setTrimIn}
+        onSetTrimOut={setTrimOut}
+        onAddCut={addCutAtPlayhead}
       />
 
       <VideoPreview

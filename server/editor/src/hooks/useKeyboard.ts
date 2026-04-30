@@ -9,6 +9,7 @@ type KeyboardActions = {
   save: () => void;
   setTrimIn: () => void;
   setTrimOut: () => void;
+  addCut: () => void;
 };
 
 export function useKeyboard(actions: KeyboardActions) {
@@ -71,6 +72,13 @@ export function useKeyboard(actions: KeyboardActions) {
           if (!mod) {
             e.preventDefault();
             actions.setTrimOut();
+          }
+          break;
+
+        case "x":
+          if (!mod) {
+            e.preventDefault();
+            actions.addCut();
           }
           break;
       }

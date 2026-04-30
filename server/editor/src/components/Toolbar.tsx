@@ -62,14 +62,14 @@ export function Toolbar({
 
         <span className="editor-toolbar-divider" />
 
-        <button onClick={onSetTrimIn} className="editor-btn" title="Set trim start at playhead (I)">
-          Trim start
+        <button onClick={onSetTrimIn} className="editor-btn" title="Set trim start at playhead">
+          Trim start <kbd>I</kbd>
         </button>
-        <button onClick={onSetTrimOut} className="editor-btn" title="Set trim end at playhead (O)">
-          Trim end
+        <button onClick={onSetTrimOut} className="editor-btn" title="Set trim end at playhead">
+          Trim end <kbd>O</kbd>
         </button>
         <button onClick={onAddCut} className="editor-btn editor-btn-cut" title="Add a cut at the playhead">
-          Add cut
+          Add cut <kbd>X</kbd>
         </button>
       </div>
 

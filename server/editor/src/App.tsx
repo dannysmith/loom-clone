@@ -32,8 +32,9 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
 
   const handleCommitConfirm = useCallback(async () => {
     await edlState.commit();
-    setShowCommitDialog(false);
-  }, [edlState]);
+    // Navigate back to the video detail page after successful commit.
+    window.location.href = `/admin/videos/${videoId}`;
+  }, [edlState, videoId]);
 
   const setTrimIn = useCallback(() => {
     const trim = edlState.edl.edits.find((e) => e.type === "trim");
@@ -62,8 +63,9 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
       save: edlState.save,
       setTrimIn,
       setTrimOut,
+      addCut: addCutAtPlayhead,
     }),
-    [playback, edlState, setTrimIn, setTrimOut],
+    [playback, edlState, setTrimIn, setTrimOut, addCutAtPlayhead],
   );
 
   useKeyboard(keyboardActions);

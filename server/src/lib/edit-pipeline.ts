@@ -243,8 +243,8 @@ function buildFfmpegEditArgs(sourcePath: string, outputPath: string, kept: Segme
     ...aSelects,
     `${vInputs}concat=n=${kept.length}:v=1:a=0[vout]`,
     `${aInputs}concat=n=${kept.length}:v=0:a=1[apre]`,
-    // Short fade-in to prevent any leading click from the concat.
-    `[apre]afade=t=in:d=${CROSSFADE_MS},afade=t=out:st=end:d=${CROSSFADE_MS}[aout]`,
+    // Short fade-in to prevent clicks at concat join points.
+    `[apre]afade=t=in:d=${CROSSFADE_MS}[aout]`,
   ].join(";");
 
   return [

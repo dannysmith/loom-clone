@@ -8,6 +8,7 @@ import { join } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
 import { purgeVideo } from "./cdn";
+import { generateVariants, probeDuration, probeMetadata } from "./derivatives";
 import {
   computeKeptSegments,
   deriveEditedTranscript,
@@ -60,15 +61,16 @@ async function runEditPipeline(videoId: string): Promise<void> {
   }
   const edl = (await edlFile.json()) as Edl;
 
-  // 2. Probe source resolution.
+  // 2. Probe source — get resolution and duration in one pass.
   const sourcePath = join(derivDir, "source.mp4");
-  const meta = await probeMetadata(sourcePath);
-  if (!meta) throw new Error("Could not probe source.mp4 metadata");
+  const [meta, duration] = await Promise.all([
+    probeMetadata(sourcePath),
+    probeDuration(sourcePath),
+  ]);
+  if (!meta) throw new Error(`Could not probe source.mp4 metadata at ${sourcePath}`);
+  if (duration === null) throw new Error(`Could not probe source.mp4 duration at ${sourcePath}`);
 
   // 3. Compute kept segments.
-  const duration = await probeDuration(sourcePath);
-  if (duration === null) throw new Error("Could not probe source.mp4 duration");
-
   const keptSegments = computeKeptSegments(edl.edits, duration);
   if (keptSegments.length === 0) {
     throw new Error("All content would be removed by edits");
@@ -86,7 +88,7 @@ async function runEditPipeline(videoId: string): Promise<void> {
 
   // 5. Regenerate downscaled variants from the edited output.
   try {
-    await generateEditedVariants(derivDir, outputPath, meta.height);
+    await generateVariants(derivDir, outputPath);
   } catch (err) {
     console.error(
       `[edit-pipeline] ${videoId} variant generation failed:`,
@@ -94,8 +96,9 @@ async function runEditPipeline(videoId: string): Promise<void> {
     );
   }
 
-  // 6. Regenerate viewer-facing storyboard from edited output.
+  // 6. Regenerate storyboards + peaks from edited output.
   const editedDuration = await probeDuration(outputPath);
+
   if (editedDuration !== null && editedDuration >= 60) {
     try {
       await generateStoryboard(derivDir, editedDuration, outputPath);
@@ -108,7 +111,6 @@ async function runEditPipeline(videoId: string): Promise<void> {
     }
   }
 
-  // 7. Regenerate editor storyboard from edited output.
   if (editedDuration !== null && editedDuration >= 5) {
     try {
       await generateEditorStoryboard(derivDir, editedDuration, outputPath);
@@ -121,7 +123,6 @@ async function runEditPipeline(videoId: string): Promise<void> {
     }
   }
 
-  // 8. Regenerate peaks from the edited output.
   if (editedDuration !== null) {
     try {
       await generatePeaks(derivDir, editedDuration, outputPath);
@@ -134,7 +135,7 @@ async function runEditPipeline(videoId: string): Promise<void> {
     }
   }
 
-  // 9. Derive edited captions from words.json + EDL.
+  // 7. Derive edited captions from words.json + EDL.
   try {
     await deriveEditedCaptions(videoId, derivDir, keptSegments);
   } catch (err) {
@@ -144,13 +145,14 @@ async function runEditPipeline(videoId: string): Promise<void> {
     );
   }
 
-  // 10. Update DB metadata from the edited output.
+  // 8. Update DB metadata from the edited output.
   const editedMeta = await probeMetadata(outputPath);
-  if (editedMeta && editedDuration !== null) {
+  const finalDuration = editedDuration ?? duration;
+  if (editedMeta) {
     await getDb()
       .update(videos)
       .set({
-        durationSeconds: editedDuration,
+        durationSeconds: finalDuration,
         fileBytes: editedMeta.fileBytes,
         lastEditedAt: nowIso(),
         updatedAt: nowIso(),
@@ -158,7 +160,7 @@ async function runEditPipeline(videoId: string): Promise<void> {
       .where(eq(videos.id, videoId));
   }
 
-  // 11. Purge CDN cache.
+  // 9. Purge CDN cache.
   const video = await getVideo(videoId);
   if (video) {
     purgeVideo(video.slug);
@@ -274,54 +276,7 @@ function buildFfmpegEditArgs(sourcePath: string, outputPath: string, kept: Segme
   ];
 }
 
-// Variant generation from an edited source (not source.mp4).
-const VARIANTS = [
-  { height: 1080, crf: 20 },
-  { height: 720, crf: 23 },
-] as const;
-
-async function generateEditedVariants(
-  derivDir: string,
-  editedPath: string,
-  sourceHeight: number,
-): Promise<void> {
-  const needed = VARIANTS.filter((v) => sourceHeight > v.height);
-  if (needed.length === 0) return;
-
-  for (const variant of needed) {
-    const outFile = `${variant.height}p.mp4`;
-    const tmpPath = join(derivDir, `${outFile}.tmp`);
-    const finalPath = join(derivDir, outFile);
-
-    await runFfmpeg([
-      "-i",
-      editedPath,
-      "-vf",
-      `scale=-2:${variant.height}`,
-      "-pix_fmt",
-      "yuv420p",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "fast",
-      "-crf",
-      String(variant.crf),
-      "-profile:v",
-      "high",
-      "-c:a",
-      "copy",
-      "-movflags",
-      "+faststart",
-      "-f",
-      "mp4",
-      tmpPath,
-    ]);
-    await rename(tmpPath, finalPath);
-    console.log(`[edit-pipeline] ${outFile} regenerated`);
-  }
-}
-
-// --- ffmpeg / ffprobe wrappers ---
+// --- ffmpeg wrapper (local to this module — derivatives.ts has its own) ---
 
 let ffmpegPath: string | null | undefined;
 
@@ -338,67 +293,6 @@ async function runFfmpeg(args: string[]): Promise<void> {
   const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (exitCode !== 0) {
     throw new Error(`ffmpeg exited ${exitCode}: ${stderr.trim()}`);
-  }
-}
-
-type ProbeMetadata = { width: number; height: number; fileBytes: number };
-
-async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
-
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        "-select_streams",
-        "v:0",
-        filePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-
-    const data = JSON.parse(stdout) as {
-      streams?: Array<{ width?: number; height?: number }>;
-      format?: { size?: string };
-    };
-
-    const stream = data.streams?.[0];
-    const w = stream?.width;
-    const h = stream?.height;
-    const size = Number.parseInt(data.format?.size ?? "", 10);
-
-    if (!w || !h || !Number.isFinite(size)) return null;
-    return { width: w, height: h, fileBytes: size };
-  } catch {
-    return null;
-  }
-}
-
-async function probeDuration(filePath: string): Promise<number | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
-
-  try {
-    const proc = Bun.spawn(
-      [ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", filePath],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-    const data = JSON.parse(stdout) as { format?: { duration?: string } };
-    const d = Number.parseFloat(data.format?.duration ?? "");
-    return Number.isFinite(d) ? d : null;
-  } catch {
-    return null;
   }
 }
 

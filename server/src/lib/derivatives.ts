@@ -158,13 +158,13 @@ export async function probeDuration(filePath: string): Promise<number | null> {
 }
 
 // Full video metadata from ffprobe: dimensions and file size.
-type ProbeMetadata = {
+export type ProbeMetadata = {
   width: number;
   height: number;
   fileBytes: number;
 };
 
-async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
+export async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
   const ffprobePath = Bun.which("ffprobe");
   if (!ffprobePath) return null;
 
@@ -453,9 +453,10 @@ function variantsForHeight(sourceHeight: number): Array<{ height: number; crf: n
   return VARIANTS.filter((v) => sourceHeight > v.height);
 }
 
-// Generate downsampled MP4 variants from source.mp4.
-export async function generateVariants(dir: string): Promise<void> {
-  const sourcePath = join(dir, "source.mp4");
+// Generate downsampled MP4 variants. When inputPath is provided (e.g. an
+// edited output), variants are generated from that file instead of source.mp4.
+export async function generateVariants(dir: string, inputPath?: string): Promise<void> {
+  const sourcePath = inputPath ?? join(dir, "source.mp4");
   const meta = await probeMetadata(sourcePath);
   if (!meta) return;
 

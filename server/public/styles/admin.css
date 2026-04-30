@@ -1115,6 +1115,57 @@ select.input {
 	color: var(--color-danger);
 }
 
+/* ------- Slug editor ------- */
+
+.slug-editor {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.slug-editor-row {
+	display: flex;
+	align-items: center;
+}
+
+.editable-input--slug {
+	font-family: var(--font-mono);
+	font-size: var(--font-size-sm);
+	field-sizing: content;
+	min-inline-size: 14ch;
+	max-inline-size: 100%;
+}
+
+.slug-editor-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+}
+
+.slug-editor-tools {
+	display: flex;
+	gap: var(--space-1);
+}
+
+.slug-editor-actions {
+	display: flex;
+	gap: var(--space-2);
+}
+
+.btn--icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-1);
+	aspect-ratio: 1;
+	color: var(--color-fg-muted);
+
+	&:hover {
+		color: var(--color-fg);
+	}
+}
+
 /* ------- Tag picker ------- */
 
 .tag-picker {

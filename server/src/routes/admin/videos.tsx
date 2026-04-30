@@ -3,8 +3,10 @@ import { Hono } from "hono";
 import { purgeVideo } from "../../lib/cdn";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
+import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
+  checkSlugAvailable,
   duplicateVideo,
   getTranscript,
   trashVideo,
@@ -12,6 +14,7 @@ import {
   updateSlug,
   updateVideo,
   ValidationError,
+  validateSlugFormat,
 } from "../../lib/store";
 import { addTagToVideo, getVideoTags, listTags, removeTagFromVideo } from "../../lib/tags";
 import {
@@ -105,6 +108,29 @@ videoRoutes.get("/:id/partials/slug/edit", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   return c.html(<SlugEdit video={result} />);
+});
+
+videoRoutes.get("/:id/partials/slug/check", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const slug = String(c.req.query("slug") ?? "").trim();
+  if (!slug || slug === result.slug) return c.body(null);
+  try {
+    validateSlugFormat(slug);
+    checkSlugAvailable(slug, result.id);
+    return c.body(null);
+  } catch (err) {
+    const message =
+      err instanceof ValidationError || err instanceof ConflictError ? err.message : "Invalid slug";
+    return c.html(<span class="editable-error">{message}</span>);
+  }
+});
+
+videoRoutes.get("/:id/partials/slug/from-title", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  if (!result.title) return c.text("", 400);
+  return c.text(slugFromTitle(result.title));
 });
 
 videoRoutes.patch("/:id/slug", async (c) => {

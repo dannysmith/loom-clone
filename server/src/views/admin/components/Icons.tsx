@@ -194,6 +194,34 @@ export function IconEye(props: IconProps) {
   );
 }
 
+export function IconShuffle(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
+      <path d="m18 2 4 4-4 4" />
+      <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+      <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+      <path d="m18 14 4 4-4 4" />
+    </Svg>
+  );
+}
+
+export function IconWand(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M15 9h.01" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m3 21 9-9" />
+      <path d="M12.2 6.2 11 5" />
+    </Svg>
+  );
+}
+
 // --- Helpers ---
 
 // --- File type icons ---

@@ -51,7 +51,7 @@ export class ConflictError extends Error {
 // indexed captures.
 export const SLUG_PATTERN = "[a-z0-9](?:-?[a-z0-9])*";
 export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
-export const SLUG_MAX_LENGTH = 64;
+export const SLUG_MAX_LENGTH = 200;
 
 // Slugs that would shadow a top-level route or well-known file. Names are
 // stored without their extension because the regex already forbids dots —
@@ -126,11 +126,11 @@ export function checkSlugAvailable(slug: string, excludeVideoId?: string): void 
   }
 
   const redirectTaken = db
-    .select({ oldSlug: slugRedirects.oldSlug })
+    .select({ oldSlug: slugRedirects.oldSlug, videoId: slugRedirects.videoId })
     .from(slugRedirects)
     .where(eq(slugRedirects.oldSlug, slug))
     .get();
-  if (redirectTaken) {
+  if (redirectTaken && redirectTaken.videoId !== excludeVideoId) {
     throw new ConflictError(`Slug "${slug}" is reserved as a redirect`);
   }
 }
@@ -643,7 +643,12 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
 
   // Transaction: add the old slug to redirects + point the video at the new
   // slug. Atomic so a crash can't leave a video with no resolvable URL.
+  // If the new slug was a previous slug for this same video, remove that
+  // redirect first — the video is reclaiming its old slug.
   await db.transaction((tx) => {
+    tx.delete(slugRedirects)
+      .where(and(eq(slugRedirects.oldSlug, newSlug), eq(slugRedirects.videoId, id)))
+      .run();
     tx.insert(slugRedirects).values({ oldSlug, videoId: id, createdAt: now }).run();
     tx.update(videos).set({ slug: newSlug, updatedAt: now }).where(eq(videos.id, id)).run();
   });

@@ -305,6 +305,25 @@ describe("updateSlug / resolveSlug", () => {
     expect(updateSlug(other.id, originalSlug)).rejects.toBeInstanceOf(ConflictError);
   });
 
+  test("allows reclaiming own previous slug and removes the redirect", async () => {
+    const video = await createVideo();
+    const originalSlug = video.slug;
+    await updateSlug(video.id, "temporary-slug");
+
+    // Reclaim the original slug — should succeed, not throw ConflictError.
+    const reclaimed = await updateSlug(video.id, originalSlug);
+    expect(reclaimed.slug).toBe(originalSlug);
+
+    // The old redirect for originalSlug should be gone.
+    const resolved = await resolveSlug(originalSlug);
+    expect(resolved?.redirected).toBe(false);
+
+    // "temporary-slug" should now be a redirect to the video.
+    const tempResolved = await resolveSlug("temporary-slug");
+    expect(tempResolved?.video.id).toBe(video.id);
+    expect(tempResolved?.redirected).toBe(true);
+  });
+
   test("redirect chain — multiple renames, all old slugs still resolve", async () => {
     const video = await createVideo();
     const first = video.slug;

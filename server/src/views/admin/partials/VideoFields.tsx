@@ -1,7 +1,7 @@
 import { raw } from "hono/html";
 import { marked } from "marked";
 import type { Tag, Video } from "../../../db/schema";
-import { VisibilityBadge } from "../components/Icons";
+import { IconCalendar, IconShuffle, IconWand, VisibilityBadge } from "../components/Icons";
 
 marked.setOptions({ breaks: true });
 
@@ -77,31 +77,79 @@ export function SlugDisplay({ video }: { video: Video }) {
 }
 
 export function SlugEdit({ video, error }: { video: Video; error?: string }) {
+  const recordingDate = video.createdAt.slice(0, 10);
   return (
     <form
       id="field-slug"
-      class="editable-field editable-field--editing"
+      class="slug-editor"
       hx-patch={`/admin/videos/${video.id}/slug`}
       hx-target="#field-slug"
       hx-swap="outerHTML"
     >
-      <div class="editable-input-group">
-        <span class="editable-prefix">/</span>
-        <input class="input editable-input" type="text" name="slug" value={video.slug} required />
+      <div class="slug-editor-row">
+        <div class="editable-input-group">
+          <span class="editable-prefix">/</span>
+          <input
+            class="input editable-input editable-input--slug"
+            type="text"
+            name="slug"
+            value={video.slug}
+            required
+            hx-get={`/admin/videos/${video.id}/partials/slug/check`}
+            hx-trigger="input changed delay:300ms"
+            hx-target="#slug-validation"
+            hx-swap="innerHTML"
+            hx-include="this"
+          />
+        </div>
       </div>
-      {error && <span class="editable-error">{error}</span>}
-      <button type="submit" class="btn btn--primary btn--sm">
-        Save
-      </button>
-      <button
-        type="button"
-        class="btn btn--sm"
-        hx-get={`/admin/videos/${video.id}/partials/slug`}
-        hx-target="#field-slug"
-        hx-swap="outerHTML"
-      >
-        Cancel
-      </button>
+      <div class="slug-editor-controls">
+        <div class="slug-editor-tools">
+          <button
+            type="button"
+            class="btn btn--sm btn--icon"
+            title="Prepend recording date"
+            data-date={recordingDate}
+            onclick="slugPrependDate(this)"
+          >
+            <IconCalendar size={14} />
+          </button>
+          <button
+            type="button"
+            class="btn btn--sm btn--icon"
+            title="Obfuscate with random characters"
+            onclick="slugObfuscate(this)"
+          >
+            <IconShuffle size={14} />
+          </button>
+          {video.title && (
+            <button
+              type="button"
+              class="btn btn--sm btn--icon"
+              title="Generate from title"
+              data-url={`/admin/videos/${video.id}/partials/slug/from-title`}
+              onclick="slugFromTitle(this)"
+            >
+              <IconWand size={14} />
+            </button>
+          )}
+        </div>
+        <div class="slug-editor-actions">
+          <button type="submit" class="btn btn--primary btn--sm">
+            Save
+          </button>
+          <button
+            type="button"
+            class="btn btn--sm"
+            hx-get={`/admin/videos/${video.id}/partials/slug`}
+            hx-target="#field-slug"
+            hx-swap="outerHTML"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+      <div id="slug-validation">{error && <span class="editable-error">{error}</span>}</div>
     </form>
   );
 }

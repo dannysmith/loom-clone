@@ -45,9 +45,9 @@ All 401 responses include `WWW-Authenticate: Bearer realm="loom-clone"`.
 Slugs are the public identifier for videos. They appear in every viewer-facing URL and must satisfy:
 
 - **Regex**: `^[a-z0-9](-?[a-z0-9])*$` — lowercase alphanumeric with single dashes, no dots, no slashes, no leading/trailing/double dashes.
-- **Max length**: 64 characters.
+- **Max length**: 200 characters.
 - **Reserved words**: `admin`, `api`, `static`, `data`, `v`, `robots`, `favicon`, `sitemap`, `humans`, `manifest`, `apple-touch-icon`, `health`, `login`, `logout`, `auth`, `signup`, `embed`, `raw`, `stream`, `poster`, `feed`, `rss`, `search`. Attempting to create or rename to a reserved slug returns 409.
-- **Globally unique**: a slug cannot match any current video's slug OR any entry in the `slug_redirects` table. This ensures old URLs never silently resolve to the wrong video.
+- **Globally unique**: a slug cannot match any current video's slug OR any entry in the `slug_redirects` table. Exception: a video can reclaim its own previous slug (the redirect pointing back to itself is removed). This ensures old URLs never silently resolve to the wrong video.
 
 Validation happens at write time in `lib/store.ts` via `validateSlugFormat()`. Auto-generated slugs (3-word adjective-noun-verb from `human-id`, e.g. `calm-dogs-dream`) always satisfy these constraints.
 
@@ -369,7 +369,9 @@ When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
 | PATCH | `/admin/videos/:id/title` | Save title |
 | GET | `/admin/videos/:id/partials/slug` | Slug display partial |
 | GET | `/admin/videos/:id/partials/slug/edit` | Slug edit form |
-| PATCH | `/admin/videos/:id/slug` | Save slug (creates redirect) |
+| GET | `/admin/videos/:id/partials/slug/check?slug=` | Live slug validation (format + availability) |
+| GET | `/admin/videos/:id/partials/slug/from-title` | Generate slug from video title |
+| PATCH | `/admin/videos/:id/slug` | Save slug (creates redirect, reclaims own old slugs) |
 | GET | `/admin/videos/:id/partials/description` | Description display partial |
 | GET | `/admin/videos/:id/partials/description/edit` | Description edit form |
 | PATCH | `/admin/videos/:id/description` | Save description |

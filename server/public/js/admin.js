@@ -33,6 +33,53 @@ document.body.addEventListener("htmx:afterSwap", function (event) {
   }
 });
 
+// --- Slug editor tools ---
+
+// Find the slug <input> from any button inside the slug editor form.
+function _slugInput(btn) {
+  return btn.closest("form").querySelector('input[name="slug"]');
+}
+
+// Trigger HTMX validation after programmatically changing the input value.
+function _triggerValidation(input) {
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Prepend the video's recording date to the current slug value.
+function slugPrependDate(btn) {
+  var input = _slugInput(btn);
+  var date = btn.dataset.date;
+  if (!input.value.startsWith(date + "-")) {
+    input.value = date + "-" + input.value;
+    _triggerValidation(input);
+  }
+}
+
+// Append a dash and 64 random alphanumeric characters to the slug.
+function slugObfuscate(btn) {
+  var input = _slugInput(btn);
+  var chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  var arr = crypto.getRandomValues(new Uint8Array(64));
+  var rand = "";
+  for (var i = 0; i < 64; i++) rand += chars[arr[i] % chars.length];
+  input.value = input.value + "-" + rand;
+  _triggerValidation(input);
+}
+
+// Fetch a generated slug from the server and replace the input value.
+function slugFromTitle(btn) {
+  var input = _slugInput(btn);
+  var url = btn.dataset.url;
+  fetch(url, { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (slug) {
+      if (slug) {
+        input.value = slug;
+        _triggerValidation(input);
+      }
+    });
+}
+
 // Upload progress handler. Called via hx-on:htmx:xhr:progress on the
 // upload form. Updates the <progress> element.
 function updateProgress(event) {

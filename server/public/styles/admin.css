@@ -566,6 +566,11 @@ body.admin--login {
 	background-color: var(--color-danger-bg);
 }
 
+.badge--processing {
+	color: var(--color-warning);
+	background-color: var(--color-warning-bg);
+}
+
 .badge--edited {
 	color: var(--tag-blue);
 	background-color: oklch(from var(--tag-blue) l c h / 0.1);

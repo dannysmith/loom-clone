@@ -45,6 +45,7 @@ Three components exist today, plus a diagnostic tool:
 - `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm). Model choice, skip conditions, performance. Read before changing anything in the audio processing step in `derivatives.ts`.
 - `docs/developer/transcription.md` — how subtitles are generated (WhisperKit on Mac, TranscribeAgent lifecycle, model management, server-side indexing). Read before touching `TranscribeAgent`, `TranscriptionModelStatus`, or the transcript endpoint.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
+- `docs/developer/admin-editor.md` — the web-based video editor: React app architecture, Vite build process, EDL format, ffmpeg edit pipeline, file layout after editing, keyboard shortcuts. Read before touching anything in `server/editor/`, `edit-pipeline.ts`, `edit-transcript.ts`, or the editor admin routes.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
 - `docs/archive/` — incident records, completed research audits, and the original requirements doc. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
 

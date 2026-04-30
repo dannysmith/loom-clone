@@ -17,7 +17,7 @@ export const videos = sqliteTable(
   {
     id: text("id").primaryKey(),
     slug: text("slug").notNull().unique(),
-    status: text("status", { enum: ["recording", "healing", "complete", "failed"] })
+    status: text("status", { enum: ["recording", "healing", "complete", "processing", "failed"] })
       .notNull()
       .default("recording"),
     visibility: text("visibility", { enum: ["public", "unlisted", "private"] })

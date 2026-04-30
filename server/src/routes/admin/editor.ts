@@ -22,6 +22,14 @@ editor.get("/:id/editor", async (c) => {
   if (result instanceof Response) return result;
   const video = result;
 
+  // Only complete videos can be edited.
+  if (video.status !== "complete") {
+    return c.text(`Cannot edit a video with status "${video.status}"`, 400);
+  }
+  if (video.trashedAt) {
+    return c.text("Cannot edit a trashed video", 400);
+  }
+
   let scripts: string;
   const manifestPath = join(PUBLIC_ROOT, "editor", ".vite", "manifest.json");
   const manifestExists = await Bun.file(manifestPath).exists();
@@ -122,6 +130,13 @@ editor.put(
 editor.post("/:id/editor/commit", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
+
+  if (result.status === "processing") {
+    return c.json({ error: "Video is already being processed" }, 409);
+  }
+  if (result.status !== "complete") {
+    return c.json({ error: `Cannot commit edits for a video with status "${result.status}"` }, 400);
+  }
 
   const edlPath = join(DATA_DIR, result.id, "derivatives", "edits.json");
   const file = Bun.file(edlPath);

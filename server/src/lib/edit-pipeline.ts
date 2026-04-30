@@ -52,6 +52,30 @@ async function runEditPipeline(videoId: string): Promise<void> {
   const started = Date.now();
   const derivDir = join(DATA_DIR, videoId, "derivatives");
 
+  // Mark the video as processing so the UI shows the right state and
+  // prevents concurrent edits.
+  await getDb()
+    .update(videos)
+    .set({ status: "processing", updatedAt: nowIso() })
+    .where(eq(videos.id, videoId));
+
+  try {
+    await _runEditPipelineInner(videoId, derivDir, started);
+  } catch (err) {
+    // Restore to complete on failure so the video isn't stuck in processing.
+    await getDb()
+      .update(videos)
+      .set({ status: "complete", updatedAt: nowIso() })
+      .where(eq(videos.id, videoId));
+    throw err;
+  }
+}
+
+async function _runEditPipelineInner(
+  videoId: string,
+  derivDir: string,
+  started: number,
+): Promise<void> {
   // 1. Read the EDL.
   const edlPath = join(derivDir, "edits.json");
   const edlFile = Bun.file(edlPath);
@@ -123,20 +147,19 @@ async function runEditPipeline(videoId: string): Promise<void> {
     );
   }
 
-  // 8. Update DB metadata from the edited output.
+  // 8. Update DB metadata from the edited output and restore status to complete.
   const editedMeta = await probeMetadata(outputPath);
   const finalDuration = editedDuration ?? duration;
-  if (editedMeta) {
-    await getDb()
-      .update(videos)
-      .set({
-        durationSeconds: finalDuration,
-        fileBytes: editedMeta.fileBytes,
-        lastEditedAt: nowIso(),
-        updatedAt: nowIso(),
-      })
-      .where(eq(videos.id, videoId));
-  }
+  await getDb()
+    .update(videos)
+    .set({
+      status: "complete",
+      durationSeconds: editedMeta ? finalDuration : undefined,
+      fileBytes: editedMeta?.fileBytes,
+      lastEditedAt: nowIso(),
+      updatedAt: nowIso(),
+    })
+    .where(eq(videos.id, videoId));
 
   // 9. Purge CDN cache.
   const video = await getVideo(videoId);

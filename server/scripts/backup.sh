@@ -5,10 +5,11 @@
 #
 # What gets backed up:
 #   - data/app.db.bak  (point-in-time SQLite snapshot, deleted after run)
-#   - Per-video: recording.json, derivatives/source.mp4, derivatives/thumbnail.jpg
+#   - Per-video: recording.json, derivatives/source.mp4, derivatives/thumbnail.jpg,
+#     derivatives/edits.json (edit decisions), derivatives/words.json (word timestamps)
 #
-# What does NOT get backed up (regenerable from source.mp4):
-#   - HLS segments, variants, storyboards, thumbnail candidates
+# What does NOT get backed up (regenerable from source.mp4 + edits.json):
+#   - HLS segments, variants, storyboards, thumbnail candidates, peaks, editor storyboards
 #
 # Prerequisites:
 #   - restic, sqlite3 installed on the host
@@ -97,7 +98,9 @@ for dir in "$DATA_DIR"/*/; do
   for f in \
     "$dir/recording.json" \
     "$dir/derivatives/source.mp4" \
-    "$dir/derivatives/thumbnail.jpg"; do
+    "$dir/derivatives/thumbnail.jpg" \
+    "$dir/derivatives/edits.json" \
+    "$dir/derivatives/words.json"; do
     if [[ -f "$f" ]]; then
       echo "$f" >> "$FILELIST"
       ((file_count++))

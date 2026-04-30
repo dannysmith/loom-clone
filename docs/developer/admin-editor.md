@@ -1,0 +1,182 @@
+# Admin Video Editor
+
+How the web-based video editor works — architecture, build process, editing pipeline, and the relationship between source files and edited derivatives.
+
+## Architecture overview
+
+The editor is a React app that runs inside the admin panel at `/admin/videos/:id/editor`. It communicates with the Hono server via JSON API endpoints. Editing decisions are stored as a JSON "edit decision list" (EDL). The actual video processing (applying edits via ffmpeg) happens server-side when the user clicks "Commit."
+
+```
+Browser (React editor)              Server (Hono + Bun)
+  │                                    │
+  │  GET /admin/videos/:id/editor      │  serves HTML shell loading React bundle
+  │  GET /:id/editor/edl               │  returns current edits.json (or empty EDL)
+  │  GET /:id/editor/media/peaks.json  │  audio waveform peaks
+  │  GET /:id/editor/media/words.json  │  word-level transcript timestamps
+  │  GET /:id/media/raw/source.mp4     │  the editor always plays the original
+  │                                    │
+  │  PUT /:id/editor/edl               │  save edit decisions (no processing)
+  │  POST /:id/editor/commit           │  trigger ffmpeg processing pipeline
+  │                                    │
+  │                                    │  → sets status to "processing"
+  │                                    │  → runs ffmpeg trim/cut/crossfade
+  │                                    │  → regenerates variants, storyboard, captions
+  │                                    │  → updates DB metadata
+  │                                    │  → purges CDN cache
+  │                                    │  → sets status back to "complete"
+```
+
+## Why it's a separate React app
+
+The rest of the admin panel uses HTMX + vanilla JS with server-rendered Hono JSX. That's the right choice for CRUD forms and page navigation. A video editor needs continuous state management (timeline position, zoom, drag handles, undo/redo stack, playback sync) that benefits from React's model. Keeping it as a separate Vite + React sub-project means the editor's complexity doesn't leak into the rest of the admin panel.
+
+## Project structure
+
+```
+server/editor/              # Vite + React sub-project
+  package.json              # separate dependencies (react, wavesurfer.js, vite)
+  tsconfig.json             # React JSX config (not hono/jsx)
+  vite.config.ts            # base="/static/editor/", builds to ../public/editor/
+  index.html                # Vite entry point template
+  src/
+    main.tsx                # React entry — reads data attributes from the HTML shell
+    App.tsx                 # orchestrates all components and hooks
+    api.ts                  # fetch helpers for EDL load/save/commit, media URLs
+    types.ts                # shared types: Edit, Edl, PeaksData, Word
+    hooks/
+      useEdl.ts             # EDL state management with undo/redo history
+      useVideoPlayback.ts   # video element control, playback through cuts
+      useKeyboard.ts        # keyboard shortcut bindings
+    components/
+      VideoPreview.tsx      # <video> element playing source.mp4
+      Waveform.tsx          # wavesurfer.js with Regions plugin for trim/cut handles
+      Timeline.tsx          # thumbnail strip from editor storyboard sprite sheet
+      Toolbar.tsx           # controls: play, trim, cut, undo/redo, save, commit
+      CommitDialog.tsx      # confirmation dialog before processing
+      TranscriptOverlay.tsx # word-level transcript with current-word highlighting
+    styles/
+      editor.css            # dark theme, full-viewport layout
+```
+
+## Build and dev workflow
+
+**Production build:**
+```sh
+cd server/editor && bun run build
+# or from server/: bun run editor:build
+```
+
+Output lands in `server/public/editor/` (gitignored). The Hono route reads the Vite manifest at `public/editor/.vite/manifest.json` to resolve hashed JS/CSS filenames.
+
+**Development (two terminals):**
+```sh
+# Terminal 1: Hono server
+cd server && bun run dev
+
+# Terminal 2: Vite dev server with HMR
+cd server/editor && bun run editor:dev
+```
+
+The Hono route detects dev mode (no manifest file on disk) and loads scripts from `localhost:5173` for hot module replacement.
+
+## How the Hono route serves the editor
+
+`server/src/routes/admin/editor.ts` has a `GET /:id/editor` route that:
+
+1. Checks admin auth (inherited from the admin middleware)
+2. Guards against non-complete or trashed videos
+3. Returns an HTML shell with:
+   - The video's ID, slug, duration, title, and height as `data-*` attributes on `#editor-root`
+   - In production: `<script>` and `<link>` tags resolved from the Vite manifest
+   - In dev: `<script>` tags pointing at the Vite dev server
+
+The React app reads the data attributes on mount and never needs a separate API call for video metadata.
+
+## Edit Decision List (EDL)
+
+Edits are stored as `derivatives/edits.json`:
+
+```json
+{
+  "version": 1,
+  "source": "source.mp4",
+  "edits": [
+    { "type": "trim", "startTime": 2.5, "endTime": 175.0 },
+    { "type": "cut", "startTime": 45.2, "endTime": 52.8 }
+  ]
+}
+```
+
+- **trim** — defines the kept range (everything outside is removed)
+- **cut** — a section within the kept range to remove
+
+The EDL is always a complete description applied to `source.mp4` from scratch. It is not incremental — each commit fully re-derives all outputs. Re-editing loads the existing EDL so previous edits are visible and modifiable.
+
+## Editor components
+
+**Video preview:** Standard `<video>` element playing `source.mp4` (always the original, never the edited output). During playback, the `useVideoPlayback` hook uses `requestAnimationFrame` to skip over cut regions and stop at the trim end.
+
+**Waveform:** wavesurfer.js v7 with the Regions plugin. Loaded from pre-computed `peaks.json` (generated during the derivatives pipeline from source.mp4). Trim boundaries appear as draggable handles. Cut regions appear as red overlays that can be dragged and resized. Double-click to add a new cut.
+
+**Timeline:** Thumbnail strip rendered from `editor-storyboard.jpg` + `editor-storyboard.vtt`. One frame per second up to 10 minutes, one every 2 seconds beyond. Supports click-to-seek and drag-to-scrub.
+
+**Transcript overlay:** Word-level display from `words.json` (uploaded by WhisperKit with per-word start/end timestamps). Words in cut regions are shown with strikethrough. The current word is highlighted. Click a word to seek to its timestamp.
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| Space | Play/pause |
+| I | Set trim start at playhead |
+| O | Set trim end at playhead |
+| X | Add a cut at the playhead |
+| Left/Right | Step 1 second |
+| Shift+Left/Right | Step 5 seconds |
+| Cmd+Z | Undo |
+| Cmd+Shift+Z | Redo |
+| Cmd+S | Save EDL (without committing) |
+
+## Processing pipeline
+
+When the user clicks Commit, the server-side edit pipeline (`lib/edit-pipeline.ts`) runs:
+
+1. Sets video status to `"processing"` (prevents concurrent edits)
+2. Reads `edits.json` and probes `source.mp4`
+3. Computes kept segments (the inverse of the cuts/trims)
+4. Runs ffmpeg to produce `{height}p.mp4` (e.g. `1080p.mp4`) from `source.mp4`
+   - Full re-encode with `-preset fast -crf 18`
+   - 30ms audio crossfade at cut join points to prevent clicks
+   - For simple trims: `-ss`/`-to` args
+   - For cuts: `trim`/`atrim` + `concat` filter_complex
+5. Regenerates downscaled variants (720p, etc.) from the edited output
+6. Regenerates viewer-facing storyboard from the edited output
+7. Derives edited captions from `words.json` by dropping words in removed regions and shifting timestamps
+8. Updates DB: `durationSeconds`, `fileBytes`, `lastEditedAt`, `status` → `"complete"`
+9. Purges CDN cache for the slug + global feeds
+10. Logs `edits_committed` event
+
+If the pipeline fails at any point, status is restored to `"complete"` so the video isn't stuck.
+
+## File layout after editing
+
+See the "Edited video file resolution" section in [Server Routes & API](server-routes-and-api.md) for the full file layout and URL resolution rules.
+
+Key points:
+- `source.mp4` is never modified — it's the sacred original
+- The edited output is named by resolution (e.g. `1080p.mp4`)
+- `activeRawFilename(video)` in `lib/url.ts` is the single source of truth for which file viewers should see
+- Editor-specific files (`peaks.json`, `editor-storyboard.*`) always reflect `source.mp4`, never the edited output
+- Viewer-facing files (storyboard, captions, variants) are regenerated from the edited output
+
+## Where the code lives
+
+| Concern | File |
+|---------|------|
+| Editor page route + API endpoints | `server/src/routes/admin/editor.ts` |
+| React editor app | `server/editor/src/` |
+| Edit pipeline (ffmpeg processing) | `server/src/lib/edit-pipeline.ts` |
+| Edit transcript derivation | `server/src/lib/edit-transcript.ts` |
+| Active raw filename resolution | `server/src/lib/url.ts` (`activeRawFilename`) |
+| Audio peaks generation | `server/src/lib/peaks.ts` |
+| Editor storyboard generation | `server/src/lib/storyboard.ts` (`generateEditorStoryboard`) |
+| Task document (design decisions) | `docs/tasks-todo/task-x-video-editing.md` |

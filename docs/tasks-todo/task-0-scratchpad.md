@@ -9,6 +9,3 @@ Note: This scratchpad is always "task 0", although the tasks below are not necec
 
 
 ## Future Ideas
-
-- **Basic web-based editor**: Trim, cut, and stitch videos in the browser. This may be where Remotion becomes interesting as a future direction.
-- **Automatic zoom and cursor effects**: Screen Studio-style post-processing (auto-zoom into click targets, cursor smoothing). Aspirational for polished content.

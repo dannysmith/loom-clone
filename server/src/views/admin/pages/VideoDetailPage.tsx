@@ -100,6 +100,15 @@ export function VideoDetailPage({
       <div class="video-meta">
         <div class="video-meta-grid">
           <span class={`badge badge--${video.status}`}>{video.status}</span>
+          {video.lastEditedAt && (
+            <a
+              href={`/admin/videos/${video.id}/editor`}
+              class="badge badge--edited"
+              title={`Edited ${formatDateTime(video.lastEditedAt)}`}
+            >
+              edited
+            </a>
+          )}
           {duration && (
             <span class="meta-pill">
               <IconClock size={14} />

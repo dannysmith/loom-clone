@@ -6,6 +6,7 @@ import {
   IconDownload,
   IconDuplicate,
   IconExternalLink,
+  IconScissors,
   IconTrash,
 } from "../components/Icons";
 
@@ -40,6 +41,12 @@ export function VideoActions({ video }: { video: Video }) {
             <IconCode size={14} /> Copy embed HTML
           </button>
         </>
+      )}
+
+      {video.status === "complete" && (
+        <a href={`/admin/videos/${video.id}/editor`} class="btn btn--sm">
+          <IconScissors size={14} /> Edit video
+        </a>
       )}
 
       <a href={`/admin/videos/${video.id}/media/raw/source.mp4`} download class="btn btn--sm">

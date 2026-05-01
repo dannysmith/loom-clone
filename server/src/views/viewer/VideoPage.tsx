@@ -203,6 +203,9 @@ export function VideoPage({
           {captionsUrl && (
             <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
+          {poster && (
+            <media-poster class="vds-poster" src={poster} alt={video.title ?? ""} />
+          )}
         </media-provider>
         <media-video-layout thumbnails={`/${video.slug}/storyboard.vtt`} />
       </media-player>

@@ -103,6 +103,9 @@ export function EmbedPage({
           {captionsUrl && (
             <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
+          {poster && (
+            <media-poster class="vds-poster" src={poster} alt={title ?? ""} />
+          )}
         </media-provider>
 
         {(title || duration) && (

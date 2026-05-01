@@ -1,4 +1,6 @@
 node_modules/
+editor/node_modules/
+public/editor/
 data/
 .env
 .DS_Store

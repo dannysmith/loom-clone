@@ -39,6 +39,7 @@ export function VideoCard({ video, mode = "default" }: Props) {
         </div>
         <div class="video-card-body">
           <div class="video-card-title">{title}</div>
+          <div class="video-card-slug" title={`/${video.slug}`}>/{video.slug}</div>
           <div class="video-card-meta">
             {duration && (
               <span class="meta-pill">

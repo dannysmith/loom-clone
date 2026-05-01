@@ -224,6 +224,15 @@ body.admin--login {
 	white-space: nowrap;
 }
 
+[data-view="grid"] .video-card-slug {
+	font-family: var(--font-family-mono, ui-monospace, monospace);
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 [data-view="grid"] .video-card-meta {
 	display: flex;
 	align-items: center;
@@ -263,7 +272,7 @@ body.admin--login {
 
 [data-view="table"] .video-card-link {
 	display: grid;
-	grid-template-columns: 3rem 1fr auto auto auto;
+	grid-template-columns: 3rem 1fr 1fr auto auto auto;
 	align-items: center;
 	gap: var(--space-3);
 	padding: var(--space-2) var(--space-3);
@@ -310,6 +319,16 @@ body.admin--login {
 [data-view="table"] .video-card-title {
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
+	min-inline-size: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+[data-view="table"] .video-card-slug {
+	font-family: var(--font-family-mono, ui-monospace, monospace);
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
 	min-inline-size: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;

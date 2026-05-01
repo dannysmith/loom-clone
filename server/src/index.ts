@@ -29,4 +29,5 @@ export default {
   port,
   hostname,
   fetch: app.fetch,
+  maxRequestBodySize: 1024 * 1024 * 1024, // 1 GB (Bun defaults to 128 MB)
 };

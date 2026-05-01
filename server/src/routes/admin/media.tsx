@@ -48,7 +48,7 @@ media.get("/:id/media/poster.jpg", async (c) => {
 });
 
 // Serve thumbnail candidate images for the admin picker.
-const CANDIDATE_FILENAME = /^(auto-\d{2}|custom-\d{8}T\d{12}Z)\.jpg$/;
+const CANDIDATE_FILENAME = /^(auto-\d{2}|custom-\d{8}T\d{9}Z)\.jpg$/;
 
 media.get("/:id/media/thumbnail-candidates/:file", async (c) => {
   const file = c.req.param("file");

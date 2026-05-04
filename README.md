@@ -25,7 +25,7 @@ It has four parts:
 
 The recorder is a macOS menubar app. Select a screen, camera and microphone, check the live preview, and hit record.
 
-- Menubar app allows selection of screen, camera and microphone sources and shows previews & audio meter sow you know everything's working ok before hitting record. The camera white balance and brightness can be tweaked before recording.
+- Menubar app allows selection of screen, camera and microphone sources and shows previews & audio meter so you know everything's working ok before hitting record. The camera white balance and brightness can be tweaked before recording.
 - Three recording modes — screen and camera, screen only, camera only — with instant switching mid-recording. The composited output cuts between modes instantly and (unlike Loom) uses the full-quality video feed when in camera-only mode.
 - Draggable camera overlay that can be repositioned between corners during recording. Neither the overlay nor the recording toolbar appear in the captured screen-recording so we always get clean footage.
 - Stream quality options: 720p, 1080p or 1440p.
@@ -40,7 +40,7 @@ A core principle of this project is "never lose footage." Recording a 20-minute 
 
 - Raw streams saved locally as `screen.mov`, `camera.mp4` and `audio.m4a` at full quality, independent of what gets streamed to the server. Even if everything else fails, the raw footage is always on disk for recovery or editing in Final Cut Pro.
 - Tolerant of network loss during recording. Segments queue locally and upload when the connection returns — even a 10-minute outage just means a delayed upload, not lost video.
-- Self-healing after every recording. The HLS segments are saved locally before being sent to the server. WAfter every recording the server and client compare segment inventories and automatically resend anything missing. This also runs on app launch for any recordings from the last few days, just in case.
+- Self-healing after every recording. The HLS segments are saved locally before being sent to the server. After every recording the server and client compare segment inventories and automatically resend anything missing. This also runs on app launch for any recordings from the last few days, just in case.
 - All uploads are idempotent — re-sending a segment or sending them out of order always converges to the correct result. The server rebuilds its playlist from what's on disk, not from request arrival order.
 - Server data is backed up daily to separate encrypted storage.
 

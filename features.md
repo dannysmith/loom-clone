@@ -1,6 +1,6 @@
 # Features
 
-> Note: This is a working doc on the features of this project, which will probs eventually be used as the basis of a blog article and/or a project website (and/or a decent README.md etc)
+> Note: This is a working doc on the features of this project, which will probs eventually be used as the basis of a blog article.
 
 ## Why I built this
 
@@ -307,38 +307,68 @@ Our mac will have a directory in `~/Application Support/LoomClone/recordings/[UU
 
 ## The Admin Interface
 
-### The Dashboard
+The admin interface lives at http://v.danny.is/admin and allows me to log in and manage my videos.
 
 ### The Video Page
 
-### Slugs & Redirects
+- Changing the title, slug and visibility
+- The video player
+- Video Actions: Open, Copy, Embed, Edit, Download, Duplicate, Trash
+- Video meta-information
+- Description and tags
+- Thumbnail Picker
 
-### The Activity Log
+#### The Event Log & File Browser
 
-### Video Actions
+- Event Log
+- File Browser
+- Transcription
+
+### The Video Editor
+
+### The Dashboard
+
+- Filters, Search & Sorting
+- Vdieo Options
 
 ### Settings & Trash Bin
 
-### The Admin API
+## Viewer-Facing Features
 
-## Viewer-Facing
+### The Video Page (/:slug)
 
-- `/:slug` SEO & OEmbed stuff
-- `/:slug/embed` stuff including `/oembed` URL.
-- The player, versions, poster, subtitles, storyboard, transcriptions etc.
+- Basic info shown
+- The Player: versions, poster, subtitles, storyboard, transcriptions etc.
+- SEO & Metadata etc
+
+### Other Formats
+
 - `/:slug.json`
 - `/:slug.md`
+- `/:slug.mp4`
+
+### Embedding
+
+- Poster Frame etc from vidstack.
+- `/:slug/embed` 
+- The `/oembed` URL
+
+### Public Feeds
+
 - `/feed.xml` (and `/rss`)
 - `/feed.json`
 - `/llms.txt`
 - `/` hints for LLMs and machines etc
 
-### Caching/HTML Etc
+### Slug Redirects
 
 
-### The CDN
+### Performance
 
-## Deployment
+- BunnyCDN
+- Serving the right headers
+- HTML stuff like preload etc
 
-- Blah
-- Archiving & Backup
+## Deployment & Backup
+
+Just a quick note on deployment, archiving and backup, future plans etc.

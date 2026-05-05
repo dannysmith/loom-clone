@@ -1,11 +1,22 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { cors } from "hono/cors";
 import { requireApiKey } from "./lib/auth";
 import { getRewrittenCss, PUBLIC_ROOT } from "./lib/static-assets";
 import admin from "./routes/admin";
 import api from "./routes/api";
 import site from "./routes/site";
 import videos from "./routes/videos";
+
+// Wildcard CORS for the public viewer surface — feeds, oEmbed, llms.txt,
+// sitemap, and (via the videos module) `/:slug*`. Lets external clients
+// (e.g. an inline player on another origin) fetch JSON metadata, captions,
+// and storyboard VTTs cross-origin. Deliberately NOT applied to /api/* or
+// /admin/* — those stay same-origin / token-gated.
+const publicCors = cors({
+  origin: "*",
+  allowMethods: ["GET", "HEAD", "OPTIONS"],
+});
 
 // Factory — kept side-effect-free so tests can construct a fresh app
 // without touching the on-disk database. The entry point in `index.ts`
@@ -59,12 +70,21 @@ export function createApp(): Hono {
   );
 
   app.route("/admin", admin);
+
+  // Public viewer routes get wildcard CORS. Mounted before the route
+  // handlers so OPTIONS preflights are answered by the middleware.
+  app.use("/feed.xml", publicCors);
+  app.use("/feed.json", publicCors);
+  app.use("/oembed", publicCors);
+  app.use("/llms.txt", publicCors);
+  app.use("/sitemap.xml", publicCors);
   app.route("/", site);
 
   // Mounted last as documentation of intent — the `/:slug` catch-all
   // lives here and shouldn't be allowed to swallow more specific routes.
   // (Hono's trie router prefers specific routes anyway, but order makes
-  // the policy explicit.)
+  // the policy explicit.) CORS for the videos surface is applied inside
+  // the videos sub-router so it only fires for requests routed there.
   app.route("/", videos);
 
   return app;

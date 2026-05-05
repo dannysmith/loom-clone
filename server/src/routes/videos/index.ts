@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import embed from "./embed";
 import media, { handleMp4Redirect } from "./media";
 import { handleJsonMetadata, handleMdMetadata } from "./metadata";
@@ -10,6 +11,19 @@ import { handleSlugPage } from "./page";
 // based on extension for .json, .md, .mp4 — Hono can't separate a param
 // from a literal dot-suffix, so we parse it ourselves.
 const videos = new Hono();
+
+// Wildcard CORS for everything routed through the videos module — the
+// public viewer surface (JSON metadata, captions, storyboard VTT, raw MP4,
+// HLS, etc.). Scoped here rather than at the app level so it only fires
+// for requests Hono actually dispatches to this sub-router; /api/* and
+// /admin/* never reach here.
+videos.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "HEAD", "OPTIONS"],
+  }),
+);
 
 // Permanent redirect from the legacy /v/:slug path. Cached shared URLs,
 // bookmarks, and older macOS app versions that still reference /v/... will

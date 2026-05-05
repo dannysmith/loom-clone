@@ -80,6 +80,19 @@ function slugFromTitle(btn) {
     });
 }
 
+// Copy the public video URL with a ?t= parameter at the player's current time.
+function copyTimestampedUrl(slug) {
+  var player = document.querySelector("media-player");
+  if (!player) return;
+  var secs = Math.floor(player.currentTime || 0);
+  if (secs <= 0) return copyToClipboard("/" + slug);
+  var h = Math.floor(secs / 3600);
+  var m = Math.floor((secs % 3600) / 60);
+  var s = secs % 60;
+  var t = (h ? h + "h" : "") + (m ? m + "m" : "") + s + "s";
+  copyToClipboard("/" + slug + "?t=" + t);
+}
+
 // Upload progress handler. Called via hx-on:htmx:xhr:progress on the
 // upload form. Updates the <progress> element.
 function updateProgress(event) {

@@ -1,6 +1,7 @@
 import type { Video } from "../../../db/schema";
 import { absoluteUrl, activeRawFilename } from "../../../lib/url";
 import {
+  IconClock,
   IconCode,
   IconCopy,
   IconDownload,
@@ -36,6 +37,9 @@ export function VideoActions({ video }: { video: Video }) {
           </a>
           <button type="button" class="btn btn--sm" onclick={`copyToClipboard('${publicUrl}')`}>
             <IconCopy size={14} /> Copy public URL
+          </button>
+          <button type="button" class="btn btn--sm" onclick={`copyTimestampedUrl('${video.slug}')`}>
+            <IconClock size={14} /> Copy URL at current time
           </button>
           <button type="button" class="btn btn--sm" onclick={`copyText('${escapedEmbed}')`}>
             <IconCode size={14} /> Copy embed HTML

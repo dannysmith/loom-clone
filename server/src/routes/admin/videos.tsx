@@ -27,6 +27,8 @@ import { ThumbnailPicker } from "../../views/admin/partials/ThumbnailPicker";
 import {
   DescriptionDisplay,
   DescriptionEdit,
+  NotesDisplay,
+  NotesEdit,
   SlugDisplay,
   SlugEdit,
   TitleDisplay,
@@ -169,6 +171,27 @@ videoRoutes.patch("/:id/description", async (c) => {
   const video = await updateVideo(id, { description });
   c.header("HX-Trigger", "video-updated");
   return c.html(<DescriptionDisplay video={video} />);
+});
+
+videoRoutes.get("/:id/partials/notes", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<NotesDisplay video={result} />);
+});
+
+videoRoutes.get("/:id/partials/notes/edit", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  return c.html(<NotesEdit video={result} />);
+});
+
+videoRoutes.patch("/:id/notes", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.parseBody();
+  const notes = String(body.notes ?? "").trim() || null;
+  const video = await updateVideo(id, { notes });
+  c.header("HX-Trigger", "video-updated");
+  return c.html(<NotesDisplay video={video} />);
 });
 
 videoRoutes.get("/:id/partials/visibility", async (c) => {

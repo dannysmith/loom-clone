@@ -20,6 +20,7 @@ import { ThumbnailPicker } from "../partials/ThumbnailPicker";
 import { VideoActions } from "../partials/VideoActions";
 import {
   DescriptionDisplay,
+  NotesDisplay,
   SlugDisplay,
   TitleDisplay,
   VideoTagsControl,
@@ -173,6 +174,11 @@ export function VideoDetailPage({
         <div class="video-tags-section">
           <h3>Tags</h3>
           <VideoTagsControl video={video} videoTags={videoTags} allTags={allTags} />
+        </div>
+
+        <div class="video-notes">
+          <h3>Notes</h3>
+          <NotesDisplay video={video} />
         </div>
       </div>
 

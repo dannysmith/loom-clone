@@ -14,6 +14,7 @@ export type EventType =
   | "duplicated_from"
   | "title_changed"
   | "description_changed"
+  | "notes_changed"
   | "visibility_changed"
   | "slug_changed"
   | "tag_added"

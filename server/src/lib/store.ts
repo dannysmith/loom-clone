@@ -142,6 +142,7 @@ export type GetOpts = { includeTrashed?: boolean };
 export type VideoPatch = {
   title?: string | null;
   description?: string | null;
+  notes?: string | null;
   visibility?: Video["visibility"];
 };
 
@@ -601,6 +602,13 @@ export async function updateVideo(id: string, patch: VideoPatch): Promise<Video>
     events.push({
       type: "description_changed",
       data: { from: existing.description, to: patch.description },
+    });
+  }
+  if (patch.notes !== undefined && patch.notes !== existing.notes) {
+    changes.notes = patch.notes;
+    events.push({
+      type: "notes_changed",
+      data: { from: existing.notes, to: patch.notes },
     });
   }
   if (patch.visibility !== undefined && patch.visibility !== existing.visibility) {

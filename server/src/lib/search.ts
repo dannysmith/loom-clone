@@ -11,13 +11,15 @@ import { getSqlite } from "../db/client";
 export function setupFts(): void {
   const db = getSqlite();
 
-  // Schema migration: if the old FTS table exists without the transcript
-  // column, drop it so the new schema can be created. FTS5 virtual tables
-  // don't support ALTER TABLE ADD COLUMN.
+  // Schema migration: if the old FTS table is missing columns, drop and
+  // recreate. FTS5 virtual tables don't support ALTER TABLE ADD COLUMN.
   const cols = db.prepare("SELECT * FROM pragma_table_info('videos_fts')").all() as Array<{
     name: string;
   }>;
-  if (cols.length > 0 && !cols.some((c) => c.name === "transcript")) {
+  if (
+    cols.length > 0 &&
+    (!cols.some((c) => c.name === "transcript") || !cols.some((c) => c.name === "notes"))
+  ) {
     db.exec("DROP TABLE IF EXISTS videos_fts");
     // Drop old triggers that reference the old schema.
     db.exec("DROP TRIGGER IF EXISTS videos_fts_ai");
@@ -31,7 +33,8 @@ export function setupFts(): void {
       title,
       description,
       slug,
-      transcript
+      transcript,
+      notes
     );
   `);
 
@@ -41,8 +44,8 @@ export function setupFts(): void {
   // After inserting a video, add it to the FTS index.
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS videos_fts_ai AFTER INSERT ON videos BEGIN
-      INSERT INTO videos_fts(video_id, title, description, slug, transcript)
-      VALUES (NEW.id, NEW.title, NEW.description, NEW.slug, '');
+      INSERT INTO videos_fts(video_id, title, description, slug, transcript, notes)
+      VALUES (NEW.id, NEW.title, NEW.description, NEW.slug, '', COALESCE(NEW.notes, ''));
     END;
   `);
 
@@ -50,10 +53,11 @@ export function setupFts(): void {
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS videos_fts_au AFTER UPDATE ON videos BEGIN
       DELETE FROM videos_fts WHERE video_id = OLD.id;
-      INSERT INTO videos_fts(video_id, title, description, slug, transcript)
+      INSERT INTO videos_fts(video_id, title, description, slug, transcript, notes)
       VALUES (
         NEW.id, NEW.title, NEW.description, NEW.slug,
-        COALESCE((SELECT plain_text FROM video_transcripts WHERE video_id = NEW.id), '')
+        COALESCE((SELECT plain_text FROM video_transcripts WHERE video_id = NEW.id), ''),
+        COALESCE(NEW.notes, '')
       );
     END;
   `);
@@ -68,9 +72,10 @@ export function setupFts(): void {
   // Backfill: insert any videos that aren't in the FTS table yet.
   // This handles upgrading from a database that existed before FTS was added.
   db.exec(`
-    INSERT INTO videos_fts(video_id, title, description, slug, transcript)
+    INSERT INTO videos_fts(video_id, title, description, slug, transcript, notes)
     SELECT v.id, v.title, v.description, v.slug,
-           COALESCE(vt.plain_text, '')
+           COALESCE(vt.plain_text, ''),
+           COALESCE(v.notes, '')
     FROM videos v
     LEFT JOIN video_transcripts vt ON vt.video_id = v.id
     WHERE v.id NOT IN (SELECT video_id FROM videos_fts);
@@ -83,13 +88,15 @@ export function updateFtsTranscript(videoId: string, transcript: string): void {
   const db = getSqlite();
   // Read the current FTS row, update with the new transcript text.
   const existing = db
-    .prepare("SELECT title, description, slug FROM videos_fts WHERE video_id = ?")
-    .get(videoId) as { title: string; description: string; slug: string } | undefined;
+    .prepare("SELECT title, description, slug, notes FROM videos_fts WHERE video_id = ?")
+    .get(videoId) as
+    | { title: string; description: string; slug: string; notes: string }
+    | undefined;
   if (!existing) return;
   db.prepare("DELETE FROM videos_fts WHERE video_id = ?").run(videoId);
   db.prepare(
-    "INSERT INTO videos_fts(video_id, title, description, slug, transcript) VALUES (?, ?, ?, ?, ?)",
-  ).run(videoId, existing.title, existing.description, existing.slug, transcript);
+    "INSERT INTO videos_fts(video_id, title, description, slug, transcript, notes) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(videoId, existing.title, existing.description, existing.slug, transcript, existing.notes);
 }
 
 // Searches the FTS index and returns matching video IDs. The query is

@@ -1031,6 +1031,22 @@ select.input {
 	}
 }
 
+.video-notes {
+	margin-block-end: var(--space-4);
+
+	& h3 {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-bold);
+		margin-block-end: var(--space-1);
+	}
+
+	& p {
+		font-size: var(--font-size-sm);
+		color: var(--color-fg-muted);
+		white-space: pre-wrap;
+	}
+}
+
 /* ------- Editable fields ------- */
 
 .editable-field {
@@ -1487,6 +1503,7 @@ select.input {
 
 .thumbnail-picker {
 	margin-block-start: var(--space-4);
+	margin-block-end: var(--space-6);
 }
 
 .thumbnail-picker h3 {

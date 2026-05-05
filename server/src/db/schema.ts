@@ -25,6 +25,7 @@ export const videos = sqliteTable(
       .default("unlisted"),
     title: text("title"),
     description: text("description"),
+    notes: text("notes"),
     // Cached at completion so list views don't need to sum segment durations.
     durationSeconds: real("duration_seconds"),
     // Metadata columns populated by the post-processing pipeline (ffprobe + recording.json).

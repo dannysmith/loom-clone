@@ -214,6 +214,64 @@ export function DescriptionEdit({ video }: { video: Video }) {
   );
 }
 
+// --- Notes ---
+
+export function NotesDisplay({ video }: { video: Video }) {
+  return (
+    <div id="field-notes" class="editable-field">
+      {video.notes ? (
+        <p class="editable-value editable-value--notes">{video.notes}</p>
+      ) : (
+        <p class="editable-value editable-value--empty">No notes</p>
+      )}
+      <button
+        type="button"
+        class="btn btn--sm editable-trigger"
+        hx-get={`/admin/videos/${video.id}/partials/notes/edit`}
+        hx-target="#field-notes"
+        hx-swap="outerHTML"
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+
+export function NotesEdit({ video }: { video: Video }) {
+  return (
+    <form
+      id="field-notes"
+      class="editable-field editable-field--editing editable-field--block"
+      hx-patch={`/admin/videos/${video.id}/notes`}
+      hx-target="#field-notes"
+      hx-swap="outerHTML"
+    >
+      <textarea
+        class="input editable-textarea"
+        name="notes"
+        rows={3}
+        placeholder="Private notes (only visible here)"
+      >
+        {video.notes ?? ""}
+      </textarea>
+      <div class="editable-actions">
+        <button type="submit" class="btn btn--primary btn--sm">
+          Save
+        </button>
+        <button
+          type="button"
+          class="btn btn--sm"
+          hx-get={`/admin/videos/${video.id}/partials/notes`}
+          hx-target="#field-notes"
+          hx-swap="outerHTML"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // --- Visibility ---
 
 export function VisibilityDisplay({ video }: { video: Video }) {

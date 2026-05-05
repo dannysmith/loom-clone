@@ -50,6 +50,13 @@
       "when": 1777580358462,
       "tag": "0006_deep_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1777982321812,
+      "tag": "0007_omniscient_mephisto",
+      "breakpoints": true
     }
   ]
 }

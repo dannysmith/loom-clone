@@ -10,6 +10,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     private(set) var nativePixelSize: CGSize = .zero
 
     var onScreenFrame: (@Sendable (CMSampleBuffer) -> Void)?
+    var onStreamError: (@Sendable (Error) -> Void)?
 
     private var stream: SCStream?
     private let captureQueue = DispatchQueue(label: "com.loomclone.screen-capture", qos: .userInteractive)
@@ -109,5 +110,6 @@ extension ScreenCaptureManager: SCStreamOutput {
 extension ScreenCaptureManager: SCStreamDelegate {
     func stream(_: SCStream, didStopWithError error: any Error) {
         print("[screen] Stream stopped with error: \(error)")
+        onStreamError?(error)
     }
 }

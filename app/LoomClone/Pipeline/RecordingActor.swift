@@ -53,6 +53,26 @@ actor RecordingActor {
     /// reported to the timeline, to avoid duplicate events.
     var rawWriterFailureReported: Set<String> = []
 
+    // MARK: - Source Health Tracking
+
+    /// Host-clock seconds when the last frame/sample was received from each source.
+    /// Updated by the frame handlers, read by the health check on each metronome tick.
+    var lastScreenFrameHostTime: Double?
+    var lastCameraFrameHostTime: Double?
+    var lastAudioSampleHostTime: Double?
+
+    /// Which source health warnings are currently active. Used for dedup — a
+    /// warning fires once, clears if the source recovers, then can re-fire.
+    var activeSourceWarnings: Set<RecordingWarning.Kind> = []
+
+    /// Callback to notify the coordinator of warning changes. The Bool is true
+    /// for add, false for remove.
+    var onWarningChanged: (@Sendable (RecordingWarning, Bool) async -> Void)?
+
+    func setWarningCallback(_ callback: @escaping @Sendable (RecordingWarning, Bool) async -> Void) {
+        onWarningChanged = callback
+    }
+
     /// True when the camera's AVCaptureSession includes the mic, so audio
     /// samples from the shared session feed the HLS writer (instead of the
     /// standalone mic). Set during `startCaptureSources` based on whether
@@ -194,6 +214,11 @@ actor RecordingActor {
     /// Drives the encoding cadence. Emits a composited frame every 1/30s
     /// regardless of how fast the underlying sources are delivering.
     var metronomeTask: Task<Void, Never>?
+
+    /// Separate timer for source health checks. Runs at ~2Hz — far slower
+    /// than the metronome — and is completely decoupled from the encode
+    /// cadence so it can never introduce timing jitter.
+    var healthCheckTask: Task<Void, Never>?
 
     /// Tick counter used only for drift-corrected sleep scheduling. The
     /// encoder PTS comes from wall clock at emit time, not from this counter.
@@ -589,6 +614,10 @@ actor RecordingActor {
             // failure in the timeline at the first segment boundary after it
             // occurs, rather than waiting until finish().
             await checkRawWriterStatus()
+
+            // Check HLS writer health. Unlike raw writer failures (which are
+            // recoverable), an HLS writer failure is terminal.
+            await checkHLSWriterHealth()
         }
 
         // Write to local disk FIRST — the upload path reads bytes from this

@@ -167,6 +167,28 @@ final class RecordingCoordinator {
         cameraAdjustments = .default
     }
 
+    // MARK: - Source Health Warnings
+
+    /// Active warnings surfaced by the recording pipeline. Observed by the
+    /// floating toolbar to show warning pills above the controls.
+    private(set) var activeWarnings: [RecordingWarning] = []
+
+    /// Called from RecordingActor's warning callback (via MainActor hop).
+    func handleWarningChanged(_ warning: RecordingWarning, isActive: Bool) {
+        if isActive {
+            if !activeWarnings.contains(where: { $0.id == warning.id }) {
+                activeWarnings.append(warning)
+            }
+        } else {
+            activeWarnings.removeAll { $0.id == warning.id }
+        }
+    }
+
+    /// Dismiss a warning (for dismissible warnings like tier 2 silence).
+    func dismissWarning(_ warning: RecordingWarning) {
+        activeWarnings.removeAll { $0.id == warning.id }
+    }
+
     // MARK: - Permissions
 
     var screenPermissionDenied = false
@@ -418,6 +440,16 @@ final class RecordingCoordinator {
                 }
             }
 
+            // Wire the source-health warning callback. Fires when a capture
+            // source fails, goes stale, or recovers. Hop to main actor to
+            // update the observable warning list.
+            await actor.setWarningCallback { [weak self] warning, isActive in
+                guard let self else { return }
+                await MainActor.run {
+                    self.handleWarningChanged(warning, isActive: isActive)
+                }
+            }
+
             // Wire the camera-adjustments state box. The compositor reads
             // from it on every frame so slider moves take effect immediately
             // on the composited HLS output.
@@ -510,6 +542,7 @@ final class RecordingCoordinator {
         guard state == .recording || state == .paused else { return }
         state = .stopped
         stopTimer()
+        activeWarnings.removeAll()
         cameraOverlay?.hide()
 
         // Only restart the preview if the popover is still open (rare —
@@ -589,6 +622,7 @@ final class RecordingCoordinator {
 
         state = .stopped
         stopTimer()
+        activeWarnings.removeAll()
         cameraOverlay?.hide()
 
         if isPopoverOpen, let camera = selectedCamera {
@@ -651,6 +685,7 @@ final class RecordingCoordinator {
 
         state = .stopped
         stopTimer()
+        activeWarnings.removeAll()
         cameraOverlay?.hide()
 
         // Tell AppDelegate to hide the floating RecordingPanel — we don't own

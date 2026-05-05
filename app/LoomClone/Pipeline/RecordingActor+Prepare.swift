@@ -252,6 +252,11 @@ extension RecordingActor {
         cameraFrameQueue.removeAll(keepingCapacity: true)
         metronomeTickIdx = 0
         terminalErrorFired = false
+        rawWriterFailureReported.removeAll()
+        lastScreenFrameHostTime = nil
+        lastCameraFrameHostTime = nil
+        lastAudioSampleHostTime = nil
+        activeSourceWarnings.removeAll()
         timeline = RecordingTimelineBuilder()
     }
 
@@ -321,6 +326,10 @@ extension RecordingActor {
                 guard let self else { return }
                 Task { await self.handleScreenFrame(buffer) }
             }
+            screenCapture.onStreamError = { [weak self] error in
+                guard let self else { return }
+                Task { await self.handleScreenCaptureError(error) }
+            }
         }
 
         if hasCamera {
@@ -328,6 +337,14 @@ extension RecordingActor {
                 guard let self else { return }
                 self.onCameraSampleForOverlay?(buffer)
                 Task { await self.handleCameraFrame(buffer) }
+            }
+            cameraCapture.onSessionError = { [weak self] error in
+                guard let self else { return }
+                Task { await self.handleCameraSessionError(error) }
+            }
+            cameraCapture.onSessionInterrupted = { [weak self] in
+                guard let self else { return }
+                Task { await self.handleCameraSessionInterrupted() }
             }
 
             // When camera + mic share a session, the shared session's audio
@@ -351,6 +368,14 @@ extension RecordingActor {
             micCapture.onAudioSample = { [weak self] buffer in
                 guard let self else { return }
                 Task { await self.handleMicAudioSample(buffer) }
+            }
+            micCapture.onSessionError = { [weak self] error in
+                guard let self else { return }
+                Task { await self.handleMicSessionError(error) }
+            }
+            micCapture.onSessionInterrupted = { [weak self] in
+                guard let self else { return }
+                Task { await self.handleMicSessionInterrupted() }
             }
         }
     }

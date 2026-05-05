@@ -123,6 +123,13 @@ final class CameraPreviewManager: NSObject {
     /// This must complete before the recording camera session starts or the
     /// system throws "HALB_IOThread::_Start: there already is a thread" errors.
     func stop() async {
+        // Bump the generation so any in-flight watchdog task exits on its
+        // next check. Without this, a watchdog spawned by the previous
+        // start() could fire after stop() returns and restart the preview
+        // session while the recording session is using the same device —
+        // causing CMIO contention and corrupted frames.
+        sessionGeneration += 1
+
         guard let session else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {

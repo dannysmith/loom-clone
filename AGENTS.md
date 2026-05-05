@@ -66,6 +66,7 @@ Direct commands (for reference or when you need different flags):
 - **Server**: see `server/CLAUDE.md` for scripts (lint, format, typecheck, test, dev) and testing conventions. `cd server && bun run dev` runs the hot-reload server on `http://localhost:3000`.
 - **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
 - **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`. **Also run `make regen` after adding or removing any `.swift` file** — sources are discovered at generate time, not at build time, so xcodebuild won't find them otherwise.
+- **USB camera AV sync in debug builds**: Running from Xcode with the ZV-1 (or other UVC cameras) causes CMIO synchronizer log spam that creates I/O back-pressure, dropping video frames and causing AV desync. This does NOT happen in production builds or when running the debug `.app` directly from Finder. Test recording quality with the production build, not from Xcode.
 
 ## Task Management
 

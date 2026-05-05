@@ -7,15 +7,31 @@ extension RecordingActor {
         metronomeTask = Task { [weak self] in
             await self?.metronomeLoop()
         }
+        startHealthCheckTimer()
     }
 
     /// Cancels the metronome task and awaits its completion so the caller can
     /// be sure no more frames will be appended before it proceeds.
     func cancelMetronome() async {
+        healthCheckTask?.cancel()
+        healthCheckTask = nil
         guard let task = metronomeTask else { return }
         task.cancel()
         _ = await task.value
         metronomeTask = nil
+    }
+
+    /// Runs source health checks at ~2Hz, completely decoupled from the
+    /// timing-critical metronome encode loop. 500ms is plenty for detecting
+    /// 1-2 second staleness thresholds.
+    private func startHealthCheckTimer() {
+        healthCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, !Task.isCancelled else { break }
+                await self.checkSourceHealth()
+            }
+        }
     }
 
     /// The 30fps encoding loop. Each tick composes one output frame using

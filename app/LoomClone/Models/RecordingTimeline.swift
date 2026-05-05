@@ -457,6 +457,36 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
+    // MARK: - Source Failure Events
+
+    func recordSourceFailed(source: String, error: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "source.\(source).failed",
+            data: ["error": .string(error)]
+        )
+    }
+
+    func recordSourceStale(source: String, t: Double, staleDuration: Double) {
+        appendEvent(
+            t: t,
+            kind: "source.\(source).stale",
+            data: ["staleDurationSeconds": .double(staleDuration)]
+        )
+    }
+
+    func recordSourceRecovered(source: String, t: Double) {
+        appendEvent(t: t, kind: "source.\(source).recovered", data: nil)
+    }
+
+    func recordHLSWriterFailed(error: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "writer.hls.failed",
+            data: ["error": .string(error)]
+        )
+    }
+
     /// Seconds since t=0 (the commit anchor). Safe to call before the anchor
     /// is set — returns 0.
     func now() -> Double {

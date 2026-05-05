@@ -6,11 +6,34 @@ struct RecordingPanelContent: View {
     var onCancel: () -> Void
 
     var body: some View {
-        if coordinator.state == .countingDown {
-            countdownView
-        } else {
-            recordingControls
+        VStack(spacing: 0) {
+            // Absorb unused space at the top so the toolbar is always
+            // pinned to the bottom of the fixed-height panel.
+            Spacer(minLength: 0)
+
+            // Warnings float in the clear area above the toolbar.
+            if coordinator.state != .countingDown, !coordinator.activeWarnings.isEmpty {
+                WarningBannerView(warnings: coordinator.activeWarnings) { warning in
+                    coordinator.dismissWarning(warning)
+                }
+                .padding(.bottom, 6)
+            }
+
+            // Toolbar: vibrancy background, rounded corners, shadow.
+            Group {
+                if coordinator.state == .countingDown {
+                    countdownView
+                } else {
+                    recordingControls
+                }
+            }
+            .background(VisualEffectBackground())
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
         }
+        // Inset from panel edges so the shadow renders fully.
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
 
     private var countdownView: some View {
@@ -123,4 +146,19 @@ struct RecordingPanelContent: View {
         let seconds = total % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
+}
+
+/// Wraps NSVisualEffectView for use as a SwiftUI background. Reproduces
+/// the HUD-window vibrancy that the panel previously got from an AppKit
+/// NSVisualEffectView covering the entire content area.
+struct VisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_: NSVisualEffectView, context _: Context) {}
 }

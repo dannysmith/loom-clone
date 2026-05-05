@@ -14,6 +14,7 @@ extension RecordingActor {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         latestScreenFrame = CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS)
+        markScreenFrameReceived()
 
         if let screenRawWriter,
            let retimed = retimedSampleForRawWriter(sampleBuffer)
@@ -30,6 +31,7 @@ extension RecordingActor {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let capturePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         cameraFrameQueue.append(CachedFrame(pixelBuffer: pixelBuffer, capturePTS: capturePTS))
+        markCameraFrameReceived()
         if cameraFrameQueue.count > Self.cameraFrameQueueCapacity {
             cameraFrameQueue.removeFirst()
         }
@@ -48,6 +50,7 @@ extension RecordingActor {
     /// raw copy goes to audio.m4a.
     func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
         audioHasArrived = true
+        markAudioSampleReceived()
         guard isRecording else { return }
         guard let startTime = recordingStartTime else { return }
 
@@ -125,6 +128,7 @@ extension RecordingActor {
     /// shared session's audio is the one feeding HLS).
     func handleStandaloneAudioSample(_ sampleBuffer: CMSampleBuffer) async {
         audioHasArrived = true
+        markAudioSampleReceived()
         guard let audioRawWriter,
               let retimed = retimedSampleForRawWriter(sampleBuffer) else { return }
         await audioRawWriter.append(retimed)
@@ -149,14 +153,31 @@ extension RecordingActor {
             )
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return nil }
-            guard let camera = cameraFrameQueue.last else { return nil }
-            sourcePTS = camera.capturePTS
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .screenAndCamera,
-                pipPosition: pipPosition
-            )
+            let camera = cameraFrameQueue.last
+            // When the camera source is dead (failed or stale), fall back to
+            // screen-only composition so the output continues with the screen
+            // feed rather than stalling entirely. Use the screen PTS to keep
+            // timestamps advancing (stale camera PTS would freeze and fail
+            // the monotonicity check).
+            let cameraAvailable = camera != nil
+                && !activeSourceWarnings.contains(.cameraFailed)
+                && !activeSourceWarnings.contains(.cameraStale)
+            if cameraAvailable, let camera {
+                sourcePTS = camera.capturePTS
+                result = await composition.compositeFrame(
+                    screenBuffer: screen.pixelBuffer,
+                    cameraBuffer: camera.pixelBuffer,
+                    mode: .screenAndCamera,
+                    pipPosition: pipPosition
+                )
+            } else {
+                sourcePTS = screen.capturePTS
+                result = await composition.compositeFrame(
+                    screenBuffer: screen.pixelBuffer,
+                    cameraBuffer: nil,
+                    mode: .screenOnly
+                )
+            }
         case .cameraOnly:
             guard !cameraFrameQueue.isEmpty else { return nil }
             let camera = cameraFrameQueue.removeFirst()

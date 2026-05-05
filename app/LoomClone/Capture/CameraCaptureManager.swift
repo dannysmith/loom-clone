@@ -5,11 +5,14 @@ import Foundation
 final class CameraCaptureManager: NSObject, @unchecked Sendable {
     var onCameraFrame: (@Sendable (CMSampleBuffer) -> Void)?
     var onAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
+    var onSessionError: (@Sendable (Error) -> Void)?
+    var onSessionInterrupted: (@Sendable () -> Void)?
 
     private var session: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "com.loomclone.camera-capture", qos: .userInteractive)
     private let audioCaptureQueue = DispatchQueue(label: "com.loomclone.camera-audio-capture", qos: .userInteractive)
     private var audioOutput: AVCaptureAudioDataOutput?
+    private var sessionObservers: [NSObjectProtocol] = []
 
     /// True when this session includes a mic audio input/output alongside
     /// the camera video. Set during `startCapture` when a `micDevice` is
@@ -175,6 +178,31 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         session.commitConfiguration()
         self.session = session
 
+        // Subscribe to session error and interruption notifications so we can
+        // detect device disconnects, resource pressure, and other failures
+        // mid-recording.
+        let errorObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session,
+            queue: nil
+        ) { [weak self] notification in
+            guard let self else { return }
+            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
+                ?? NSError(domain: "AVCaptureSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown runtime error"])
+            print("[camera] Session runtime error: \(error)")
+            self.onSessionError?(error)
+        }
+        let interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: nil
+        ) { [weak self] notification in
+            guard let self else { return }
+            print("[camera] Session interrupted: \(notification.userInfo ?? [:])")
+            self.onSessionInterrupted?()
+        }
+        sessionObservers = [errorObserver, interruptionObserver]
+
         // startRunning() blocks until the session is actually running. Wait for
         // it to complete before returning so callers don't race against the
         // hardware coming up.
@@ -220,6 +248,10 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     }
 
     func stopCapture() async {
+        for observer in sessionObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        sessionObservers.removeAll()
         guard let session else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {

@@ -8,6 +8,12 @@ final class RecordingPanel {
     private let onStop: () -> Void
     private let onCancel: () -> Void
 
+    /// Fixed panel height: toolbar (~56pt) + warning space (~70pt for 2-3
+    /// pills) + shadow/padding (~26pt). The toolbar is pinned to the bottom;
+    /// warnings appear in the clear space above. Panel size never changes.
+    private static let panelWidth: CGFloat = 360
+    private static let panelHeight: CGFloat = 160
+
     init(
         coordinator: RecordingCoordinator,
         onStop: @escaping () -> Void,
@@ -32,7 +38,7 @@ final class RecordingPanel {
 
     private func createPanel() {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 56),
+            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.panelHeight),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: true
@@ -45,16 +51,10 @@ final class RecordingPanel {
         panel.titleVisibility = .hidden
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
-
-        // Vibrancy background
-        let visualEffect = NSVisualEffectView()
-        visualEffect.material = .hudWindow
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.wantsLayer = true
-        visualEffect.layer?.cornerRadius = 12
-        visualEffect.layer?.masksToBounds = true
+        // Shadow is rendered by the SwiftUI toolbar shape, not the panel
+        // frame — otherwise the panel's full rect (including the transparent
+        // warning area) would cast a shadow.
+        panel.hasShadow = false
 
         let content = RecordingPanelContent(
             coordinator: coordinator,
@@ -64,17 +64,10 @@ final class RecordingPanel {
         let hostingView = NSHostingView(rootView: content)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        visualEffect.translatesAutoresizingMaskIntoConstraints = false
         panel.contentView = NSView()
-        panel.contentView?.addSubview(visualEffect)
         panel.contentView?.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
-            visualEffect.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor),
-            visualEffect.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor),
-            visualEffect.topAnchor.constraint(equalTo: panel.contentView!.topAnchor),
-            visualEffect.bottomAnchor.constraint(equalTo: panel.contentView!.bottomAnchor),
-
             hostingView.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor),
             hostingView.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor),
             hostingView.topAnchor.constraint(equalTo: panel.contentView!.topAnchor),
@@ -87,10 +80,11 @@ final class RecordingPanel {
     private func positionPanel() {
         guard let screen = NSScreen.main else { return }
         let visibleFrame = screen.visibleFrame
-        let panelSize = panel?.frame.size ?? NSSize(width: 320, height: 56)
 
-        let x = visibleFrame.midX - panelSize.width / 2
-        let y = visibleFrame.minY + 40 // 40pt above the bottom of the visible area
+        let x = visibleFrame.midX - Self.panelWidth / 2
+        // Position the panel so the toolbar (pinned to the bottom of the
+        // panel, with 12pt bottom padding) sits ~28pt above the screen bottom.
+        let y = visibleFrame.minY + 16
 
         panel?.setFrameOrigin(NSPoint(x: x, y: y))
     }

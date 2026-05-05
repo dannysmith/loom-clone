@@ -317,6 +317,19 @@ actor WriterActor {
         await onSegmentReady?(emission)
     }
 
+    // MARK: - Health Check
+
+    /// Expose the writer's status for external health checks. Returns
+    /// `.unknown` if no writer is configured.
+    func writerStatus() -> AVAssetWriter.Status {
+        writer?.status ?? .unknown
+    }
+
+    /// Expose the writer's error description for timeline recording.
+    func writerError() -> String? {
+        writer?.error?.localizedDescription
+    }
+
     // MARK: - Errors
 
     enum WriterError: Error {

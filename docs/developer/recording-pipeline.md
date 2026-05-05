@@ -151,6 +151,34 @@ Pause is a first-class concept in the pipeline, not a stop-and-restart:
 
 Result: the output stream has no gap. Segments continue with continuous indexing and monotonic PTS values. The pause just... isn't there in the final video.
 
+## Source failure behaviour
+
+What happens today when a capture source dies mid-recording. GPU/composition failures are handled robustly (see above); source-level failures are not. See `docs/tasks-todo/task-2-source-failure-handling.md` for planned improvements.
+
+### Screen capture (SCStream)
+
+`ScreenCaptureManager` implements the `SCStreamDelegate` method `stream(_:didStopWithError:)` but only logs the error to console. There is no callback to RecordingActor, no timeline event, and no user notification. If SCStream dies, the single-slot `latestScreenFrame` cache retains the last delivered frame and the metronome continues emitting it as frozen pixels indefinitely. The recording appears normal from the pipeline's perspective — just with a static image.
+
+### Camera (AVCaptureSession)
+
+No `AVCaptureSession.runtimeErrorNotification` or `wasInterruptedNotification` observers are registered. If the camera session dies (e.g. USB disconnect), frames stop arriving and the FIFO queue drains naturally. In `cameraOnly` mode the metronome starts skipping every tick (no frames to emit). In `screenAndCamera` mode the PiP overlay disappears but screen recording continues. No detection, no alert, no recovery attempt.
+
+### Microphone (AVCaptureSession)
+
+Same as camera — no session error notifications. If the mic stops delivering, audio goes silent in the output. The only detection is at prepare time: `startCaptureSources()` waits up to 1 second for the first audio sample, but continues recording even if audio never arrives.
+
+### Shared session coupling
+
+When camera and mic share an `AVCaptureSession` (for AV sync — see the "shared session" design in `CameraCaptureManager`), disconnecting the camera kills the entire session, including the mic audio track. The standalone `MicrophoneCaptureManager` session continues running independently and writes to `audio.m4a`, but it does NOT feed the HLS writer — so the composited output loses audio silently. This is the most dangerous failure mode: camera disconnect causes invisible audio death.
+
+### Raw writer failures
+
+Handled via `RawStreamWriter`. Each writer checks `writer.status == .failed` on append and sets a `hasFailed` flag. `checkRawWriterStatus()` is called at segment boundaries and records a timeline event on first detection. At stop time, `finish()` returns a `FinishResult` (.ok / .neverStarted / .failed) that is recorded in the timeline metadata. Raw writer failures do not stop the recording — the HLS path is independent.
+
+### HLS writer health
+
+`WriterActor` does not currently check `writer.status` during operation (unlike raw writers). If the HLS writer enters `.failed` state mid-recording, frames are silently dropped and the failure is only discovered at `finish()` time.
+
 ## Mode switching
 
 Switching mode mid-recording is instant:

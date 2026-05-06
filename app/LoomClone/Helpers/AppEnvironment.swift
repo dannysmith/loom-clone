@@ -40,6 +40,24 @@ enum AppEnvironment {
 
     static let serverURLKey = "serverURL"
     static let outputPresetKey = "outputPresetID"
+    static let recentlyHiddenBundleIDsKey = "recentlyHiddenBundleIDs"
+    static let hideDesktopIconsKey = "hideDesktopIcons"
+
+    // MARK: - Server URL
+
+    // MARK: - App Exclusion
+
+    /// Bundle IDs of recently-hidden apps, most-recent first. Capped at 5.
+    static var recentlyHiddenBundleIDs: [String] {
+        get { defaults.stringArray(forKey: recentlyHiddenBundleIDsKey) ?? [] }
+        set { defaults.set(Array(newValue.prefix(5)), forKey: recentlyHiddenBundleIDsKey) }
+    }
+
+    /// Whether desktop icons should be hidden from screen recording.
+    static var hideDesktopIcons: Bool {
+        get { defaults.bool(forKey: hideDesktopIconsKey) }
+        set { defaults.set(newValue, forKey: hideDesktopIconsKey) }
+    }
 
     // MARK: - Server URL
 

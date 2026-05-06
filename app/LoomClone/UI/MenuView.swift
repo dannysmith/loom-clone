@@ -117,6 +117,12 @@ struct MenuView: View {
                 cameraAdjustmentsSection
             }
 
+            // App exclusion — only shown when a display is selected (screen
+            // capture is active). Hidden in camera-only mode.
+            if coordinator.selectedDisplay != nil, coordinator.state == .idle {
+                HideAppWindowsSection(coordinator: coordinator)
+            }
+
             // Mode picker — only shown when more than one mode is reachable.
             // With one source selected, the mode is implicit.
             if coordinator.availableModes.count > 1 {

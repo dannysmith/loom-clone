@@ -121,6 +121,32 @@ struct RecordingTimeline: Encodable {
         var startedAt: String // ISO8601, set at commit
         var endedAt: String? // ISO8601, set at stop
         var durationSeconds: Double? // logical duration (minus pauses)
+        var exclusions: Exclusions?
+    }
+
+    /// Apps and windows excluded from the screen capture for this recording.
+    struct Exclusions: Encodable {
+        let excludedApps: [ExcludedApp]
+        let desktopIconsHidden: Bool
+
+        struct ExcludedApp: Encodable {
+            let bundleID: String
+            let name: String
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            if !excludedApps.isEmpty {
+                try c.encode(excludedApps, forKey: .excludedApps)
+            }
+            if desktopIconsHidden {
+                try c.encode(desktopIconsHidden, forKey: .desktopIconsHidden)
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case excludedApps, desktopIconsHidden
+        }
     }
 
     struct AppInfo: Encodable {
@@ -234,6 +260,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
     private var rawScreen: RecordingTimeline.RawStreams.VideoStream?
     private var rawCamera: RecordingTimeline.RawStreams.VideoStream?
     private var rawAudio: RecordingTimeline.RawStreams.AudioStream?
+    private var exclusions: RecordingTimeline.Exclusions?
     private var renderErrorCount: Int = 0
     private var stallTimeoutCount: Int = 0
     private var rebuildSuccessCount: Int = 0
@@ -260,6 +287,10 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
 
     func setPreset(_ preset: OutputPreset) {
         self.preset = preset
+    }
+
+    func setExclusions(_ exclusions: RecordingTimeline.Exclusions?) {
+        self.exclusions = exclusions
     }
 
     func setRawScreen(filename: String, width: Int, height: Int, codec: String, bitrate: Int, bytes: Int64, failed: Bool = false) {
@@ -521,7 +552,8 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
                 initialPipPosition: initialPipPosition.rawValue,
                 startedAt: startedAt.map { Self.isoFormatter.string(from: $0) } ?? "",
                 endedAt: endedAt.map { Self.isoFormatter.string(from: $0) },
-                durationSeconds: durationSeconds
+                durationSeconds: durationSeconds,
+                exclusions: exclusions
             ),
             app: Self.currentAppInfo(),
             hardware: Self.currentHardware(),

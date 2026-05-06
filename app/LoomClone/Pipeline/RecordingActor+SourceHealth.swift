@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import CoreMedia
 
@@ -242,6 +243,63 @@ extension RecordingActor {
             // identify which warning to remove.
             let placeholder = RecordingWarning(id: kind, severity: .warning, message: "", dismissible: false)
             Task { await callback(placeholder, false) }
+        }
+    }
+
+    // MARK: - Focused Window Visibility
+
+    /// Check whether the currently focused window belongs to a hidden app.
+    /// Fires/clears the `.focusedWindowHidden` warning as needed. Must be
+    /// called from an async context since it hops to MainActor to read
+    /// NSWorkspace state.
+    func checkFocusedWindowVisibility() async {
+        guard isRecording, !isStopping, !excludedBundleIDs.isEmpty else {
+            // No apps excluded — clear any stale warning
+            if activeSourceWarnings.remove(.focusedWindowHidden) != nil {
+                lastFocusedHiddenBundleID = nil
+                clearWarning(.focusedWindowHidden)
+            }
+            return
+        }
+
+        let frontmost = await MainActor.run {
+            NSWorkspace.shared.frontmostApplication
+        }
+
+        guard let app = frontmost else { return }
+        let bundleID = app.bundleIdentifier ?? ""
+        let isHidden = excludedBundleIDs.contains(bundleID)
+
+        if isHidden {
+            // If focused app changed to a different hidden app, update the message
+            if lastFocusedHiddenBundleID != bundleID {
+                // Clear old warning first so the UI re-renders with new message
+                if activeSourceWarnings.contains(.focusedWindowHidden) {
+                    clearWarning(.focusedWindowHidden)
+                }
+                lastFocusedHiddenBundleID = bundleID
+                activeSourceWarnings.insert(.focusedWindowHidden)
+                let name = app.localizedName ?? "App"
+                fireWarning(.init(
+                    id: .focusedWindowHidden,
+                    severity: .warning,
+                    message: "\(name) is hidden from recording",
+                    dismissible: false
+                ))
+            } else if !activeSourceWarnings.contains(.focusedWindowHidden) {
+                // Same app, but warning was cleared somehow — re-fire
+                activeSourceWarnings.insert(.focusedWindowHidden)
+                let name = app.localizedName ?? "App"
+                fireWarning(.init(
+                    id: .focusedWindowHidden,
+                    severity: .warning,
+                    message: "\(name) is hidden from recording",
+                    dismissible: false
+                ))
+            }
+        } else if activeSourceWarnings.remove(.focusedWindowHidden) != nil {
+            lastFocusedHiddenBundleID = nil
+            clearWarning(.focusedWindowHidden)
         }
     }
 

@@ -26,5 +26,6 @@ struct RecordingWarning: Identifiable, Equatable {
         case audioFailed
         case audioMissing
         case hlsWriterFailed
+        case focusedWindowHidden
     }
 }

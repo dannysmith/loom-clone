@@ -53,6 +53,24 @@ actor RecordingActor {
     /// reported to the timeline, to avoid duplicate events.
     var rawWriterFailureReported: Set<String> = []
 
+    // MARK: - App Exclusion
+
+    /// Bundle IDs the user selected for exclusion. Stored so the health check
+    /// can detect when the focused window belongs to a hidden app, and so
+    /// mid-recording filter updates can re-resolve the full set.
+    var excludedBundleIDs: Set<String> = []
+
+    /// Whether Finder's desktop icon windows are excluded.
+    var hideDesktopIcons: Bool = false
+
+    /// Tracks the bundle ID of the last hidden app we warned about, so we
+    /// can update the warning message when focus moves between hidden apps.
+    var lastFocusedHiddenBundleID: String?
+
+    /// Counter for the health check timer. Used to throttle periodic filter
+    /// refreshes (Finder browser window re-enumeration) to every ~5 seconds.
+    var filterRefreshCounter: Int = 0
+
     // MARK: - Source Health Tracking
 
     /// Host-clock seconds when the last frame/sample was received from each source.
@@ -594,6 +612,62 @@ actor RecordingActor {
             timeline.recordPipPositionChanged(from: previous, to: newPosition, t: timeline.now())
         }
         print("[recording] PiP position switched to: \(newPosition)")
+    }
+
+    // MARK: - App Exclusion Updates
+
+    /// Re-resolve excluded apps from SCShareableContent and update the live
+    /// stream filter. Called when an excluded app launches mid-recording, or
+    /// periodically to refresh Finder browser window exceptions.
+    func updateExcludedApps() async {
+        guard modeUsesScreen else { return }
+
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        } catch {
+            print("[exclusion] SCShareableContent query failed: \(error)")
+            return
+        }
+
+        var appsToExclude: [SCRunningApplication] = []
+
+        // Always exclude our own app
+        if let ourApp = content.applications.first(where: {
+            $0.processID == ProcessInfo.processInfo.processIdentifier
+        }) {
+            appsToExclude.append(ourApp)
+        }
+
+        // User-selected apps
+        for app in content.applications where excludedBundleIDs.contains(app.bundleIdentifier) {
+            appsToExclude.append(app)
+        }
+
+        var exceptingWindows: [SCWindow] = []
+
+        // Desktop icons: exclude Finder, but re-include its browser windows
+        if hideDesktopIcons {
+            if let finder = content.applications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+                if !appsToExclude.contains(where: { $0.processID == finder.processID }) {
+                    appsToExclude.append(finder)
+                }
+                // Re-include Finder windows at normal window level (browser windows).
+                // Desktop icon windows are at kCGDesktopIconWindowLevel and stay excluded.
+                exceptingWindows = content.windows.filter {
+                    $0.owningApplication?.processID == finder.processID && $0.windowLayer == 0
+                }
+            }
+        }
+
+        do {
+            try await screenCapture.updateFilter(
+                excludingApps: appsToExclude,
+                exceptingWindows: exceptingWindows
+            )
+        } catch {
+            print("[exclusion] Filter update failed: \(error)")
+        }
     }
 
     // MARK: - Segment Handling

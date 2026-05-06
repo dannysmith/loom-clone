@@ -30,8 +30,24 @@ extension RecordingActor {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, !Task.isCancelled else { break }
                 await self.checkSourceHealth()
+                await self.checkFocusedWindowVisibility()
+
+                // Periodically re-enumerate Finder browser windows when desktop
+                // icons are hidden, so newly-opened Finder windows are excepted
+                // from the exclusion. Every ~5 seconds (10 ticks × 500ms).
+                await self.tickFilterRefresh()
             }
         }
+    }
+
+    /// Called from the health check timer. Refreshes the screen capture filter
+    /// every 10 ticks (~5 seconds) when desktop icon hiding is active, to pick
+    /// up newly-opened Finder browser windows.
+    private func tickFilterRefresh() async {
+        guard hideDesktopIcons else { return }
+        filterRefreshCounter += 1
+        guard filterRefreshCounter % 10 == 0 else { return }
+        await updateExcludedApps()
     }
 
     /// The 30fps encoding loop. Each tick composes one output frame using

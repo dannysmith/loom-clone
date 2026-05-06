@@ -25,9 +25,16 @@ extension RecordingActor {
         cameraID: String?,
         microphoneID: String?,
         mode: RecordingMode,
-        preset: OutputPreset
+        preset: OutputPreset,
+        excludedBundleIDs: Set<String> = [],
+        hideDesktopIcons: Bool = false
     ) async throws -> (id: String, slug: String) {
         resetPrepareState(mode: mode, preset: preset)
+
+        // Store exclusion state for mid-recording filter updates and
+        // the focused-window warning check.
+        self.excludedBundleIDs = excludedBundleIDs
+        self.hideDesktopIcons = hideDesktopIcons
 
         // 1. Resolve devices from identifiers
         let (display, ourApp) = try await resolveDisplay(displayID: displayID)
@@ -65,6 +72,24 @@ extension RecordingActor {
                 )
             }
         )
+
+        // Record exclusion metadata in the timeline. Resolved names come from
+        // NSWorkspace which requires MainActor, so hop there briefly.
+        if !excludedBundleIDs.isEmpty || hideDesktopIcons {
+            let resolvedApps = await MainActor.run {
+                excludedBundleIDs.compactMap { bundleID -> RecordingTimeline.Exclusions.ExcludedApp? in
+                    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                        return .init(bundleID: bundleID, name: bundleID)
+                    }
+                    let name = FileManager.default.displayName(atPath: url.path)
+                    return .init(bundleID: bundleID, name: name)
+                }
+            }
+            timeline.setExclusions(.init(
+                excludedApps: resolvedApps,
+                desktopIconsHidden: hideDesktopIcons
+            ))
+        }
 
         // Wire upload-result callback into the timeline. This fires on the
         // upload actor and hops back into us to record the result.
@@ -262,11 +287,13 @@ extension RecordingActor {
 
     /// Resolve a display ID to its SCDisplay and find our own app for exclusion.
     /// Returns (nil, nil) when no displayID is provided (camera-only mode).
+    /// Uses `onScreenWindowsOnly: false` so excluded apps are found even if
+    /// they have no on-screen windows yet.
     private func resolveDisplay(
         displayID: CGDirectDisplayID?
     ) async throws -> (SCDisplay?, SCRunningApplication?) {
         guard let displayID else { return (nil, nil) }
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw RecordingError.displayNotFound
         }
@@ -274,6 +301,57 @@ extension RecordingActor {
             $0.processID == ProcessInfo.processInfo.processIdentifier
         }
         return (display, ourApp)
+    }
+
+    /// Build the full app and window exclusion lists for the screen capture filter.
+    /// Resolves user-selected bundle IDs and desktop icon windows from a fresh
+    /// SCShareableContent query.
+    private func resolveExclusions(
+        ourApp: SCRunningApplication?
+    ) async -> (apps: [SCRunningApplication], exceptingWindows: [SCWindow]) {
+        var appsToExclude: [SCRunningApplication] = []
+        if let ourApp { appsToExclude.append(ourApp) }
+
+        // No exclusions configured — skip the query
+        guard !excludedBundleIDs.isEmpty || hideDesktopIcons else {
+            return (appsToExclude, [])
+        }
+
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        } catch {
+            print("[exclusion] SCShareableContent query failed: \(error)")
+            return (appsToExclude, [])
+        }
+
+        // User-selected apps
+        for app in content.applications where excludedBundleIDs.contains(app.bundleIdentifier) {
+            appsToExclude.append(app)
+            print("[exclusion] Excluding \(app.bundleIdentifier) (pid: \(app.processID))")
+        }
+
+        var exceptingWindows: [SCWindow] = []
+
+        // Desktop icons: exclude Finder, but re-include its browser windows
+        if hideDesktopIcons {
+            if let finder = content.applications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+                if !appsToExclude.contains(where: { $0.processID == finder.processID }) {
+                    appsToExclude.append(finder)
+                    print("[exclusion] Excluding Finder for desktop icons")
+                }
+                // Re-include Finder windows at normal window level (browser windows).
+                // Desktop icon windows sit at kCGDesktopIconWindowLevel and stay excluded.
+                exceptingWindows = content.windows.filter {
+                    $0.owningApplication?.processID == finder.processID && $0.windowLayer == 0
+                }
+                if !exceptingWindows.isEmpty {
+                    print("[exclusion] Excepting \(exceptingWindows.count) Finder browser window(s)")
+                }
+            }
+        }
+
+        return (appsToExclude, exceptingWindows)
     }
 
     /// Set up raw stream writers for screen and audio. Camera is deferred
@@ -393,7 +471,12 @@ extension RecordingActor {
 
         if let display {
             do {
-                try await screenCapture.startCapture(display: display, excludingApp: ourApp)
+                let (appsToExclude, exceptingWindows) = await resolveExclusions(ourApp: ourApp)
+                try await screenCapture.startCapture(
+                    display: display,
+                    excludingApps: appsToExclude,
+                    exceptingWindows: exceptingWindows
+                )
             } catch {
                 await tearDownWarmedUpWritersOnPrepareFailure()
                 throw error

@@ -134,6 +134,38 @@ final class RecordingCoordinator {
         return displayOK || cameraOK
     }
 
+    // MARK: - App Exclusion
+
+    /// Bundle IDs currently selected for exclusion. In-memory only — resets
+    /// on app restart. Persists across popover open/close within a session.
+    var excludedAppBundleIDs: Set<String> = [] {
+        didSet { updateRecentlyHidden() }
+    }
+
+    /// Whether desktop icons are hidden from recording. Persisted.
+    var hideDesktopIcons: Bool = AppEnvironment.hideDesktopIcons {
+        didSet { AppEnvironment.hideDesktopIcons = hideDesktopIcons }
+    }
+
+    /// Most-recently-hidden bundle IDs (up to 5), persisted across restarts.
+    /// Displayed at the top of the app exclusion list in the popover.
+    private(set) var recentlyHiddenBundleIDs: [String] = AppEnvironment.recentlyHiddenBundleIDs
+
+    /// Promotes any checked bundle IDs to the front of the recently-hidden list.
+    private func updateRecentlyHidden() {
+        var recent = recentlyHiddenBundleIDs
+        for id in excludedAppBundleIDs {
+            recent.removeAll { $0 == id }
+            recent.insert(id, at: 0)
+        }
+        recent = Array(recent.prefix(5))
+        recentlyHiddenBundleIDs = recent
+        AppEnvironment.recentlyHiddenBundleIDs = recent
+    }
+
+    /// NSWorkspace observer token for app launches during recording.
+    private var appLaunchObserver: NSObjectProtocol?
+
     // MARK: - Camera Preview & Overlay
 
     let cameraPreview = CameraPreviewManager()
@@ -457,6 +489,8 @@ final class RecordingCoordinator {
 
             // 3. Kick off the slow setup (server session, capture hardware,
             // audio wait) IN PARALLEL with the visible countdown.
+            let currentExcludedApps = self.excludedAppBundleIDs
+            let currentHideDesktopIcons = self.hideDesktopIcons
             let prepareTask = Task { () -> (id: String, slug: String)? in
                 do {
                     return try await actor.prepareRecording(
@@ -464,7 +498,9 @@ final class RecordingCoordinator {
                         cameraID: cameraID,
                         microphoneID: micID,
                         mode: currentMode,
-                        preset: currentPreset
+                        preset: currentPreset,
+                        excludedBundleIDs: currentExcludedApps,
+                        hideDesktopIcons: currentHideDesktopIcons
                     )
                 } catch {
                     print("[coordinator] prepareRecording failed: \(error)")
@@ -510,6 +546,7 @@ final class RecordingCoordinator {
             self.elapsedSeconds = 0
             self.startTimer()
             self.updateCameraOverlayVisibility()
+            self.startAppLaunchObserver()
         }
     }
 
@@ -518,6 +555,7 @@ final class RecordingCoordinator {
         countdownSeconds = nil
         state = .idle
         recordingActor = nil
+        stopAppLaunchObserver()
         cameraOverlay?.hide()
         // Only restart the preview if the popover is still open. Otherwise
         // we'd silently re-activate the camera with the popover closed,
@@ -542,6 +580,7 @@ final class RecordingCoordinator {
         guard state == .recording || state == .paused else { return }
         state = .stopped
         stopTimer()
+        stopAppLaunchObserver()
         activeWarnings.removeAll()
         cameraOverlay?.hide()
 
@@ -622,6 +661,7 @@ final class RecordingCoordinator {
 
         state = .stopped
         stopTimer()
+        stopAppLaunchObserver()
         activeWarnings.removeAll()
         cameraOverlay?.hide()
 
@@ -685,6 +725,7 @@ final class RecordingCoordinator {
 
         state = .stopped
         stopTimer()
+        stopAppLaunchObserver()
         activeWarnings.removeAll()
         cameraOverlay?.hide()
 
@@ -771,6 +812,36 @@ final class RecordingCoordinator {
             cameraOverlay?.show(on: nil, style: style)
         } else {
             cameraOverlay?.hide()
+        }
+    }
+
+    // MARK: - App Launch Observer
+
+    /// Watch for newly-launched apps during recording. If a launched app's
+    /// bundle ID is in the exclusion set, re-resolve and update the capture
+    /// filter so it's excluded without needing a recording restart.
+    private func startAppLaunchObserver() {
+        guard !excludedAppBundleIDs.isEmpty else { return }
+        appLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  self.state == .recording || self.state == .paused,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier,
+                  self.excludedAppBundleIDs.contains(bundleID)
+            else { return }
+            print("[coordinator] Excluded app launched mid-recording: \(bundleID)")
+            Task { await self.recordingActor?.updateExcludedApps() }
+        }
+    }
+
+    private func stopAppLaunchObserver() {
+        if let observer = appLaunchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            appLaunchObserver = nil
         }
     }
 

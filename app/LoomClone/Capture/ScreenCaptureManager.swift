@@ -13,13 +13,29 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     var onStreamError: (@Sendable (Error) -> Void)?
 
     private var stream: SCStream?
+    private var captureDisplay: SCDisplay?
     private let captureQueue = DispatchQueue(label: "com.loomclone.screen-capture", qos: .userInteractive)
 
-    func startCapture(display: SCDisplay, excludingApp: SCRunningApplication? = nil) async throws {
+    func startCapture(
+        display: SCDisplay,
+        excludingApps: [SCRunningApplication] = [],
+        exceptingWindows: [SCWindow] = []
+    ) async throws {
+        captureDisplay = display
+
         let filter: SCContentFilter
-        if let app = excludingApp {
-            filter = SCContentFilter(display: display, excludingApplications: [app], exceptingWindows: [])
-            print("[screen] Excluding app windows from capture (pid: \(app.processID))")
+        if !excludingApps.isEmpty {
+            filter = SCContentFilter(
+                display: display,
+                excludingApplications: excludingApps,
+                exceptingWindows: exceptingWindows
+            )
+            for app in excludingApps {
+                print("[screen] Excluding from capture: \(app.bundleIdentifier) (pid: \(app.processID))")
+            }
+            if !exceptingWindows.isEmpty {
+                print("[screen] Excepting \(exceptingWindows.count) window(s) from exclusion")
+            }
         } else {
             filter = SCContentFilter(display: display, excludingWindows: [])
         }
@@ -48,6 +64,22 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
         self.stream = stream
 
         print("[screen] Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ 30fps")
+    }
+
+    /// Update the content filter on a live stream. Used to add newly-launched
+    /// excluded apps or refresh Finder browser window exceptions mid-recording.
+    func updateFilter(
+        excludingApps: [SCRunningApplication],
+        exceptingWindows: [SCWindow] = []
+    ) async throws {
+        guard let display = captureDisplay, let stream else { return }
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: excludingApps,
+            exceptingWindows: exceptingWindows
+        )
+        try await stream.updateContentFilter(filter)
+        print("[screen] Filter updated: \(excludingApps.count) app(s) excluded, \(exceptingWindows.count) window(s) excepted")
     }
 
     /// Look up the backing scale factor for a CGDirectDisplayID. Falls back
@@ -80,6 +112,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
             print("[screen] Stop error: \(error)")
         }
         stream = nil
+        captureDisplay = nil
         print("[screen] Capture stopped")
     }
 }

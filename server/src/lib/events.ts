@@ -26,6 +26,7 @@ export type EventType =
   | "transcript_uploaded"
   | "words_uploaded"
   | "title_suggested"
+  | "description_suggested"
   | "edits_committed";
 
 // Returns all events for a video, oldest first. The `data` field is raw

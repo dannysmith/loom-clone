@@ -186,9 +186,17 @@ actor TranscribeAgent {
             }
         }
 
-        // Suggest a title using on-device Foundation Models (fire-and-forget,
-        // never blocks .transcribed sidecar).
-        await suggestTitle(videoId: videoId, localDir: localDir, srt: srt)
+        // Suggest a title and description using on-device Foundation Models.
+        // Both are fire-and-forget — failures never block the .transcribed
+        // sidecar. Description runs even if title generation returns nil; the
+        // title (when available) is passed only as a topical hint.
+        let suggestedTitle = await suggestTitle(videoId: videoId, localDir: localDir, srt: srt)
+        await suggestDescription(
+            videoId: videoId,
+            localDir: localDir,
+            srt: srt,
+            titleHint: suggestedTitle
+        )
 
         let now = ISO8601DateFormatter().string(from: Date())
         try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)
@@ -325,9 +333,13 @@ actor TranscribeAgent {
     /// Attempts to generate and upload a title suggestion using on-device
     /// Foundation Models. Failures are logged and swallowed — never blocks
     /// the transcription flow.
-    private func suggestTitle(videoId: String, localDir: URL, srt: String) async {
+    ///
+    /// Returns the generated title (regardless of whether the server applied
+    /// it) so the caller can pass it as a topical hint to other suggestion
+    /// generators. Returns nil if generation/validation failed.
+    private func suggestTitle(videoId: String, localDir: URL, srt: String) async -> String? {
         #if canImport(FoundationModels)
-            guard #available(macOS 26, *) else { return }
+            guard #available(macOS 26, *) else { return nil }
 
             // Build context preamble from recording.json
             let recordingJsonURL = localDir.appendingPathComponent("recording.json")
@@ -336,14 +348,14 @@ actor TranscribeAgent {
 
             // Strip SRT timestamps to get plain text for the prompt
             let plainText = stripSrtTimestamps(srt)
-            guard !plainText.isEmpty else { return }
+            guard !plainText.isEmpty else { return nil }
 
             guard let title = await TitleSuggestionGenerator.suggest(
                 transcript: plainText,
                 preamble: preamble
             ) else {
                 print("[title-suggest] \(videoId): no usable suggestion")
-                return
+                return nil
             }
 
             // Upload to server
@@ -352,6 +364,46 @@ actor TranscribeAgent {
                 print("[title-suggest] \(videoId): \"\(title)\"")
             } catch {
                 print("[title-suggest] \(videoId): upload failed: \(error)")
+            }
+            return title
+        #else
+            return nil
+        #endif
+    }
+
+    /// Attempts to generate and upload a description suggestion using on-device
+    /// Foundation Models. Independent of title suggestion — runs even if title
+    /// generation returned nil. Failures are logged and swallowed.
+    private func suggestDescription(
+        videoId: String,
+        localDir: URL,
+        srt: String,
+        titleHint: String?
+    ) async {
+        #if canImport(FoundationModels)
+            guard #available(macOS 26, *) else { return }
+
+            let recordingJsonURL = localDir.appendingPathComponent("recording.json")
+            let preamble = RecordingContextBuilder.buildPreamble(from: recordingJsonURL)
+                ?? "video recording"
+
+            let plainText = stripSrtTimestamps(srt)
+            guard !plainText.isEmpty else { return }
+
+            guard let description = await DescriptionSuggestionGenerator.suggest(
+                transcript: plainText,
+                preamble: preamble,
+                titleHint: titleHint
+            ) else {
+                print("[description-suggest] \(videoId): no usable suggestion")
+                return
+            }
+
+            do {
+                try await uploadSuggestedDescription(videoId: videoId, description: description)
+                print("[description-suggest] \(videoId): \"\(description)\"")
+            } catch {
+                print("[description-suggest] \(videoId): upload failed: \(error)")
             }
         #endif
     }
@@ -388,6 +440,23 @@ actor TranscribeAgent {
         // Any 2xx is fine (applied or not).
         guard http.statusCode == 200 || http.statusCode == 404 else {
             throw TranscribeError.server("suggest-title status \(http.statusCode)")
+        }
+    }
+
+    private func uploadSuggestedDescription(videoId: String, description: String) async throws {
+        var request = try apiClient.authorizedRequest(
+            path: "/api/videos/\(videoId)/suggest-description"
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = try JSONSerialization.data(
+            withJSONObject: ["description": description]
+        )
+        request.httpBody = body
+
+        let (_, http) = try await apiClient.send(request)
+        guard http.statusCode == 200 || http.statusCode == 404 else {
+            throw TranscribeError.server("suggest-description status \(http.statusCode)")
         }
     }
 

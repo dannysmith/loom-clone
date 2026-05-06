@@ -386,6 +386,40 @@ videos.put(
   },
 );
 
+// Accept an AI-suggested description. Only applies if the video's description
+// is still null (user hasn't manually set one). Idempotent — re-calling after
+// a user edit is a silent no-op.
+const suggestDescriptionSchema = z.object({
+  description: z.string().min(1).max(2000),
+});
+
+videos.put(
+  "/:id/suggest-description",
+  zValidator("json", suggestDescriptionSchema, (result, c) => {
+    if (!result.success) {
+      return apiError(c, 400, result.error.message, ErrorCode.VALIDATION_ERROR);
+    }
+  }),
+  async (c) => {
+    const { id } = c.req.param();
+    const video = await getVideo(id);
+    if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+
+    const { description } = c.req.valid("json");
+
+    if (video.description !== null) {
+      // User already set a description — don't overwrite.
+      await logEvent(id, "description_suggested", { description, applied: false });
+      return c.json({ applied: false });
+    }
+
+    await updateVideo(id, { description });
+    await logEvent(id, "description_suggested", { description, applied: true });
+    console.log(`[suggest-description] ${id}: "${description}"`);
+    return c.json({ applied: true });
+  },
+);
+
 // Cancel/delete a recording. Only allowed for non-complete videos — once a
 // video is complete it's shareable and deletion is an admin act.
 videos.delete("/:id", async (c) => {

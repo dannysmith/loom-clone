@@ -1,54 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// Expandable "Hide App Windows" section in the menubar popover. Lets the user
-/// toggle desktop icon hiding and select running apps to exclude from screen
-/// capture. Implemented as a leaf subview so @Observable reads are scoped here
-/// and don't trigger full MenuView re-renders.
+/// Expandable "Hide from recording" section in the menubar popover. Lets the
+/// user toggle desktop icon hiding and select running apps to exclude from
+/// screen capture. Implemented as a leaf subview so @Observable reads are
+/// scoped here and don't trigger full MenuView re-renders.
 struct HideAppWindowsSection: View {
     let coordinator: RecordingCoordinator
 
-    /// Local expansion state — auto-expanded if any exclusion is active.
     @State private var isExpanded: Bool = false
     @State private var didAutoExpand: Bool = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 desktopIconsToggle
-
-                let recentApps = recentlyHiddenApps
-                let otherApps = runningApps(excluding: Set(recentApps.map(\.bundleID)))
-
-                if !recentApps.isEmpty {
-                    ForEach(recentApps) { app in
-                        appRow(app: app)
-                    }
-                }
-
-                if !otherApps.isEmpty {
-                    if !recentApps.isEmpty {
-                        Divider()
-                            .padding(.vertical, 2)
-                    }
-                    ForEach(otherApps) { app in
-                        appRow(app: app)
-                    }
-                }
-
-                if recentApps.isEmpty, otherApps.isEmpty {
-                    Text("No apps running")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
+                appList
             }
-            .frame(maxHeight: 150)
         } label: {
             HStack(spacing: 4) {
-                Text("Hide App Windows")
+                Text("Hide from recording")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 let count = coordinator.excludedAppBundleIDs.count
+                    + (coordinator.hideDesktopIcons ? 1 : 0)
                 if count > 0 {
                     Text("(\(count))")
                         .font(.caption)
@@ -56,11 +31,15 @@ struct HideAppWindowsSection: View {
                 }
             }
         }
+        .disclosureGroupStyle(ClickableDisclosureStyle())
         .onAppear {
             autoExpandIfNeeded()
         }
         .onChange(of: coordinator.isPopoverOpen) { _, open in
-            if open { autoExpandIfNeeded() }
+            if open {
+                didAutoExpand = false
+                autoExpandIfNeeded()
+            }
         }
     }
 
@@ -76,6 +55,45 @@ struct HideAppWindowsSection: View {
         }
         .toggleStyle(.checkbox)
         .controlSize(.small)
+    }
+
+    // MARK: - App List
+
+    private var appList: some View {
+        let recentApps = recentlyHiddenApps
+        let otherApps = runningApps(excluding: Set(recentApps.map(\.bundleID)))
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(recentApps) { app in
+                    appRow(app: app)
+                }
+
+                if !recentApps.isEmpty, !otherApps.isEmpty {
+                    Divider()
+                }
+
+                ForEach(otherApps) { app in
+                    appRow(app: app)
+                }
+
+                if recentApps.isEmpty, otherApps.isEmpty {
+                    Text("No apps running")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: 140)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        )
     }
 
     // MARK: - App Row
@@ -106,6 +124,8 @@ struct HideAppWindowsSection: View {
         }
         .toggleStyle(.checkbox)
         .controlSize(.small)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 8)
     }
 
     // MARK: - Auto-expand
@@ -120,15 +140,12 @@ struct HideAppWindowsSection: View {
 
     // MARK: - App Enumeration
 
-    /// Recently-hidden apps from persisted list, regardless of whether running.
     private var recentlyHiddenApps: [AppInfo] {
         coordinator.recentlyHiddenBundleIDs.compactMap { bundleID in
             appInfo(for: bundleID)
         }
     }
 
-    /// Currently running Dock-visible apps, excluding our own and any in the
-    /// recently-hidden list.
     private func runningApps(excluding recentBundleIDs: Set<String>) -> [AppInfo] {
         let ownBundleID = Bundle.main.bundleIdentifier ?? ""
         return NSWorkspace.shared.runningApplications
@@ -149,8 +166,6 @@ struct HideAppWindowsSection: View {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    /// Resolve a bundle ID to display info. Running apps get their icon from
-    /// NSRunningApplication; not-running apps fall back to NSWorkspace.
     private func appInfo(for bundleID: String) -> AppInfo? {
         if let running = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) {
             return AppInfo(
@@ -160,23 +175,12 @@ struct HideAppWindowsSection: View {
                 isRunning: true
             )
         }
-        // Not running — resolve name/icon from the file system
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return AppInfo(
-                bundleID: bundleID,
-                name: bundleID,
-                icon: nil,
-                isRunning: false
-            )
+            return AppInfo(bundleID: bundleID, name: bundleID, icon: nil, isRunning: false)
         }
         let name = FileManager.default.displayName(atPath: url.path)
         let icon = NSWorkspace.shared.icon(forFile: url.path)
-        return AppInfo(
-            bundleID: bundleID,
-            name: name,
-            icon: icon,
-            isRunning: false
-        )
+        return AppInfo(bundleID: bundleID, name: name, icon: icon, isRunning: false)
     }
 }
 
@@ -191,6 +195,38 @@ extension HideAppWindowsSection {
 
         var id: String {
             bundleID
+        }
+    }
+}
+
+// MARK: - Clickable Disclosure Style
+
+/// Custom DisclosureGroupStyle that makes the entire label row clickable,
+/// not just the chevron. Standard macOS DisclosureGroup only responds to
+/// clicks on the small disclosure triangle.
+private struct ClickableDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    configuration.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                    configuration.label
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if configuration.isExpanded {
+                configuration.content
+            }
         }
     }
 }

@@ -117,12 +117,6 @@ struct MenuView: View {
                 cameraAdjustmentsSection
             }
 
-            // App exclusion — only shown when a display is selected (screen
-            // capture is active). Hidden in camera-only mode.
-            if coordinator.selectedDisplay != nil, coordinator.state == .idle {
-                HideAppWindowsSection(coordinator: coordinator)
-            }
-
             // Mode picker — only shown when more than one mode is reachable.
             // With one source selected, the mode is implicit.
             if coordinator.availableModes.count > 1 {
@@ -139,6 +133,11 @@ struct MenuView: View {
             // Output preset picker. 1440p is hidden when no selected source
             // can natively feed it.
             qualityPicker
+
+            // App exclusion — only shown when a display is selected and idle.
+            if coordinator.selectedDisplay != nil, coordinator.state == .idle {
+                HideAppWindowsSection(coordinator: coordinator)
+            }
 
             // Record button — disabled if any prerequisite isn't satisfied
             let canRecord = coordinator.state == .idle

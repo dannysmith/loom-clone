@@ -59,3 +59,7 @@ The arnndn filter runs at ~88x realtime. For a 30-minute recording, total audio 
 - Model file: `server/assets/audio-models/cb.rnnn`
 - Model docs: `server/assets/audio-models/README.md`
 - Tests: `server/src/lib/__tests__/audio-processing.test.ts`
+
+## Silence detection (suggested edits)
+
+After audio processing, peaks generation, and storyboard work, the derivatives pipeline runs ffmpeg's `silencedetect` filter against `source.mp4` and writes `derivatives/suggested-edits.json` if any silences ≥3s are found. These pre-populate the editor with trim/cut suggestions the first time a video is opened. See `docs/developer/admin-editor.md` for the editor-side behaviour, and `server/src/lib/suggested-edits.ts` for the silence thresholds and lifecycle rules.

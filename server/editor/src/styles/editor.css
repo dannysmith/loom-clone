@@ -173,6 +173,23 @@ body {
   background: oklch(0.5 0.14 250);
 }
 
+.editor-btn-accept-all {
+  background: oklch(0.4 0.13 75);
+  border-color: oklch(0.5 0.15 75);
+  color: oklch(0.95 0.05 75);
+}
+
+.editor-btn-accept-all:hover:not(:disabled) {
+  background: oklch(0.46 0.15 75);
+}
+
+.editor-suggestion-count {
+  font-size: 0.75rem;
+  color: oklch(0.78 0.12 75);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Video preview */
 
 .editor-preview {
@@ -269,6 +286,86 @@ body {
   font-size: 0.7rem;
   color: #666;
   pointer-events: none;
+}
+
+/* Suggested-edit overlay (amber accept/dismiss controls layered on the
+   waveform). The wavesurfer regions render the colored band; this layer
+   sits above them and only handles button hit-testing. */
+
+.editor-suggestion-layer {
+  position: absolute;
+  inset: 0.25rem 0;
+  pointer-events: none;
+}
+
+.editor-suggestion-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px;
+  pointer-events: none;
+  border-left: 1px dashed oklch(0.78 0.15 75 / 0.7);
+  border-right: 1px dashed oklch(0.78 0.15 75 / 0.7);
+}
+
+.editor-suggestion-label {
+  font-size: 0.6rem;
+  color: oklch(0.92 0.08 75);
+  background: oklch(0.3 0.1 75 / 0.85);
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.editor-suggestion-actions {
+  display: flex;
+  gap: 2px;
+  pointer-events: auto;
+}
+
+.editor-suggestion-btn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid oklch(0.55 0.13 75);
+  border-radius: 3px;
+  background: oklch(0.25 0.08 75 / 0.95);
+  color: oklch(0.92 0.08 75);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.editor-suggestion-btn:hover {
+  background: oklch(0.35 0.12 75);
+}
+
+.editor-suggestion-accept {
+  border-color: oklch(0.6 0.18 145);
+  color: oklch(0.95 0.1 145);
+}
+
+.editor-suggestion-accept:hover {
+  background: oklch(0.4 0.16 145);
+}
+
+.editor-suggestion-dismiss {
+  border-color: oklch(0.55 0.05 30);
+  color: oklch(0.85 0.04 30);
+}
+
+.editor-suggestion-dismiss:hover {
+  background: oklch(0.35 0.08 30);
 }
 
 /* Transcript overlay */

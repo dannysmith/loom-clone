@@ -7,6 +7,7 @@ import { logEvent } from "./events";
 import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo } from "./store";
 import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
+import { generateSuggestedEdits } from "./suggested-edits";
 import { extractAndPromoteThumbnails } from "./thumbnails";
 
 // Resolved absolutely so it survives test chdir() calls.
@@ -672,6 +673,31 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
         `[derivatives] ${videoId} peaks generation failed:`,
         err instanceof Error ? err.message : err,
       );
+    }
+  }
+
+  // Post-recipe step 8: suggested edits from silence detection.
+  // Skip if the user has already committed an edit (lastEditedAt set) — once
+  // they've used the editor we never want to surface auto-suggestions again.
+  // generateSuggestedEdits also no-ops when the file already exists, so a
+  // repeat run from healing is idempotent.
+  if (sourceExists && duration >= 5) {
+    const video = await getVideo(videoId, { includeTrashed: true });
+    if (!video?.lastEditedAt) {
+      const suggestStarted = Date.now();
+      try {
+        const generated = await generateSuggestedEdits(dir, duration);
+        if (generated) {
+          const ms = Date.now() - suggestStarted;
+          console.log(`[derivatives] ${videoId}/suggested-edits.json generated (${ms}ms)`);
+          steps.push("suggested-edits");
+        }
+      } catch (err) {
+        console.error(
+          `[derivatives] ${videoId} suggested-edits generation failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
   }
 

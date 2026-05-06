@@ -112,6 +112,23 @@ Edits are stored as `derivatives/edits.json`:
 
 The EDL is always a complete description applied to `source.mp4` from scratch. It is not incremental — each commit fully re-derives all outputs. Re-editing loads the existing EDL so previous edits are visible and modifiable.
 
+## Suggested edits
+
+A separate `derivatives/suggested-edits.json` file pre-populates the editor with auto-detected trim and cut suggestions on the very first time you open the editor for a new video. Same shape as `edits.json` so accepted suggestions merge straight in.
+
+Generated server-side from ffmpeg's `silencedetect` filter (run after audio post-processing in the derivatives pipeline). Silences ≥3 seconds at the start/end of the video become a single trim suggestion; interior silences become cut suggestions. See `server/src/lib/suggested-edits.ts` for the thresholds.
+
+**Lifecycle:**
+- Generated once during initial post-processing if `lastEditedAt` is null and no suggestions file already exists (idempotent — healing reruns of the derivatives pipeline don't regenerate).
+- Deleted on the first successful commit in `edit-pipeline.ts`, so suggestions never reappear once the user has committed any edit.
+- Suppressed in the editor UI if `edits.json` already contains user edits (e.g. an in-progress saved-but-not-committed edit), to avoid noise on a returning visit.
+
+**UI:**
+- Suggested cuts render as amber wavesurfer regions, distinct from the red of committed cuts.
+- A suggested trim renders as amber dimmed regions at the leading/trailing silence positions, but only when the active trim is at the default (full duration) — once the user manually adjusts the trim, the suggestion is hidden.
+- Each region carries a ✓ Accept / ✗ Dismiss control, and the toolbar surfaces "Accept all" / "Dismiss all" with a count.
+- Accept moves a suggestion into the live EDL (single undoable step). Dismiss is in-memory only and reappears on next page load until the user commits.
+
 ## Editor components
 
 **Video preview:** Standard `<video>` element playing `source.mp4` (always the original, never the edited output). During playback, the `useVideoPlayback` hook uses `requestAnimationFrame` to skip over cut regions and stop at the trim end.
@@ -179,4 +196,5 @@ Key points:
 | Active raw filename resolution | `server/src/lib/url.ts` (`activeRawFilename`) |
 | Audio peaks generation | `server/src/lib/peaks.ts` |
 | Editor storyboard generation | `server/src/lib/storyboard.ts` (`generateEditorStoryboard`) |
+| Suggested-edits generation | `server/src/lib/suggested-edits.ts` |
 | Task document (design decisions) | `docs/tasks-todo/task-x-video-editing.md` |

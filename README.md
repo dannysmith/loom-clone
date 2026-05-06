@@ -2,6 +2,8 @@
 
 > [!NOTE]
 > This is a personal tool built for an audience of one. It's not packaged for others to deploy or use — this repo exists as a reference and because I like building in the open.
+>
+> Source is published under the [PolyForm Strict License 1.0.0](LICENSE.md) — read it, learn from it, but don't fork or run it as your own. I may relicense under something more permissive later; for now, all rights reserved.
 
 A personal Loom replacement. A native macOS menubar app for recording, a server for processing and hosting, and a CDN-backed delivery layer — all on a domain I own.
 
@@ -106,3 +108,7 @@ Open `app/LoomClone.xcodeproj` in Xcode and run the `LoomClone` scheme. The Xcod
 ## Contributing
 
 This is a personal project and I'm not looking for contributions at the moment. That said, issues are welcome if you spot bugs or have questions.
+
+## License
+
+[PolyForm Strict 1.0.0](LICENSE.md). Source-available, not open source — read freely, but don't fork, modify, or run it. Future relicensing under a permissive license is possible but not promised.

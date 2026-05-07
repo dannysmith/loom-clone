@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.js";
 import { loadPeaks } from "../api";
@@ -9,15 +9,31 @@ type Props = {
   duration: number;
   currentTime: number;
   edl: { edits: Edit[] };
+  suggestions: Edit[];
   onSeek: (time: number) => void;
   onEditsChange: (edits: Edit[]) => void;
+  onAcceptSuggestion: (index: number) => void;
+  onDismissSuggestion: (index: number) => void;
 };
 
 const CUT_COLOR = "rgba(239, 68, 68, 0.4)";
 const DIMMED_COLOR = "rgba(0, 0, 0, 0.65)";
 const TRIM_HANDLE_COLOR = "rgba(255, 255, 255, 0.15)";
+// Amber, distinct from the red of committed cuts and the white-ish trim handles.
+const SUGGESTED_CUT_COLOR = "rgba(217, 119, 6, 0.55)";
+const SUGGESTED_TRIM_COLOR = "rgba(217, 119, 6, 0.35)";
 
-export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsChange }: Props) {
+export function Waveform({
+  videoId,
+  duration,
+  currentTime,
+  edl,
+  suggestions,
+  onSeek,
+  onEditsChange,
+  onAcceptSuggestion,
+  onDismissSuggestion,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
@@ -26,6 +42,8 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
   // the ready handler and the effect without stale closures.
   const editsRef = useRef(edl.edits);
   editsRef.current = edl.edits;
+  const suggestionsRef = useRef(suggestions);
+  suggestionsRef.current = suggestions;
   const onEditsChangeRef = useRef(onEditsChange);
   onEditsChangeRef.current = onEditsChange;
   const suppressRegionEvents = useRef(false);
@@ -87,6 +105,50 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
           color: CUT_COLOR,
           drag: true,
           resize: true,
+        });
+      });
+
+    // Suggested-trim regions. Only render when the current trim is at
+    // the default (full-duration). Once the user has manually adjusted
+    // the trim we hide the suggestion to avoid second-guessing them.
+    const trimAtDefault = trimStart <= 0.01 && trimEnd >= duration - 0.01;
+    const suggestedTrim = suggestionsRef.current.find((e) => e.type === "trim");
+    if (trimAtDefault && suggestedTrim) {
+      if (suggestedTrim.startTime > 0.01) {
+        regions.addRegion({
+          id: "suggested-trim-leading",
+          start: 0,
+          end: suggestedTrim.startTime,
+          color: SUGGESTED_TRIM_COLOR,
+          drag: false,
+          resize: false,
+        });
+      }
+      if (suggestedTrim.endTime < duration - 0.01) {
+        regions.addRegion({
+          id: "suggested-trim-trailing",
+          start: suggestedTrim.endTime,
+          end: duration,
+          color: SUGGESTED_TRIM_COLOR,
+          drag: false,
+          resize: false,
+        });
+      }
+    }
+
+    // Suggested cuts — non-draggable so the user has to accept first
+    // before fine-tuning. Cleaner than mixing two semantically different
+    // region types in one drag handler.
+    suggestionsRef.current
+      .filter((e) => e.type === "cut")
+      .forEach((cut, i) => {
+        regions.addRegion({
+          id: `suggested-cut-${i}`,
+          start: cut.startTime,
+          end: cut.endTime,
+          color: SUGGESTED_CUT_COLOR,
+          drag: false,
+          resize: false,
         });
       });
 
@@ -180,12 +242,12 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoId, duration]);
 
-  // Re-sync regions when edits change (after wavesurfer is ready).
+  // Re-sync regions when edits or suggestions change (after wavesurfer is ready).
   useEffect(() => {
     if (ready) {
       syncRegions();
     }
-  }, [edl.edits, ready, syncRegions]);
+  }, [edl.edits, suggestions, ready, syncRegions]);
 
   // Sync cursor position with video time.
   useEffect(() => {
@@ -209,15 +271,83 @@ export function Waveform({ videoId, duration, currentTime, edl, onSeek, onEditsC
     [duration, edl.edits, onEditsChange],
   );
 
+  // Build the per-suggestion overlay buttons. Positioning is by percent
+  // of total duration so it tracks the waveform's responsive width.
+  //
+  // For cuts this is straightforward: the overlay sits on the cut region.
+  // For trims the overlay must cover the trimmed-away portion (the amber
+  // region), NOT the kept portion. A trim with startTime > 0 has leading
+  // silence; endTime < duration has trailing silence. Place the overlay
+  // on the larger trimmed section so the buttons are most visible.
+  const suggestionOverlays = useMemo(
+    () =>
+      suggestions.map((s, i) => {
+        let leftPct: number;
+        let widthPct: number;
+
+        if (s.type === "trim") {
+          const leadingDur = s.startTime;
+          const trailingDur = duration - s.endTime;
+          if (trailingDur >= leadingDur) {
+            // Place on trailing silence
+            leftPct = (s.endTime / duration) * 100;
+            widthPct = (trailingDur / duration) * 100;
+          } else {
+            // Place on leading silence
+            leftPct = 0;
+            widthPct = (leadingDur / duration) * 100;
+          }
+        } else {
+          leftPct = (s.startTime / duration) * 100;
+          widthPct = ((s.endTime - s.startTime) / duration) * 100;
+        }
+
+        const label = s.type === "trim" ? "Trim" : "Suggested cut";
+        return (
+          <div
+            key={`s-${i}`}
+            className="editor-suggestion-overlay"
+            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            onDoubleClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-suggestion-label">{label}</div>
+            <div className="editor-suggestion-actions">
+              <button
+                type="button"
+                className="editor-suggestion-btn editor-suggestion-accept"
+                title="Accept"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onAcceptSuggestion(i);
+                }}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="editor-suggestion-btn editor-suggestion-dismiss"
+                title="Dismiss"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onDismissSuggestion(i);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        );
+      }),
+    [suggestions, duration, onAcceptSuggestion, onDismissSuggestion],
+  );
+
   return (
     <div className="editor-waveform" onDoubleClick={handleDoubleClick}>
       <div ref={containerRef} className="editor-waveform-container" />
-      {!ready && <div className="editor-waveform-loading">Loading waveform...</div>}
-      {ready && edl.edits.length === 0 && (
-        <div className="editor-waveform-hint">
-          Use the toolbar buttons or press I / O to set trim points. Double-click the waveform to add a cut.
-        </div>
+      {ready && suggestions.length > 0 && (
+        <div className="editor-suggestion-layer">{suggestionOverlays}</div>
       )}
+      {!ready && <div className="editor-waveform-loading">Loading waveform...</div>}
     </div>
   );
 }

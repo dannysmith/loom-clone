@@ -1,4 +1,4 @@
-import type { Edl, PeaksData, Word } from "./types";
+import type { Edl, PeaksData, SuggestedEdits, Word } from "./types";
 
 const base = (videoId: string) => `/admin/videos/${videoId}`;
 
@@ -33,6 +33,16 @@ export async function loadPeaks(videoId: string): Promise<PeaksData> {
 export async function loadWords(videoId: string): Promise<Word[]> {
   const res = await fetch(editorMediaUrl(videoId, "words.json"));
   if (!res.ok) throw new Error(`Failed to load words: ${res.status}`);
+  return res.json();
+}
+
+// Returns null when no suggestions exist (e.g. an edited video, or an
+// older video that was processed before silence detection landed). Any
+// other failure is surfaced so the editor can show a load error.
+export async function loadSuggestedEdits(videoId: string): Promise<SuggestedEdits | null> {
+  const res = await fetch(editorMediaUrl(videoId, "suggested-edits.json"));
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to load suggested edits: ${res.status}`);
   return res.json();
 }
 

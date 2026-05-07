@@ -102,6 +102,11 @@ When screen and camera feeds have been selected, there are three modes available
 
 Switching between theese in the menubar panel updates the preview appropriately and also dictates which mode the recording will *start* in. The mode can still be changed during recording.
 
+Expanding the *Hide from recording* section allows us to hide stuff from the screen recorder:
+
+1. **Desktop icons** - When checked, finder’s desktop icons will be hidden in the screen recording.
+2. **App Windows** - Any ckecked apps will have their windows hidden in the screen recording. Currently running apps are shown alongside the five most-recently selected apps (whether they’re running or not).
+
 ## The Recording UI
 
 While recording is in progress a toolbar is shown at the bottom of the screen with controls for ending, pausing and cancelling the recording, and for switching between modes. The mode switcher is only visible when both camera and screen feeds are available.
@@ -222,13 +227,15 @@ Now we have a clean `source.mp4` we can use it to generate some derivitive files
 
 While the post-processing above is best done server-side, doing any **AI stuff** on the server would mean paying for tokens on an external service or beefing up the server enough to run models on it. Since I have a pretty powerful laptop it makes more sense to do this stuff locally instead. So the macOS app includes WhisperKit for transcription.
 
-Whenever a 60s+ video completes, the macOS app kicks off a task to transcribe the local `audio.m4a` and then use it and the  timing data from `recording.json` to generate a `captions.srt`.  Both sre stored locally on disk and also sent to the server – the transcript is written to the database and the `captions.src` is used to provide close captions in the web players.
+Whenever a video completes, the macOS app kicks off a task to transcribe the local `audio.m4a` and then use it and the  timing data from `recording.json` to generate a `captions.srt`.  Both sre stored locally on disk and also sent to the server – the transcript is written to the database and the `captions.src` is used to provide close captions in the web players.
 
 If transcription completes successfully, the first ~500 words are fed to Apple Intelligence’s local Foundation Models along with a system prompt generated using data from `recordings.json` which is tasked with returning a suggested title for the video. The suggestion is checked against some simple *is-this-insane* rules and then sent to the server where it updates the video’s title (unless the user has already added a title).
 
+Suggested descriptions are generated in a similar way.
+
 ## End State
 
-For a 60+ second video with all input sources, we’ll end up with the following once all post-processing is finished:
+For a video with all input sources, we’ll end up with the following once all post-processing is finished:
 
 ### Database Record
 
@@ -325,6 +332,14 @@ The admin interface lives at http://v.danny.is/admin and allows me to log in and
 - Transcription
 
 ### The Video Editor
+
+Intro
+
+- Trimming
+- Clipping
+- Comitting & Regen
+- Undo
+- Suggested Clips
 
 ### The Dashboard
 

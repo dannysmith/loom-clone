@@ -30,3 +30,12 @@ export type StoryboardCue = {
   w: number;
   h: number;
 };
+
+// Mirrors edits.json on disk so accepted suggestions can be merged into
+// the EDL without transformation. Generated server-side once at
+// post-processing and dropped after the first commit.
+export type SuggestedEdits = {
+  version: 1;
+  source: string;
+  edits: Edit[];
+};

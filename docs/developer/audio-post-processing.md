@@ -59,3 +59,7 @@ The arnndn filter runs at ~88x realtime. For a 30-minute recording, total audio 
 - Model file: `server/assets/audio-models/cb.rnnn`
 - Model docs: `server/assets/audio-models/README.md`
 - Tests: `server/src/lib/__tests__/audio-processing.test.ts`
+
+## Silence detection (suggested edits)
+
+The derivatives pipeline runs ffmpeg's `silencedetect` filter against the raw `source.mp4` **before** audio processing (denoise + loudnorm) and writes `derivatives/suggested-edits.json` if any silences ≥3s are found. Running on the raw audio is critical — after loudnorm the dynamic range is compressed and background noise sits at ~-25 dB, making silence indistinguishable from quiet speech. Pre-loudnorm, true silence is -50 dB or lower, so the -30 dB threshold cleanly separates pauses from speech. These pre-populate the editor with trim/cut suggestions the first time a video is opened. See `docs/developer/admin-editor.md` for the editor-side behaviour, and `server/src/lib/suggested-edits.ts` for the silence thresholds and lifecycle rules.

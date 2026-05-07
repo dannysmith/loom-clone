@@ -150,7 +150,8 @@ editor.post("/:id/editor/commit", async (c) => {
 });
 
 // --- Editor media files ---
-const EDITOR_FILENAME = /^(editor-storyboard\.(jpg|vtt)|peaks\.json|words\.json|edits\.json)$/;
+const EDITOR_FILENAME =
+  /^(editor-storyboard\.(jpg|vtt)|peaks\.json|words\.json|edits\.json|suggested-edits\.json)$/;
 
 editor.get("/:id/editor/media/:file", async (c) => {
   const file = c.req.param("file");

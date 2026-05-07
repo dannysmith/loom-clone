@@ -3,7 +3,7 @@
 // re-generation of downscaled variants, storyboard, and edited captions.
 
 import { eq } from "drizzle-orm";
-import { rename } from "fs/promises";
+import { rename, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
@@ -162,7 +162,16 @@ async function _runEditPipelineInner(
     })
     .where(eq(videos.id, videoId));
 
-  // 9. Purge CDN cache.
+  // 9. Drop the suggested-edits.json file. Suggestions are a one-shot
+  // helper for the very first edit pass — once the user has committed,
+  // we never want to surface auto-suggestions for this video again.
+  // The lastEditedAt flag (set above) also guards against the
+  // derivatives pipeline regenerating them on a subsequent healing run.
+  await rm(join(derivDir, "suggested-edits.json"), { force: true }).catch((err) => {
+    console.warn(`[edit-pipeline] failed to remove suggested-edits.json for ${videoId}:`, err);
+  });
+
+  // 10. Purge CDN cache.
   const video = await getVideo(videoId);
   if (video) {
     purgeVideo(video.slug);

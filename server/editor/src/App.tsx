@@ -103,6 +103,7 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
         saving={edlState.saving}
         currentTime={playback.currentTime}
         duration={duration}
+        suggestionCount={edlState.suggestions.length}
         onPlayPause={playback.togglePlayPause}
         onUndo={edlState.undo}
         onRedo={edlState.redo}
@@ -112,6 +113,8 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
         onSetTrimOut={setTrimOut}
         onAddCut={addCutAtPlayhead}
         onDeleteCut={deleteCutAtPlayhead}
+        onAcceptAllSuggestions={edlState.acceptAllSuggestions}
+        onDismissAllSuggestions={edlState.dismissAllSuggestions}
         hasCutAtPlayhead={hasCutAtPlayhead}
       />
 
@@ -136,8 +139,11 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           duration={duration}
           currentTime={playback.currentTime}
           edl={edlState.edl}
+          suggestions={edlState.suggestions}
           onSeek={playback.seek}
           onEditsChange={handleEditsChange}
+          onAcceptSuggestion={edlState.acceptSuggestion}
+          onDismissSuggestion={edlState.dismissSuggestion}
         />
 
         <TranscriptOverlay

@@ -9,6 +9,7 @@ type Props = {
   currentTime: number;
   duration: number;
   hasCutAtPlayhead: boolean;
+  suggestionCount: number;
   onPlayPause: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -18,6 +19,8 @@ type Props = {
   onSetTrimOut: () => void;
   onAddCut: () => void;
   onDeleteCut: () => void;
+  onAcceptAllSuggestions: () => void;
+  onDismissAllSuggestions: () => void;
 };
 
 function formatTime(seconds: number): string {
@@ -37,6 +40,7 @@ export function Toolbar({
   currentTime,
   duration,
   hasCutAtPlayhead,
+  suggestionCount,
   onPlayPause,
   onUndo,
   onRedo,
@@ -46,6 +50,8 @@ export function Toolbar({
   onSetTrimOut,
   onAddCut,
   onDeleteCut,
+  onAcceptAllSuggestions,
+  onDismissAllSuggestions,
 }: Props) {
   return (
     <div className="editor-toolbar">
@@ -79,6 +85,29 @@ export function Toolbar({
           <button onClick={onDeleteCut} className="editor-btn editor-btn-delete-cut" title="Delete the cut under the playhead">
             Delete cut <kbd>D</kbd>
           </button>
+        )}
+
+        {suggestionCount > 0 && (
+          <>
+            <span className="editor-toolbar-divider" />
+            <span className="editor-suggestion-count" title="Auto-detected from silences in the audio">
+              {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
+            </span>
+            <button
+              onClick={onAcceptAllSuggestions}
+              className="editor-btn editor-btn-accept-all"
+              title="Accept every suggested trim and cut"
+            >
+              Accept all
+            </button>
+            <button
+              onClick={onDismissAllSuggestions}
+              className="editor-btn"
+              title="Dismiss all suggestions for this session"
+            >
+              Dismiss all
+            </button>
+          </>
         )}
       </div>
 

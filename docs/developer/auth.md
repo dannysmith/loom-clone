@@ -21,7 +21,7 @@ lck_<43 chars of base64url>
 
 **Schema** (`server/src/db/schema.ts`): `api_keys(id, name, hashed_token, created_at, last_used_at, revoked_at)`. `hashed_token` is uniquely indexed.
 
-**Key lib** (`server/src/lib/api-keys.ts`): `createApiKey`, `verifyApiKey`, `listApiKeys`, `revokeApiKey`, `touchLastUsed`. SHA-256 hash of the plaintext is looked up by indexed equality — no byte-by-byte constant-time comparison. For 256-bit random tokens the practical timing leak is negligible; revisit if auth rate-limiting is ever added.
+**Key lib** (`server/src/lib/api-keys.ts`): `createApiKey`, `verifyApiKey`, `listApiKeys`, `revokeApiKey`, `touchLastUsed`. SHA-256 hash of the plaintext is looked up by indexed equality.
 
 **Middleware** (`server/src/lib/auth.ts`): `requireApiKey()` is a Hono middleware. On a bad/missing/revoked token it returns `401` with `WWW-Authenticate: Bearer realm="loom-clone"` and a JSON body following the standard error envelope: `{ error: "<message>", code: "<MACHINE_CODE>" }`. Codes: `MISSING_AUTH_HEADER`, `MALFORMED_AUTH_HEADER`, `EMPTY_BEARER_TOKEN`, `INVALID_API_KEY`. On success it fire-and-forgets `touchLastUsed(id)` and stashes `apiKeyId` on the Hono context (typed via `AuthVariables`).
 
@@ -53,12 +53,9 @@ bun run keys:revoke <id>        # idempotent
 4. Record. Every API call now carries the token.
 5. If the key needs rotating: `bun run keys:revoke <id>` then `keys:create` a new one; paste it back into Settings.
 
-### What's not here, and why
+### Scope
 
-- **Password hashing (bcrypt/argon2)** — wrong tool for high-entropy tokens; would slow verification for no security gain.
-- **Rate limiting on auth failures** — single-user scale, not worth the complexity.
-- **Per-key scopes / read-only keys** — YAGNI for a single user.
-- **Token refresh / expiry** — long-lived tokens with manual rotation are fine at this scale.
+Single-user system, so no per-key scopes, refresh flow, or expiry — keys are long-lived and rotated manually via the CLI. Hashing uses SHA-256 rather than a slow KDF; the tokens are 256 bits of random entropy, so a slow hash adds nothing.
 
 ## Admin authentication — web panel + programmatic access
 

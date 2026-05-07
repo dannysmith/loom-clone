@@ -61,13 +61,11 @@ export function parseSilenceDetectOutput(stderr: string, duration: number): Sile
 
   // Match e.g. "[silencedetect @ 0x...] silence_start: 4.12345"
   // or       "[silencedetect @ 0x...] silence_end: 8.901 | silence_duration: 4.778"
-  const startRe = /silence_start:\s*(-?\d+(?:\.\d+)?)/g;
-  const endRe = /silence_end:\s*(-?\d+(?:\.\d+)?)/g;
+  const startRe = /silence_start:\s*(-?\d+(?:\.\d+)?)/;
+  const endRe = /silence_end:\s*(-?\d+(?:\.\d+)?)/;
 
   // Walk the stderr line by line so start/end ordering is preserved.
   for (const line of stderr.split("\n")) {
-    startRe.lastIndex = 0;
-    endRe.lastIndex = 0;
     const startMatch = startRe.exec(line);
     if (startMatch?.[1] !== undefined) {
       pendingStart = Math.max(0, Number.parseFloat(startMatch[1]));

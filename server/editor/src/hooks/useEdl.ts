@@ -138,10 +138,10 @@ export function useEdl(videoId: string) {
     if (suggestions.length === 0) return;
     const trimSuggestion = suggestions.find((e) => e.type === "trim");
     const cutSuggestions = suggestions.filter((e) => e.type === "cut");
-    const without = edl.edits.filter((e) => e.type !== "trim" || !trimSuggestion);
+    const withoutTrim = edl.edits.filter((e) => e.type !== "trim");
     const nextEdits: Edit[] = trimSuggestion
-      ? [trimSuggestion, ...without.filter((e) => e.type !== "trim"), ...cutSuggestions]
-      : [...without, ...cutSuggestions];
+      ? [trimSuggestion, ...withoutTrim, ...cutSuggestions]
+      : [...edl.edits, ...cutSuggestions];
     apply({ edl: { ...edl, edits: nextEdits }, suggestions: [] });
   }, [edl, suggestions, apply]);
 

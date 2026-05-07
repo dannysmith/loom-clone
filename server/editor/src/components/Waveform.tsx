@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.js";
 import { loadPeaks } from "../api";
@@ -279,62 +279,67 @@ export function Waveform({
   // region), NOT the kept portion. A trim with startTime > 0 has leading
   // silence; endTime < duration has trailing silence. Place the overlay
   // on the larger trimmed section so the buttons are most visible.
-  const suggestionOverlays = suggestions.map((s, i) => {
-    let leftPct: number;
-    let widthPct: number;
+  const suggestionOverlays = useMemo(
+    () =>
+      suggestions.map((s, i) => {
+        let leftPct: number;
+        let widthPct: number;
 
-    if (s.type === "trim") {
-      const leadingDur = s.startTime;
-      const trailingDur = duration - s.endTime;
-      if (trailingDur >= leadingDur) {
-        // Place on trailing silence
-        leftPct = (s.endTime / duration) * 100;
-        widthPct = (trailingDur / duration) * 100;
-      } else {
-        // Place on leading silence
-        leftPct = 0;
-        widthPct = (leadingDur / duration) * 100;
-      }
-    } else {
-      leftPct = (s.startTime / duration) * 100;
-      widthPct = ((s.endTime - s.startTime) / duration) * 100;
-    }
+        if (s.type === "trim") {
+          const leadingDur = s.startTime;
+          const trailingDur = duration - s.endTime;
+          if (trailingDur >= leadingDur) {
+            // Place on trailing silence
+            leftPct = (s.endTime / duration) * 100;
+            widthPct = (trailingDur / duration) * 100;
+          } else {
+            // Place on leading silence
+            leftPct = 0;
+            widthPct = (leadingDur / duration) * 100;
+          }
+        } else {
+          leftPct = (s.startTime / duration) * 100;
+          widthPct = ((s.endTime - s.startTime) / duration) * 100;
+        }
 
-    const label = s.type === "trim" ? "Trim" : "Suggested cut";
-    return (
-      <div
-        key={`s-${i}`}
-        className="editor-suggestion-overlay"
-        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-      >
-        <div className="editor-suggestion-label">{label}</div>
-        <div className="editor-suggestion-actions">
-          <button
-            type="button"
-            className="editor-suggestion-btn editor-suggestion-accept"
-            title="Accept"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onAcceptSuggestion(i);
-            }}
+        const label = s.type === "trim" ? "Trim" : "Suggested cut";
+        return (
+          <div
+            key={`s-${i}`}
+            className="editor-suggestion-overlay"
+            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            onDoubleClick={(ev) => ev.stopPropagation()}
           >
-            ✓
-          </button>
-          <button
-            type="button"
-            className="editor-suggestion-btn editor-suggestion-dismiss"
-            title="Dismiss"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onDismissSuggestion(i);
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-  });
+            <div className="editor-suggestion-label">{label}</div>
+            <div className="editor-suggestion-actions">
+              <button
+                type="button"
+                className="editor-suggestion-btn editor-suggestion-accept"
+                title="Accept"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onAcceptSuggestion(i);
+                }}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="editor-suggestion-btn editor-suggestion-dismiss"
+                title="Dismiss"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onDismissSuggestion(i);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        );
+      }),
+    [suggestions, duration, onAcceptSuggestion, onDismissSuggestion],
+  );
 
   return (
     <div className="editor-waveform" onDoubleClick={handleDoubleClick}>

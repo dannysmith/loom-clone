@@ -75,19 +75,21 @@ describe("suggestionsFromSilences", () => {
   test("leading silence rolls up into a suggested trim startTime", () => {
     const result = suggestionsFromSilences([{ start: 0, end: 5 }], 60);
     expect(result).toHaveLength(1);
-    const trim = result[0]!;
-    expect(trim.type).toBe("trim");
-    expect(trim.startTime).toBeCloseTo(4.9, 5);
-    expect(trim.endTime).toBe(60);
+    const trim = result[0];
+    expect(trim).toBeDefined();
+    expect(trim?.type).toBe("trim");
+    expect(trim?.startTime).toBeCloseTo(4.9, 5);
+    expect(trim?.endTime).toBe(60);
   });
 
   test("trailing silence rolls up into a suggested trim endTime", () => {
     const result = suggestionsFromSilences([{ start: 56, end: 60 }], 60);
     expect(result).toHaveLength(1);
-    const trim = result[0]!;
-    expect(trim.type).toBe("trim");
-    expect(trim.startTime).toBe(0);
-    expect(trim.endTime).toBeCloseTo(56.1, 5);
+    const trim = result[0];
+    expect(trim).toBeDefined();
+    expect(trim?.type).toBe("trim");
+    expect(trim?.startTime).toBe(0);
+    expect(trim?.endTime).toBeCloseTo(56.1, 5);
   });
 
   test("combines leading + trailing + interior into one trim and one cut", () => {

@@ -167,7 +167,9 @@ async function _runEditPipelineInner(
   // we never want to surface auto-suggestions for this video again.
   // The lastEditedAt flag (set above) also guards against the
   // derivatives pipeline regenerating them on a subsequent healing run.
-  await rm(join(derivDir, "suggested-edits.json"), { force: true }).catch(() => {});
+  await rm(join(derivDir, "suggested-edits.json"), { force: true }).catch((err) => {
+    console.warn(`[edit-pipeline] failed to remove suggested-edits.json for ${videoId}:`, err);
+  });
 
   // 10. Purge CDN cache.
   const video = await getVideo(videoId);

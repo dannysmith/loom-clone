@@ -43,7 +43,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 `.github/workflows/deploy.yml` runs on every push to `main` that touches `server/**`:
 
 1. **Test job**: installs deps, runs `bun run check` (lint + format), `bun run typecheck`, and `bun test`
-2. **Deploy job** (only if tests pass): SSHs into the VPS as the deploy user, pulls latest, rebuilds and restarts the container
+2. **Deploy job** (only if tests pass): SSHs into the VPS as the configured deploy user, pulls latest, rebuilds and restarts the container
 
 The whole pipeline takes ~40 seconds.
 
@@ -52,9 +52,10 @@ The whole pipeline takes ~40 seconds.
 | Secret | Value |
 | --- | --- |
 | `VPS_HOST` | The VPS IPv4 address |
-| `VPS_SSH_KEY` | A dedicated ed25519 private key (no passphrase) that can SSH as the deploy user |
+| `VPS_SSH_USER` | The system username on the VPS that owns the deploy key |
+| `VPS_SSH_KEY` | A dedicated ed25519 private key (no passphrase) that can SSH as that user |
 
-The corresponding public key lives in `~/.ssh/authorized_keys` on the VPS. This is a purpose-specific key — not a personal SSH key used for other things.
+The corresponding public key lives in `~/.ssh/authorized_keys` of the deploy user on the VPS. This is a purpose-specific key — not a personal SSH key used for other things.
 
 ## Setting up from scratch
 
@@ -74,14 +75,14 @@ If the VPS dies or you need to recreate this setup:
 4. **Create the data directory** on the storage volume:
    ```bash
    sudo mkdir -p /mnt/data/loom-clone
-   sudo chown $USER:$USER /mnt/data/loom-clone
+   sudo chown "$USER:$USER" /mnt/data/loom-clone
    ```
 
 5. **Create `server/.env`** on the VPS:
    ```bash
    cat > ~/loom-clone/server/.env <<'EOF'
    PUBLIC_URL=https://v.danny.is
-   ADMIN_USERNAME=admin
+   ADMIN_USERNAME=<choose a username for the admin web panel>
    ADMIN_PASSWORD=<choose a long password and save it somewhere>
    SESSION_SECRET=<generate with: openssl rand -base64 48>
    BUNNY_CDN_API_KEY=<from BunnyCDN dashboard: Account → Settings → API Keys>
@@ -107,7 +108,7 @@ If the VPS dies or you need to recreate this setup:
    ```
    Then restart Caddy: `cd ~/danny-vps-infra/caddy && docker compose restart caddy` (restart, not reload — bind-mounted files need a container restart to pick up inode changes from git pull).
 
-9. **Set up CI/CD**: generate a deploy SSH key (`ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/loom-clone-deploy`), add the public key to `~/.ssh/authorized_keys` on the VPS, add the private key as `VPS_SSH_KEY` and the VPS IP as `VPS_HOST` in GitHub repo secrets.
+9. **Set up CI/CD**: generate a deploy SSH key (`ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/loom-clone-deploy`), add the public key to `~/.ssh/authorized_keys` of the deploy user on the VPS, then add three GitHub repo secrets: `VPS_HOST` (the VPS IP), `VPS_SSH_USER` (the deploy user), and `VPS_SSH_KEY` (the private key).
 
 10. **Set up BunnyCDN** pull zone with origin `https://origin.v.danny.is`, enable "Optimize for large object delivery" and "Serve stale while origin offline", add Edge Rules to bypass cache for `/api/*` and `/admin/*`, add `v.danny.is` as a custom hostname, and activate SSL. See `docs/tasks-todo/task-1-view-layer.md` for the full setup details.
 

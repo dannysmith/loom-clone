@@ -165,11 +165,11 @@ crontab -e
 Add these lines:
 
 ```cron
-# loom-clone: daily backup at 03:30 UTC
-30 3 * * * ~/loom-clone/server/scripts/backup.sh >> ~/logs/backup.log 2>&1
+# loom-clone: daily backup at 03:30 UTC (HOME expands to the user's crontab home)
+30 3 * * * $HOME/loom-clone/server/scripts/backup.sh >> $HOME/logs/backup.log 2>&1
 
 # loom-clone: weekly restic integrity check (Sundays 04:30 UTC)
-30 4 * * 0 RESTIC_REPOSITORY="sftp:hetzner-backup:loom-clone" RESTIC_PASSWORD_FILE="~/.config/restic-password" restic check >> ~/logs/backup-check.log 2>&1
+30 4 * * 0 RESTIC_REPOSITORY="sftp:hetzner-backup:loom-clone" RESTIC_PASSWORD_FILE="$HOME/.config/restic-password" restic check >> $HOME/logs/backup-check.log 2>&1
 ```
 
 The daily backup runs at 03:30 UTC. The weekly integrity check runs an hour later on Sundays to avoid overlapping.
@@ -182,7 +182,7 @@ For push-based failure alerts instead of manually reviewing logs:
 2. Add a curl ping at the end of the backup crontab line:
 
 ```cron
-30 3 * * * ~/loom-clone/server/scripts/backup.sh >> ~/logs/backup.log 2>&1 && curl -fsS -m 10 --retry 5 https://hc-ping.com/YOUR-UUID-HERE > /dev/null
+30 3 * * * $HOME/loom-clone/server/scripts/backup.sh >> $HOME/logs/backup.log 2>&1 && curl -fsS -m 10 --retry 5 https://hc-ping.com/YOUR-UUID-HERE > /dev/null
 ```
 
 Healthchecks.io will alert you if the ping doesn't arrive within the expected window.

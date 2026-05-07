@@ -80,7 +80,7 @@ Considered and ruled out. SQLite is the right database for a single-user tool at
 ### One-time setup
 
 - Provision a Storage Box BX11 in the same Hetzner project. Note the SFTP host, port, username, and the SSH public key on the production VPS that will push backups.
-- Generate a restic repository password, store it in `~/.config/restic-password` on the VPS (chmod 600), and somewhere offline that survives the VPS dying.
+- Generate a restic repository password, store it in `~/.config/restic-password` on the VPS (chmod 600, owned by the deploy user), and somewhere offline that survives the VPS dying.
 - Initialise the restic repo: `restic -r sftp:<box-user>@<box-host>:/repo init`.
 - Confirm Hetzner-level snapshot retention is enabled on the box (10 automated snapshots on BX11).
 

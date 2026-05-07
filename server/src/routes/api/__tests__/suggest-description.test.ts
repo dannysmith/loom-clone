@@ -79,6 +79,16 @@ describe("PUT /:id/suggest-description", () => {
     expect(res.status).toBe(400);
   });
 
+  test("returns 400 for whitespace-only description", async () => {
+    const { id } = await createVideoViaApi();
+    const res = await videos.request(`/${id}/suggest-description`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: "   \t\n  " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   test("returns 400 for missing description field", async () => {
     const { id } = await createVideoViaApi();
     const res = await videos.request(`/${id}/suggest-description`, {

@@ -94,7 +94,7 @@ import Foundation
         // MARK: - Private
 
         private static func truncateTranscript(_ text: String, maxWords: Int) -> String {
-            let words = text.split(separator: " ", omittingEmptySubsequences: true)
+            let words = text.split(whereSeparator: { $0.isWhitespace })
             if words.count <= maxWords { return text }
             return words.prefix(maxWords).joined(separator: " ")
         }

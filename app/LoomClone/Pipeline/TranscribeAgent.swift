@@ -187,16 +187,16 @@ actor TranscribeAgent {
         }
 
         // Suggest a title and description using on-device Foundation Models.
-        // Both are fire-and-forget — failures never block the .transcribed
-        // sidecar. Description runs even if title generation returns nil; the
-        // title (when available) is passed only as a topical hint.
-        let suggestedTitle = await suggestTitle(videoId: videoId, localDir: localDir, srt: srt)
-        await suggestDescription(
+        // Both run concurrently — failures never block the .transcribed sidecar.
+        // Description does not wait for the title; titleHint is nil.
+        async let titleTask: String? = suggestTitle(videoId: videoId, localDir: localDir, srt: srt)
+        async let descTask: Void = suggestDescription(
             videoId: videoId,
             localDir: localDir,
             srt: srt,
-            titleHint: suggestedTitle
+            titleHint: nil
         )
+        _ = await (titleTask, descTask)
 
         let now = ISO8601DateFormatter().string(from: Date())
         try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)

@@ -390,7 +390,7 @@ videos.put(
 // is still null (user hasn't manually set one). Idempotent — re-calling after
 // a user edit is a silent no-op.
 const suggestDescriptionSchema = z.object({
-  description: z.string().min(1).max(2000),
+  description: z.string().trim().min(1).max(2000),
 });
 
 videos.put(

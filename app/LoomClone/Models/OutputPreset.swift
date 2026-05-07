@@ -25,7 +25,7 @@ struct OutputPreset: Equatable, Hashable, Identifiable {
         label: "1080p",
         width: 1920,
         height: 1080,
-        bitrate: 6_000_000
+        bitrate: 8_000_000
     )
 
     /// QHD / 1440p. Chosen as the top preset rather than 4K: at 4K the
@@ -41,7 +41,7 @@ struct OutputPreset: Equatable, Hashable, Identifiable {
         label: "1440p",
         width: 2560,
         height: 1440,
-        bitrate: 10_000_000
+        bitrate: 13_000_000
     )
 
     static let all: [OutputPreset] = [.p720, .p1080, .p1440]

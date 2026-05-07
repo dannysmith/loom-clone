@@ -104,7 +104,7 @@ Metal renders can hang or error (documented in `docs/archive/m2-pro-video-pipeli
 
 WriterActor wraps AVAssetWriter in HLS fMP4 mode (`.mpeg4AppleHLS` output content type). Configuration:
 
-- **Video:** H.264 High Profile, 6 Mbps at 1080p, 30fps expected.
+- **Video:** H.264 High Profile, 8 Mbps at 1080p, 30fps expected.
 - **Audio:** AAC-LC, 128 kbps, 48 kHz.
 - **Segment interval:** ~4 seconds.
 

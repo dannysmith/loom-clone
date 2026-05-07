@@ -33,7 +33,7 @@ final class RecordingTimelineBuilderTests: XCTestCase {
         XCTAssertEqual(timeline.preset.id, "1080p")
         XCTAssertEqual(timeline.preset.width, 1920)
         XCTAssertEqual(timeline.preset.height, 1080)
-        XCTAssertEqual(timeline.preset.bitrate, 6_000_000)
+        XCTAssertEqual(timeline.preset.bitrate, 8_000_000)
     }
 
     func testBuildCapturesInputs() {

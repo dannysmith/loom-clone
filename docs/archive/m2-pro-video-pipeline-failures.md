@@ -20,7 +20,7 @@ Every failure documented here was observed on the same machine:
 - **Memory:** 32 GB unified
 - **macOS:** 26.4 (build 25E246)
 - **Architecture:** arm64e
-- **Camera used in tests:** Sony ZV-1 via USB (`uniqueID=0x0000000000000000`), delivering 1280×720 @ 30fps 420v
+- **Camera used in tests:** Sony ZV-1 via USB, delivering 1280×720 @ 30fps 420v
 - **Microphone:** Yeti Stereo via USB
 
 The M2 Pro is critical to what follows. Some key facts:

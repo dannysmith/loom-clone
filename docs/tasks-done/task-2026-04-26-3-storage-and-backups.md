@@ -4,7 +4,7 @@ Goal: get reliable, ransomware-resistant backups of every video the system can't
 
 ## Background
 
-Server-side video files live on a 20 GB Hetzner shared volume in Falkenstein (ID redacted), bind-mounted into the container at `data/`. The DB (`data/app.db`) lives there too. There are no external backups today. Disk usage is also higher than it needs to be — most completed recordings are stored roughly twice (HLS segments + a `-c copy` MP4 derivative built from them; same story for uploaded videos and their `upload.mp4`).
+Server-side video files live on a Hetzner shared volume, bind-mounted into the container at `data/`. The DB (`data/app.db`) lives there too. There are no external backups today. Disk usage is also higher than it needs to be — most completed recordings are stored roughly twice (HLS segments + a `-c copy` MP4 derivative built from them; same story for uploaded videos and their `upload.mp4`).
 
 This task tackles three things in one pass: where backups live, how they run, and what we clean up so backups (and the primary volume) don't carry duplicate bytes.
 

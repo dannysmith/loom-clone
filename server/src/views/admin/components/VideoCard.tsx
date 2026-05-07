@@ -1,4 +1,5 @@
 import type { Video } from "../../../db/schema";
+import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDurationShort } from "../../../lib/format";
 import { activeRawFilename } from "../../../lib/url";
 import {
@@ -8,6 +9,7 @@ import {
   IconDuplicate,
   IconEllipsis,
   IconExternalLink,
+  IconFolder,
   IconTrash,
   VisibilityBadge,
 } from "./Icons";
@@ -15,12 +17,13 @@ import {
 type Props = {
   video: Video;
   mode?: "default" | "trash";
+  diskSize?: number;
 };
 
 // Shared card component for both grid and table views. The containing
 // element's `data-view` attribute controls the layout via CSS.
 // In trash mode, the popover menu is replaced with a Restore button.
-export function VideoCard({ video, mode = "default" }: Props) {
+export function VideoCard({ video, mode = "default", diskSize }: Props) {
   const title = video.title || video.slug;
   const duration = formatDurationShort(video.durationSeconds);
   const date = formatDate(video.createdAt);
@@ -49,6 +52,12 @@ export function VideoCard({ video, mode = "default" }: Props) {
                 {duration}
               </span>
             )}
+            {diskSize != null && diskSize > 0 && (
+              <span class="meta-pill">
+                <IconFolder size={12} />
+                {formatFileSize(diskSize)}
+              </span>
+            )}
             {mode === "trash" ? (
               <span class="badge badge--private">trashed</span>
             ) : (
@@ -66,10 +75,19 @@ export function VideoCard({ video, mode = "default" }: Props) {
         </div>
       </a>
       {mode === "trash" ? (
-        <div class="video-card-menu-anchor">
+        <div class="video-card-menu-anchor" style="display: flex; gap: var(--space-1)">
           <form method="post" action={`/admin/videos/${video.id}/untrash`}>
             <button type="submit" class="btn btn--sm btn--primary">
               Restore
+            </button>
+          </form>
+          <form
+            method="post"
+            action={`/admin/videos/${video.id}/delete-permanently`}
+            hx-confirm={`Permanently delete "${title}"? This cannot be undone.`}
+          >
+            <button type="submit" class="btn btn--sm btn--danger-solid">
+              Delete
             </button>
           </form>
         </div>

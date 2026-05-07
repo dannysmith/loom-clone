@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getVideosDirSizes } from "../../lib/files";
 import { listVideosFiltered } from "../../lib/store";
 import { listTags } from "../../lib/tags";
 import { DashboardPage } from "../../views/admin/pages/DashboardPage";
@@ -12,12 +13,14 @@ dashboard.get("/", async (c) => {
   const filters = parseFilters(c);
   const view = c.req.query("view") || "grid";
   const [result, tags] = await Promise.all([listVideosFiltered(filters), listTags()]);
+  const diskSizes = await getVideosDirSizes(result.items.map((v) => v.id));
   return c.html(
     <DashboardPage
       videos={result.items}
       nextCursor={result.nextCursor}
       filters={filters}
       tags={tags}
+      diskSizes={diskSizes}
       view={view}
     />,
   );
@@ -28,6 +31,7 @@ dashboard.get("/partials/video-list", async (c) => {
   const filters = parseFilters(c);
   const view = c.req.query("view") || "grid";
   const result = await listVideosFiltered(filters);
+  const diskSizes = await getVideosDirSizes(result.items.map((v) => v.id));
 
   // If there's a cursor, we're loading more — return just the new cards + button.
   if (filters.cursor) {
@@ -36,6 +40,7 @@ dashboard.get("/partials/video-list", async (c) => {
         videos={result.items}
         nextCursor={result.nextCursor}
         filters={filters}
+        diskSizes={diskSizes}
         view={view}
       />,
     );
@@ -46,6 +51,7 @@ dashboard.get("/partials/video-list", async (c) => {
       videos={result.items}
       nextCursor={result.nextCursor}
       filters={filters}
+      diskSizes={diskSizes}
       view={view}
     />,
   );

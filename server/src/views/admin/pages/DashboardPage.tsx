@@ -9,6 +9,7 @@ type Props = {
   nextCursor: string | null;
   filters: DashboardFilters;
   tags: Tag[];
+  diskSizes: Record<string, number>;
   view: string;
 };
 
@@ -24,7 +25,7 @@ const SORT_OPTIONS: Array<{ value: DashboardSort; label: string }> = [
 const VISIBILITY_OPTIONS = ["", "public", "unlisted", "private"] as const;
 const STATUS_OPTIONS = ["", "recording", "healing", "complete", "failed"] as const;
 
-export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props) {
+export function DashboardPage({ videos, nextCursor, filters, tags, diskSizes, view }: Props) {
   const sort = filters.sort ?? "date-desc";
 
   return (
@@ -151,7 +152,13 @@ export function DashboardPage({ videos, nextCursor, filters, tags, view }: Props
 
       <input type="hidden" name="view" value={view} data-filter />
 
-      <VideoList videos={videos} nextCursor={nextCursor} filters={filters} view={view} />
+      <VideoList
+        videos={videos}
+        nextCursor={nextCursor}
+        filters={filters}
+        diskSizes={diskSizes}
+        view={view}
+      />
     </AdminLayout>
   );
 }

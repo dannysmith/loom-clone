@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
-import { cp, mkdir } from "fs/promises";
+import { cp, mkdir, rm } from "fs/promises";
 import { humanId } from "human-id";
 import { join } from "path";
 import { getDb } from "../db/client";
@@ -708,6 +708,67 @@ export async function untrashVideo(id: string): Promise<Video> {
   await logEvent(id, "untrashed");
   purgeGlobalFeeds();
   return updated;
+}
+
+// Permanently deletes a trashed video: logs details, removes files from disk,
+// and hard-deletes the DB record (CASCADE cleans up all related tables).
+export async function permanentlyDeleteVideo(id: string): Promise<void> {
+  const db = getDb();
+  const video = await getVideo(id, { includeTrashed: true });
+  if (!video) throw new Error(`Video ${id} not found`);
+  if (!video.trashedAt) throw new Error(`Video ${id} is not trashed`);
+
+  const originalStatus = video.status;
+
+  // Mark as deleting to prevent concurrent restore.
+  await db.update(videos).set({ status: "deleting" }).where(eq(videos.id, id));
+
+  // Gather data for the deletion log.
+  const { getVideoTags } = await import("./tags");
+  const { getVideoDirSize } = await import("./files");
+
+  const [tags, transcript, segments, redirects, diskBytes] = await Promise.all([
+    getVideoTags(id),
+    getTranscript(id),
+    getSegmentDurations(id),
+    db
+      .select({ oldSlug: slugRedirects.oldSlug })
+      .from(slugRedirects)
+      .where(eq(slugRedirects.videoId, id)),
+    getVideoDirSize(id),
+  ]);
+
+  const deletionLog = {
+    event: "permanently_deleted",
+    id: video.id,
+    slug: video.slug,
+    title: video.title,
+    description: video.description,
+    notes: video.notes,
+    status: originalStatus,
+    visibility: video.visibility,
+    source: video.source,
+    durationSeconds: video.durationSeconds,
+    fileBytes: video.fileBytes,
+    width: video.width,
+    height: video.height,
+    createdAt: video.createdAt,
+    completedAt: video.completedAt,
+    trashedAt: video.trashedAt,
+    deletedAt: nowIso(),
+    tags: tags.map((t) => t.name),
+    redirectSlugs: redirects.map((r) => r.oldSlug),
+    segmentCount: segments.size,
+    transcriptWordCount: transcript?.wordCount ?? null,
+    diskBytes,
+  };
+  console.log(`[permanent-delete] ${JSON.stringify(deletionLog)}`);
+
+  // Delete files from disk.
+  await rm(join(DATA_DIR, id), { recursive: true, force: true });
+
+  // Hard-delete from DB — CASCADE handles segments, events, tags, redirects, transcripts.
+  await db.delete(videos).where(eq(videos.id, id));
 }
 
 // Creates a complete copy of a video: new UUID, new slug, new title suffix,

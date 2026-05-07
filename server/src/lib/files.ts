@@ -44,6 +44,47 @@ export async function listVideoFiles(videoId: string): Promise<FileEntry[]> {
   return entries;
 }
 
+// Returns total bytes of all files in a video's data directory.
+// Lightweight alternative to listVideoFiles — just sums sizes without
+// building the full FileEntry array. Returns 0 if the directory doesn't exist.
+export async function getVideoDirSize(videoId: string): Promise<number> {
+  const root = join(DATA_DIR, videoId);
+  let total = 0;
+
+  async function walk(dir: string): Promise<void> {
+    let items: string[];
+    try {
+      items = await readdir(dir);
+    } catch {
+      return;
+    }
+    for (const name of items) {
+      const full = join(dir, name);
+      try {
+        const s = await stat(full);
+        if (s.isDirectory()) {
+          await walk(full);
+        } else {
+          total += s.size;
+        }
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+  }
+
+  await walk(root);
+  return total;
+}
+
+// Computes disk sizes for multiple videos in parallel.
+export async function getVideosDirSizes(videoIds: string[]): Promise<Record<string, number>> {
+  const entries = await Promise.all(
+    videoIds.map(async (id) => [id, await getVideoDirSize(id)] as const),
+  );
+  return Object.fromEntries(entries);
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];

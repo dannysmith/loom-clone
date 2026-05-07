@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { formatFileSize, listVideoFiles } from "../files";
+import { formatFileSize, getVideoDirSize, getVideosDirSizes, listVideoFiles } from "../files";
 import { createVideo } from "../store";
 
 let env: TestEnv;
@@ -67,6 +67,47 @@ describe("listVideoFiles", () => {
     const files = await listVideoFiles(v.id);
     const names = files.filter((f) => !f.isDirectory).map((f) => f.name);
     expect(names.indexOf("a-file")).toBeLessThan(names.indexOf("z-file"));
+  });
+});
+
+describe("getVideoDirSize", () => {
+  test("returns total size of files in directory", async () => {
+    const v = await createVideo();
+    const dir = join("data", v.id);
+    await writeFile(join(dir, "a.txt"), "hello"); // 5 bytes
+    await writeFile(join(dir, "b.txt"), "world!"); // 6 bytes
+
+    const size = await getVideoDirSize(v.id);
+    expect(size).toBe(11);
+  });
+
+  test("includes subdirectory files in total", async () => {
+    const v = await createVideo();
+    const dir = join("data", v.id);
+    await mkdir(join(dir, "derivatives"), { recursive: true });
+    await writeFile(join(dir, "top.txt"), "abc"); // 3 bytes
+    await writeFile(join(dir, "derivatives", "deep.txt"), "defgh"); // 5 bytes
+
+    const size = await getVideoDirSize(v.id);
+    expect(size).toBe(8);
+  });
+
+  test("returns 0 for nonexistent video", async () => {
+    const size = await getVideoDirSize("nonexistent-id");
+    expect(size).toBe(0);
+  });
+});
+
+describe("getVideosDirSizes", () => {
+  test("returns sizes for multiple videos in parallel", async () => {
+    const v1 = await createVideo();
+    const v2 = await createVideo();
+    await writeFile(join("data", v1.id, "a.txt"), "hello"); // 5
+    await writeFile(join("data", v2.id, "b.txt"), "hi"); // 2
+
+    const sizes = await getVideosDirSizes([v1.id, v2.id]);
+    expect(sizes[v1.id]).toBe(5);
+    expect(sizes[v2.id]).toBe(2);
   });
 });
 

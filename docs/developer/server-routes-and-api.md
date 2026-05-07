@@ -101,7 +101,7 @@ Single video by id.
 {
   "id": "uuid",
   "slug": "a1b2c3d4",
-  "status": "recording | healing | complete | failed",
+  "status": "recording | healing | complete | processing | failed | deleting",
   "visibility": "public | unlisted | private",
   "title": "string | null",
   "description": "string | null",
@@ -371,7 +371,7 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | GET | `/admin/settings` | Settings — General pane |
 | GET | `/admin/settings/tags` | Settings — Tags pane |
 | GET | `/admin/settings/keys` | Settings — API Keys pane |
-| GET | `/admin/trash` | Trash bin — trashed videos with restore |
+| GET | `/admin/trash` | Trash bin — trashed videos with restore / permanent delete |
 
 ### HTMX partials (HTML fragments for in-page updates)
 
@@ -407,6 +407,7 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 |--------|------|---------|
 | POST | `/admin/videos/:id/trash` | Soft-delete, redirect to dashboard |
 | POST | `/admin/videos/:id/untrash` | Restore, redirect to video detail |
+| POST | `/admin/videos/:id/delete-permanently` | Hard-delete trashed video (files + DB), redirect to trash |
 | POST | `/admin/videos/:id/duplicate` | Full copy (files + DB), redirect to duplicate |
 
 ### Admin media (session-gated, serves by video ID regardless of visibility)

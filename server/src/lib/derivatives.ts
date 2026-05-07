@@ -7,7 +7,7 @@ import { logEvent } from "./events";
 import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo } from "./store";
 import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
-import { type Silence, generateSuggestedEdits, runSilenceDetect } from "./suggested-edits";
+import { generateSuggestedEdits, runSilenceDetect, type Silence } from "./suggested-edits";
 import { extractAndPromoteThumbnails } from "./thumbnails";
 
 // Resolved absolutely so it survives test chdir() calls.

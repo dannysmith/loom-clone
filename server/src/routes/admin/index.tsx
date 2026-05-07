@@ -7,6 +7,7 @@ import {
   requireAdmin,
   verifyCredentials,
 } from "../../lib/admin-auth";
+import { getVideosDirSizes } from "../../lib/files";
 import { listVideosFiltered } from "../../lib/store";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { TrashBinPage } from "../../views/admin/pages/TrashBinPage";
@@ -72,8 +73,9 @@ admin.post("/logout", (c) => {
 
 admin.get("/trash", async (c) => {
   const result = await listVideosFiltered({ trashedOnly: true });
+  const diskSizes = await getVideosDirSizes(result.items.map((v) => v.id));
   const view = c.req.query("view") || "grid";
-  return c.html(<TrashBinPage videos={result.items} view={view} />);
+  return c.html(<TrashBinPage videos={result.items} diskSizes={diskSizes} view={view} />);
 });
 
 // --- Sub-routers ---

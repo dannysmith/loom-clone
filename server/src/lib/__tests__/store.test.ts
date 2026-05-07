@@ -20,6 +20,7 @@ import {
   getVideoBySlug,
   listVideos,
   listVideosFiltered,
+  permanentlyDeleteVideo,
   RESERVED_SLUGS,
   resolveSlug,
   SLUG_MAX_LENGTH,
@@ -569,6 +570,52 @@ describe("untrashVideo", () => {
 
     await untrashVideo(v.id);
     expect((await getVideo(v.id))?.id).toBe(v.id);
+  });
+});
+
+describe("permanentlyDeleteVideo", () => {
+  test("removes video record and cascades to all related tables", async () => {
+    const video = await createVideo();
+    await addSegment(video.id, "seg_000.m4s", 4.0);
+    const tag = await createTag("test-tag");
+    await addTagToVideo(video.id, tag.id);
+    await trashVideo(video.id);
+
+    await permanentlyDeleteVideo(video.id);
+
+    expect(await getVideo(video.id, { includeTrashed: true })).toBeUndefined();
+    expect(await getSegmentDurations(video.id)).toEqual(new Map());
+    expect(await getVideoTags(video.id)).toEqual([]);
+    const events = await getDb()
+      .select()
+      .from(videoEvents)
+      .where(eq(videoEvents.videoId, video.id));
+    expect(events).toHaveLength(0);
+  });
+
+  test("deletes the data directory from disk", async () => {
+    const { writeFile: wf } = await import("fs/promises");
+    const { existsSync } = await import("fs");
+    const { join } = await import("path");
+
+    const video = await createVideo();
+    const dir = join("data", video.id);
+    await wf(join(dir, "test.txt"), "content");
+    expect(existsSync(dir)).toBe(true);
+
+    await trashVideo(video.id);
+    await permanentlyDeleteVideo(video.id);
+
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("throws if video not found", async () => {
+    expect(permanentlyDeleteVideo("nonexistent")).rejects.toThrow("not found");
+  });
+
+  test("throws if video is not trashed", async () => {
+    const video = await createVideo();
+    expect(permanentlyDeleteVideo(video.id)).rejects.toThrow("not trashed");
   });
 });
 

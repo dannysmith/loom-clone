@@ -195,7 +195,8 @@ export async function generateSuggestedEdits(
   }
 
   const silences =
-    options?.silences ?? (await runSilenceDetect(options?.inputPath ?? join(derivDir, "source.mp4"), duration));
+    options?.silences ??
+    (await runSilenceDetect(options?.inputPath ?? join(derivDir, "source.mp4"), duration));
   const edits = suggestionsFromSilences(silences, duration);
   if (edits.length === 0) return false;
 

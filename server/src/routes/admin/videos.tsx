@@ -9,6 +9,7 @@ import {
   checkSlugAvailable,
   duplicateVideo,
   getTranscript,
+  permanentlyDeleteVideo,
   trashVideo,
   untrashVideo,
   updateSlug,
@@ -409,6 +410,11 @@ videoRoutes.post("/:id/untrash", async (c) => {
   const id = c.req.param("id");
   await untrashVideo(id);
   return c.redirect(`/admin/videos/${id}`);
+});
+
+videoRoutes.post("/:id/delete-permanently", async (c) => {
+  await permanentlyDeleteVideo(c.req.param("id"));
+  return c.redirect("/admin/trash");
 });
 
 videoRoutes.post("/:id/duplicate", async (c) => {

@@ -240,7 +240,8 @@ export function VideoTabsSection({
           hx-push-url="false"
           class={`settings-tab ${activeTab === "files" ? "active" : ""}`}
         >
-          Files ({files.filter((f) => !f.isDirectory).length})
+          Files ({files.filter((f) => !f.isDirectory).length} &middot;{" "}
+          {formatFileSize(files.reduce((sum, f) => sum + (f.isDirectory ? 0 : f.size), 0))})
         </a>
         <a
           href={`/admin/videos/${video.id}?tab=transcript`}

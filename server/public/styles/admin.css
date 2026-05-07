@@ -709,6 +709,16 @@ select.input {
 	}
 }
 
+.btn--danger-solid {
+	color: #fff;
+	background-color: var(--color-danger);
+	border-color: var(--color-danger);
+
+	&:hover {
+		background-color: oklch(from var(--color-danger) calc(l - 0.05) c h);
+	}
+}
+
 /* ------- Settings tabs ------- */
 
 .settings-tabs {

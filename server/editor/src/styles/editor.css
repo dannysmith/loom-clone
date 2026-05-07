@@ -277,17 +277,6 @@ body {
   font-size: 0.8rem;
 }
 
-.editor-waveform-hint {
-  position: absolute;
-  bottom: 4px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 0.7rem;
-  color: #666;
-  pointer-events: none;
-}
-
 /* Suggested-edit overlay (amber accept/dismiss controls layered on the
    waveform). The wavesurfer regions render the colored band; this layer
    sits above them and only handles button hit-testing. */
@@ -296,6 +285,7 @@ body {
   position: absolute;
   inset: 0.25rem 0;
   pointer-events: none;
+  z-index: 6; /* above wavesurfer internals (regions container is z-index: 5) */
 }
 
 .editor-suggestion-overlay {

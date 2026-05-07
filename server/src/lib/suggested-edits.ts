@@ -18,10 +18,10 @@ import { join } from "path";
 // Silences shorter than this don't pre-populate the editor.
 const SILENCE_MIN_SECONDS = 3;
 
-// dB below 0 dBFS that qualifies as "silent." Speech recordings post-
-// loudnorm sit around -14 LUFS with peaks at -1.5 dBTP; room ambience
-// post-denoise is ~-50 dB. -30 dB catches silence without clipping
-// quiet speech.
+// dB below 0 dBFS that qualifies as "silent." Silence detection runs
+// on the raw audio BEFORE loudnorm so the dynamic range is wide: speech
+// sits around -10 to -20 dBFS, room ambience is -50 dB or lower. -30 dB
+// cleanly separates the two without clipping quiet speech.
 const SILENCE_NOISE_DB = -30;
 
 // Padding subtracted from each end of a detected silence so the
@@ -50,7 +50,7 @@ export type SuggestedEdits = {
   edits: SuggestedEdit[];
 };
 
-type Silence = { start: number; end: number };
+export type Silence = { start: number; end: number };
 
 // Parse silence_start / silence_end lines from ffmpeg stderr. Tolerates
 // either ordering and treats an unmatched silence_start at the end as a
@@ -141,8 +141,9 @@ export function suggestionsFromSilences(silences: Silence[], duration: number): 
 }
 
 // Run ffmpeg silencedetect against a source file. Returns the silence
-// ranges parsed from stderr.
-async function runSilenceDetect(sourcePath: string, duration: number): Promise<Silence[]> {
+// ranges parsed from stderr. Exported so the derivatives pipeline can
+// call this on the raw source before audio processing.
+export async function runSilenceDetect(sourcePath: string, duration: number): Promise<Silence[]> {
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
@@ -176,10 +177,15 @@ async function runSilenceDetect(sourcePath: string, duration: number): Promise<S
 // Generate suggested-edits.json. Returns true if a file was written,
 // false if there were no suggestions worth surfacing (or generation was
 // skipped because the file already exists).
+//
+// When `silences` is provided (pre-computed from raw audio before
+// loudnorm), those are used directly. Otherwise falls back to running
+// silencedetect on the file in derivDir — this path is mainly for the
+// integration test; the real pipeline always pre-computes.
 export async function generateSuggestedEdits(
   derivDir: string,
   duration: number,
-  inputPath?: string,
+  options?: { inputPath?: string; silences?: Silence[] },
 ): Promise<boolean> {
   if (duration < SILENCE_MIN_SECONDS) return false;
 
@@ -190,9 +196,8 @@ export async function generateSuggestedEdits(
     return false;
   }
 
-  const sourcePath = inputPath ?? join(derivDir, "source.mp4");
-
-  const silences = await runSilenceDetect(sourcePath, duration);
+  const silences =
+    options?.silences ?? (await runSilenceDetect(options?.inputPath ?? join(derivDir, "source.mp4"), duration));
   const edits = suggestionsFromSilences(silences, duration);
   if (edits.length === 0) return false;
 

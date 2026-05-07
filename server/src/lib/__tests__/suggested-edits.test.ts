@@ -178,7 +178,7 @@ describe("generateSuggestedEdits", () => {
         );
       }
 
-      const generated = await generateSuggestedEdits(dir, 8, sourcePath);
+      const generated = await generateSuggestedEdits(dir, 8, { inputPath: sourcePath });
       expect(generated).toBe(true);
 
       const file = Bun.file(join(dir, "suggested-edits.json"));

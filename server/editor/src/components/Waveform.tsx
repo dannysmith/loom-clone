@@ -273,10 +273,34 @@ export function Waveform({
 
   // Build the per-suggestion overlay buttons. Positioning is by percent
   // of total duration so it tracks the waveform's responsive width.
+  //
+  // For cuts this is straightforward: the overlay sits on the cut region.
+  // For trims the overlay must cover the trimmed-away portion (the amber
+  // region), NOT the kept portion. A trim with startTime > 0 has leading
+  // silence; endTime < duration has trailing silence. Place the overlay
+  // on the larger trimmed section so the buttons are most visible.
   const suggestionOverlays = suggestions.map((s, i) => {
-    const leftPct = (s.startTime / duration) * 100;
-    const widthPct = ((s.endTime - s.startTime) / duration) * 100;
-    const label = s.type === "trim" ? "Suggested trim" : "Suggested cut";
+    let leftPct: number;
+    let widthPct: number;
+
+    if (s.type === "trim") {
+      const leadingDur = s.startTime;
+      const trailingDur = duration - s.endTime;
+      if (trailingDur >= leadingDur) {
+        // Place on trailing silence
+        leftPct = (s.endTime / duration) * 100;
+        widthPct = (trailingDur / duration) * 100;
+      } else {
+        // Place on leading silence
+        leftPct = 0;
+        widthPct = (leadingDur / duration) * 100;
+      }
+    } else {
+      leftPct = (s.startTime / duration) * 100;
+      widthPct = ((s.endTime - s.startTime) / duration) * 100;
+    }
+
+    const label = s.type === "trim" ? "Trim" : "Suggested cut";
     return (
       <div
         key={`s-${i}`}
@@ -319,11 +343,6 @@ export function Waveform({
         <div className="editor-suggestion-layer">{suggestionOverlays}</div>
       )}
       {!ready && <div className="editor-waveform-loading">Loading waveform...</div>}
-      {ready && edl.edits.length === 0 && suggestions.length === 0 && (
-        <div className="editor-waveform-hint">
-          Use the toolbar buttons or press I / O to set trim points. Double-click the waveform to add a cut.
-        </div>
-      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { logEvent } from "./events";
 import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo } from "./store";
 import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
-import { generateSuggestedEdits } from "./suggested-edits";
+import { type Silence, generateSuggestedEdits, runSilenceDetect } from "./suggested-edits";
 import { extractAndPromoteThumbnails } from "./thumbnails";
 
 // Resolved absolutely so it survives test chdir() calls.
@@ -551,6 +551,25 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   // Runs before thumbnails and metadata so they see the final file.
   const sourcePath = join(dir, "source.mp4");
   const sourceExists = await Bun.file(sourcePath).exists();
+  const duration = await videoDuration(videoId);
+
+  // Run silence detection on the RAW source before loudnorm. After
+  // loudnorm the dynamic range is compressed and background noise sits
+  // at ~-25 dB, making silence indistinguishable from quiet speech.
+  // Pre-loudnorm, true silence is -50 dB or lower, so -30 dB cleanly
+  // catches pauses without false positives.
+  let preLoudnormSilences: Silence[] | undefined;
+  if (sourceExists && duration >= 5) {
+    try {
+      preLoudnormSilences = await runSilenceDetect(sourcePath, duration);
+    } catch (err) {
+      console.error(
+        `[derivatives] ${videoId} pre-loudnorm silence detection failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   if (sourceExists) {
     const audioStarted = Date.now();
     try {
@@ -568,7 +587,6 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
 
   // Post-recipe step 2+3: thumbnail candidates + metadata extraction.
   // Both depend on source.mp4 existing.
-  const duration = await videoDuration(videoId);
   try {
     await extractAndPromoteThumbnails(dir, duration);
     console.log(`[derivatives] ${videoId}/thumbnail candidates extracted`);
@@ -677,16 +695,19 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   }
 
   // Post-recipe step 8: suggested edits from silence detection.
-  // Skip if the user has already committed an edit (lastEditedAt set) — once
-  // they've used the editor we never want to surface auto-suggestions again.
-  // generateSuggestedEdits also no-ops when the file already exists, so a
-  // repeat run from healing is idempotent.
+  // Uses the silences captured from the raw source BEFORE loudnorm (see
+  // above). Skip if the user has already committed an edit (lastEditedAt
+  // set) — once they've used the editor we never surface auto-suggestions
+  // again. generateSuggestedEdits also no-ops when the file already
+  // exists, so a repeat run from healing is idempotent.
   if (sourceExists && duration >= 5) {
     const video = await getVideo(videoId, { includeTrashed: true });
     if (!video?.lastEditedAt) {
       const suggestStarted = Date.now();
       try {
-        const generated = await generateSuggestedEdits(dir, duration);
+        const generated = await generateSuggestedEdits(dir, duration, {
+          silences: preLoudnormSilences,
+        });
         if (generated) {
           const ms = Date.now() - suggestStarted;
           console.log(`[derivatives] ${videoId}/suggested-edits.json generated (${ms}ms)`);

@@ -11,10 +11,20 @@ export interface AdminConfig {
   sessionSecret: string;
 }
 
-// Returns null when admin auth is not configured (dev mode).
+// Returns null when admin auth is not configured (dev mode only).
+// In production (NODE_ENV=production), missing ADMIN_PASSWORD is a fatal
+// configuration error: we throw rather than silently leaving /admin/* open.
 export function getAdminConfig(): AdminConfig | null {
   const password = Bun.env.ADMIN_PASSWORD;
-  if (!password) return null;
+  if (!password) {
+    if (Bun.env.NODE_ENV === "production") {
+      const msg =
+        "[admin-auth] ADMIN_PASSWORD is not set in production. Refusing to start with admin routes unprotected. Set ADMIN_PASSWORD (and SESSION_SECRET) in the environment.";
+      console.error(msg);
+      throw new Error(msg);
+    }
+    return null;
+  }
 
   const sessionSecret = Bun.env.SESSION_SECRET;
   if (!sessionSecret) {

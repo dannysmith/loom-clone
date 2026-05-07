@@ -67,11 +67,13 @@ Three environment variables control admin auth (see `.env.example`):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ADMIN_PASSWORD` | *(unset)* | Password for the admin login form. When unset, admin routes are unprotected (dev mode). |
+| `ADMIN_PASSWORD` | *(unset)* | Password for the admin login form. Required in production. |
 | `ADMIN_USERNAME` | `admin` | Username for the admin login form. |
 | `SESSION_SECRET` | *(unset)* | HMAC key for signing session cookies. Required when `ADMIN_PASSWORD` is set. Generate with `openssl rand -base64 48`. |
 
-**Dev mode**: when `ADMIN_PASSWORD` is not set, the `requireAdmin()` middleware passes all requests through without authentication. This lets you develop without needing to log in.
+**Dev convenience**: when `NODE_ENV` is *not* `production` and `ADMIN_PASSWORD` is unset, `requireAdmin()` passes requests through so you can iterate locally without logging in.
+
+**Production**: `NODE_ENV=production` is set in `docker-compose.prod.yml`. With that set, `getAdminConfig()` throws on startup if `ADMIN_PASSWORD` is missing — the server refuses to boot rather than silently leaving `/admin/*` open. The eager check in `src/index.ts` makes this a fail-fast at boot, not a fail-open at runtime.
 
 ### Sessions (web UI)
 

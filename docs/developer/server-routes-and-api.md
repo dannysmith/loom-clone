@@ -341,7 +341,7 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
 
 Auth: session cookie (`lc_session`, signed, 2-week expiry) or `Authorization: Bearer lca_...` admin token. All routes except `GET/POST /admin/login` require auth. CSRF protection on all mutations.
 
-When `ADMIN_PASSWORD` env var is not set, auth is bypassed (dev mode).
+In production, `ADMIN_PASSWORD` is required — the server refuses to start without it. Locally (`NODE_ENV` unset), an unset `ADMIN_PASSWORD` lets you iterate without logging in.
 
 ### Pages (full HTML, hx-boost navigation)
 

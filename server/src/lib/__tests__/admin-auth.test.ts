@@ -22,10 +22,26 @@ afterEach(async () => {
 // ---------- Config ----------
 
 describe("getAdminConfig", () => {
-  test("returns null when ADMIN_PASSWORD is not set", () => {
+  // Tests run with NODE_ENV unset (dev) by default; a couple of cases below
+  // flip it to "production" and clean up afterwards.
+  const originalNodeEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  test("returns null when ADMIN_PASSWORD is not set (dev)", () => {
+    delete process.env.NODE_ENV;
     delete process.env.ADMIN_PASSWORD;
     delete process.env.SESSION_SECRET;
     expect(getAdminConfig()).toBeNull();
+  });
+
+  test("throws in production when ADMIN_PASSWORD is missing", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_PASSWORD;
+    delete process.env.SESSION_SECRET;
+    expect(() => getAdminConfig()).toThrow(/ADMIN_PASSWORD/);
   });
 
   test("throws when ADMIN_PASSWORD is set but SESSION_SECRET is missing", () => {

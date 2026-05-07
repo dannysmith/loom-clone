@@ -36,7 +36,7 @@ Two separate auth systems. See `docs/developer/auth.md` at the repo root for the
 
 **API keys** (`lck_…`): bearer token on all `/api/videos/*` routes. Middleware: `requireApiKey()` in `src/lib/auth.ts`, mounted in `app.ts`. CLI: `bun run keys:create <name>`, `bun run keys:list`, `bun run keys:revoke <id>`.
 
-**Admin auth**: cookie-based sessions for the web UI, plus `lca_…` bearer tokens for programmatic access. Middleware: `requireAdmin()` in `src/lib/admin-auth.ts`. When `ADMIN_PASSWORD` env var is not set, admin auth is bypassed (dev mode). See `.env.example` for the three admin env vars (`ADMIN_PASSWORD`, `ADMIN_USERNAME`, `SESSION_SECRET`).
+**Admin auth**: cookie-based sessions for the web UI, plus `lca_…` bearer tokens for programmatic access. Middleware: `requireAdmin()` in `src/lib/admin-auth.ts`. Locally (`NODE_ENV` unset), an unset `ADMIN_PASSWORD` skips auth so you can iterate without logging in. In production (`NODE_ENV=production`, set in `docker-compose.prod.yml`), `getAdminConfig()` throws if `ADMIN_PASSWORD` is missing and the server refuses to start. See `.env.example` for the three admin env vars (`ADMIN_PASSWORD`, `ADMIN_USERNAME`, `SESSION_SECRET`).
 
 ## API response envelope
 

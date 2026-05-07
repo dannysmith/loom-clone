@@ -1,9 +1,15 @@
 import { createApp } from "./app";
 import { initDb } from "./db/client";
+import { getAdminConfig } from "./lib/admin-auth";
 import { cleanupStaleFiles } from "./lib/cleanup";
 
 await initDb();
 console.log("[db] ready at data/app.db");
+
+// Validate admin config eagerly so a misconfigured production deployment
+// fails at startup rather than silently leaving /admin/* unprotected.
+// In dev (NODE_ENV unset/!=production) this is a no-op when unset.
+getAdminConfig();
 
 const app = createApp();
 

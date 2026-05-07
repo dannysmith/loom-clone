@@ -211,6 +211,20 @@ Accept an AI-suggested title. Only applies if the video's title is still null (u
 
 **Side effects**: when applied, updates the video title (logs `title_changed` event via `updateVideo`). Always logs a `title_suggested` event with `{ title, applied }` data regardless of whether the title was applied.
 
+### `PUT /api/videos/:id/suggest-description`
+
+Accept an AI-suggested description. Only applies if the video's description is still null (user hasn't manually set one). Idempotent — re-calling after a user edit is a silent no-op.
+
+**Body**: `{ "description": "<string, 1-2000 chars>" }`
+
+**Content-Type**: `application/json`
+
+**Response** `200`: `{ "applied": true }` if the description was set, `{ "applied": false }` if the video already had a user-set description.
+
+**Errors**: `400` `VALIDATION_ERROR` (empty/missing description, over 2000 chars) | `404` `VIDEO_NOT_FOUND`
+
+**Side effects**: when applied, updates the video description (logs `description_changed` event via `updateVideo`). Always logs a `description_suggested` event with `{ description, applied }` data regardless of whether the description was applied.
+
 ### `DELETE /api/videos/:id`
 
 Cancel/delete a recording. Only works for non-complete videos.

@@ -107,6 +107,34 @@ Same philosophy as transcription itself: failures are silent and non-blocking. N
 - `#available(macOS 26, *)` — runtime check.
 - No equivalent of `TranscriptionModelStatus` needed — the Foundation Model is a system capability, not a downloaded asset.
 
+## AI description suggestion
+
+After title suggestion, `TranscribeAgent` runs a second Foundation Models pass to generate a short description. The description flows into `video.description` on the server, which is already consumed by every viewer surface (the admin editor, the viewer page, OpenGraph `og:description`, `.json` and `.md` metadata, RSS, JSON Feed, and `llms.txt`).
+
+### How it works
+
+Mirrors the title flow but with three differences:
+
+1. The transcript is truncated to ~800 words (descriptions need more context to land than titles).
+2. The `@Generable` struct's instructions ask for **a single declarative sentence, 15–25 words**, no marketing fluff, and no filler openings ("In this video", "A walkthrough of", "An overview of", etc.).
+3. The locally-generated title — when available — is passed in the prompt as a topical hint (`Suggested title: <title>`).
+
+Validation: non-empty, 4+ words, ≤280 characters, not a refusal, and a runtime regex drops any output that begins with one of the banned filler phrases (belt-and-braces — Apple's small on-device model occasionally slips through despite the instructions).
+
+`PUT /api/videos/:id/suggest-description` with `{ "description": "..." }`. The server applies it only if `video.description` is still null. Returns `{ applied: true/false }`.
+
+### Independence
+
+Title and description are independent. If title generation fails, description still runs (with no title hint). If description fails, the title is unaffected. Both failures are silent.
+
+### Where the code lives
+
+| Concern | File |
+|---|---|
+| Description suggestion generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/DescriptionSuggestion.swift` |
+| Wiring (called after title suggestion) | `app/LoomClone/Pipeline/TranscribeAgent.swift` (`suggestDescription(...)`) |
+| Suggest-description endpoint | `server/src/routes/api/videos.ts` |
+
 ## Where the code lives
 
 | Concern | File |

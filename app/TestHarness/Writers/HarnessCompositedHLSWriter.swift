@@ -28,6 +28,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
     private let width: Int
     private let height: Int
     private let bitrate: Int
+    private let fps: Int
     private let tunings: [String: JSONValue]
     private let events: EventLog
 
@@ -51,6 +52,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
         width: Int,
         height: Int,
         bitrate: Int,
+        fps: Int = 30,
         outputURL: URL,
         tunings: [String: JSONValue] = [:],
         events: EventLog
@@ -59,6 +61,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
         self.width = width
         self.height = height
         self.bitrate = bitrate
+        self.fps = fps
         self.outputURL = outputURL
         self.tunings = tunings
         self.events = events
@@ -118,7 +121,7 @@ final class HarnessCompositedHLSWriter: HarnessWriter, @unchecked Sendable {
             AVVideoAverageBitRateKey: bitrate,
             AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
             AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            AVVideoExpectedSourceFrameRateKey: 30,
+            AVVideoExpectedSourceFrameRateKey: fps,
             AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
             // Task-1 tuning 4: disable B-frames (see WriterActor).
             // Overridable via the `allowFrameReordering` tunings key

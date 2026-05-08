@@ -26,10 +26,11 @@ extension RecordingActor {
         microphoneID: String?,
         mode: RecordingMode,
         preset: OutputPreset,
+        frameRate: FrameRate = .thirtyFPS,
         excludedBundleIDs: Set<String> = [],
         hideDesktopIcons: Bool = false
     ) async throws -> (id: String, slug: String) {
-        resetPrepareState(mode: mode, preset: preset)
+        resetPrepareState(mode: mode, preset: preset, frameRate: frameRate)
 
         // Store exclusion state for mid-recording filter updates and
         // the focused-window warning check.
@@ -51,8 +52,11 @@ extension RecordingActor {
         let session = try await upload.createSession()
 
         // Populate timeline session + inputs now that we've resolved devices.
+        // The preset recorded in the timeline is the BASE preset (resolution +
+        // base bitrate). The encoder section records the EFFECTIVE bitrate
+        // (base × fps multiplier) via the fps-aware currentEncoder() helper.
         timeline.setSession(id: session.id, slug: session.slug, initialMode: mode, initialPipPosition: pipPosition)
-        timeline.setPreset(preset)
+        timeline.setPreset(preset, fps: frameRate.rawValue)
         timeline.setInputs(
             display: display.map {
                 .init(
@@ -104,8 +108,19 @@ extension RecordingActor {
         localSavePath = localDir
 
         // 4. Configure writer and compositor for this preset.
+        // Effective bitrate scales with fps: 1.0× at 30fps, 1.4× at 60fps.
+        var effectivePreset = preset
+        if frameRate != .thirtyFPS {
+            effectivePreset = OutputPreset(
+                id: preset.id,
+                label: preset.label,
+                width: preset.width,
+                height: preset.height,
+                bitrate: Int(Double(preset.bitrate) * frameRate.bitrateMultiplier)
+            )
+        }
         await composition.configure(preset: preset)
-        try await writer.configure(preset: preset)
+        try await writer.configure(preset: effectivePreset, fps: frameRate.rawValue)
 
         // 5. Configure raw stream writers for screen + audio.
         // Camera raw writer is configured after cameraCapture.startCapture
@@ -163,7 +178,14 @@ extension RecordingActor {
         wireCaptureCallbacks(hasDisplay: display != nil, hasCamera: camera != nil, hasMicrophone: microphone != nil)
 
         // 8. Start captures and configure camera raw writer.
-        try await startCaptureSources(display: display, camera: camera, microphone: microphone, ourApp: ourApp, preset: preset)
+        try await startCaptureSources(
+            display: display,
+            camera: camera,
+            microphone: microphone,
+            ourApp: ourApp,
+            preset: preset,
+            frameRate: frameRate
+        )
 
         print("[recording] Prepared: mode=\(mode), id=\(session.id)")
         return session
@@ -234,8 +256,8 @@ extension RecordingActor {
             timeline.recordRawWriterStarted(file: "camera.mp4", t: timeline.now())
         }
 
-        // Start the 30fps metronome — emits frames from the cache regardless
-        // of what the underlying sources are doing.
+        // Start the metronome — emits frames from the cache at targetFrameRate
+        // regardless of what the underlying sources are doing.
         startMetronome()
 
         print("[recording] Committed at \(recordingStartTime?.seconds ?? 0)")
@@ -263,9 +285,10 @@ extension RecordingActor {
     // MARK: - Prepare Helpers
 
     /// Zero out all per-recording state so a fresh prepare starts clean.
-    private func resetPrepareState(mode: RecordingMode, preset: OutputPreset) {
+    private func resetPrepareState(mode: RecordingMode, preset: OutputPreset, frameRate: FrameRate) {
         self.mode = mode
         self.preset = preset
+        self.targetFrameRate = frameRate.rawValue
         isRecording = false
         sharedSessionAudioActive = false
         audioInputLatency = 0
@@ -275,6 +298,7 @@ extension RecordingActor {
         lastEmittedVideoPTS = .invalid
         latestScreenFrame = nil
         cameraFrameQueue.removeAll(keepingCapacity: true)
+        lastPoppedCameraFrame = nil
         metronomeTickIdx = 0
         terminalErrorFired = false
         rawWriterFailureReported.removeAll()
@@ -465,7 +489,8 @@ extension RecordingActor {
         camera: AVCaptureDevice?,
         microphone: AVCaptureDevice?,
         ourApp: SCRunningApplication?,
-        preset: OutputPreset
+        preset: OutputPreset,
+        frameRate: FrameRate
     ) async throws {
         audioHasArrived = false
 
@@ -474,6 +499,7 @@ extension RecordingActor {
                 let (appsToExclude, exceptingWindows) = await resolveExclusions(ourApp: ourApp)
                 try await screenCapture.startCapture(
                     display: display,
+                    fps: frameRate.rawValue,
                     excludingApps: appsToExclude,
                     exceptingWindows: exceptingWindows
                 )
@@ -484,7 +510,7 @@ extension RecordingActor {
         }
 
         if let camera {
-            await cameraCapture.startCapture(device: camera, maxHeight: preset.height, micDevice: microphone)
+            await cameraCapture.startCapture(device: camera, maxHeight: preset.height, targetFPS: frameRate, micDevice: microphone)
             sharedSessionAudioActive = cameraCapture.hasAudioCapture
             await configureCameraRawWriter(withAudio: sharedSessionAudioActive)
         }
@@ -518,14 +544,15 @@ extension RecordingActor {
             return
         }
         let bitrate = 12_000_000
+        let fps = targetFrameRate
         let url = localDir.appendingPathComponent("camera.mp4")
         let kind: RawStreamWriter.Kind = if withAudio {
             .videoH264WithAudio(
-                width: width, height: height, bitrate: bitrate,
+                width: width, height: height, bitrate: bitrate, fps: fps,
                 audioBitrate: 192_000, sampleRate: 48000, channels: 2
             )
         } else {
-            .videoH264(width: width, height: height, bitrate: bitrate)
+            .videoH264(width: width, height: height, bitrate: bitrate, fps: fps)
         }
         let w = RawStreamWriter(url: url, kind: kind)
         do {

@@ -18,6 +18,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
 
     func startCapture(
         display: SCDisplay,
+        fps: Int32 = 30,
         excludingApps: [SCRunningApplication] = [],
         exceptingWindows: [SCWindow] = []
     ) async throws {
@@ -50,20 +51,39 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
         let pixelHeight = Int(CGFloat(display.height) * scale)
         nativePixelSize = CGSize(width: pixelWidth, height: pixelHeight)
 
+        // Clamp the requested fps to the display's refresh rate. Most Mac
+        // displays are 60Hz; ProMotion is 120Hz. We cap at 60fps regardless
+        // (120fps is out of scope), and on the rare <60Hz external display
+        // this prevents requesting more frames than the display can produce.
+        let displayRefreshRate = Self.refreshRate(for: display.displayID)
+        let effectiveFPS = min(fps, Int32(displayRefreshRate))
+
         let config = SCStreamConfiguration()
         config.width = pixelWidth
         config.height = pixelHeight
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: effectiveFPS)
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
-        config.queueDepth = 5
+        // Scale queue depth with fps (Cap pattern: ceil(fps/30 * 5)).
+        // 5 at 30fps, 10 at 60fps.
+        config.queueDepth = Int(ceil(Double(effectiveFPS) / 30.0 * 5.0))
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
         try await stream.startCapture()
         self.stream = stream
 
-        print("[screen] Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ 30fps")
+        print("[screen] Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ \(effectiveFPS)fps")
+    }
+
+    /// Display refresh rate for the given display. Returns the reported
+    /// rate from CGDisplayMode, or 60 if the display reports 0 (common
+    /// for LCD panels — they have a fixed refresh that CGDisplayMode
+    /// doesn't surface).
+    static func refreshRate(for displayID: CGDirectDisplayID) -> Int {
+        guard let mode = CGDisplayCopyDisplayMode(displayID) else { return 60 }
+        let rate = mode.refreshRate
+        return rate > 0 ? Int(rate) : 60
     }
 
     /// Update the content filter on a live stream. Used to add newly-launched

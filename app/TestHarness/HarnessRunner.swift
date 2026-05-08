@@ -250,6 +250,7 @@ final class HarnessRunner {
             cfg.deviceUniqueID = src.deviceUniqueID
             cfg.deviceName = src.deviceName
             cfg.maxHeight = src.maxHeight ?? Int.max
+            cfg.frameRate = config.frameRate
             cameraSource = CapturedCameraSource(config: cfg, events: events)
         default:
             throw HarnessRunnerError.unsupportedSource(src.kind)
@@ -339,6 +340,7 @@ final class HarnessRunner {
                 width: wc.width ?? 1920,
                 height: wc.height ?? 1080,
                 bitrate: wc.bitrate ?? 6_000_000,
+                fps: config.frameRate,
                 outputURL: url,
                 tunings: wc.tunings ?? [:],
                 events: events
@@ -363,6 +365,7 @@ final class HarnessRunner {
                 width: wc.width ?? 1920,
                 height: wc.height ?? 1080,
                 bitrate: wc.bitrate ?? 6_000_000,
+                fps: config.frameRate,
                 outputURL: url,
                 tunings: wc.tunings ?? [:],
                 events: events

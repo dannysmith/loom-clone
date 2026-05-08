@@ -40,6 +40,7 @@ enum AppEnvironment {
 
     static let serverURLKey = "serverURL"
     static let outputPresetKey = "outputPresetID"
+    static let frameRateKey = "frameRate"
     static let recentlyHiddenBundleIDsKey = "recentlyHiddenBundleIDs"
     static let hideDesktopIconsKey = "hideDesktopIcons"
 

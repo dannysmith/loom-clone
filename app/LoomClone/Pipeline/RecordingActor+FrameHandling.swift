@@ -154,16 +154,18 @@ extension RecordingActor {
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return nil }
             let camera = cameraFrameQueue.last
-            // When the camera source is dead (failed or stale), fall back to
-            // screen-only composition so the output continues with the screen
-            // feed rather than stalling entirely. Use the screen PTS to keep
-            // timestamps advancing (stale camera PTS would freeze and fail
-            // the monotonicity check).
+            // Screen drives timing in screenAndCamera mode — it's the
+            // primary content, camera is just a PiP overlay. Using
+            // screen PTS ensures the output advances at the screen's
+            // delivery rate (60fps when configured). Using camera PTS
+            // would throttle to the camera's rate when it's slower
+            // (e.g. 30fps camera + 60fps screen), causing the
+            // monotonicity check to reject every other tick.
+            sourcePTS = screen.capturePTS
             let cameraAvailable = camera != nil
                 && !activeSourceWarnings.contains(.cameraFailed)
                 && !activeSourceWarnings.contains(.cameraStale)
             if cameraAvailable, let camera {
-                sourcePTS = camera.capturePTS
                 result = await composition.compositeFrame(
                     screenBuffer: screen.pixelBuffer,
                     cameraBuffer: camera.pixelBuffer,
@@ -171,7 +173,6 @@ extension RecordingActor {
                     pipPosition: pipPosition
                 )
             } else {
-                sourcePTS = screen.capturePTS
                 result = await composition.compositeFrame(
                     screenBuffer: screen.pixelBuffer,
                     cameraBuffer: nil,
@@ -179,8 +180,21 @@ extension RecordingActor {
                 )
             }
         case .cameraOnly:
-            guard !cameraFrameQueue.isEmpty else { return nil }
-            let camera = cameraFrameQueue.removeFirst()
+            // Pop a fresh frame if available; otherwise re-emit the most
+            // recently popped frame (peek-with-repeat). This handles the
+            // case where the metronome ticks at 60fps but the camera only
+            // delivers at 30fps — every other tick has an empty FIFO.
+            // Repeated frames compress to nearly nothing in H.264.
+            let camera: CachedFrame
+            if !cameraFrameQueue.isEmpty {
+                let popped = cameraFrameQueue.removeFirst()
+                lastPoppedCameraFrame = popped
+                camera = popped
+            } else if let last = lastPoppedCameraFrame {
+                camera = last
+            } else {
+                return nil
+            }
             sourcePTS = camera.capturePTS
             result = await composition.compositeFrame(
                 screenBuffer: nil,
@@ -227,7 +241,7 @@ extension RecordingActor {
         guard let outputSample = createSampleBuffer(
             from: output,
             pts: pts,
-            duration: Self.frameDuration
+            duration: frameDuration
         ) else { return false }
 
         await writer.appendVideo(outputSample)

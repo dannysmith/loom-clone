@@ -281,12 +281,19 @@ export async function extractMetadata(videoId: string): Promise<void> {
   );
 }
 
-// --- Audio processing: highpass → arnndn → two-pass loudnorm ---
-
-// The audio filter chain applied to source.mp4. Denoises speech (arnndn with
-// the cb.rnnn model), removes sub-speech rumble (highpass at 80 Hz), and
-// normalises loudness to -14 LUFS (EBU R128 two-pass loudnorm). Video is
-// copied untouched; only the audio track is re-encoded to AAC at 160 kbps.
+// --- Audio processing chain ---
+//
+// highpass=80 → arnndn(cb.rnnn) → afftdn(profiled nf, nr=12)
+//   → agate(-45 dBFS, 5/300 ms, soft 2.5 dB knee, ratio 10)
+//   → dynaudnorm(f=500, g=11, m=10) → loudnorm(-14 LUFS, two-pass)
+//
+// Order is part of the design: gate runs after denoise so the threshold can
+// sit well below speech without clipping word ends; dynaudnorm runs after
+// the gate so it never sees noise to amplify; loudnorm is last so the global
+// target stays exact. The afftdn noise floor (`nf`) is profiled per recording
+// from the loudest silent region (see profileNoiseFloor).
+//
+// Video track is copied; audio re-encoded to AAC 160 kbps.
 
 type LoudnormMeasurement = {
   input_i: string;
@@ -296,21 +303,107 @@ type LoudnormMeasurement = {
   target_offset: string;
 };
 
-function audioFilterChain(): string {
-  return `highpass=f=80,arnndn=m=${ARNNDN_MODEL}`;
+// Default afftdn noise floor when profiling is unavailable (no qualifying
+// silent region, or the volumedetect probe failed).
+const DEFAULT_NOISE_FLOOR_DB = -50;
+const NOISE_FLOOR_MIN_DB = -65;
+const NOISE_FLOOR_MAX_DB = -30;
+
+function audioFilterChain(noiseFloorDb: number): string {
+  // Linear threshold for -45 dBFS = 10^(-45/20) ≈ 0.0056. Hardcoded rather
+  // than computed at call time — the gate threshold is a tuned constant.
+  const filters = [
+    "highpass=f=80",
+    `arnndn=m=${ARNNDN_MODEL}`,
+    `afftdn=nf=${noiseFloorDb}:nr=12`,
+    "agate=threshold=0.0056:ratio=10:attack=5:release=300:knee=2.5",
+    "dynaudnorm=f=500:g=11:m=10:p=0.95",
+  ];
+  return filters.join(",");
 }
 
-function loudnormPass1Filter(): string {
-  return `${audioFilterChain()},loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json`;
+function loudnormPass1Filter(noiseFloorDb: number): string {
+  return `${audioFilterChain(noiseFloorDb)},loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json`;
 }
 
-function loudnormPass2Filter(m: LoudnormMeasurement): string {
+function loudnormPass2Filter(noiseFloorDb: number, m: LoudnormMeasurement): string {
   return (
-    `${audioFilterChain()},loudnorm=I=-14:TP=-1.5:LRA=11` +
+    `${audioFilterChain(noiseFloorDb)},loudnorm=I=-14:TP=-1.5:LRA=11` +
     `:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
     `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}` +
     `:offset=${m.target_offset}:linear=true`
   );
+}
+
+// Estimate the recording's noise floor from its longest silent region and
+// return a value suitable for afftdn's `nf` parameter (in dB). The pipeline
+// already detects silences for suggested-edits; we reuse them rather than
+// running silencedetect again.
+//
+// Returns DEFAULT_NOISE_FLOOR_DB if no silence ≥ 1 s is available, ffmpeg is
+// missing, the probe fails, or volumedetect output is malformed. Result is
+// clamped to [NOISE_FLOOR_MIN_DB, NOISE_FLOOR_MAX_DB] so a freak measurement
+// can't produce nonsense filter settings.
+async function profileNoiseFloor(
+  sourcePath: string,
+  silences: Silence[] | undefined,
+): Promise<number> {
+  if (!silences || silences.length === 0) return DEFAULT_NOISE_FLOOR_DB;
+
+  // Pick the longest silence at least 1 s long.
+  let longest: Silence | undefined;
+  let longestLen = 0;
+  for (const s of silences) {
+    const len = s.end - s.start;
+    if (len >= 1.0 && len > longestLen) {
+      longest = s;
+      longestLen = len;
+    }
+  }
+  if (!longest) return DEFAULT_NOISE_FLOOR_DB;
+
+  const fp = Bun.which("ffmpeg");
+  if (!fp) return DEFAULT_NOISE_FLOOR_DB;
+
+  // Sample at most 2 s — enough for a stable mean, fast.
+  const sampleLength = Math.min(2.0, longestLen);
+
+  try {
+    const proc = Bun.spawn(
+      [
+        fp,
+        "-y",
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "info",
+        "-ss",
+        String(longest.start),
+        "-t",
+        String(sampleLength),
+        "-i",
+        sourcePath,
+        "-af",
+        "volumedetect",
+        "-vn",
+        "-f",
+        "null",
+        "-",
+      ],
+      { stderr: "pipe", stdout: "pipe" },
+    );
+    const [stderr, exit] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    if (exit !== 0) return DEFAULT_NOISE_FLOOR_DB;
+
+    const match = /mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/.exec(stderr);
+    if (!match?.[1]) return DEFAULT_NOISE_FLOOR_DB;
+
+    const measured = Math.round(Number.parseFloat(match[1]));
+    if (!Number.isFinite(measured)) return DEFAULT_NOISE_FLOOR_DB;
+    return Math.max(NOISE_FLOOR_MIN_DB, Math.min(NOISE_FLOOR_MAX_DB, measured));
+  } catch {
+    return DEFAULT_NOISE_FLOOR_DB;
+  }
 }
 
 // Parse the loudnorm JSON measurement block from ffmpeg stderr. The JSON
@@ -375,17 +468,32 @@ async function hasAudioStream(filePath: string): Promise<boolean> {
 }
 
 // Two-pass audio processing on an existing source.mp4. Replaces it in-place
-// with the processed version (video copied, audio re-encoded).
-export async function processAudio(sourcePath: string): Promise<void> {
+// with the processed version (video copied, audio re-encoded). The
+// `silences` argument feeds the afftdn noise-floor profile; if omitted the
+// chain falls back to a fixed -50 dB noise floor.
+export async function processAudio(sourcePath: string, silences?: Silence[]): Promise<void> {
   if (!(await hasAudioStream(sourcePath))) return;
   if (!(await checkAudioModel())) return;
 
   const fp = Bun.which("ffmpeg");
   if (!fp) throw new Error("ffmpeg not found on PATH");
 
+  const noiseFloorDb = await profileNoiseFloor(sourcePath, silences);
+
   // Pass 1: measure loudness through the full denoise chain.
   const pass1 = Bun.spawn(
-    [fp, "-y", "-hide_banner", "-i", sourcePath, "-af", loudnormPass1Filter(), "-f", "null", "-"],
+    [
+      fp,
+      "-y",
+      "-hide_banner",
+      "-i",
+      sourcePath,
+      "-af",
+      loudnormPass1Filter(noiseFloorDb),
+      "-f",
+      "null",
+      "-",
+    ],
     { stderr: "pipe", stdout: "pipe" },
   );
   const [pass1Stderr, pass1Exit] = await Promise.all([
@@ -410,7 +518,7 @@ export async function processAudio(sourcePath: string): Promise<void> {
       "-i",
       sourcePath,
       "-af",
-      loudnormPass2Filter(measurement),
+      loudnormPass2Filter(noiseFloorDb, measurement),
       "-c:v",
       "copy",
       "-c:a",
@@ -573,7 +681,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   if (sourceExists) {
     const audioStarted = Date.now();
     try {
-      await processAudio(sourcePath);
+      await processAudio(sourcePath, preLoudnormSilences);
       const ms = Date.now() - audioStarted;
       console.log(`[derivatives] ${videoId}/audio processed (${ms}ms)`);
       steps.push("audio");

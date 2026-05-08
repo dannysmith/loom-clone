@@ -202,3 +202,136 @@ describe("processAudio (end-to-end)", () => {
     120_000,
   );
 });
+
+// --- Chain-effect tests: noise floor + dynamic-range compression ---
+
+// Build a multi-segment fixture: tone @ 0.3 / 5s, noise @ 0.003 / 4s,
+// tone @ 0.12 / 5s, noise @ 0.003 / 4s, tone @ 0.3 / 5s. Total ~23 s.
+// The two tone amplitudes are 8 dB apart (0.3 vs 0.12); the noise pad is
+// at ~-50 dBFS. After processing, the gate should drive the noise pads
+// well below the input level, and dynaudnorm should bring the two tone
+// segments to within ~3 dB of each other.
+async function generateMultiSegmentFixture(dir: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const outPath = join(dir, "source.mp4");
+  const filterComplex = [
+    "sine=f=500:duration=5:sample_rate=48000,volume=0.3[t1]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white,asetnsamples=n=1024[n1]",
+    "sine=f=500:duration=5:sample_rate=48000,volume=0.12[t2]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white,asetnsamples=n=1024[n2]",
+    "sine=f=500:duration=5:sample_rate=48000,volume=0.3[t3]",
+    "[t1][n1][t2][n2][t3]concat=n=5:v=0:a=1[out]",
+  ].join(";");
+
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=size=320x240:rate=15:duration=23:color=black",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=channel_layout=mono:sample_rate=48000",
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      "0:v",
+      "-map",
+      "[out]",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      outPath,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exitCode !== 0) throw new Error(`multi-segment fixture failed: ${stderr}`);
+  return outPath;
+}
+
+// Mean volume over a [start, start+length] window, in dB.
+async function meanVolume(file: string, start: number, length: number): Promise<number> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-nostats",
+      "-loglevel",
+      "info",
+      "-ss",
+      String(start),
+      "-t",
+      String(length),
+      "-i",
+      file,
+      "-af",
+      "volumedetect",
+      "-vn",
+      "-f",
+      "null",
+      "-",
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exit] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exit !== 0) throw new Error(`volumedetect failed: ${stderr}`);
+  const match = /mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/.exec(stderr);
+  if (!match?.[1]) throw new Error(`no mean_volume in: ${stderr}`);
+  return Number.parseFloat(match[1]);
+}
+
+describe("processAudio (chain effects)", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "gate floors the noise pad in silent regions",
+    async () => {
+      const dir = join(DATA_DIR, "test-audio-noise-floor");
+      const sourcePath = await generateMultiSegmentFixture(dir);
+
+      await processAudio(sourcePath);
+
+      // First noise pad is at ~9-13s (after the 5s loud tone + with a small
+      // safety margin to avoid the gate's release tail). Mean volume in
+      // the middle of that pad must be below the gate threshold (-45 dBFS)
+      // by a comfortable margin.
+      const padDb = await meanVolume(sourcePath, 10, 2);
+      expect(padDb).toBeLessThan(-50);
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "dynaudnorm levels the two tone segments to within ~4 dB",
+    async () => {
+      const dir = join(DATA_DIR, "test-audio-dynamic-range");
+      const sourcePath = await generateMultiSegmentFixture(dir);
+
+      await processAudio(sourcePath);
+
+      // Loud tone occupies 0-5s, quiet tone occupies 14-19s.
+      // Sample 1s windows comfortably inside each segment to avoid edges.
+      const loudDb = await meanVolume(sourcePath, 1.5, 2);
+      const quietDb = await meanVolume(sourcePath, 15.5, 2);
+
+      // Input gap is 8 dB. After dynaudnorm + loudnorm we expect this
+      // significantly compressed. Allow up to 4 dB residual gap.
+      expect(Math.abs(loudDb - quietDb)).toBeLessThan(4);
+    },
+    60_000,
+  );
+});

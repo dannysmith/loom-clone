@@ -31,6 +31,7 @@ The recorder is a macOS menubar app. Select a screen, camera and microphone, che
 - Three recording modes — screen and camera, screen only, camera only — with instant switching mid-recording. The composited output cuts between modes instantly and (unlike Loom) uses the full-quality video feed when in camera-only mode.
 - Draggable camera overlay that can be repositioned between corners during recording. Neither the overlay nor the recording toolbar appear in the captured screen-recording so we always get clean footage.
 - Stream quality options: 720p, 1080p or 1440p.
+- Optional toggles to hide desktop icons or hide windows from a chosen app in the screen recording. Lets you keep presenter notes open in something like Drafts or TextEdit — visible to you, invisible to viewers.
 - Instant pause and resume so it's easy to quickly hot pause, change what's on the screen (or look at some notes) and then start recording again. Reduces the need for editing later on.
 - The recording toolbar and camera overlay float above fullscreen apps and follow you across macOS Spaces. This makes it easy to set up each thing you want to show as its own fullscreen Space — slides, a demo app, a terminal — and just swipe between them while recording.
 - The moment you hit stop, a shareable URL is on your clipboard. Segments were streaming to the server throughout recording, so viewers can watch immediately — before post-processing has even started.
@@ -54,7 +55,7 @@ Once recording is complete, the server runs a series of background jobs automati
 - **Thumbnail selection** — multiple candidate frames extracted and scored by visual quality. The best one becomes the poster image, with the option to pick a different candidate or upload a custom thumbnail in the admin panel.
 - **Video variants** — downsampled 720p and 1080p versions generated automatically from the source.
 - **Storyboard** — for videos over 60 seconds, a sprite sheet is generated so the player shows frame previews when scrubbing the timeline.
-- **Transcription** — runs on-device via [WhisperKit](https://github.com/argmaxinc/WhisperKit) on the Mac, so there are no external API costs and nothing leaves the machine. The transcript powers subtitles in the player, full-text search in the admin panel, and machine-readable metadata on the public site. A suggested title is also generated from the transcript using Apple's on-device foundation models.
+- **Transcription** — runs on-device via [WhisperKit](https://github.com/argmaxinc/WhisperKit) on the Mac, so there are no external API costs and nothing leaves the machine. The transcript powers subtitles in the player, full-text search in the admin panel, and machine-readable metadata on the public site. Suggested title and description are also generated from the transcript using Apple's on-device foundation models.
 
 ### Admin Interface
 
@@ -62,8 +63,8 @@ A web-based admin panel for managing videos — similar in spirit to Loom's libr
 
 - Dashboard with grid and table views, full-text search across titles, descriptions, slugs and transcripts, filters for visibility/status/tags/date/duration, and sort options.
 - Three visibility states: **unlisted** (shareable by URL, not indexed by search engines — the default), **public** (appears in feeds and sitemap), and **private** (visible only in the admin panel).
-- In-place editing of title, slug, description, visibility and tags.
-- Web-based video editor for trimming and cutting out sections with waveform visualisation. Edits are non-destructive since the original source is always preserved.
+- In-place editing of title, slug, description, visibility and tags, plus an admin-only private notes field for context, ideas or follow-ups.
+- Web-based video editor for trimming and cutting out sections with waveform visualisation, plus auto-detected silent sections offered as one-click suggested cuts. Edits are non-destructive since the original source is always preserved.
 - Upload existing MP4s — Loom exports, YouTube downloads etc. They run through the same post-processing pipeline as recorded videos.
 - Activity log tracking every meaningful change to a video and a file browser for each video's server-side directory — useful for debugging without having to SSH in.
 - Lots of small quality-of-life touches: when editing a slug there are buttons to generate from title, prepend today's date or append a random string. Thumbnail picker with auto-generated candidates. Video duplication. Soft-delete trash bin.

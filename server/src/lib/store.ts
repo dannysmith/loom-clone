@@ -308,13 +308,15 @@ export type DashboardSort =
   | "duration-desc"
   | "duration-asc"
   | "title-asc"
-  | "title-desc";
+  | "title-desc"
+  | "size-desc"
+  | "size-asc";
 
 export type DashboardFilters = {
   search?: string;
   visibility?: Video["visibility"];
   status?: Video["status"];
-  tagId?: number;
+  tagIds?: number[];
   dateFrom?: string; // ISO date string
   dateTo?: string; // ISO date string
   durationMin?: number; // seconds
@@ -359,17 +361,25 @@ export async function listVideosFiltered(filters: DashboardFilters = {}): Promis
   if (filters.durationMax != null)
     conditions.push(lte(videos.durationSeconds, filters.durationMax));
 
-  // Tag filter via subquery
-  if (filters.tagId != null) {
+  // Tag filter via subquery (OR semantics — match any selected tag)
+  if (filters.tagIds?.length) {
     const taggedIds = db
       .select({ videoId: videoTags.videoId })
       .from(videoTags)
-      .where(eq(videoTags.tagId, filters.tagId));
+      .where(
+        filters.tagIds.length === 1
+          ? eq(videoTags.tagId, filters.tagIds[0]!)
+          : inArray(videoTags.tagId, filters.tagIds),
+      );
     conditions.push(inArray(videos.id, taggedIds));
   }
 
+  // Size sort can't use cursor pagination (size isn't in DB). Return all
+  // matching rows; the caller handles in-memory sort + pagination.
+  const isSizeSort = sort === "size-desc" || sort === "size-asc";
+
   // Cursor pagination — look up the cursor video's sort-column value
-  if (filters.cursor) {
+  if (filters.cursor && !isSizeSort) {
     const cursorVideo = db
       .select({
         id: videos.id,
@@ -386,16 +396,21 @@ export async function listVideosFiltered(filters: DashboardFilters = {}): Promis
     }
   }
 
-  // Sort order
-  const orderCols = sortOrder(sort);
+  // Sort order — size sort uses date-desc as DB fallback (actual sort is in-memory)
+  const orderCols = sortOrder(isSizeSort ? "date-desc" : sort);
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
-  const rows = await db
+  const query = db
     .select()
     .from(videos)
     .where(where)
-    .orderBy(...orderCols)
-    .limit(limit + 1);
+    .orderBy(...orderCols);
+  const rows = isSizeSort ? await query : await query.limit(limit + 1);
+
+  if (isSizeSort) {
+    // Return all matching rows — caller handles size-based sort + pagination
+    return { items: rows, nextCursor: null };
+  }
 
   const hasNext = rows.length > limit;
   const items = hasNext ? rows.slice(0, limit) : rows;
@@ -460,6 +475,10 @@ function cursorCondition(sort: DashboardSort, c: CursorVideo): ReturnType<typeof
         and(sql`${videos.title} = ${t}`, lt(videos.id, c.id)),
       )!;
     }
+    // Size sort uses in-memory pagination — cursor never reaches here.
+    case "size-desc":
+    case "size-asc":
+      return sql`1 = 1`;
   }
 }
 
@@ -477,6 +496,10 @@ function sortOrder(sort: DashboardSort) {
       return [asc(videos.title), asc(videos.id)] as const;
     case "title-desc":
       return [desc(videos.title), desc(videos.id)] as const;
+    // Size sort uses in-memory sort — fallback to date-desc in SQL.
+    case "size-desc":
+    case "size-asc":
+      return [desc(videos.createdAt), desc(videos.id)] as const;
   }
 }
 

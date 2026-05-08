@@ -748,7 +748,7 @@ describe("listVideosFiltered", () => {
     const tag = await createTag("test-tag");
     await addTagToVideo(tagged.id, tag.id);
 
-    const result = await listVideosFiltered({ tagId: tag.id });
+    const result = await listVideosFiltered({ tagIds: [tag.id] });
     expect(result.items.map((v) => v.id)).toContain(tagged.id);
     expect(result.items.map((v) => v.id)).not.toContain(untagged.id);
   });

@@ -14,10 +14,12 @@ const VALID_SORTS = new Set<DashboardSort>([
   "duration-asc",
   "title-asc",
   "title-desc",
+  "size-desc",
+  "size-asc",
 ]);
 
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
-const VALID_STATUS = new Set(["recording", "healing", "complete", "failed"]);
+const VALID_STATUS = new Set(["recording", "healing", "complete", "processing", "failed"]);
 
 /** Parses DashboardFilters from URL query params. */
 export function parseFilters(c: Context): DashboardFilters {
@@ -34,10 +36,10 @@ export function parseFilters(c: Context): DashboardFilters {
   const status = q("status");
   if (status && VALID_STATUS.has(status)) filters.status = status as DashboardFilters["status"];
 
-  const tagId = q("tag");
-  if (tagId) {
-    const n = Number(tagId);
-    if (Number.isFinite(n)) filters.tagId = n;
+  const tag = q("tag");
+  if (tag) {
+    const ids = tag.split(",").map(Number).filter(Number.isFinite);
+    if (ids.length) filters.tagIds = ids;
   }
 
   const dateFrom = q("from");
@@ -71,7 +73,7 @@ export function filtersToParams(f: DashboardFilters): Record<string, string> {
   if (f.search) p.q = f.search;
   if (f.visibility) p.visibility = f.visibility;
   if (f.status) p.status = f.status;
-  if (f.tagId != null) p.tag = String(f.tagId);
+  if (f.tagIds?.length) p.tag = f.tagIds.join(",");
   if (f.dateFrom) p.from = f.dateFrom;
   if (f.dateTo) p.to = f.dateTo;
   if (f.durationMin != null) p.dmin = String(f.durationMin);

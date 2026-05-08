@@ -102,10 +102,16 @@ body.admin--login {
 
 .dashboard-toolbar {
 	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	margin-block-end: var(--space-5);
+}
+
+.dashboard-toolbar-row {
+	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--space-2);
-	margin-block-end: var(--space-5);
 }
 
 .dashboard-search {
@@ -115,14 +121,31 @@ body.admin--login {
 	max-inline-size: 20rem;
 }
 
-.dashboard-controls {
+.dashboard-sort-group {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--space-2);
+	gap: var(--space-1);
+	margin-inline-start: auto;
 
 	& .input {
 		inline-size: auto;
+	}
+}
+
+.sort-dir-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-2);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: none;
+	color: var(--color-fg-muted);
+	cursor: pointer;
+
+	&:hover {
+		color: var(--color-fg);
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
 	}
 }
 
@@ -149,6 +172,150 @@ body.admin--login {
 	&.active {
 		color: var(--color-fg);
 		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	}
+}
+
+/* Filter pills row */
+
+.dashboard-filters {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: var(--space-3);
+}
+
+.filter-group {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding-inline-end: var(--space-2);
+	border-inline-end: 1px solid var(--color-border);
+
+	&:last-child {
+		border-inline-end: none;
+		padding-inline-end: 0;
+	}
+}
+
+.filter-group-label {
+	font-size: var(--font-size-xs);
+	color: var(--color-fg);
+	font-weight: var(--font-weight-bold);
+	white-space: nowrap;
+	padding-inline-end: var(--space-1);
+}
+
+.filter-pill {
+	position: relative;
+	cursor: pointer;
+
+	& input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	& .filter-pill-label {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-fg-muted);
+		background-color: transparent;
+		border: 1px solid transparent;
+		transition: background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out),
+			border-color var(--duration-fast) var(--ease-out);
+	}
+
+	&:hover .filter-pill-label {
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	}
+
+	& input:checked + .filter-pill-label {
+		color: var(--pill-active-color, var(--color-fg));
+		background-color: var(--pill-active-bg, light-dark(var(--neutral-100), var(--neutral-800)));
+		border-color: var(--pill-active-border, var(--color-border));
+	}
+}
+
+/* Visibility pill colors */
+.filter-pill--public {
+	--pill-active-color: var(--color-info);
+	--pill-active-bg: var(--color-info-bg);
+	--pill-active-border: transparent;
+}
+
+.filter-pill--unlisted {
+	--pill-active-bg: light-dark(var(--neutral-100), var(--neutral-800));
+	--pill-active-border: var(--color-border);
+}
+
+.filter-pill--private {
+	--pill-active-color: var(--color-danger);
+	--pill-active-bg: var(--color-danger-bg);
+	--pill-active-border: transparent;
+}
+
+/* Status pill colors */
+.filter-pill--recording {
+	--pill-active-color: var(--color-info);
+	--pill-active-bg: var(--color-info-bg);
+	--pill-active-border: transparent;
+}
+
+.filter-pill--healing {
+	--pill-active-color: var(--color-warning);
+	--pill-active-bg: var(--color-warning-bg);
+	--pill-active-border: transparent;
+}
+
+.filter-pill--complete {
+	--pill-active-color: var(--color-success);
+	--pill-active-bg: var(--color-success-bg);
+	--pill-active-border: transparent;
+}
+
+.filter-pill--processing {
+	--pill-active-color: var(--color-warning);
+	--pill-active-bg: var(--color-warning-bg);
+	--pill-active-border: transparent;
+}
+
+.filter-pill--failed {
+	--pill-active-color: var(--color-danger);
+	--pill-active-bg: var(--color-danger-bg);
+	--pill-active-border: transparent;
+}
+
+/* Tag filter pills — reuse tag-picker-toggle + tag-chip pattern */
+.filter-tag-pill {
+	position: relative;
+	cursor: pointer;
+
+	& input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	& .tag-chip {
+		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		color: var(--color-fg-muted);
+		transition: background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out);
+	}
+
+	& input:checked + .tag-chip {
+		background-color: var(--chip-color, var(--neutral-400));
+		color: #fff;
 	}
 }
 

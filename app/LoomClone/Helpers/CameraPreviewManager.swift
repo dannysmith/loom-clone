@@ -28,6 +28,14 @@ final class CameraPreviewManager: NSObject {
         qos: .userInteractive
     )
 
+    /// In-flight start (or stop) task. Used to coalesce overlapping
+    /// `start()` calls: when popoverDidOpen and the selectedCamera didSet
+    /// both fire `Task { await cameraPreview.start(...) }`, both Tasks
+    /// would otherwise race through their `await stop()` and concurrently
+    /// configure separate AVCaptureSessions. Chaining each new start
+    /// behind the previous Task makes the sequence deterministic.
+    private var inFlightStart: Task<Void, Never>?
+
     /// Monotonically increasing counter bumped each time `start()` creates a
     /// new session. The frame-watchdog task compares its captured generation
     /// against the current value — if they differ, the session it was
@@ -54,8 +62,24 @@ final class CameraPreviewManager: NSObject {
     /// Start the preview session for `device`. Awaits the AVCaptureSession's
     /// `startRunning()` so callers know the hardware is actually live before
     /// they proceed (avoids CMIO contention with the recording session).
+    ///
+    /// Coalesced: overlapping calls are serialised behind the most recent
+    /// in-flight start, so concurrent invocations (e.g. popover open and
+    /// selectedCamera didSet firing back-to-back) can't tangle the
+    /// `session` / `currentDeviceID` state.
     func start(device: AVCaptureDevice) async {
-        await startSession(device: device, retryCount: 0)
+        let prior = inFlightStart
+        let task = Task { [weak self] in
+            await prior?.value
+            await self?.startSession(device: device, retryCount: 0)
+        }
+        inFlightStart = task
+        await task.value
+        // Clear the handle only if we're still the most recent task — a
+        // later start() may have replaced us while we were running.
+        if inFlightStart == task {
+            inFlightStart = nil
+        }
     }
 
     private func startSession(device: AVCaptureDevice, retryCount: Int) async {

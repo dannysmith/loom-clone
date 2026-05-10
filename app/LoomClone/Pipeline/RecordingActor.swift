@@ -572,8 +572,9 @@ actor RecordingActor {
 
         timeline.recordPaused(t: logicalElapsedSeconds())
 
-        // The audio path also tracks pauses (in TimestampAdjuster) so post-resume
-        // mic samples retime correctly. Both accumulators must advance together.
+        // The writer flips an internal `isPaused` flag for defence-in-depth;
+        // all PTS math now lives on the actor (single pauseAccumulator), so
+        // the writer is a pure sink.
         await writer.pause(at: now)
     }
 

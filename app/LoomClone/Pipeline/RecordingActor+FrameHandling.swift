@@ -43,11 +43,15 @@ extension RecordingActor {
         }
     }
 
-    /// Audio samples go to the HLS writer (via TimestampAdjuster) and a raw
-    /// writer. When `sharedSessionAudioActive` is true this is called from
-    /// the camera's shared session and the raw copy goes to camera.mp4's
-    /// audio track. Otherwise it's called from the standalone mic and the
-    /// raw copy goes to audio.m4a.
+    /// Audio samples go to the HLS writer and a raw writer. When
+    /// `sharedSessionAudioActive` is true this is called from the camera's
+    /// shared session and the raw copy goes to camera.mp4's audio track.
+    /// Otherwise it's called from the standalone mic and the raw copy goes
+    /// to audio.m4a.
+    ///
+    /// All retiming happens here against the actor's `pauseAccumulator` so
+    /// the writer is a pure sink. The HLS path adds the AAC priming offset;
+    /// the raw path doesn't (priming is an HLS-only concern).
     func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
         audioHasArrived = true
         markAudioSampleReceived()
@@ -61,51 +65,52 @@ extension RecordingActor {
         guard relativePTS >= .zero else { return }
 
         let duration = CMSampleBufferGetDuration(sampleBuffer)
+        let logicalPTS = relativePTS - pauseAccumulator
 
-        var timing = CMSampleTimingInfo(
-            duration: duration,
-            presentationTimeStamp: relativePTS,
-            decodeTimeStamp: .invalid
-        )
+        // HLS path: skip while paused. The writer also guards isPaused as
+        // defence-in-depth, but short-circuiting here avoids an unnecessary
+        // sample buffer copy.
+        if pauseStartHostTime == nil, logicalPTS >= .zero {
+            let hlsPTS = TimestampAdjuster.defaultPrimingOffset + logicalPTS
+            var hlsTiming = CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: hlsPTS,
+                decodeTimeStamp: .invalid
+            )
+            var hlsOut: CMSampleBuffer?
+            CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault,
+                sampleBuffer: sampleBuffer,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &hlsTiming,
+                sampleBufferOut: &hlsOut
+            )
+            if let hlsOut {
+                await writer.appendAudio(hlsOut)
+            }
+        }
 
-        var retimed: CMSampleBuffer?
-        CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &timing,
-            sampleBufferOut: &retimed
-        )
-
-        guard let retimed else { return }
-        await writer.appendAudio(retimed)
-
-        // Raw audio path: independent retiming using RecordingActor's
-        // pauseAccumulator (no priming offset — that's an HLS-only concern).
-        // Routes to camera.mp4 audio when shared session is active, or
-        // audio.m4a when the standalone mic feeds the HLS writer.
-        if pauseStartHostTime == nil {
-            let rawAudioPTS = relativePTS - pauseAccumulator
-            if rawAudioPTS >= .zero {
-                var rawTiming = CMSampleTimingInfo(
-                    duration: duration,
-                    presentationTimeStamp: rawAudioPTS,
-                    decodeTimeStamp: .invalid
-                )
-                var rawOut: CMSampleBuffer?
-                CMSampleBufferCreateCopyWithNewTiming(
-                    allocator: kCFAllocatorDefault,
-                    sampleBuffer: sampleBuffer,
-                    sampleTimingEntryCount: 1,
-                    sampleTimingArray: &rawTiming,
-                    sampleBufferOut: &rawOut
-                )
-                if let rawOut {
-                    if sharedSessionAudioActive {
-                        await cameraRawWriter?.appendAudio(rawOut)
-                    } else {
-                        await audioRawWriter?.append(rawOut)
-                    }
+        // Raw audio path: routes to camera.mp4 audio when shared session is
+        // active, or audio.m4a when the standalone mic feeds the HLS writer.
+        if pauseStartHostTime == nil, logicalPTS >= .zero {
+            var rawTiming = CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: logicalPTS,
+                decodeTimeStamp: .invalid
+            )
+            var rawOut: CMSampleBuffer?
+            CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault,
+                sampleBuffer: sampleBuffer,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &rawTiming,
+                sampleBufferOut: &rawOut
+            )
+            if let rawOut {
+                if sharedSessionAudioActive {
+                    await cameraRawWriter?.appendAudio(rawOut)
+                } else {
+                    await audioRawWriter?.append(rawOut)
                 }
             }
         }

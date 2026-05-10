@@ -19,6 +19,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "videos:backfill-metadata": "bun scripts/backfill-metadata.ts",
+    "audio:bench": "bun scripts/audio-bench.ts",
     "keys:create": "bun scripts/keys.ts create",
     "keys:list": "bun scripts/keys.ts list",
     "keys:revoke": "bun scripts/keys.ts revoke"

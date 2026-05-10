@@ -6,6 +6,7 @@ import { _parseLoudnormJson, processAudio } from "../derivatives";
 import { DATA_DIR } from "../store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+const sayAvailable = Bun.which("say") !== null;
 
 let env: TestEnv;
 
@@ -200,5 +201,184 @@ describe("processAudio (end-to-end)", () => {
       expect(lufs).toBeLessThan(-13);
     },
     120_000,
+  );
+});
+
+// --- Chain-effect tests: noise floor + dynamic-range compression ---
+
+// Build a multi-segment fixture from real macOS `say` TTS: loud speech
+// (5 s), noise pad (4 s ~-50 dBFS), quiet speech (5 s, -8 dB vs loud),
+// noise pad (4 s), loud speech (5 s). Total 23 s.
+//
+// Real speech is required: arnndn/afftdn (correctly) attenuate non-voice
+// signals like sine tones, leaving nothing for the gate or dynaudnorm to
+// act on. TTS output passes through the denoise stage as voice content.
+async function generateMultiSegmentFixture(dir: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const aiffPath = join(dir, "tts.aiff");
+  const wavPath = join(dir, "tts.wav");
+  const outPath = join(dir, "source.mp4");
+
+  // 1. Generate ~7 s of TTS (default voice).
+  const sayProc = Bun.spawn(
+    [
+      "say",
+      "-o",
+      aiffPath,
+      "The quick brown fox jumps over the lazy dog. The rain in Spain falls mainly on the plain. She sells seashells by the seashore.",
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [sayErr, sayExit] = await Promise.all([
+    new Response(sayProc.stderr).text(),
+    sayProc.exited,
+  ]);
+  if (sayExit !== 0) throw new Error(`say failed: ${sayErr}`);
+
+  // 2. Transcode to mono 48 kHz WAV, exactly 5 s.
+  const wavProc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      aiffPath,
+      "-ac",
+      "1",
+      "-ar",
+      "48000",
+      "-t",
+      "5",
+      wavPath,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [wavErr, wavExit] = await Promise.all([
+    new Response(wavProc.stderr).text(),
+    wavProc.exited,
+  ]);
+  if (wavExit !== 0) throw new Error(`speech transcode failed: ${wavErr}`);
+
+  // 3. Build fixture: 3× speech split (one quiet, two loud) + 2× noise pads.
+  const filterComplex = [
+    "[1:a]asplit=3[s1][s2][s3]",
+    "[s1]volume=1.0[t1]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white:sample_rate=48000,asetnsamples=n=1024[n1]",
+    "[s2]volume=0.4[t2]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white:sample_rate=48000,asetnsamples=n=1024[n2]",
+    "[s3]volume=1.0[t3]",
+    "[t1][n1][t2][n2][t3]concat=n=5:v=0:a=1[out]",
+  ].join(";");
+
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=size=320x240:rate=15:duration=23:color=black",
+      "-i",
+      wavPath,
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      "0:v",
+      "-map",
+      "[out]",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      outPath,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exitCode !== 0) throw new Error(`multi-segment fixture failed: ${stderr}`);
+  return outPath;
+}
+
+// Mean volume over a [start, start+length] window, in dB.
+async function meanVolume(file: string, start: number, length: number): Promise<number> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-nostats",
+      "-loglevel",
+      "info",
+      "-ss",
+      String(start),
+      "-t",
+      String(length),
+      "-i",
+      file,
+      "-af",
+      "volumedetect",
+      "-vn",
+      "-f",
+      "null",
+      "-",
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exit] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exit !== 0) throw new Error(`volumedetect failed: ${stderr}`);
+  const match = /mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/.exec(stderr);
+  if (!match?.[1]) throw new Error(`no mean_volume in: ${stderr}`);
+  return Number.parseFloat(match[1]);
+}
+
+describe("processAudio (chain effects)", () => {
+  test.skipIf(!ffmpegAvailable || !sayAvailable)(
+    "gate floors the noise pad in silent regions",
+    async () => {
+      const dir = join(DATA_DIR, "test-audio-noise-floor");
+      const sourcePath = await generateMultiSegmentFixture(dir);
+
+      await processAudio(sourcePath);
+
+      // Fixture layout: t1 0-5s (loud), n1 5-9s (noise pad), t2 9-14s
+      // (quiet), n2 14-18s (noise pad), t3 18-23s. Sample 2 s in the
+      // middle of n1 (with a small lead-in to clear gate release tail).
+      // Mean volume must sit well below the gate threshold (-45 dBFS).
+      const padDb = await meanVolume(sourcePath, 6, 2);
+      expect(padDb).toBeLessThan(-50);
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable || !sayAvailable)(
+    "dynaudnorm levels the two speech segments to within ~4 dB",
+    async () => {
+      const dir = join(DATA_DIR, "test-audio-dynamic-range");
+      const sourcePath = await generateMultiSegmentFixture(dir);
+
+      await processAudio(sourcePath);
+
+      // Loud speech t1 (0-5 s), quiet speech t2 (9-14 s, -8 dB before
+      // processing). Sample 2 s windows comfortably inside each.
+      const loudDb = await meanVolume(sourcePath, 1.5, 2);
+      const quietDb = await meanVolume(sourcePath, 10.5, 2);
+
+      // Input gap is 8 dB. After dynaudnorm + loudnorm we expect this
+      // significantly compressed. Allow up to 4 dB residual gap.
+      expect(Math.abs(loudDb - quietDb)).toBeLessThan(4);
+    },
+    60_000,
   );
 });

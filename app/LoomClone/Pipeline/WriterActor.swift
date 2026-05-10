@@ -29,7 +29,6 @@ actor WriterActor {
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
-    private var timestampAdjuster: TimestampAdjuster
     private var writerDelegate: WriterDelegate?
     private var isPaused = false
     private var segmentIndex = 0
@@ -63,9 +62,7 @@ actor WriterActor {
         let duration: Double?
     }
 
-    init() {
-        timestampAdjuster = TimestampAdjuster()
-    }
+    init() {}
 
     // MARK: - Setup
 
@@ -83,7 +80,7 @@ actor WriterActor {
         let writer = AVAssetWriter(contentType: UTType.mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(seconds: 4, preferredTimescale: 600)
-        writer.initialSegmentStartTime = timestampAdjuster.primingOffset
+        writer.initialSegmentStartTime = TimestampAdjuster.defaultPrimingOffset
 
         // Set up the segment stream: delegate yields, consumer drains.
         let (stream, continuation) = AsyncStream.makeStream(of: PendingSegment.self)
@@ -183,16 +180,16 @@ actor WriterActor {
             let detail = writer.error?.localizedDescription ?? "unknown"
             throw WriterError.startWritingFailed(detail)
         }
-        writer.startSession(atSourceTime: timestampAdjuster.primingOffset)
+        writer.startSession(atSourceTime: TimestampAdjuster.defaultPrimingOffset)
         hasStartedSession = true
         print("[writer] Started writing")
     }
 
-    /// Append a video sample buffer whose PTS is already in final form.
-    /// The metronome in RecordingActor emits frames with PTS =
-    /// `primingOffset + frameIdx / 30` and handles pause by not advancing
-    /// `frameIdx`, so this path intentionally bypasses `TimestampAdjuster` —
-    /// the adjuster's pause accumulator only applies to audio.
+    /// Append a sample buffer whose PTS is already in final form. Both
+    /// video and audio go through the same path: RecordingActor stamps
+    /// every buffer with `primingOffset + (sourcePTS - recordingStartTime) -
+    /// pauseAccumulator` before handing off, so the writer is a pure sink
+    /// with no timing knowledge of its own.
     func appendVideo(_ sampleBuffer: CMSampleBuffer) {
         guard hasStartedSession,
               let videoInput,
@@ -207,22 +204,22 @@ actor WriterActor {
               let audioInput,
               audioInput.isReadyForMoreMediaData else { return }
 
-        guard let adjusted = timestampAdjuster.adjust(sampleBuffer) else { return }
-        audioInput.append(adjusted)
+        audioInput.append(sampleBuffer)
     }
 
     // MARK: - Pause / Resume
 
-    func pause(at time: CMTime) {
+    /// Stops the audio input from accepting buffers. The actor also short-
+    /// circuits HLS audio appends while paused, so this is defence-in-depth.
+    /// Note: flushSegment() is only allowed when preferredOutputSegmentInterval
+    /// is .indefinite. With automatic segmentation (4s), AVAssetWriter handles
+    /// segment boundaries itself.
+    func pause(at _: CMTime) {
         isPaused = true
-        timestampAdjuster.markPause(at: time)
-        // Note: flushSegment() is only allowed when preferredOutputSegmentInterval is .indefinite.
-        // With automatic segmentation (4s), AVAssetWriter handles segment boundaries itself.
         print("[writer] Paused")
     }
 
-    func resume(at time: CMTime) {
-        timestampAdjuster.markResume(at: time)
+    func resume(at _: CMTime) {
         isPaused = false
         print("[writer] Resumed")
     }

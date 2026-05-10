@@ -8,18 +8,29 @@ final class KeyboardShortcutManager {
     private static let keyM: UInt16 = 46
 
     private var globalMonitor: Any?
+
+    /// State inspector — the manager dispatches based on the coordinator's
+    /// current state but never reaches in for behaviour. All actions are
+    /// closures injected at registration time.
     private weak var coordinator: RecordingCoordinator?
+
     private var onToggleRecord: (() -> Void)?
     private var onStop: (() -> Void)?
+    private var onPauseOrResume: (() -> Void)?
+    private var onCycleMode: (() -> Void)?
 
     func register(
         coordinator: RecordingCoordinator,
         onToggleRecord: @escaping () -> Void,
-        onStop: @escaping () -> Void
+        onStop: @escaping () -> Void,
+        onPauseOrResume: @escaping () -> Void,
+        onCycleMode: @escaping () -> Void
     ) {
         self.coordinator = coordinator
         self.onToggleRecord = onToggleRecord
         self.onStop = onStop
+        self.onPauseOrResume = onPauseOrResume
+        self.onCycleMode = onCycleMode
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             Task { @MainActor in
@@ -52,15 +63,13 @@ final class KeyboardShortcutManager {
             }
 
         case Self.keyP:
-            if coordinator.state == .recording {
-                coordinator.pauseRecording()
-            } else if coordinator.state == .paused {
-                coordinator.resumeRecording()
+            if coordinator.state == .recording || coordinator.state == .paused {
+                onPauseOrResume?()
             }
 
         case Self.keyM:
             if coordinator.state == .recording || coordinator.state == .paused {
-                coordinator.cycleMode()
+                onCycleMode?()
             }
 
         default:

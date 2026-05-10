@@ -26,7 +26,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutManager.register(
             coordinator: coordinator,
             onToggleRecord: { [weak self] in self?.handleRecord() },
-            onStop: { [weak self] in self?.handleStop() }
+            onStop: { [weak self] in self?.handleStop() },
+            onPauseOrResume: { [weak coordinator] in
+                guard let coordinator else { return }
+                if coordinator.state == .recording {
+                    coordinator.pauseRecording()
+                } else if coordinator.state == .paused {
+                    coordinator.resumeRecording()
+                }
+            },
+            onCycleMode: { [weak coordinator] in coordinator?.cycleMode() }
         )
 
         // When the compositor's terminal-error path stops a recording on its

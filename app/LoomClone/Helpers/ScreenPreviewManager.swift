@@ -16,41 +16,32 @@ final class ScreenPreviewManager {
     private(set) var image: CGImage?
 
     @ObservationIgnored
-    private var refreshTask: Task<Void, Never>?
+    private var captureTask: Task<Void, Never>?
 
     @ObservationIgnored
     private var currentDisplayID: CGDirectDisplayID?
-
-    /// How often to re-snapshot the display while the popover is open.
-    /// Screens don't change often and the popover is typically only open for
-    /// a few seconds, so this can be quite lax.
-    private static let refreshInterval: Duration = .seconds(10)
 
     /// Maximum width of the preview image. Scaled down from the native
     /// display resolution so we don't pay a full-screen readback for a
     /// 160-point-tall preview slot.
     private static let previewWidth: Int = 640
 
-    /// Start capturing snapshots of the given display. No-op if already
-    /// capturing the same display.
+    /// Capture a single snapshot of the given display. No-op if a capture
+    /// for this display is already in flight or already produced an image.
+    /// The previous design refreshed every 10s, but the popover is usually
+    /// open for a few seconds; one snapshot per open is enough.
     func start(display: SCDisplay) {
-        if currentDisplayID == display.displayID, refreshTask != nil { return }
+        if currentDisplayID == display.displayID, image != nil || captureTask != nil { return }
         stop()
         currentDisplayID = display.displayID
-
-        refreshTask = Task { @MainActor in
+        captureTask = Task { @MainActor in
             await self.capture(display: display)
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.refreshInterval)
-                if Task.isCancelled { break }
-                await self.capture(display: display)
-            }
         }
     }
 
     func stop() {
-        refreshTask?.cancel()
-        refreshTask = nil
+        captureTask?.cancel()
+        captureTask = nil
         currentDisplayID = nil
         image = nil
     }

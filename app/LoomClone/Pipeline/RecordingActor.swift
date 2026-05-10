@@ -425,7 +425,7 @@ actor RecordingActor {
     /// Emit a `raw.writer.failed` timeline event for each raw writer that
     /// entered `.failed` state during the recording.
     private func recordRawWriterFailures(_ results: RawFinishResults) {
-        let t = timeline.now()
+        let t = logicalElapsedSeconds()
         if case let .failed(error) = results.screen {
             timeline.recordRawWriterFailed(file: "screen.mov", error: error, t: t)
         }
@@ -648,7 +648,11 @@ actor RecordingActor {
     func switchMode(to newMode: RecordingMode) {
         let previous = mode
         mode = newMode
-        timeline.recordModeSwitch(from: previous, to: newMode, t: timeline.now())
+        // Use logicalElapsedSeconds (CMClock-based, pause-aware) rather than
+        // timeline.now() (Date-based). Both anchors are set within
+        // microseconds of each other, but using the CMClock derivative keeps
+        // every recording event on the same clock domain as segment PTS.
+        timeline.recordModeSwitch(from: previous, to: newMode, t: logicalElapsedSeconds())
         Log.recording.log("Mode switched to: \(newMode)")
     }
 
@@ -657,7 +661,7 @@ actor RecordingActor {
         guard newPosition != previous else { return }
         pipPosition = newPosition
         if isRecording {
-            timeline.recordPipPositionChanged(from: previous, to: newPosition, t: timeline.now())
+            timeline.recordPipPositionChanged(from: previous, to: newPosition, t: logicalElapsedSeconds())
         }
         Log.recording.log("PiP position switched to: \(newPosition)")
     }

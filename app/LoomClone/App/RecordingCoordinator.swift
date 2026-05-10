@@ -350,9 +350,19 @@ final class RecordingCoordinator {
     /// How often to re-poll the device lists while the popover is open.
     private static let devicePollInterval: Duration = .seconds(2)
 
+    /// Wait between flipping `state` to `.stopped` (post-recording) and
+    /// flipping it back to `.idle`. Long enough for the user to glance at
+    /// the toast / pasteboard-grab confirmation, short enough that
+    /// reopening the popover shortly after a stop doesn't feel laggy.
+    private static let stoppedToIdleDelay: Duration = .seconds(8)
+
+    /// Notification observers active while the popover is open. Used to
+    /// drive device list refreshes on hot-plug instead of polling.
+    private var deviceHotPlugObservers: [NSObjectProtocol] = []
+
     /// Called when the menu-bar popover is about to become visible.
     /// Kicks off device enumeration + starts the relevant previews + begins
-    /// polling for device hot-plug events.
+    /// polling for server health (devices use hot-plug notifications).
     func popoverDidOpen() {
         guard !isPopoverOpen else { return }
         isPopoverOpen = true
@@ -363,6 +373,8 @@ final class RecordingCoordinator {
             self.updatePreviewsForCurrentState()
         }
 
+        installDeviceHotPlugObservers()
+
         deviceRefreshTask?.cancel()
         deviceRefreshTask = Task { @MainActor in
             while !Task.isCancelled {
@@ -370,7 +382,6 @@ final class RecordingCoordinator {
                 if Task.isCancelled { break }
                 if !self.isPopoverOpen { break }
                 await self.checkServerHealth()
-                await self.refreshDevices()
             }
         }
     }
@@ -383,6 +394,7 @@ final class RecordingCoordinator {
 
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
+        removeDeviceHotPlugObservers()
 
         // Only stop previews if we're idle. If recording is starting or in
         // progress, the recording flow manages the camera itself.
@@ -393,6 +405,30 @@ final class RecordingCoordinator {
             }
             screenPreview.stop()
         }
+    }
+
+    private func installDeviceHotPlugObservers() {
+        removeDeviceHotPlugObservers()
+        let nc = NotificationCenter.default
+        let names: [NSNotification.Name] = [
+            .AVCaptureDeviceWasConnected,
+            .AVCaptureDeviceWasDisconnected,
+            NSApplication.didChangeScreenParametersNotification,
+        ]
+        deviceHotPlugObservers = names.map { name in
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.refreshDevices()
+                }
+            }
+        }
+    }
+
+    private func removeDeviceHotPlugObservers() {
+        for observer in deviceHotPlugObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        deviceHotPlugObservers = []
     }
 
     /// Reconcile camera and screen preview lifecycles with the current
@@ -661,7 +697,7 @@ final class RecordingCoordinator {
                 )
             }
 
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(for: Self.stoppedToIdleDelay)
             if self.state == .stopped {
                 self.state = .idle
             }
@@ -820,7 +856,7 @@ final class RecordingCoordinator {
             alert.addButton(withTitle: "OK")
             alert.runModal()
 
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(for: Self.stoppedToIdleDelay)
             if self.state == .stopped {
                 self.state = .idle
             }

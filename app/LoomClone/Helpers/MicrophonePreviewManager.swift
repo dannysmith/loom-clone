@@ -22,7 +22,7 @@ final class MicrophonePreviewManager {
     private var session: AVCaptureSession?
     private var output: AVCaptureAudioDataOutput?
     private var currentDeviceID: String?
-    private var pollTimer: Timer?
+    private var pollTask: Task<Void, Never>?
 
     /// Floor (dBFS) used when normalising averagePowerLevel into 0…1.
     /// -50 matches roughly the noise floor of a typical quiet room — below
@@ -82,8 +82,8 @@ final class MicrophonePreviewManager {
     }
 
     func stop() async {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        pollTask?.cancel()
+        pollTask = nil
 
         guard let session else {
             resetState()
@@ -108,12 +108,14 @@ final class MicrophonePreviewManager {
     }
 
     private func startPolling() {
-        pollTimer?.invalidate()
-        let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sampleLevel() }
+        pollTask?.cancel()
+        pollTask = Task { [weak self] in
+            let nanos = UInt64(Self.pollInterval * 1_000_000_000)
+            while !Task.isCancelled {
+                self?.sampleLevel()
+                try? await Task.sleep(nanoseconds: nanos)
+            }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        pollTimer = timer
     }
 
     private func sampleLevel() {

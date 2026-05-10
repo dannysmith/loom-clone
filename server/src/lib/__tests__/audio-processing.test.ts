@@ -6,6 +6,7 @@ import { _parseLoudnormJson, processAudio } from "../derivatives";
 import { DATA_DIR } from "../store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+const sayAvailable = Bun.which("say") !== null;
 
 let env: TestEnv;
 
@@ -205,21 +206,69 @@ describe("processAudio (end-to-end)", () => {
 
 // --- Chain-effect tests: noise floor + dynamic-range compression ---
 
-// Build a multi-segment fixture: tone @ 0.3 / 5s, noise @ 0.003 / 4s,
-// tone @ 0.12 / 5s, noise @ 0.003 / 4s, tone @ 0.3 / 5s. Total ~23 s.
-// The two tone amplitudes are 8 dB apart (0.3 vs 0.12); the noise pad is
-// at ~-50 dBFS. After processing, the gate should drive the noise pads
-// well below the input level, and dynaudnorm should bring the two tone
-// segments to within ~3 dB of each other.
+// Build a multi-segment fixture from real macOS `say` TTS: loud speech
+// (5 s), noise pad (4 s ~-50 dBFS), quiet speech (5 s, -8 dB vs loud),
+// noise pad (4 s), loud speech (5 s). Total 23 s.
+//
+// Real speech is required: arnndn/afftdn (correctly) attenuate non-voice
+// signals like sine tones, leaving nothing for the gate or dynaudnorm to
+// act on. TTS output passes through the denoise stage as voice content.
 async function generateMultiSegmentFixture(dir: string): Promise<string> {
   await mkdir(dir, { recursive: true });
+  const aiffPath = join(dir, "tts.aiff");
+  const wavPath = join(dir, "tts.wav");
   const outPath = join(dir, "source.mp4");
+
+  // 1. Generate ~7 s of TTS (default voice).
+  const sayProc = Bun.spawn(
+    [
+      "say",
+      "-o",
+      aiffPath,
+      "The quick brown fox jumps over the lazy dog. The rain in Spain falls mainly on the plain. She sells seashells by the seashore.",
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [sayErr, sayExit] = await Promise.all([
+    new Response(sayProc.stderr).text(),
+    sayProc.exited,
+  ]);
+  if (sayExit !== 0) throw new Error(`say failed: ${sayErr}`);
+
+  // 2. Transcode to mono 48 kHz WAV, exactly 5 s.
+  const wavProc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      aiffPath,
+      "-ac",
+      "1",
+      "-ar",
+      "48000",
+      "-t",
+      "5",
+      wavPath,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [wavErr, wavExit] = await Promise.all([
+    new Response(wavProc.stderr).text(),
+    wavProc.exited,
+  ]);
+  if (wavExit !== 0) throw new Error(`speech transcode failed: ${wavErr}`);
+
+  // 3. Build fixture: 3× speech split (one quiet, two loud) + 2× noise pads.
   const filterComplex = [
-    "sine=f=500:duration=5:sample_rate=48000,volume=0.3[t1]",
-    "anoisesrc=duration=4:amplitude=0.003:color=white,asetnsamples=n=1024[n1]",
-    "sine=f=500:duration=5:sample_rate=48000,volume=0.12[t2]",
-    "anoisesrc=duration=4:amplitude=0.003:color=white,asetnsamples=n=1024[n2]",
-    "sine=f=500:duration=5:sample_rate=48000,volume=0.3[t3]",
+    "[1:a]asplit=3[s1][s2][s3]",
+    "[s1]volume=1.0[t1]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white:sample_rate=48000,asetnsamples=n=1024[n1]",
+    "[s2]volume=0.4[t2]",
+    "anoisesrc=duration=4:amplitude=0.003:color=white:sample_rate=48000,asetnsamples=n=1024[n2]",
+    "[s3]volume=1.0[t3]",
     "[t1][n1][t2][n2][t3]concat=n=5:v=0:a=1[out]",
   ].join(";");
 
@@ -234,10 +283,8 @@ async function generateMultiSegmentFixture(dir: string): Promise<string> {
       "lavfi",
       "-i",
       "color=size=320x240:rate=15:duration=23:color=black",
-      "-f",
-      "lavfi",
       "-i",
-      "anullsrc=channel_layout=mono:sample_rate=48000",
+      wavPath,
       "-filter_complex",
       filterComplex,
       "-map",
@@ -297,7 +344,7 @@ async function meanVolume(file: string, start: number, length: number): Promise<
 }
 
 describe("processAudio (chain effects)", () => {
-  test.skipIf(!ffmpegAvailable)(
+  test.skipIf(!ffmpegAvailable || !sayAvailable)(
     "gate floors the noise pad in silent regions",
     async () => {
       const dir = join(DATA_DIR, "test-audio-noise-floor");
@@ -305,28 +352,28 @@ describe("processAudio (chain effects)", () => {
 
       await processAudio(sourcePath);
 
-      // First noise pad is at ~9-13s (after the 5s loud tone + with a small
-      // safety margin to avoid the gate's release tail). Mean volume in
-      // the middle of that pad must be below the gate threshold (-45 dBFS)
-      // by a comfortable margin.
-      const padDb = await meanVolume(sourcePath, 10, 2);
+      // Fixture layout: t1 0-5s (loud), n1 5-9s (noise pad), t2 9-14s
+      // (quiet), n2 14-18s (noise pad), t3 18-23s. Sample 2 s in the
+      // middle of n1 (with a small lead-in to clear gate release tail).
+      // Mean volume must sit well below the gate threshold (-45 dBFS).
+      const padDb = await meanVolume(sourcePath, 6, 2);
       expect(padDb).toBeLessThan(-50);
     },
     60_000,
   );
 
-  test.skipIf(!ffmpegAvailable)(
-    "dynaudnorm levels the two tone segments to within ~4 dB",
+  test.skipIf(!ffmpegAvailable || !sayAvailable)(
+    "dynaudnorm levels the two speech segments to within ~4 dB",
     async () => {
       const dir = join(DATA_DIR, "test-audio-dynamic-range");
       const sourcePath = await generateMultiSegmentFixture(dir);
 
       await processAudio(sourcePath);
 
-      // Loud tone occupies 0-5s, quiet tone occupies 14-19s.
-      // Sample 1s windows comfortably inside each segment to avoid edges.
+      // Loud speech t1 (0-5 s), quiet speech t2 (9-14 s, -8 dB before
+      // processing). Sample 2 s windows comfortably inside each.
       const loudDb = await meanVolume(sourcePath, 1.5, 2);
-      const quietDb = await meanVolume(sourcePath, 15.5, 2);
+      const quietDb = await meanVolume(sourcePath, 10.5, 2);
 
       // Input gap is 8 dB. After dynaudnorm + loudnorm we expect this
       // significantly compressed. Allow up to 4 dB residual gap.

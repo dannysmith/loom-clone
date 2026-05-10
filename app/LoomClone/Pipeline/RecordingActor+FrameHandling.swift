@@ -185,20 +185,25 @@ extension RecordingActor {
             // case where the metronome ticks at 60fps but the camera only
             // delivers at 30fps — every other tick has an empty FIFO.
             // Repeated frames compress to nearly nothing in H.264.
-            let camera: CachedFrame
+            let cameraBuffer: CVPixelBuffer
             if !cameraFrameQueue.isEmpty {
                 let popped = cameraFrameQueue.removeFirst()
                 lastPoppedCameraFrame = popped
-                camera = popped
+                cameraBuffer = popped.pixelBuffer
+                sourcePTS = popped.capturePTS
             } else if let last = lastPoppedCameraFrame {
-                camera = last
+                cameraBuffer = last.pixelBuffer
+                // Use the current host clock for repeated frames so the
+                // PTS advances monotonically. The original capturePTS is
+                // stale (same as the previous tick's), which would fail
+                // the monotonicity guard and silently drop the frame.
+                sourcePTS = CMClockGetTime(CMClockGetHostTimeClock())
             } else {
                 return nil
             }
-            sourcePTS = camera.capturePTS
             result = await composition.compositeFrame(
                 screenBuffer: nil,
-                cameraBuffer: camera.pixelBuffer,
+                cameraBuffer: cameraBuffer,
                 mode: .cameraOnly
             )
         }

@@ -204,7 +204,7 @@ actor RecordingActor {
 
     /// Latest valid screen frame received from ScreenCaptureKit.
     /// The metronome reads this on every tick — so an idle screen produces
-    /// correctly-encoded static frames at 30fps instead of gaps.
+    /// correctly-encoded static frames at the configured rate instead of gaps.
     var latestScreenFrame: CachedFrame?
 
     /// Bounded FIFO of camera frames. A single-slot cache previously lost

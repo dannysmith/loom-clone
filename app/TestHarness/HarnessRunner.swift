@@ -14,7 +14,7 @@ import Foundation
 // The metronome is a tight dispatch loop with wall-clock waits
 // between frames, NOT a real CADisplayLink/CVDisplayLink. The
 // harness doesn't care about matching display refresh — it cares
-// about producing frames at ~30 fps with reliable timing metadata.
+// about producing frames at the configured rate with reliable timing metadata.
 //
 // Tier-1 tests are the first thing this runs, all with synthetic
 // frame sources. Tier-4 real-capture support is additive and lives

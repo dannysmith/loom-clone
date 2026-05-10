@@ -83,7 +83,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     static func refreshRate(for displayID: CGDirectDisplayID) -> Int {
         guard let mode = CGDisplayCopyDisplayMode(displayID) else { return 60 }
         let rate = mode.refreshRate
-        return rate > 0 ? Int(rate) : 60
+        return rate > 0 ? Int(rate.rounded()) : 60
     }
 
     /// Update the content filter on a live stream. Used to add newly-launched

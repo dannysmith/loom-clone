@@ -444,31 +444,32 @@ async function main(): Promise<number> {
   for (const chain of variants) {
     const outputPath = join(outDir, `out-${chain.name}.mp4`);
     process.stdout.write(`[${chain.name}] running... `);
-    let processingMs: number;
     try {
-      processingMs = await runChain(inputPath, outputPath, chain);
+      const processingMs = await runChain(inputPath, outputPath, chain);
+      process.stdout.write("measuring... ");
+
+      const duration = await probeDuration(outputPath);
+      const { lufs, truePeak } = await measureLoudness(outputPath);
+      const { noiseFloorDb, speechDynamicRangeDb } = await measureFloorAndRange(
+        outputPath,
+        duration,
+      );
+
+      results.push({
+        name: chain.name,
+        description: chain.description,
+        outputPath,
+        processingMs,
+        integratedLufs: lufs,
+        truePeak,
+        noiseFloorDb,
+        speechDynamicRangeDb,
+      });
+
+      console.log("done.");
     } catch (err) {
       console.log(`FAILED — ${err instanceof Error ? err.message : err}`);
-      continue;
     }
-    process.stdout.write("measuring... ");
-
-    const duration = await probeDuration(outputPath);
-    const { lufs, truePeak } = await measureLoudness(outputPath);
-    const { noiseFloorDb, speechDynamicRangeDb } = await measureFloorAndRange(outputPath, duration);
-
-    results.push({
-      name: chain.name,
-      description: chain.description,
-      outputPath,
-      processingMs,
-      integratedLufs: lufs,
-      truePeak,
-      noiseFloorDb,
-      speechDynamicRangeDb,
-    });
-
-    console.log("done.");
   }
 
   console.log();

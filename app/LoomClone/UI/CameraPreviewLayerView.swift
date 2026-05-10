@@ -5,9 +5,13 @@ import CoreMedia
 import CoreVideo
 import Metal
 
-/// Serialises access to each preview view's filter pixel-buffer pool.
-/// Declared at file scope so it's nonisolated and reachable from the
-/// capture-queue paths that call `enqueue(_:)`.
+/// Serialises mutations to each preview view's filter state — the pixel-
+/// buffer pool (recreated on dim changes) and the `adjustmentsState` ref.
+/// Reads of `adjustmentsState` from the capture queue rely on Swift's
+/// pointer-sized atomic loads on ARM64; tearing isn't the failure mode,
+/// stale reads are, and a one-frame stale read of an Observable ref is
+/// fine for a 30fps preview. Writes go through this queue so they don't
+/// race with the pool ensure-and-allocate path.
 private let cameraPreviewFilterQueue = DispatchQueue(
     label: "com.loomclone.camera-preview-filter"
 )
@@ -69,9 +73,14 @@ final class CameraPreviewLayerView: NSView {
     }
 
     /// Wire the shared adjustments state. Passing nil reverts to pure
-    /// passthrough. Thread-safe.
+    /// passthrough. Writes serialise through `cameraPreviewFilterQueue` so
+    /// they don't race with the capture-queue reads inside
+    /// `filteredSampleBuffer`. Async dispatch — the writer doesn't block
+    /// (this is called from MainActor on slider drags).
     nonisolated func setAdjustmentsState(_ state: CameraAdjustmentsState?) {
-        adjustmentsState = state
+        cameraPreviewFilterQueue.async {
+            self.adjustmentsState = state
+        }
     }
 
     private func configure() {

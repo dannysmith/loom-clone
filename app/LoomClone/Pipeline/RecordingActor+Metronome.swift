@@ -64,6 +64,14 @@ extension RecordingActor {
         while !Task.isCancelled, isRecording {
             let emitted = await emitMetronomeFrame()
 
+            // Re-check cancellation immediately after composite returns.
+            // A wedged GPU can leave a render task waiting up to 2s before
+            // it gives up; without this guard cancelMetronome (awaiting
+            // task.value) would block the stop flow on a frame that's
+            // about to be appended into a writer the actor is trying to
+            // tear down.
+            if Task.isCancelled { return }
+
             if !emitted {
                 try? await Task.sleep(for: .nanoseconds(sleepNanos))
                 continue

@@ -162,7 +162,19 @@ extension RecordingActor {
         // is handled by `handleSegment`, which tolerates a pre-commit state
         // (`timeline.recordSegment` is only called for `.media` segments;
         // `logicalElapsedSeconds()` returns 0 before commit).
-        await writer.startWriting()
+        do {
+            try await writer.startWriting()
+        } catch {
+            // The HLS encoder failed to start (most commonly hardware
+            // encoder unavailable under machine pressure). Don't proceed
+            // — without the primary output, no segments will ever fire.
+            timeline.recordHLSWriterFailed(
+                error: (error as NSError).localizedDescription,
+                t: 0
+            )
+            await tearDownWarmedUpWritersOnPrepareFailure()
+            throw error
+        }
         await screenRawWriter?.startWriting()
         if screenRawWriter != nil {
             timeline.recordRawWriterStarted(file: "screen.mov", t: timeline.now())

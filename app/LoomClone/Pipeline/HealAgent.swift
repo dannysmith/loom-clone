@@ -302,14 +302,90 @@ actor HealAgent {
     // MARK: - Timeline parsing & patching
 
     //
-    // recording.json is a versioned Encodable on the Swift side; we only need
-    // to read a handful of fields and patch flags, so JSONSerialization into
-    // [String: Any] avoids pulling the whole schema into Codable-both-ways.
+    // recording.json is a versioned Encodable on the Swift side. The heal
+    // agent only needs to read session.id and the segments array, and patch
+    // the upload-state flags on each segment.
+    //
+    // Strategy: JSONSerialization preserves the outer dict exactly (including
+    // fields heal doesn't know about — schema bumps, future additions). The
+    // segments array is decoded into a strongly-typed `Codable` struct so
+    // field-name string literals don't leak across three call sites. Modified
+    // segments are re-encoded back into the dict before write.
 
     private struct TimelineParse {
         let videoId: String
         let timelineData: Data
         let unhealedFilenames: [String]
+    }
+
+    /// Codable mirror of the segments-array entries in recording.json.
+    /// Mirrors `RecordingTimeline.SegmentEntry` but is its own type because
+    /// the agent only needs read+write on a subset of fields, and the round-
+    /// trip preserves unknown fields verbatim through JSONSerialization.
+    private struct SegmentPatch: Codable {
+        let index: Int
+        let filename: String
+        let bytes: Int
+        let durationSeconds: Double
+        let emittedAt: Double
+        var uploaded: Bool
+        var uploadError: String?
+    }
+
+    /// Reads segments out of `recording.json` strongly-typed, applies
+    /// `transform`, and writes them back. Returns `nil` if the file can't
+    /// be read or doesn't have a segments array; otherwise returns the
+    /// patched segments so callers can interrogate the post-write state.
+    @discardableResult
+    private func patchRecordingJSON(
+        localDir: URL,
+        transform: (SegmentPatch) -> SegmentPatch
+    ) -> [SegmentPatch]? {
+        let url = localDir.appendingPathComponent("recording.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let rawSegments = obj["segments"] as? [[String: Any]] else { return nil }
+
+        // Round-trip through JSON to get a strongly-typed [SegmentPatch].
+        guard let segmentsData = try? JSONSerialization.data(withJSONObject: rawSegments),
+              var segments = try? JSONDecoder().decode([SegmentPatch].self, from: segmentsData)
+        else { return nil }
+
+        for i in segments.indices {
+            segments[i] = transform(segments[i])
+        }
+
+        // Re-serialise patched segments and splice back into the outer dict
+        // so unknown fields are preserved exactly.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let patchedData = try? encoder.encode(segments),
+              let patchedAny = try? JSONSerialization.jsonObject(with: patchedData)
+        else { return nil }
+        obj["segments"] = patchedAny
+
+        guard let out = try? JSONSerialization.data(
+            withJSONObject: obj,
+            options: [.prettyPrinted, .sortedKeys]
+        ) else { return nil }
+        do {
+            try out.write(to: url)
+            return segments
+        } catch {
+            print("[heal] failed to rewrite recording.json: \(error)")
+            return nil
+        }
+    }
+
+    /// Read-only view of the segments array. Used by `parseTimelineForHealing`
+    /// and `lookupDuration` so neither has to repeat the JSON dance.
+    private func readSegments(at url: URL) -> [SegmentPatch]? {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawSegments = obj["segments"] as? [[String: Any]],
+              let segmentsData = try? JSONSerialization.data(withJSONObject: rawSegments)
+        else { return nil }
+        return try? JSONDecoder().decode([SegmentPatch].self, from: segmentsData)
     }
 
     private func parseTimelineForHealing(at url: URL) -> TimelineParse? {
@@ -326,71 +402,14 @@ actor HealAgent {
         }()
         guard !videoId.isEmpty else { return nil }
 
-        var unhealed: [String] = []
-        if let segments = obj["segments"] as? [[String: Any]] {
-            for s in segments {
-                guard let filename = s["filename"] as? String else { continue }
-                let uploaded = s["uploaded"] as? Bool ?? false
-                if !uploaded { unhealed.append(filename) }
-            }
-        }
+        let segments = readSegments(at: url) ?? []
+        let unhealed = segments.filter { !$0.uploaded }.map(\.filename)
         return TimelineParse(videoId: videoId, timelineData: data, unhealedFilenames: unhealed)
     }
 
     private func lookupDuration(localDir: URL, filename: String) -> Double? {
         let url = localDir.appendingPathComponent("recording.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        guard let segments = obj["segments"] as? [[String: Any]] else { return nil }
-        for s in segments where (s["filename"] as? String) == filename {
-            return s["durationSeconds"] as? Double
-        }
-        return nil
-    }
-
-    private struct PatchSegment {
-        let filename: String
-        var uploaded: Bool
-        var uploadError: String?
-    }
-
-    @discardableResult
-    private func patchRecordingJSON(
-        localDir: URL,
-        transform: (PatchSegment) -> PatchSegment
-    ) -> Bool {
-        let url = localDir.appendingPathComponent("recording.json")
-        guard let data = try? Data(contentsOf: url) else { return false }
-        guard var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        guard var segments = obj["segments"] as? [[String: Any]] else { return false }
-
-        for i in segments.indices {
-            let current = PatchSegment(
-                filename: (segments[i]["filename"] as? String) ?? "",
-                uploaded: (segments[i]["uploaded"] as? Bool) ?? false,
-                uploadError: segments[i]["uploadError"] as? String
-            )
-            let patched = transform(current)
-            segments[i]["uploaded"] = patched.uploaded
-            if let err = patched.uploadError {
-                segments[i]["uploadError"] = err
-            } else {
-                segments[i].removeValue(forKey: "uploadError")
-            }
-        }
-        obj["segments"] = segments
-
-        guard let out = try? JSONSerialization.data(
-            withJSONObject: obj,
-            options: [.prettyPrinted, .sortedKeys]
-        ) else { return false }
-        do {
-            try out.write(to: url)
-            return true
-        } catch {
-            print("[heal] failed to rewrite recording.json: \(error)")
-            return false
-        }
+        return readSegments(at: url)?.first(where: { $0.filename == filename })?.durationSeconds
     }
 
     private struct CompleteResponse: Decodable {

@@ -735,8 +735,19 @@ final class RecordingCoordinator {
         mode = newMode
     }
 
+    /// Step `mode` to the next entry in `availableModes`, skipping any modes
+    /// the current source selection can't satisfy. The keyboard shortcut
+    /// (Cmd+Shift+M) is wired to this during recording — using `mode.next()`
+    /// directly would cycle into modes (e.g. `.cameraOnly` with no camera
+    /// selected) that the metronome can't drive, silently halting output.
     func cycleMode() {
-        mode = mode.next()
+        let modes = availableModes
+        guard !modes.isEmpty else { return }
+        if let currentIdx = modes.firstIndex(of: mode) {
+            mode = modes[(currentIdx + 1) % modes.count]
+        } else {
+            mode = modes[0]
+        }
     }
 
     // MARK: - Device Enumeration

@@ -509,6 +509,10 @@ actor RecordingActor {
     /// removes the local safety-net copy.
     func cancelRecording() async {
         isRecording = false
+        // Mirror `stopRecording`: composition failures during teardown should
+        // short-circuit recovery (no point in a 2s GPU rebuild when we're
+        // about to discard the output anyway).
+        isStopping = true
 
         await cancelMetronome()
         await screenCapture.stopCapture()

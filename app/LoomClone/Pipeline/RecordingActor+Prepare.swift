@@ -290,6 +290,8 @@ extension RecordingActor {
         self.preset = preset
         self.targetFrameRate = frameRate.rawValue
         isRecording = false
+        isStopping = false
+        audioHasArrived = false
         sharedSessionAudioActive = false
         audioInputLatency = 0
         recordingStartTime = nil

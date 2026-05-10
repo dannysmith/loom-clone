@@ -3,7 +3,9 @@ import Foundation
 private extension String {
     /// Returns `self` when non-empty, `nil` otherwise. Lets call sites use
     /// `?.nonEmpty ?? fallback` instead of an opaque `.flatMap` predicate.
-    var nonEmpty: String? { isEmpty ? nil : self }
+    var nonEmpty: String? {
+        isEmpty ? nil : self
+    }
 }
 
 /// Build-configuration-aware constants for storage namespacing.

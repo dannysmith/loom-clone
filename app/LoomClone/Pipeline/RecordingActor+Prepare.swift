@@ -585,6 +585,17 @@ extension RecordingActor {
         }
     }
 
+    /// Called from audio handlers on every sample. Sets the boolean flag and
+    /// resumes a parked `waitForFirstAudio` waiter on the first sample.
+    func markAudioArrived() {
+        let firstSample = !audioHasArrived
+        audioHasArrived = true
+        if firstSample, let continuation = audioReadyContinuation {
+            audioReadyContinuation = nil
+            continuation.resume()
+        }
+    }
+
     /// Configure the camera raw writer using actual delivered dimensions
     /// from the running capture session. When `withAudio` is true, the
     /// writer includes an audio track so camera.mp4 is a self-contained

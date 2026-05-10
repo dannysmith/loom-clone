@@ -137,6 +137,8 @@ extension RecordingActor {
         timeline.recordSourceFailed(source: "camera", error: desc, t: t)
         print("[health] Camera session error: \(desc)")
 
+        failoverSharedSessionAudio(reason: "camera session error: \(desc)", t: t)
+
         activeSourceWarnings.insert(.cameraFailed)
         fireWarning(.init(
             id: .cameraFailed,
@@ -153,6 +155,8 @@ extension RecordingActor {
         timeline.recordSourceFailed(source: "camera", error: "session interrupted", t: t)
         print("[health] Camera session interrupted")
 
+        failoverSharedSessionAudio(reason: "camera session interrupted", t: t)
+
         activeSourceWarnings.insert(.cameraFailed)
         fireWarning(.init(
             id: .cameraFailed,
@@ -160,6 +164,19 @@ extension RecordingActor {
             message: "Camera interrupted",
             dismissible: false
         ))
+    }
+
+    /// When camera + mic share an AVCaptureSession, the camera's audio is
+    /// what feeds the HLS writer (eliminating cross-session clock jitter).
+    /// If the camera session dies, that audio path goes silent — but the
+    /// standalone mic session is still running. Flip the routing flag so
+    /// `handleMicAudioSample` starts forwarding mic audio into the HLS
+    /// path. No-op when the session wasn't shared in the first place.
+    private func failoverSharedSessionAudio(reason: String, t: Double) {
+        guard sharedSessionAudioActive else { return }
+        sharedSessionAudioActive = false
+        timeline.recordAudioFailover(reason: reason, t: t)
+        print("[health] Audio failover: shared session dead, routing standalone mic to HLS")
     }
 
     /// Called from the MicrophoneCaptureManager's session error notification.

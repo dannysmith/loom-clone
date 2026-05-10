@@ -520,6 +520,17 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
+    /// Logged when the camera + mic shared session dies and HLS audio
+    /// failover routes through the standalone mic instead. Forensic only —
+    /// the user is already alerted via the camera-failed warning.
+    func recordAudioFailover(reason: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "audio.failover",
+            data: ["reason": .string(reason)]
+        )
+    }
+
     /// Seconds since t=0 (the commit anchor). Safe to call before the anchor
     /// is set — returns 0.
     func now() -> Double {

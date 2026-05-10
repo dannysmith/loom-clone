@@ -7,6 +7,15 @@ enum CircleMaskGenerator {
     /// nonisolated(unsafe) is fine — only accessed from CompositionActor (a single actor)
     nonisolated(unsafe) private static var cache: [Int: CIImage] = [:]
 
+    /// Cap on cached diameters. In practice diameter is preset-bound so the
+    /// cache should hold ≤4 entries (one per PiP size), but a runaway caller
+    /// could otherwise keep this growing indefinitely. Evicts the oldest
+    /// inserted entry on overflow; preset rotation stays warm.
+    private static let maxCachedDiameters = 16
+
+    /// Insertion-ordered list of cached diameters, used for LRU-style eviction.
+    nonisolated(unsafe) private static var insertionOrder: [Int] = []
+
     static func mask(diameter: Int) -> CIImage {
         if let cached = cache[diameter] {
             return cached
@@ -40,6 +49,11 @@ enum CircleMaskGenerator {
 
         let ciImage = CIImage(cgImage: cgImage)
         cache[diameter] = ciImage
+        insertionOrder.append(diameter)
+        if insertionOrder.count > maxCachedDiameters {
+            let evict = insertionOrder.removeFirst()
+            cache.removeValue(forKey: evict)
+        }
         return ciImage
     }
 }

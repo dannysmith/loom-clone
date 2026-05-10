@@ -103,7 +103,10 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     }
 
     /// Look up the backing scale factor for a CGDirectDisplayID. Falls back
-    /// to 1.0 if no matching NSScreen is found (shouldn't happen in practice).
+    /// to 1.0 if no matching NSScreen is found and logs a warning — on a
+    /// Retina display the fallback would silently downsize screen capture
+    /// to half resolution, so the log gives us a chance to notice if it
+    /// ever happens in practice.
     static func backingScaleFactor(for displayID: CGDirectDisplayID) -> CGFloat {
         for screen in NSScreen.screens {
             if let id = screen.deviceDescription[
@@ -112,6 +115,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
                 return screen.backingScaleFactor
             }
         }
+        Log.screen.log("No NSScreen matched displayID \(displayID); falling back to scale=1.0")
         return 1.0
     }
 

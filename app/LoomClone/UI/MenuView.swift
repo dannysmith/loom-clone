@@ -365,6 +365,12 @@ struct MenuView: View {
 
             fpsPicker
         }
+        // Disable while a recording is active or stopping — the in-flight
+        // recording captured `preset` at start, so changes here only land
+        // in UserDefaults for the *next* recording. Leaving the picker
+        // interactive made it look like it was retargeting the current
+        // recording.
+        .disabled(coordinator.state != .idle)
         // 1440p availability depends on display and camera (not mode — see
         // is1440pAvailable). Re-check whenever either changes.
         .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in

@@ -1,5 +1,11 @@
 import Foundation
 
+private extension String {
+    /// Returns `self` when non-empty, `nil` otherwise. Lets call sites use
+    /// `?.nonEmpty ?? fallback` instead of an opaque `.flatMap` predicate.
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
 /// Build-configuration-aware constants for storage namespacing.
 ///
 /// Debug builds (run from Xcode) and release builds (archived / installed
@@ -65,8 +71,7 @@ enum AppEnvironment {
     /// The currently configured server URL, or the build-config default.
     static var serverURL: String {
         get {
-            defaults.string(forKey: serverURLKey).flatMap { $0.isEmpty ? nil : $0 }
-                ?? defaultServerURL
+            defaults.string(forKey: serverURLKey)?.nonEmpty ?? defaultServerURL
         }
         set {
             defaults.set(newValue, forKey: serverURLKey)

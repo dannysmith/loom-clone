@@ -13,13 +13,13 @@ enum H264Settings {
     ]
 
     /// Shared H.264 compression properties. Both the HLS writer and the raw
-    /// camera writer use these — only bitrate differs between them.
-    static func compressionProperties(bitrate: Int) -> [String: Any] {
+    /// camera writer use these — bitrate and fps differ between them.
+    static func compressionProperties(bitrate: Int, fps: Int32) -> [String: Any] {
         [
             AVVideoAverageBitRateKey: bitrate,
             AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
             AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            AVVideoExpectedSourceFrameRateKey: 30,
+            AVVideoExpectedSourceFrameRateKey: fps,
             AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
             // OBS/FFmpeg/HandBrake all ship RealTime=false on Apple Silicon
             // after OBS issue #5840 documented framedrops and unreliability

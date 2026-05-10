@@ -353,18 +353,51 @@ struct MenuView: View {
         let presets = OutputPreset.all.filter {
             $0 != .p1440 || coordinator.is1440pAvailable
         }
-        Picker("Quality", selection: $coordinator.outputPreset) {
-            ForEach(presets) { preset in
-                Text(preset.label)
-                    .tag(preset)
+        HStack(spacing: 8) {
+            Picker("Quality", selection: $coordinator.outputPreset) {
+                ForEach(presets) { preset in
+                    Text(preset.label)
+                        .tag(preset)
+                }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            fpsPicker
+        }
+        // 1440p availability depends on display and camera (not mode — see
+        // is1440pAvailable). Re-check whenever either changes.
+        .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in
+            downgradeIf1440pUnavailable()
+            downgradeIf60fpsUnavailable()
+        }
+        .onChange(of: coordinator.selectedCamera?.uniqueID) { _, _ in
+            downgradeIf1440pUnavailable()
+            downgradeIf60fpsUnavailable()
+        }
+        // Switching to 720p forces 30fps (incoherent intent — issue #20).
+        .onChange(of: coordinator.outputPreset) { _, newPreset in
+            if newPreset == .p720, coordinator.frameRate == .sixtyFPS {
+                coordinator.frameRate = .thirtyFPS
+            }
+            downgradeIf60fpsUnavailable()
+        }
+    }
+
+    // MARK: - FPS Picker
+
+    @ViewBuilder
+    private var fpsPicker: some View {
+        let available = coordinator.is60fpsAvailable
+        Picker("FPS", selection: $coordinator.frameRate) {
+            Text(FrameRate.thirtyFPS.label).tag(FrameRate.thirtyFPS)
+            Text(FrameRate.sixtyFPS.label).tag(FrameRate.sixtyFPS)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        // 1440p availability depends on display and camera (not mode — see
-        // is1440pAvailable). Re-check whenever either changes.
-        .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in downgradeIf1440pUnavailable() }
-        .onChange(of: coordinator.selectedCamera?.uniqueID) { _, _ in downgradeIf1440pUnavailable() }
+        .frame(width: 100)
+        .disabled(!available && coordinator.frameRate == .thirtyFPS)
+        .opacity(available || coordinator.frameRate == .sixtyFPS ? 1.0 : 0.5)
     }
 
     /// If the user had 1440p selected and the active source can no longer
@@ -373,6 +406,14 @@ struct MenuView: View {
     private func downgradeIf1440pUnavailable() {
         if coordinator.outputPreset == .p1440, !coordinator.is1440pAvailable {
             coordinator.outputPreset = .p1080
+        }
+    }
+
+    /// If the user had 60fps selected and no source can deliver it any more
+    /// (or resolution changed to 720p), fall back to 30fps silently.
+    private func downgradeIf60fpsUnavailable() {
+        if coordinator.frameRate == .sixtyFPS, !coordinator.is60fpsAvailable {
+            coordinator.frameRate = .thirtyFPS
         }
     }
 

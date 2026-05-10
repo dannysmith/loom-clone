@@ -204,7 +204,7 @@ actor RecordingActor {
 
     /// Latest valid screen frame received from ScreenCaptureKit.
     /// The metronome reads this on every tick — so an idle screen produces
-    /// correctly-encoded static frames at 30fps instead of gaps.
+    /// correctly-encoded static frames at the configured rate instead of gaps.
     var latestScreenFrame: CachedFrame?
 
     /// Bounded FIFO of camera frames. A single-slot cache previously lost
@@ -214,23 +214,40 @@ actor RecordingActor {
     /// keeps memory bounded if the metronome stalls.
     ///
     /// - `cameraOnly`: the metronome pops one frame per emit, so every
-    ///   captured frame lands in the output in order.
+    ///   captured frame lands in the output in order. When the target fps
+    ///   exceeds the camera's delivery rate (e.g. 60fps metronome with a
+    ///   30fps camera), the most-recently-popped frame is re-emitted on
+    ///   empty ticks — see `lastPoppedCameraFrame`.
     /// - `screenAndCamera`: the metronome peeks the most recent frame as
     ///   the PiP backdrop without popping; older entries age out via the
     ///   capacity cap.
     /// - `screenOnly`: queue unused.
     var cameraFrameQueue: [CachedFrame] = []
-    static let cameraFrameQueueCapacity = 4
+    static let cameraFrameQueueCapacity = 8
+
+    /// Most recently popped camera frame from the FIFO. Used for the
+    /// peek-with-repeat policy in `cameraOnly` mode when the metronome
+    /// ticks faster than the camera delivers (e.g. 60fps target with a
+    /// 30fps camera). Re-emitting this frame on empty ticks fills the
+    /// timeline with repeated frames that compress to nearly nothing
+    /// in H.264, while preserving the guarantee that every original
+    /// camera frame reaches the output exactly once.
+    var lastPoppedCameraFrame: CachedFrame?
 
     // MARK: - Metronome
 
-    /// Target frame rate for the output video timeline. The encoder's keyframe
-    /// interval (2s) and segment interval (4s) are sized to this.
-    static let targetFrameRate: Int32 = 30
-    static let frameDuration = CMTime(value: 1, timescale: targetFrameRate)
+    /// Target frame rate for the output video timeline, set at recording
+    /// start from the user's FrameRate selection. The encoder's keyframe
+    /// interval (2s) and segment interval (4s) are duration-based and
+    /// fps-agnostic.
+    var targetFrameRate: Int32 = FrameRate.thirtyFPS.rawValue
+    var frameDuration: CMTime {
+        CMTime(value: 1, timescale: targetFrameRate)
+    }
 
-    /// Drives the encoding cadence. Emits a composited frame every 1/30s
-    /// regardless of how fast the underlying sources are delivering.
+    /// Drives the encoding cadence. Emits a composited frame every
+    /// `frameDuration` regardless of how fast the underlying sources
+    /// are delivering.
     var metronomeTask: Task<Void, Never>?
 
     /// Separate timer for source health checks. Runs at ~2Hz — far slower

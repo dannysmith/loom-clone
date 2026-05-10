@@ -257,6 +257,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
     private var durationSeconds: Double?
     private var inputs: RecordingTimeline.Inputs = .init(display: nil, camera: nil, microphone: nil)
     private var preset: OutputPreset = .default
+    private var fps: Int32 = FrameRate.thirtyFPS.rawValue
     private var rawScreen: RecordingTimeline.RawStreams.VideoStream?
     private var rawCamera: RecordingTimeline.RawStreams.VideoStream?
     private var rawAudio: RecordingTimeline.RawStreams.AudioStream?
@@ -285,8 +286,9 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         self.initialPipPosition = initialPipPosition
     }
 
-    func setPreset(_ preset: OutputPreset) {
+    func setPreset(_ preset: OutputPreset, fps: Int32 = FrameRate.thirtyFPS.rawValue) {
         self.preset = preset
+        self.fps = fps
     }
 
     func setExclusions(_ exclusions: RecordingTimeline.Exclusions?) {
@@ -565,7 +567,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
                 height: preset.height,
                 bitrate: preset.bitrate
             ),
-            encoder: Self.currentEncoder(preset: preset),
+            encoder: Self.currentEncoder(preset: preset, fps: fps),
             rawStreams: (rawScreen == nil && rawCamera == nil && rawAudio == nil)
                 ? nil
                 : .init(screen: rawScreen, camera: rawCamera, audio: rawAudio),
@@ -636,14 +638,16 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         return .init(model: modelName, arch: arch)
     }
 
-    private static func currentEncoder(preset: OutputPreset) -> RecordingTimeline.EncoderInfo {
-        .init(
+    private static func currentEncoder(preset: OutputPreset, fps: Int32) -> RecordingTimeline.EncoderInfo {
+        let frameRate = FrameRate(rawValue: fps) ?? .thirtyFPS
+        let effectiveBitrate = Int(Double(preset.bitrate) * frameRate.bitrateMultiplier)
+        return .init(
             videoCodec: "h264",
             videoProfile: "High",
-            videoBitrate: preset.bitrate,
+            videoBitrate: effectiveBitrate,
             audioCodec: "aac-lc",
             audioBitrate: 128_000,
-            targetFPS: 30,
+            targetFPS: Int(fps),
             outputWidth: preset.width,
             outputHeight: preset.height,
             segmentIntervalSeconds: 4.0

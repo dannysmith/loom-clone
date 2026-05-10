@@ -23,12 +23,12 @@ actor RawStreamWriter {
         /// H.264 via VideoToolbox on the hardware H.264/HEVC media engine.
         /// Used for the raw camera writer. Target bitrate, H.264 High Profile,
         /// 2 s keyframe interval.
-        case videoH264(width: Int, height: Int, bitrate: Int)
+        case videoH264(width: Int, height: Int, bitrate: Int, fps: Int32)
 
         /// H.264 video + AAC audio in a single MP4. Used for the raw camera
         /// writer when camera and mic share an AVCaptureSession, so camera.mp4
         /// contains both tracks for manual recovery.
-        case videoH264WithAudio(width: Int, height: Int, bitrate: Int, audioBitrate: Int, sampleRate: Int, channels: Int)
+        case videoH264WithAudio(width: Int, height: Int, bitrate: Int, fps: Int32, audioBitrate: Int, sampleRate: Int, channels: Int)
 
         /// ProRes 422 Proxy via the hardware ProRes engine — a separate
         /// silicon block on M*Pro / M*Max chips, distinct from the H.264
@@ -77,7 +77,7 @@ actor RawStreamWriter {
 
         let input: AVAssetWriterInput
         switch kind {
-        case let .videoH264(width, height, bitrate):
+        case let .videoH264(width, height, bitrate, fps):
             // No AVVideoColorPropertiesKey — colour space is inferred from
             // pixel buffer attachments. Declaring Rec. 709 explicitly would
             // force GPU-side colour conversion on screen-capture frames
@@ -89,17 +89,17 @@ actor RawStreamWriter {
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
                 AVVideoEncoderSpecificationKey: H264Settings.encoderSpecification as [String: Any],
-                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate) as [String: Any],
+                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate, fps: fps) as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 
-        case let .videoH264WithAudio(width, height, bitrate, audioBitrate, sampleRate, channels):
+        case let .videoH264WithAudio(width, height, bitrate, fps, audioBitrate, sampleRate, channels):
             let videoSettings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
                 AVVideoEncoderSpecificationKey: H264Settings.encoderSpecification as [String: Any],
-                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate) as [String: Any],
+                AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: bitrate, fps: fps) as [String: Any],
             ]
             input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
 

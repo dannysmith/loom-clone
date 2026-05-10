@@ -590,6 +590,16 @@ actor RecordingActor {
         }
         pauseStartHostTime = nil
 
+        // Drop any camera frames that arrived during the pause. In cameraOnly
+        // the metronome pops the *oldest* queued frame; without this drain it
+        // would pop frames whose capturePTS predates the resume moment, and
+        // their elapsedLogical = (capturePTS - start) - pauseAccumulator
+        // works out to ~queue-depth × frame-interval *before* the last
+        // pre-pause emitted PTS — the strict-monotonic guard then rejects
+        // them silently. screenAndCamera peeks the latest frame so it's
+        // less affected, but draining keeps semantics consistent.
+        cameraFrameQueue.removeAll(keepingCapacity: true)
+
         timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: pauseSeconds)
 
         await writer.resume(at: now)

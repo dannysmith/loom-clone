@@ -134,6 +134,39 @@ final class RecordingCoordinator {
         return displayOK || cameraOK
     }
 
+    // MARK: - Frame Rate
+
+    /// Target fps for the output video. Orthogonal to resolution — the
+    /// effective bitrate is `outputPreset.bitrate × frameRate.bitrateMultiplier`.
+    var frameRate: FrameRate = {
+        guard let raw = AppEnvironment.defaults.object(forKey: AppEnvironment.frameRateKey) as? Int32 else {
+            return .thirtyFPS
+        }
+        return FrameRate(rawValue: raw) ?? .thirtyFPS
+    }() {
+        didSet {
+            AppEnvironment.defaults.set(frameRate.rawValue, forKey: AppEnvironment.frameRateKey)
+        }
+    }
+
+    /// True if 60fps is meaningful given the current source selection and
+    /// resolution. Uses permissive gating: shown whenever ANY non-None
+    /// selected source can deliver 60fps at the current resolution.
+    /// Always false for 720p (incoherent intent — see issue #20 decision 6).
+    var is60fpsAvailable: Bool {
+        guard outputPreset != .p720 else { return false }
+        // Screen: any display ≥60Hz supports 60fps capture
+        let displayOK: Bool = {
+            guard let display = selectedDisplay else { return false }
+            return ScreenCaptureManager.refreshRate(for: display.displayID) >= 60
+        }()
+        let cameraOK: Bool = {
+            guard let cam = selectedCamera else { return false }
+            return CameraCaptureManager.supports60fps(for: cam, maxHeight: outputPreset.height)
+        }()
+        return displayOK || cameraOK
+    }
+
     // MARK: - App Exclusion
 
     /// Bundle IDs currently selected for exclusion. In-memory only — resets
@@ -430,6 +463,7 @@ final class RecordingCoordinator {
         let micID = selectedMicrophone?.uniqueID
         let currentMode = mode
         let currentPreset = outputPreset
+        let currentFrameRate = frameRate
 
         startupTask = Task { @MainActor in
             // 1. Stop the previews. Camera preview must be AWAITED — the
@@ -499,6 +533,7 @@ final class RecordingCoordinator {
                         microphoneID: micID,
                         mode: currentMode,
                         preset: currentPreset,
+                        frameRate: currentFrameRate,
                         excludedBundleIDs: currentExcludedApps,
                         hideDesktopIcons: currentHideDesktopIcons
                     )

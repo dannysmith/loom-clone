@@ -306,6 +306,7 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
         var deviceUniqueID: String?
         var deviceName: String?
         var maxHeight: Int = .max
+        var frameRate: Int = 30
     }
 
     private let config: Config
@@ -354,11 +355,11 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
         let session = AVCaptureSession()
         session.beginConfiguration()
 
-        if let best = Self.bestFormat(for: device, maxHeight: config.maxHeight) {
+        if let best = Self.bestFormat(for: device, maxHeight: config.maxHeight, frameRate: config.frameRate) {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = best
-                let targetDur = CMTime(value: 1, timescale: 30)
+                let targetDur = CMTime(value: 1, timescale: Int32(config.frameRate))
                 if best.videoSupportedFrameRateRanges.contains(where: {
                     $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
                 }) {
@@ -451,13 +452,13 @@ final class CapturedCameraSource: NSObject, HarnessFrameSource, @unchecked Senda
         ).devices
     }
 
-    static func bestFormat(for device: AVCaptureDevice, maxHeight: Int) -> AVCaptureDevice.Format? {
-        let targetDur = CMTime(value: 1, timescale: 30)
+    static func bestFormat(for device: AVCaptureDevice, maxHeight: Int, frameRate: Int = 30) -> AVCaptureDevice.Format? {
+        let minAcceptableRate = Double(frameRate) - 1.0
         let candidates = device.formats.filter { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             guard Int(dims.height) <= maxHeight else { return false }
             return format.videoSupportedFrameRateRanges.contains {
-                $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
+                $0.maxFrameRate >= minAcceptableRate
             }
         }
         return candidates.max { a, b in

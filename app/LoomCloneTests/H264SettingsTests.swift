@@ -11,22 +11,30 @@ final class H264SettingsTests: XCTestCase {
     }
 
     func testCompressionPropertiesContainExpectedKeys() {
-        let props = H264Settings.compressionProperties(bitrate: 6_000_000)
+        let props = H264Settings.compressionProperties(bitrate: 6_000_000, fps: 30)
 
         XCTAssertEqual(props[AVVideoAverageBitRateKey] as? Int, 6_000_000)
         XCTAssertEqual(props[AVVideoMaxKeyFrameIntervalDurationKey] as? Double, 2.0)
         XCTAssertEqual(props[AVVideoProfileLevelKey] as? String, AVVideoProfileLevelH264HighAutoLevel)
-        XCTAssertEqual(props[AVVideoExpectedSourceFrameRateKey] as? Int, 30)
+        XCTAssertEqual(props[AVVideoExpectedSourceFrameRateKey] as? Int32, 30)
         XCTAssertEqual(props[AVVideoH264EntropyModeKey] as? String, AVVideoH264EntropyModeCABAC)
         XCTAssertEqual(props[AVVideoAllowFrameReorderingKey] as? Bool, false)
     }
 
     func testCompressionPropertiesBitrateVaries() {
-        let low = H264Settings.compressionProperties(bitrate: 2_500_000)
-        let high = H264Settings.compressionProperties(bitrate: 10_000_000)
+        let low = H264Settings.compressionProperties(bitrate: 2_500_000, fps: 30)
+        let high = H264Settings.compressionProperties(bitrate: 10_000_000, fps: 30)
 
         XCTAssertEqual(low[AVVideoAverageBitRateKey] as? Int, 2_500_000)
         XCTAssertEqual(high[AVVideoAverageBitRateKey] as? Int, 10_000_000)
+    }
+
+    func testCompressionPropertiesFPSVaries() {
+        let at30 = H264Settings.compressionProperties(bitrate: 8_000_000, fps: 30)
+        let at60 = H264Settings.compressionProperties(bitrate: 8_000_000, fps: 60)
+
+        XCTAssertEqual(at30[AVVideoExpectedSourceFrameRateKey] as? Int32, 30)
+        XCTAssertEqual(at60[AVVideoExpectedSourceFrameRateKey] as? Int32, 60)
     }
 
     func testRec709ColorProperties() {

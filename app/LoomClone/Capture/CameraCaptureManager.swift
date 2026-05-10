@@ -20,22 +20,22 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// to decide audio routing (shared session vs standalone mic).
     private(set) var hasAudioCapture: Bool = false
 
-    /// Minimum acceptable max frame rate when selecting a format. 29.0 fps
-    /// with the tolerance lets NTSC cameras through (they advertise 29.97 =
-    /// 1001/30000, which a strict 30.0 check rejected) while still excluding
-    /// PAL-locked cameras that only offer 25fps.
-    private static let minAcceptableFrameRate: Double = 29.0
-
-    /// Pick the "best" format for a device subject to a max height cap.
-    /// Highest resolution that still fits under the cap and supports
-    /// ≈30fps (see `minAcceptableFrameRate`). Returns nil if no format
+    /// Pick the "best" format for a device subject to a max height cap
+    /// and a target frame rate. Highest resolution that still fits under
+    /// the cap and supports the target fps (with NTSC tolerance: 29.97
+    /// passes ≥ 29.0, 59.94 passes ≥ 59.0). Returns nil if no format
     /// matches — caller should fall back.
-    static func bestFormat(for device: AVCaptureDevice, maxHeight: Int) -> AVCaptureDevice.Format? {
+    static func bestFormat(
+        for device: AVCaptureDevice,
+        maxHeight: Int,
+        targetFPS: FrameRate = .thirtyFPS
+    ) -> AVCaptureDevice.Format? {
+        let minRate = targetFPS.minAcceptableRate
         let candidates = device.formats.filter { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             guard Int(dims.height) <= maxHeight else { return false }
             return format.videoSupportedFrameRateRanges.contains {
-                $0.maxFrameRate >= minAcceptableFrameRate
+                $0.maxFrameRate >= minRate
             }
         }
         return candidates.max { a, b in
@@ -46,18 +46,33 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     }
 
     /// Maximum height a device can deliver at ≈30fps. Used by the coordinator
-    /// to gate the 4K preset in cameraOnly mode.
+    /// to gate the 1440p preset. Resolution availability is fps-agnostic
+    /// (we always support 30fps at any resolution).
     static func maxNativeHeight(for device: AVCaptureDevice) -> Int {
+        let minRate = FrameRate.thirtyFPS.minAcceptableRate
         var maxH = 0
         for format in device.formats {
             let supports30 = format.videoSupportedFrameRateRanges.contains {
-                $0.maxFrameRate >= minAcceptableFrameRate
+                $0.maxFrameRate >= minRate
             }
             guard supports30 else { continue }
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             if Int(dims.height) > maxH { maxH = Int(dims.height) }
         }
         return maxH
+    }
+
+    /// Whether the device has any format at ≤ maxHeight that supports
+    /// ≈60fps. Used by the coordinator to gate the 60fps toggle.
+    static func supports60fps(for device: AVCaptureDevice, maxHeight: Int) -> Bool {
+        let minRate = FrameRate.sixtyFPS.minAcceptableRate
+        return device.formats.contains { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard Int(dims.height) <= maxHeight else { return false }
+            return format.videoSupportedFrameRateRanges.contains {
+                $0.maxFrameRate >= minRate
+            }
+        }
     }
 
     static func availableDevices() -> [AVCaptureDevice] {
@@ -76,7 +91,12 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// camera writer's dimensions.
     private(set) var nativePixelSize: CGSize = .zero
 
-    func startCapture(device: AVCaptureDevice, maxHeight: Int = Int.max, micDevice: AVCaptureDevice? = nil) async {
+    func startCapture(
+        device: AVCaptureDevice,
+        maxHeight: Int = Int.max,
+        targetFPS: FrameRate = .thirtyFPS,
+        micDevice: AVCaptureDevice? = nil
+    ) async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         guard granted else {
             print("[camera] Permission denied")
@@ -87,40 +107,40 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         session.beginConfiguration()
 
         // Pick the highest-resolution format whose height is <= maxHeight and
-        // supports at least 30fps. This lets a good camera (4K webcam, DSLR
+        // supports the target fps. This lets a good camera (4K webcam, DSLR
         // via capture card) deliver at the output preset's height rather than
         // being pegged to AVCaptureSession.Preset.high's ~720p default.
-        if let best = Self.bestFormat(for: device, maxHeight: maxHeight) {
+        if let best = Self.bestFormat(for: device, maxHeight: maxHeight, targetFPS: targetFPS) {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = best
-                // Only lock the frame rate when 1/30 is within the format's
+                // Only lock the frame rate when 1/fps is within the format's
                 // supported duration range. UVC cameras like the ZV-1
                 // advertise fixed-rate ranges whose min and max duration
                 // are both `1000000/30000030` (essentially-but-not-exactly
                 // 30fps — UVC intervals are stored in 100ns units, which
                 // doesn't hit 1/30 on the nose). Setting
-                // activeVideoMinFrameDuration to CMTime(1, 30) in that
+                // activeVideoMinFrameDuration to CMTime(1, fps) in that
                 // case throws NSInvalidArgumentException — an ObjC
                 // exception Swift's `try/catch` can't catch, which
-                // crashes the app. When 1/30 isn't in range, the format's
-                // own rate applies (30.00003 fps on the ZV-1, 30 exactly
-                // on cameras that report it that way) — leave it alone.
-                let thirtyDur = CMTime(value: 1, timescale: 30)
+                // crashes the app. When 1/fps isn't in range, the format's
+                // own rate applies — leave it alone.
+                let targetDur = targetFPS.frameDuration
                 if best.videoSupportedFrameRateRanges.contains(where: {
-                    $0.minFrameDuration <= thirtyDur && thirtyDur <= $0.maxFrameDuration
+                    $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
                 }) {
-                    device.activeVideoMinFrameDuration = thirtyDur
-                    device.activeVideoMaxFrameDuration = thirtyDur
+                    device.activeVideoMinFrameDuration = targetDur
+                    device.activeVideoMaxFrameDuration = targetDur
                 }
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
                 let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
                 print(String(
-                    format: "[camera] Selected format: %dx%d @ %.2ffps (cap: %d)",
+                    format: "[camera] Selected format: %dx%d @ %.2ffps (target: %d, cap: %d)",
                     dims.width,
                     dims.height,
-                    min(rate, 30.0),
+                    min(rate, Double(targetFPS.rawValue)),
+                    targetFPS.rawValue,
                     maxHeight
                 ))
             } catch {

@@ -65,19 +65,19 @@ The coordinator runs the countdown and `prepareRecording()` in parallel. After c
 
 ## Frame flow by mode
 
-The metronome ticks at 30fps regardless of source frame rates. What it reads on each tick depends on the current mode:
+The metronome ticks at the configured frame rate (30fps or 60fps) regardless of source frame rates. What it reads on each tick depends on the current mode:
 
 ### `cameraOnly`
 
-Camera delivers frames into a bounded FIFO queue (capacity 4). Each metronome tick pops one frame from the queue. Every camera frame reaches the output in capture order at its native PTS. If the camera delivers faster than 30fps, the queue absorbs burst; if slower, the metronome waits (stalls are rare — cameras deliver at 30fps steady-state).
+Camera delivers frames into a bounded FIFO queue (capacity 8). Each metronome tick pops one frame from the queue. Every camera frame reaches the output in capture order at its native PTS. If the camera delivers faster than the metronome rate, the queue absorbs bursts; if slower (e.g. 30fps camera with 60fps metronome), the most-recently-popped frame is re-emitted on empty ticks — repeated frames compress to nearly nothing in H.264.
 
 ### `screenOnly`
 
-Screen frames go into a single-slot cache (latest wins). Metronome reads the latest cached frame on each tick. This means idle screens (no pixel changes) still produce a steady 30fps output with repeated frames — which is correct for HLS encoding.
+Screen frames go into a single-slot cache (latest wins). Metronome reads the latest cached frame on each tick. This means idle screens (no pixel changes) still produce a steady output with repeated frames — which is correct for HLS encoding.
 
 ### `screenAndCamera`
 
-Metronome drives at 30fps from the screen cache. On each tick it also *peeks* (without popping) the most recent camera frame from the FIFO as the PiP overlay. The camera frame isn't consumed because it's decorative — the screen timing drives the output.
+Metronome drives at the configured rate from the screen cache. On each tick it also *peeks* (without popping) the most recent camera frame from the FIFO as the PiP overlay. The camera frame isn't consumed because it's decorative — the screen timing drives the output.
 
 In all modes, the output frame is stamped with the source frame's hardware capture PTS, not the wall clock at emit time. This is what the writer uses for segment timing.
 
@@ -104,7 +104,7 @@ Metal renders can hang or error (documented in `docs/archive/m2-pro-video-pipeli
 
 WriterActor wraps AVAssetWriter in HLS fMP4 mode (`.mpeg4AppleHLS` output content type). Configuration:
 
-- **Video:** H.264 High Profile, 8 Mbps at 1080p, 30fps expected.
+- **Video:** H.264 High Profile. Base bitrate per resolution preset (8 Mbps at 1080p, 13 Mbps at 1440p); scaled 1.4× at 60fps. Frame rate hint matches the configured fps.
 - **Audio:** AAC-LC, 128 kbps, 48 kHz.
 - **Segment interval:** ~4 seconds.
 
@@ -236,7 +236,7 @@ The timeline serves three purposes: debugging (correlate events with segment bou
 | ------------------------------------------ | --------------------------------------------------- |
 | Orchestrator + clock + pause               | `Pipeline/RecordingActor.swift`                     |
 | Two-phase start                            | `Pipeline/RecordingActor+Prepare.swift`             |
-| Metronome (30fps emit loop)                | `Pipeline/RecordingActor+Metronome.swift`           |
+| Metronome (30/60fps emit loop)              | `Pipeline/RecordingActor+Metronome.swift`           |
 | Capture callbacks + PTS retiming           | `Pipeline/RecordingActor+FrameHandling.swift`       |
 | GPU failure recovery                       | `Pipeline/RecordingActor+CompositionRecovery.swift` |
 | Metal/CIContext rendering                  | `Pipeline/CompositionActor.swift`                   |

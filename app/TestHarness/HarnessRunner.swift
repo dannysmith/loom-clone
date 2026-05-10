@@ -14,7 +14,7 @@ import Foundation
 // The metronome is a tight dispatch loop with wall-clock waits
 // between frames, NOT a real CADisplayLink/CVDisplayLink. The
 // harness doesn't care about matching display refresh — it cares
-// about producing frames at ~30 fps with reliable timing metadata.
+// about producing frames at the configured rate with reliable timing metadata.
 //
 // Tier-1 tests are the first thing this runs, all with synthetic
 // frame sources. Tier-4 real-capture support is additive and lives
@@ -250,6 +250,7 @@ final class HarnessRunner {
             cfg.deviceUniqueID = src.deviceUniqueID
             cfg.deviceName = src.deviceName
             cfg.maxHeight = src.maxHeight ?? Int.max
+            cfg.frameRate = config.frameRate
             cameraSource = CapturedCameraSource(config: cfg, events: events)
         default:
             throw HarnessRunnerError.unsupportedSource(src.kind)
@@ -339,6 +340,7 @@ final class HarnessRunner {
                 width: wc.width ?? 1920,
                 height: wc.height ?? 1080,
                 bitrate: wc.bitrate ?? 6_000_000,
+                fps: config.frameRate,
                 outputURL: url,
                 tunings: wc.tunings ?? [:],
                 events: events
@@ -363,6 +365,7 @@ final class HarnessRunner {
                 width: wc.width ?? 1920,
                 height: wc.height ?? 1080,
                 bitrate: wc.bitrate ?? 6_000_000,
+                fps: config.frameRate,
                 outputURL: url,
                 tunings: wc.tunings ?? [:],
                 events: events

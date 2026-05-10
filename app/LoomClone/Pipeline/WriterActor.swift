@@ -73,8 +73,13 @@ actor WriterActor {
     /// configure() time so the timeline snapshot can include it.
     private(set) var preset: OutputPreset = .default
 
-    func configure(preset: OutputPreset) throws {
+    /// The target fps for this recording. Captured at configure() time
+    /// so it can be threaded into encoder settings and timeline metadata.
+    private(set) var fps: Int32 = FrameRate.thirtyFPS.rawValue
+
+    func configure(preset: OutputPreset, fps: Int32) throws {
         self.preset = preset
+        self.fps = fps
         let writer = AVAssetWriter(contentType: UTType.mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(seconds: 4, preferredTimescale: 600)
@@ -127,7 +132,7 @@ actor WriterActor {
             AVVideoHeightKey: preset.height,
             AVVideoEncoderSpecificationKey: H264Settings.encoderSpecification as [String: Any],
             AVVideoColorPropertiesKey: H264Settings.rec709ColorProperties as [String: Any],
-            AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: preset.bitrate) as [String: Any],
+            AVVideoCompressionPropertiesKey: H264Settings.compressionProperties(bitrate: preset.bitrate, fps: fps) as [String: Any],
         ]
 
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
@@ -160,7 +165,7 @@ actor WriterActor {
         self.segmentIndex = 0
         self.hasStartedSession = false
 
-        print("[writer] Configured: H.264 High 6Mbps, AAC-LC 128kbps, 4s segments")
+        print("[writer] Configured: H.264 High \(preset.bitrate / 1_000_000)Mbps @ \(fps)fps, AAC-LC 128kbps, 4s segments")
     }
 
     // MARK: - Writing

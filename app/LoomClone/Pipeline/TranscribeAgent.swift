@@ -44,10 +44,10 @@ actor TranscribeAgent {
             let pipe = try await createPipeline()
             whisperPipe = pipe
             await status.setReady()
-            print("[transcribe] model download complete")
+            Log.transcribe.log("model download complete")
         } catch {
             await status.setFailed(error.localizedDescription)
-            print("[transcribe] model download failed: \(error)")
+            Log.transcribe.log("model download failed: \(error)")
         }
     }
 
@@ -97,7 +97,7 @@ actor TranscribeAgent {
         }
 
         if !pending.isEmpty {
-            print("[transcribe] startup scan: \(pending.count) recording(s) to transcribe")
+            Log.transcribe.log("startup scan: \(pending.count) recording(s) to transcribe")
         }
 
         for item in pending {
@@ -117,7 +117,7 @@ actor TranscribeAgent {
 
         let audioPath = localDir.appendingPathComponent("audio.m4a")
         guard FileManager.default.fileExists(atPath: audioPath.path) else {
-            print("[transcribe] \(videoId): no audio.m4a — skipping")
+            Log.transcribe.log("\(videoId): no audio.m4a — skipping")
             return
         }
 
@@ -126,11 +126,11 @@ actor TranscribeAgent {
         if let duration = try? await asset.load(.duration),
            CMTimeGetSeconds(duration) < Self.minTranscriptionDuration
         {
-            print("[transcribe] \(videoId): audio too short (\(CMTimeGetSeconds(duration))s) — skipping")
+            Log.transcribe.log("\(videoId): audio too short (\(CMTimeGetSeconds(duration))s) — skipping")
             return
         }
 
-        print("[transcribe] \(videoId): starting")
+        Log.transcribe.log("\(videoId): starting")
 
         let results: [TranscriptionResult]
         do {
@@ -138,12 +138,12 @@ actor TranscribeAgent {
             let options = DecodingOptions(wordTimestamps: true)
             results = try await pipe.transcribe(audioPath: audioPath.path, decodeOptions: options)
         } catch {
-            print("[transcribe] \(videoId): whisper failed: \(error)")
+            Log.transcribe.log("\(videoId): whisper failed: \(error)")
             return
         }
 
         guard !results.isEmpty else {
-            print("[transcribe] \(videoId): no results from whisper")
+            Log.transcribe.log("\(videoId): no results from whisper")
             return
         }
 
@@ -154,7 +154,7 @@ actor TranscribeAgent {
         do {
             try Data(srt.utf8).write(to: captionsPath)
         } catch {
-            print("[transcribe] \(videoId): failed to write local SRT: \(error)")
+            Log.transcribe.log("\(videoId): failed to write local SRT: \(error)")
         }
 
         // Write words.json locally as a backup alongside captions.srt.
@@ -164,7 +164,7 @@ actor TranscribeAgent {
                 let jsonData = try JSONSerialization.data(withJSONObject: wordsData, options: [.sortedKeys])
                 try jsonData.write(to: wordsPath)
             } catch {
-                print("[transcribe] \(videoId): failed to write local words.json: \(error)")
+                Log.transcribe.log("\(videoId): failed to write local words.json: \(error)")
             }
         }
 
@@ -174,7 +174,7 @@ actor TranscribeAgent {
             markOrphaned(localDir: localDir)
             return
         } catch {
-            print("[transcribe] \(videoId): upload failed: \(error) — will retry next launch")
+            Log.transcribe.log("\(videoId): upload failed: \(error) — will retry next launch")
             return
         }
 
@@ -182,9 +182,9 @@ actor TranscribeAgent {
         if !wordsData.isEmpty {
             do {
                 try await uploadWords(videoId: videoId, words: wordsData)
-                print("[transcribe] \(videoId): words.json uploaded (\(wordsData.count) words)")
+                Log.transcribe.log("\(videoId): words.json uploaded (\(wordsData.count) words)")
             } catch {
-                print("[transcribe] \(videoId): words upload failed: \(error)")
+                Log.transcribe.log("\(videoId): words upload failed: \(error)")
             }
         }
 
@@ -202,7 +202,7 @@ actor TranscribeAgent {
 
         let now = ISO8601DateFormatter().string(from: Date())
         try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)
-        print("[transcribe] \(videoId): complete")
+        Log.transcribe.log("\(videoId): complete")
     }
 
     // MARK: - WhisperKit Pipeline
@@ -356,16 +356,16 @@ actor TranscribeAgent {
                 transcript: plainText,
                 preamble: preamble
             ) else {
-                print("[title-suggest] \(videoId): no usable suggestion")
+                Log.titleSuggest.log("\(videoId): no usable suggestion")
                 return nil
             }
 
             // Upload to server
             do {
                 try await uploadSuggestedTitle(videoId: videoId, title: title)
-                print("[title-suggest] \(videoId): \"\(title)\"")
+                Log.titleSuggest.log("\(videoId): \"\(title)\"")
             } catch {
-                print("[title-suggest] \(videoId): upload failed: \(error)")
+                Log.titleSuggest.log("\(videoId): upload failed: \(error)")
             }
             return title
         #else
@@ -397,15 +397,15 @@ actor TranscribeAgent {
                 preamble: preamble,
                 titleHint: titleHint
             ) else {
-                print("[description-suggest] \(videoId): no usable suggestion")
+                Log.descriptionSuggest.log("\(videoId): no usable suggestion")
                 return
             }
 
             do {
                 try await uploadSuggestedDescription(videoId: videoId, description: description)
-                print("[description-suggest] \(videoId): \"\(description)\"")
+                Log.descriptionSuggest.log("\(videoId): \"\(description)\"")
             } catch {
-                print("[description-suggest] \(videoId): upload failed: \(error)")
+                Log.descriptionSuggest.log("\(videoId): upload failed: \(error)")
             }
         #endif
     }
@@ -469,6 +469,6 @@ actor TranscribeAgent {
         let now = ISO8601DateFormatter().string(from: Date())
         let contents = Data("orphaned: server returned 404 at \(now)\n".utf8)
         try? contents.write(to: path)
-        print("[transcribe] marked orphaned: \(localDir.lastPathComponent)")
+        Log.transcribe.log("marked orphaned: \(localDir.lastPathComponent)")
     }
 }

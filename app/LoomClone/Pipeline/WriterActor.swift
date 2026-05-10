@@ -162,7 +162,7 @@ actor WriterActor {
         self.segmentIndex = 0
         self.hasStartedSession = false
 
-        print("[writer] Configured: H.264 High \(preset.bitrate / 1_000_000)Mbps @ \(fps)fps, AAC-LC 128kbps, 4s segments")
+        Log.writer.log("Configured: H.264 High \(preset.bitrate / 1_000_000)Mbps @ \(fps)fps, AAC-LC 128kbps, 4s segments")
     }
 
     // MARK: - Writing
@@ -182,7 +182,7 @@ actor WriterActor {
         }
         writer.startSession(atSourceTime: TimestampAdjuster.defaultPrimingOffset)
         hasStartedSession = true
-        print("[writer] Started writing")
+        Log.writer.log("Started writing")
     }
 
     /// Append a sample buffer whose PTS is already in final form. Both
@@ -216,12 +216,12 @@ actor WriterActor {
     /// segment boundaries itself.
     func pause(at _: CMTime) {
         isPaused = true
-        print("[writer] Paused")
+        Log.writer.log("Paused")
     }
 
     func resume(at _: CMTime) {
         isPaused = false
-        print("[writer] Resumed")
+        Log.writer.log("Resumed")
     }
 
     // MARK: - Finish
@@ -256,7 +256,7 @@ actor WriterActor {
         // Wrapping it in withCheckedContinuation would hang the actor forever.
         // Check status first and bail with a log if the writer already failed.
         if writer.status == .failed {
-            print("[writer] FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
+            Log.writer.log("FAILED before finish: \(writer.error?.localizedDescription ?? "unknown")")
         } else {
             // Mark both inputs as finished before calling finishWriting (Apple
             // best practice — tells the writer no more samples are coming).
@@ -266,9 +266,9 @@ actor WriterActor {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 writer.finishWriting { continuation.resume() }
             }
-            print("[writer] Finished writing, status: \(writer.status.rawValue)")
+            Log.writer.log("Finished writing, status: \(writer.status.rawValue)")
             if let error = writer.error {
-                print("[writer] Error: \(error)")
+                Log.writer.log("Error: \(error)")
             }
         }
 
@@ -304,13 +304,13 @@ actor WriterActor {
                 duration: 0,
                 type: .initialization
             )
-            print("[writer] Init segment: \(pending.data.count) bytes")
+            Log.writer.log("Init segment: \(pending.data.count) bytes")
         } else {
             let duration = pending.duration ?? 4.0
 
             // finishWriting() emits empty trailing segments with 0 duration — skip them
             if duration < 0.01 {
-                print("[writer] Skipping empty segment (\(pending.data.count) bytes, \(String(format: "%.3f", duration))s)")
+                Log.writer.log("Skipping empty segment (\(pending.data.count) bytes, \(String(format: "%.3f", duration))s)")
                 return
             }
 
@@ -323,7 +323,7 @@ actor WriterActor {
                 duration: duration,
                 type: .media
             )
-            print("[writer] Segment \(filename): \(pending.data.count) bytes, \(String(format: "%.3f", duration))s")
+            Log.writer.log("Segment \(filename): \(pending.data.count) bytes, \(String(format: "%.3f", duration))s")
         }
 
         await onSegmentReady?(emission)

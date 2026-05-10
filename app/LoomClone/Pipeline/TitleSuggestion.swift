@@ -55,7 +55,7 @@ import Foundation
                 guard isValidTitle(title) else { return nil }
                 return title
             } catch {
-                print("[title-suggest] generation failed: \(error)")
+                Log.titleSuggest.log("generation failed: \(error)")
                 return nil
             }
         }

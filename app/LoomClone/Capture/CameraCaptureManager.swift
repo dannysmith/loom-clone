@@ -99,7 +99,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     ) async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         guard granted else {
-            print("[camera] Permission denied")
+            Log.camera.log("Permission denied")
             return
         }
 
@@ -135,8 +135,8 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
                 let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                print(String(
-                    format: "[camera] Selected format: %dx%d @ %.2ffps (target: %d, cap: %d)",
+                Log.camera.log(String(
+                    format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d)",
                     dims.width,
                     dims.height,
                     min(rate, Double(targetFPS.rawValue)),
@@ -144,7 +144,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                     maxHeight
                 ))
             } catch {
-                print("[camera] Could not set activeFormat: \(error) — falling back to .high")
+                Log.camera.log("Could not set activeFormat: \(error) — falling back to .high")
                 session.sessionPreset = .high
             }
         } else {
@@ -157,7 +157,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 session.addInput(input)
             }
         } catch {
-            print("[camera] Failed to create input: \(error)")
+            Log.camera.log("Failed to create input: \(error)")
             return
         }
 
@@ -187,11 +187,11 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                         session.addOutput(audioOut)
                         audioOutput = audioOut
                         hasAudioCapture = true
-                        print("[camera] Added mic to shared session: \(micDevice.localizedName)")
+                        Log.camera.log("Added mic to shared session: \(micDevice.localizedName)")
                     }
                 }
             } catch {
-                print("[camera] Failed to add mic to shared session: \(error) — standalone mic will be used")
+                Log.camera.log("Failed to add mic to shared session: \(error) — standalone mic will be used")
             }
         }
 
@@ -209,7 +209,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             guard let self else { return }
             let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
                 ?? NSError(domain: "AVCaptureSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown runtime error"])
-            print("[camera] Session runtime error: \(error)")
+            Log.camera.log("Session runtime error: \(error)")
             self.onSessionError?(error)
         }
         let interruptionObserver = NotificationCenter.default.addObserver(
@@ -218,7 +218,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             queue: nil
         ) { [weak self] notification in
             guard let self else { return }
-            print("[camera] Session interrupted: \(notification.userInfo ?? [:])")
+            Log.camera.log("Session interrupted: \(notification.userInfo ?? [:])")
             self.onSessionInterrupted?()
         }
         sessionObservers = [errorObserver, interruptionObserver]
@@ -243,7 +243,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         // size at zero — and the raw camera writer was never created.
         let activeDims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         nativePixelSize = CGSize(width: Int(activeDims.width), height: Int(activeDims.height))
-        print("[camera] Capture started: \(device.localizedName) @ \(activeDims.width)x\(activeDims.height)")
+        Log.camera.log("Capture started: \(device.localizedName) @ \(activeDims.width)x\(activeDims.height)")
 
         // Format introspection — logs what the active format declares for
         // pixel format + colour metadata. Many USB cameras and capture cards
@@ -264,7 +264,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         let transfer = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String ??
             "none"
         let matrix = CMFormatDescriptionGetExtension(fmtDesc, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String ?? "none"
-        print("[camera] Format introspection: subType=\(subTypeStr) primaries=\(primaries) transfer=\(transfer) matrix=\(matrix)")
+        Log.camera.log("Format introspection: subType=\(subTypeStr) primaries=\(primaries) transfer=\(transfer) matrix=\(matrix)")
     }
 
     func stopCapture() async {
@@ -282,7 +282,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         self.session = nil
         self.audioOutput = nil
         self.hasAudioCapture = false
-        print("[camera] Capture stopped")
+        Log.camera.log("Capture stopped")
     }
 }
 

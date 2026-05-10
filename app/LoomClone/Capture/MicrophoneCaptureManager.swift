@@ -22,7 +22,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
     func startCapture(device: AVCaptureDevice) async {
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else {
-            print("[mic] Permission denied")
+            Log.mic.log("Permission denied")
             return
         }
 
@@ -35,7 +35,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
                 session.addInput(input)
             }
         } catch {
-            print("[mic] Failed to create input: \(error)")
+            Log.mic.log("Failed to create input: \(error)")
             return
         }
 
@@ -57,7 +57,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
             guard let self else { return }
             let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
                 ?? NSError(domain: "AVCaptureSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown runtime error"])
-            print("[mic] Session runtime error: \(error)")
+            Log.mic.log("Session runtime error: \(error)")
             self.onSessionError?(error)
         }
         let interruptionObserver = NotificationCenter.default.addObserver(
@@ -66,7 +66,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
             queue: nil
         ) { [weak self] notification in
             guard let self else { return }
-            print("[mic] Session interrupted: \(notification.userInfo ?? [:])")
+            Log.mic.log("Session interrupted: \(notification.userInfo ?? [:])")
             self.onSessionInterrupted?()
         }
         sessionObservers = [errorObserver, interruptionObserver]
@@ -82,11 +82,11 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
         }
         let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(device.activeFormat.formatDescription)
         if let asbd {
-            print(
-                "[mic] Capture started: \(device.localizedName) — \(Int(asbd.pointee.mChannelsPerFrame))ch, \(Int(asbd.pointee.mSampleRate)) Hz"
+            Log.mic.log(
+                "Capture started: \(device.localizedName) — \(Int(asbd.pointee.mChannelsPerFrame))ch, \(Int(asbd.pointee.mSampleRate)) Hz"
             )
         } else {
-            print("[mic] Capture started: \(device.localizedName)")
+            Log.mic.log("Capture started: \(device.localizedName)")
         }
     }
 
@@ -103,7 +103,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
             }
         }
         self.session = nil
-        print("[mic] Capture stopped")
+        Log.mic.log("Capture stopped")
     }
 }
 

@@ -24,9 +24,9 @@ extension RecordingCoordinator {
             // TCC denial: Code -3801
             if error.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain", error.code == -3801 {
                 screenPermissionDenied = true
-                print("[devices] Screen recording permission denied — user must grant in System Settings")
+                Log.devices.log("Screen recording permission denied — user must grant in System Settings")
             } else {
-                print("[devices] Failed to enumerate displays: \(error)")
+                Log.devices.log("Failed to enumerate displays: \(error)")
             }
         }
 

@@ -30,7 +30,7 @@ extension RecordingActor {
                     activeSourceWarnings.insert(.screenStale)
                     let t = logicalElapsedSeconds()
                     timeline.recordSourceStale(source: "screen", t: t, staleDuration: stale)
-                    print("[health] Screen stale: \(String(format: "%.1f", stale))s since last frame")
+                    Log.health.log("Screen stale: \(String(format: "%.1f", stale))s since last frame")
                     fireWarning(.init(
                         id: .screenStale,
                         severity: mode == .screenOnly ? .critical : .warning,
@@ -50,7 +50,7 @@ extension RecordingActor {
                     activeSourceWarnings.insert(.cameraStale)
                     let t = logicalElapsedSeconds()
                     timeline.recordSourceStale(source: "camera", t: t, staleDuration: stale)
-                    print("[health] Camera stale: \(String(format: "%.1f", stale))s since last frame")
+                    Log.health.log("Camera stale: \(String(format: "%.1f", stale))s since last frame")
                     fireWarning(.init(
                         id: .cameraStale,
                         severity: mode == .cameraOnly ? .critical : .warning,
@@ -69,7 +69,7 @@ extension RecordingActor {
                     activeSourceWarnings.insert(.audioMissing)
                     let t = logicalElapsedSeconds()
                     timeline.recordSourceStale(source: "audio", t: t, staleDuration: stale)
-                    print("[health] Audio missing: \(String(format: "%.1f", stale))s since last sample")
+                    Log.health.log("Audio missing: \(String(format: "%.1f", stale))s since last sample")
                     fireWarning(.init(
                         id: .audioMissing,
                         severity: .warning,
@@ -87,7 +87,7 @@ extension RecordingActor {
         lastScreenFrameHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         if activeSourceWarnings.remove(.screenStale) != nil {
             timeline.recordSourceRecovered(source: "screen", t: logicalElapsedSeconds())
-            print("[health] Screen recovered")
+            Log.health.log("Screen recovered")
             clearWarning(.screenStale)
         }
     }
@@ -96,7 +96,7 @@ extension RecordingActor {
         lastCameraFrameHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         if activeSourceWarnings.remove(.cameraStale) != nil {
             timeline.recordSourceRecovered(source: "camera", t: logicalElapsedSeconds())
-            print("[health] Camera recovered")
+            Log.health.log("Camera recovered")
             clearWarning(.cameraStale)
         }
     }
@@ -105,7 +105,7 @@ extension RecordingActor {
         lastAudioSampleHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         if activeSourceWarnings.remove(.audioMissing) != nil {
             timeline.recordSourceRecovered(source: "audio", t: logicalElapsedSeconds())
-            print("[health] Audio recovered")
+            Log.health.log("Audio recovered")
             clearWarning(.audioMissing)
         }
     }
@@ -118,7 +118,7 @@ extension RecordingActor {
         let t = logicalElapsedSeconds()
         let desc = (error as NSError).localizedDescription
         timeline.recordSourceFailed(source: "screen", error: desc, t: t)
-        print("[health] Screen capture failed: \(desc)")
+        Log.health.log("Screen capture failed: \(desc)")
 
         activeSourceWarnings.insert(.screenFailed)
         fireWarning(.init(
@@ -135,7 +135,7 @@ extension RecordingActor {
         let t = logicalElapsedSeconds()
         let desc = (error as NSError).localizedDescription
         timeline.recordSourceFailed(source: "camera", error: desc, t: t)
-        print("[health] Camera session error: \(desc)")
+        Log.health.log("Camera session error: \(desc)")
 
         failoverSharedSessionAudio(reason: "camera session error: \(desc)", t: t)
 
@@ -153,7 +153,7 @@ extension RecordingActor {
         guard isRecording, !isStopping else { return }
         let t = logicalElapsedSeconds()
         timeline.recordSourceFailed(source: "camera", error: "session interrupted", t: t)
-        print("[health] Camera session interrupted")
+        Log.health.log("Camera session interrupted")
 
         failoverSharedSessionAudio(reason: "camera session interrupted", t: t)
 
@@ -176,7 +176,7 @@ extension RecordingActor {
         guard sharedSessionAudioActive else { return }
         sharedSessionAudioActive = false
         timeline.recordAudioFailover(reason: reason, t: t)
-        print("[health] Audio failover: shared session dead, routing standalone mic to HLS")
+        Log.health.log("Audio failover: shared session dead, routing standalone mic to HLS")
     }
 
     /// Called from the MicrophoneCaptureManager's session error notification.
@@ -185,7 +185,7 @@ extension RecordingActor {
         let t = logicalElapsedSeconds()
         let desc = (error as NSError).localizedDescription
         timeline.recordSourceFailed(source: "audio", error: desc, t: t)
-        print("[health] Mic session error: \(desc)")
+        Log.health.log("Mic session error: \(desc)")
 
         activeSourceWarnings.insert(.audioFailed)
         fireWarning(.init(
@@ -201,7 +201,7 @@ extension RecordingActor {
         guard isRecording, !isStopping else { return }
         let t = logicalElapsedSeconds()
         timeline.recordSourceFailed(source: "audio", error: "session interrupted", t: t)
-        print("[health] Mic session interrupted")
+        Log.health.log("Mic session interrupted")
 
         activeSourceWarnings.insert(.audioFailed)
         fireWarning(.init(
@@ -226,7 +226,7 @@ extension RecordingActor {
         let errorDesc = await writer.writerError()
         let t = logicalElapsedSeconds()
         timeline.recordHLSWriterFailed(error: errorDesc ?? "unknown", t: t)
-        print("[health] HLS writer failed: \(errorDesc ?? "unknown")")
+        Log.health.log("HLS writer failed: \(errorDesc ?? "unknown")")
 
         fireWarning(.init(
             id: .hlsWriterFailed,

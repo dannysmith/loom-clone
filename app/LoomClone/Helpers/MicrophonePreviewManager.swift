@@ -43,7 +43,7 @@ final class MicrophonePreviewManager {
 
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else {
-            print("[mic-preview] Permission denied")
+            Log.micPreview.log("Permission denied")
             return
         }
 
@@ -56,7 +56,7 @@ final class MicrophonePreviewManager {
                 session.addInput(input)
             }
         } catch {
-            print("[mic-preview] Failed to create input: \(error)")
+            Log.micPreview.log("Failed to create input: \(error)")
             return
         }
 
@@ -78,7 +78,7 @@ final class MicrophonePreviewManager {
         }
         self.isActive = true
         startPolling()
-        print("[mic-preview] Started: \(device.localizedName)")
+        Log.micPreview.log("Started: \(device.localizedName)")
     }
 
     func stop() async {
@@ -96,7 +96,7 @@ final class MicrophonePreviewManager {
             }
         }
         resetState()
-        print("[mic-preview] Stopped")
+        Log.micPreview.log("Stopped")
     }
 
     private func resetState() {

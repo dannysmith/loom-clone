@@ -115,7 +115,7 @@ actor HealAgent {
         inFlight.insert(videoId)
         defer { inFlight.remove(videoId) }
 
-        print("[heal] \(videoId): starting")
+        Log.heal.log("\(videoId): starting")
 
         // Authoritative missing list from the server. We trust this over the
         // local `uploaded: false` flags — Phase 3 live retries may have
@@ -128,7 +128,7 @@ actor HealAgent {
             markOrphaned(localDir: localDir)
             return
         case let .failure(err):
-            print("[heal] \(videoId): initial /complete failed: \(err) — will retry next launch")
+            Log.heal.log("\(videoId): initial /complete failed: \(err) — will retry next launch")
             return
         }
 
@@ -141,7 +141,7 @@ actor HealAgent {
                 out.uploadError = nil
                 return out
             }
-            print("[heal] \(videoId): nothing missing server-side")
+            Log.heal.log("\(videoId): nothing missing server-side")
             return
         }
 
@@ -149,7 +149,7 @@ actor HealAgent {
         case .orphaned:
             return
         case let .incomplete(count):
-            print("[heal] \(videoId): \(count) segment(s) still unhealed — will retry next launch")
+            Log.heal.log("\(videoId): \(count) segment(s) still unhealed — will retry next launch")
             return
         case .allHealed:
             break
@@ -161,13 +161,13 @@ actor HealAgent {
         let updatedTimeline = (try? Data(contentsOf: localDir.appendingPathComponent("recording.json"))) ?? timelineData
         switch await postComplete(videoId: videoId, timelineData: updatedTimeline) {
         case let .ok(_, finalMissing) where finalMissing.isEmpty:
-            print("[heal] \(videoId): complete")
+            Log.heal.log("\(videoId): complete")
         case let .ok(_, finalMissing):
-            print("[heal] \(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
+            Log.heal.log("\(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
         case .orphaned:
             markOrphaned(localDir: localDir)
         case let .failure(err):
-            print("[heal] \(videoId): final /complete failed: \(err) — will retry next launch")
+            Log.heal.log("\(videoId): final /complete failed: \(err) — will retry next launch")
         }
     }
 
@@ -188,7 +188,7 @@ actor HealAgent {
         for filename in missing {
             let filePath = localDir.appendingPathComponent(filename)
             guard FileManager.default.fileExists(atPath: filePath.path) else {
-                print("[heal] \(videoId): local file missing, cannot heal \(filename)")
+                Log.heal.log("\(videoId): local file missing, cannot heal \(filename)")
                 failed.append(filename)
                 continue
             }
@@ -196,7 +196,7 @@ actor HealAgent {
             do {
                 data = try Data(contentsOf: filePath)
             } catch {
-                print("[heal] \(videoId): read failed for \(filename): \(error)")
+                Log.heal.log("\(videoId): read failed for \(filename): \(error)")
                 failed.append(filename)
                 continue
             }
@@ -215,12 +215,12 @@ actor HealAgent {
                     out.uploadError = nil
                     return out
                 }
-                print("[heal] \(videoId): healed \(filename)")
+                Log.heal.log("\(videoId): healed \(filename)")
             } catch HealError.orphaned {
                 markOrphaned(localDir: localDir)
                 return .orphaned
             } catch {
-                print("[heal] \(videoId): PUT failed for \(filename): \(error)")
+                Log.heal.log("\(videoId): PUT failed for \(filename): \(error)")
                 failed.append(filename)
             }
         }
@@ -296,7 +296,7 @@ actor HealAgent {
         let now = ISO8601DateFormatter().string(from: Date())
         let contents = Data("orphaned: server returned 404 at \(now)\n".utf8)
         try? contents.write(to: path)
-        print("[heal] marked orphaned: \(localDir.lastPathComponent)")
+        Log.heal.log("marked orphaned: \(localDir.lastPathComponent)")
     }
 
     // MARK: - Timeline parsing & patching
@@ -372,7 +372,7 @@ actor HealAgent {
             try out.write(to: url)
             return segments
         } catch {
-            print("[heal] failed to rewrite recording.json: \(error)")
+            Log.heal.log("failed to rewrite recording.json: \(error)")
             return nil
         }
     }

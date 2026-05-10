@@ -15,7 +15,7 @@ enum HALInputLatency {
     /// Returns 0 if the device can't be resolved or any query fails.
     static func totalInputLatency(for device: AVCaptureDevice) -> Double {
         guard let audioDeviceID = resolveAudioDeviceID(uid: device.uniqueID) else {
-            print("[hal-latency] Could not resolve AudioDeviceID for \(device.localizedName)")
+            Log.halLatency.log("Could not resolve AudioDeviceID for \(device.localizedName)")
             return 0
         }
 
@@ -45,8 +45,8 @@ enum HALInputLatency {
         let bufferSeconds = Double(bufferFrames) / sampleRate
         let total = deviceSeconds + bufferSeconds
 
-        print(String(
-            format: "[hal-latency] %@: dev=%d safety=%d stream=%d buf=%d rate=%.0f → %.2fms",
+        Log.halLatency.log(String(
+            format: "%@: dev=%d safety=%d stream=%d buf=%d rate=%.0f → %.2fms",
             device.localizedName,
             deviceLatency, safetyOffset, streamLatency, bufferFrames,
             sampleRate, total * 1000

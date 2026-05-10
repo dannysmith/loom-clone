@@ -312,16 +312,16 @@ actor RecordingActor {
         timeline.markStopped(logicalDuration: logicalDuration)
 
         // Stop the metronome first so no more frames get appended
-        print("[recording] Stopping metronome...")
+        Log.recording.log("Stopping metronome...")
         await cancelMetronome()
-        print("[recording] Metronome stopped")
+        Log.recording.log("Metronome stopped")
 
         // Stop captures (each await waits for stopRunning() to actually return)
-        print("[recording] Stopping captures...")
+        Log.recording.log("Stopping captures...")
         await screenCapture.stopCapture()
         await cameraCapture.stopCapture()
         await micCapture.stopCapture()
-        print("[recording] Captures stopped")
+        Log.recording.log("Captures stopped")
 
         // Kick off raw writer finishes in the background, in parallel with
         // the composited writer's finish flow. Each raw writer is independent
@@ -353,9 +353,9 @@ actor RecordingActor {
         // processed by the writer's consumer — i.e. recorded in the timeline
         // and enqueued for upload. After this line, no more segments can
         // appear from the encoder.
-        print("[recording] Finishing composited writer...")
+        Log.recording.log("Finishing composited writer...")
         await writer.finish()
-        print("[recording] Composited writer done")
+        Log.recording.log("Composited writer done")
 
         // Drain the upload queue, but only up to a grace window. With Phase 3's
         // unbounded retry policy, waiting forever here would hang the stop flow
@@ -383,14 +383,14 @@ actor RecordingActor {
             do {
                 try data.write(to: path)
             } catch {
-                print("[recording] Failed to write local timeline: \(error)")
+                Log.recording.log("Failed to write local timeline: \(error)")
             }
         }
 
         // Complete upload (includes the timeline in the payload)
         do {
             let result = try await upload.complete(timeline: timelineData)
-            print("[recording] Stopped, URL: \(result.url) (missing=\(result.missing.count))")
+            Log.recording.log("Stopped, URL: \(result.url) (missing=\(result.missing.count))")
             guard let videoId = await upload.videoId,
                   let localDir = localSavePath
             else {
@@ -417,7 +417,7 @@ actor RecordingActor {
                 missing: result.missing
             )
         } catch {
-            print("[recording] Complete failed: \(error)")
+            Log.recording.log("Complete failed: \(error)")
             return nil
         }
     }
@@ -515,7 +515,7 @@ actor RecordingActor {
         do {
             return try encoder.encode(timeline)
         } catch {
-            print("[recording] Failed to encode timeline: \(error)")
+            Log.recording.log("Failed to encode timeline: \(error)")
             return nil
         }
     }
@@ -553,7 +553,7 @@ actor RecordingActor {
         }
         localSavePath = nil
 
-        print("[recording] Cancelled")
+        Log.recording.log("Cancelled")
     }
 
     /// Cancel during prepare/countdown — captures may be running but the
@@ -576,7 +576,7 @@ actor RecordingActor {
         cameraRawWriter = nil
         audioRawWriter = nil
 
-        print("[recording] Preparation cancelled")
+        Log.recording.log("Preparation cancelled")
     }
 
     // MARK: - Pause / Resume
@@ -649,7 +649,7 @@ actor RecordingActor {
         let previous = mode
         mode = newMode
         timeline.recordModeSwitch(from: previous, to: newMode, t: timeline.now())
-        print("[recording] Mode switched to: \(newMode)")
+        Log.recording.log("Mode switched to: \(newMode)")
     }
 
     func switchPipPosition(to newPosition: PipPosition) {
@@ -659,7 +659,7 @@ actor RecordingActor {
         if isRecording {
             timeline.recordPipPositionChanged(from: previous, to: newPosition, t: timeline.now())
         }
-        print("[recording] PiP position switched to: \(newPosition)")
+        Log.recording.log("PiP position switched to: \(newPosition)")
     }
 
     // MARK: - App Exclusion Updates
@@ -674,7 +674,7 @@ actor RecordingActor {
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         } catch {
-            print("[exclusion] SCShareableContent query failed: \(error)")
+            Log.exclusion.log("SCShareableContent query failed: \(error)")
             return
         }
 
@@ -714,7 +714,7 @@ actor RecordingActor {
                 exceptingWindows: exceptingWindows
             )
         } catch {
-            print("[exclusion] Filter update failed: \(error)")
+            Log.exclusion.log("Filter update failed: \(error)")
         }
     }
 
@@ -746,14 +746,14 @@ actor RecordingActor {
         // file on every attempt, so the file must exist before enqueuing.
         // The local copy is also the safety net that Phase 2 healing relies on.
         guard let localDir = localSavePath else {
-            print("[recording] No local dir, dropping segment \(emission.filename)")
+            Log.recording.log("No local dir, dropping segment \(emission.filename)")
             return
         }
         let filePath = localDir.appendingPathComponent(emission.filename)
         do {
             try emission.data.write(to: filePath)
         } catch {
-            print("[recording] Failed to save local segment \(emission.filename): \(error)")
+            Log.recording.log("Failed to save local segment \(emission.filename): \(error)")
             return
         }
 

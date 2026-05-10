@@ -86,7 +86,7 @@ import Foundation
                 guard isValidDescription(cleaned) else { return nil }
                 return cleaned
             } catch {
-                print("[description-suggest] generation failed: \(error)")
+                Log.descriptionSuggest.log("generation failed: \(error)")
                 return nil
             }
         }

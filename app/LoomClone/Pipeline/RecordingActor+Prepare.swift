@@ -199,7 +199,7 @@ extension RecordingActor {
             frameRate: frameRate
         )
 
-        print("[recording] Prepared: mode=\(mode), id=\(session.id)")
+        Log.recording.log("Prepared: mode=\(mode), id=\(session.id)")
         return session
     }
 
@@ -241,10 +241,11 @@ extension RecordingActor {
             anchor = now - maxAnchorAge
             if let cachedPTS, cachedPTS.isValid {
                 let ageMS = (now - cachedPTS).seconds * 1000
-                print(String(
-                    format: "[recording] Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms",
+                let clampMS = maxAnchorAge.seconds * 1000
+                Log.recording.log(String(
+                    format: "Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms",
                     ageMS,
-                    maxAnchorAge.seconds * 1000
+                    clampMS
                 ))
             }
         }
@@ -272,7 +273,7 @@ extension RecordingActor {
         // regardless of what the underlying sources are doing.
         startMetronome()
 
-        print("[recording] Committed at \(recordingStartTime?.seconds ?? 0)")
+        Log.recording.log("Committed at \(recordingStartTime?.seconds ?? 0)")
     }
 
     /// Cleanup path for `prepareRecording` failing after the HLS / screen-raw /
@@ -291,7 +292,7 @@ extension RecordingActor {
             audioRawWriter = nil
             rawAudioConfig = nil
         }
-        print("[recording] Tore down warmed-up writers after prepare failure")
+        Log.recording.log("Tore down warmed-up writers after prepare failure")
     }
 
     // MARK: - Prepare Helpers
@@ -359,14 +360,14 @@ extension RecordingActor {
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         } catch {
-            print("[exclusion] SCShareableContent query failed: \(error)")
+            Log.exclusion.log("SCShareableContent query failed: \(error)")
             return (appsToExclude, [])
         }
 
         // User-selected apps
         for app in content.applications where excludedBundleIDs.contains(app.bundleIdentifier) {
             appsToExclude.append(app)
-            print("[exclusion] Excluding \(app.bundleIdentifier) (pid: \(app.processID))")
+            Log.exclusion.log("Excluding \(app.bundleIdentifier) (pid: \(app.processID))")
         }
 
         var exceptingWindows: [SCWindow] = []
@@ -376,7 +377,7 @@ extension RecordingActor {
             if let finder = content.applications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
                 if !appsToExclude.contains(where: { $0.processID == finder.processID }) {
                     appsToExclude.append(finder)
-                    print("[exclusion] Excluding Finder for desktop icons")
+                    Log.exclusion.log("Excluding Finder for desktop icons")
                 }
                 // Re-include Finder windows at normal window level (browser windows).
                 // Desktop icon windows sit at kCGDesktopIconWindowLevel and stay excluded.
@@ -384,7 +385,7 @@ extension RecordingActor {
                     $0.owningApplication?.processID == finder.processID && $0.windowLayer == 0
                 }
                 if !exceptingWindows.isEmpty {
-                    print("[exclusion] Excepting \(exceptingWindows.count) Finder browser window(s)")
+                    Log.exclusion.log("Excepting \(exceptingWindows.count) Finder browser window(s)")
                 }
             }
         }
@@ -412,9 +413,9 @@ extension RecordingActor {
                 try await w.configure()
                 screenRawWriter = w
                 rawScreenDims = (width, height)
-                print("[recording] Raw screen writer: ProRes 422 Proxy at \(width)x\(height) (hardware ProRes engine)")
+                Log.recording.log("Raw screen writer: ProRes 422 Proxy at \(width)x\(height) (hardware ProRes engine)")
             } catch {
-                print("[recording] Failed to configure raw screen writer: \(error)")
+                Log.recording.log("Failed to configure raw screen writer: \(error)")
             }
         }
 
@@ -428,9 +429,9 @@ extension RecordingActor {
                 try await w.configure()
                 audioRawWriter = w
                 rawAudioConfig = (bitrate, sampleRate, channels)
-                print("[recording] Raw audio writer: AAC \(bitrate / 1000) kbps")
+                Log.recording.log("Raw audio writer: AAC \(bitrate / 1000) kbps")
             } catch {
-                print("[recording] Failed to configure raw audio writer: \(error)")
+                Log.recording.log("Failed to configure raw audio writer: \(error)")
             }
         }
     }
@@ -537,7 +538,7 @@ extension RecordingActor {
         // The session is running but the first sample can take 50-200ms.
         if microphone != nil {
             let arrived = await waitForFirstAudio(timeout: .seconds(1))
-            print("[recording] Audio \(arrived ? "ready" : "timeout, proceeding anyway")")
+            Log.recording.log("Audio \(arrived ? "ready" : "timeout, proceeding anyway")")
         }
     }
 
@@ -594,7 +595,7 @@ extension RecordingActor {
         let width = Int(nativeSize.width)
         let height = Int(nativeSize.height)
         guard width > 0, height > 0 else {
-            print("[recording] Camera nativePixelSize is zero — skipping raw camera writer")
+            Log.recording.log("Camera nativePixelSize is zero — skipping raw camera writer")
             return
         }
         let bitrate = 12_000_000
@@ -613,9 +614,9 @@ extension RecordingActor {
             try await w.configure()
             cameraRawWriter = w
             rawCameraDims = (width, height, bitrate)
-            print("[recording] Raw camera writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps\(withAudio ? " + audio" : "")")
+            Log.recording.log("Raw camera writer: \(width)x\(height) @ \(bitrate / 1_000_000) Mbps\(withAudio ? " + audio" : "")")
         } catch {
-            print("[recording] Failed to configure raw camera writer: \(error)")
+            Log.recording.log("Failed to configure raw camera writer: \(error)")
         }
     }
 }

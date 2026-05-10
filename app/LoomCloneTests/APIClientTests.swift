@@ -20,19 +20,29 @@ final class APIClientTests: XCTestCase {
         try? testKeyStore.delete()
     }
 
-    func testURLComposition() {
+    func testURLComposition() throws {
         let client = APIClient(baseURL: "http://127.0.0.1:3000", keyStore: testKeyStore)
         XCTAssertEqual(
-            client.url(path: "/api/videos").absoluteString,
+            try client.url(path: "/api/videos").absoluteString,
             "http://127.0.0.1:3000/api/videos"
         )
     }
 
-    func testUnauthedRequestHasNoAuthorizationHeader() {
+    func testUnauthedRequestHasNoAuthorizationHeader() throws {
         let client = APIClient(baseURL: "http://127.0.0.1:3000", keyStore: testKeyStore)
-        let req = client.request(path: "/api/health", timeout: 2)
+        let req = try client.request(path: "/api/health", timeout: 2)
         XCTAssertNil(req.value(forHTTPHeaderField: "Authorization"))
         XCTAssertEqual(req.timeoutInterval, 2)
+    }
+
+    func testURLThrowsForInvalidBaseURL() {
+        let client = APIClient(baseURL: "", keyStore: testKeyStore)
+        XCTAssertThrowsError(try client.url(path: "")) { error in
+            guard case APIClient.ClientError.invalidBaseURL = error else {
+                XCTFail("Expected invalidBaseURL, got \(error)")
+                return
+            }
+        }
     }
 
     func testAuthorizedRequestAttachesBearerHeader() throws {

@@ -105,7 +105,7 @@ actor CompositionActor {
         overlayPadding = (20.0 * ratio).rounded()
         circleMask = CircleMaskGenerator.mask(diameter: Int(overlayDiameter))
 
-        print("[composition] Configured: \(preset.width)x\(preset.height), PiP=\(Int(overlayDiameter))px")
+        Log.composition.log("Configured: \(preset.width)x\(preset.height), PiP=\(Int(overlayDiameter))px")
     }
 
     // MARK: - Camera Frame Adjustments
@@ -157,7 +157,7 @@ actor CompositionActor {
         pipPosition: PipPosition = .bottomRight
     ) async -> Result<CVPixelBuffer, CompositionError>? {
         guard let output = outputPool.createBuffer() else {
-            print("[composition] Failed to create output buffer")
+            Log.composition.log("Failed to create output buffer")
             return nil
         }
 
@@ -287,7 +287,7 @@ actor CompositionActor {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue()
         else {
-            print("[composition] Rebuild failed: MTLCreateSystemDefaultDevice / makeCommandQueue returned nil")
+            Log.composition.log("Rebuild failed: MTLCreateSystemDefaultDevice / makeCommandQueue returned nil")
             return false
         }
 
@@ -295,7 +295,7 @@ actor CompositionActor {
             mtlCommandQueue: queue,
             options: [.cacheIntermediates: false]
         )
-        print("[composition] Rebuilt CIContext and MTLCommandQueue")
+        Log.composition.log("Rebuilt CIContext and MTLCommandQueue")
         return true
     }
 

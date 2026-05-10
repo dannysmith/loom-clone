@@ -434,7 +434,7 @@ final class RecordingCoordinator {
     func startRecording() {
         guard state == .idle else { return }
         guard !availableModes.isEmpty else {
-            print("[coordinator] No sources selected — record button should be disabled")
+            Log.coordinator.log("No sources selected — record button should be disabled")
             return
         }
         // Make sure the mode the user is about to record in is actually
@@ -538,7 +538,7 @@ final class RecordingCoordinator {
                         hideDesktopIcons: currentHideDesktopIcons
                     )
                 } catch {
-                    print("[coordinator] prepareRecording failed: \(error)")
+                    Log.coordinator.log("prepareRecording failed: \(error)")
                     return nil
                 }
             }
@@ -879,7 +879,7 @@ final class RecordingCoordinator {
                   let bundleID = app.bundleIdentifier,
                   self.excludedAppBundleIDs.contains(bundleID)
             else { return }
-            print("[coordinator] Excluded app launched mid-recording: \(bundleID)")
+            Log.coordinator.log("Excluded app launched mid-recording: \(bundleID)")
             Task { await self.recordingActor?.updateExcludedApps() }
         }
     }

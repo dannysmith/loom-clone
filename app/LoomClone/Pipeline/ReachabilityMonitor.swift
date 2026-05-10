@@ -44,7 +44,7 @@ final class ReachabilityMonitor: @unchecked Sendable {
         lock.unlock()
 
         if wasOnline != nowOnline {
-            print("[reachability] \(nowOnline ? "online" : "offline")")
+            Log.reachability.log("\(nowOnline ? "online" : "offline")")
         }
     }
 }

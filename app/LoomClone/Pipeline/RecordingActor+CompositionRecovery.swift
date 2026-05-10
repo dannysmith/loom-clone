@@ -24,7 +24,7 @@ extension RecordingActor {
         // spurious gpu_wobble flag when the final metronome tick races the
         // stop signal.
         if isStopping {
-            print("[recording] Composition failure during stop — skipping rebuild")
+            Log.recording.log("Composition failure during stop — skipping rebuild")
             return
         }
 
@@ -40,16 +40,16 @@ extension RecordingActor {
             detail = "waitUntilCompleted exceeded 2s"
         }
         timeline.recordCompositionFailure(kind: kind, t: t, detail: detail)
-        print("[recording] Composition failure: \(kind) — \(detail). Attempting rebuild.")
+        Log.recording.log("Composition failure: \(kind) — \(detail). Attempting rebuild.")
 
         let rebuilt = await composition.rebuildContext()
         if rebuilt {
             timeline.recordCompositionRebuilt(t: logicalElapsedSeconds())
-            print("[recording] Rebuild succeeded, recording continues")
+            Log.recording.log("Rebuild succeeded, recording continues")
             return
         }
 
-        print("[recording] Rebuild failed; escalating to terminal stop")
+        Log.recording.log("Rebuild failed; escalating to terminal stop")
         await escalateCompositionTerminalFailure(detail: "Rebuild failed after \(kind)")
     }
 
@@ -71,7 +71,7 @@ extension RecordingActor {
         if let callback = onTerminalError {
             Task { await callback(message) }
         } else {
-            print("[recording] WARN: terminal composition failure but no onTerminalError callback wired")
+            Log.recording.log("WARN: terminal composition failure but no onTerminalError callback wired")
         }
     }
 }

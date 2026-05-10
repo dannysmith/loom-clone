@@ -75,7 +75,7 @@ final class ScreenPreviewManager {
             )
             self.image = img
         } catch {
-            print("[screen-preview] Capture failed: \(error)")
+            Log.screenPreview.log("Capture failed: \(error)")
         }
     }
 }

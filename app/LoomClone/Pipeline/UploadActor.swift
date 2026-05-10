@@ -62,7 +62,7 @@ actor UploadActor {
         videoId = json.id
         slug = json.slug
 
-        print("[upload] Session created: id=\(json.id), slug=\(json.slug)")
+        Log.upload.log("Session created: id=\(json.id), slug=\(json.slug)")
         return (json.id, json.slug)
     }
 
@@ -90,7 +90,7 @@ actor UploadActor {
     /// encompassing queue task is cancelled.
     private func uploadSegment(_ segment: VideoSegment) async {
         guard let videoId else {
-            print("[upload] No video session — dropping segment \(segment.filename)")
+            Log.upload.log("No video session — dropping segment \(segment.filename)")
             onUploadResult?(segment.filename, false, "no session")
             return
         }
@@ -117,7 +117,7 @@ actor UploadActor {
             do {
                 data = try Data(contentsOf: segment.localURL)
             } catch {
-                print("[upload] Cannot read \(segment.filename) from \(segment.localURL.path): \(error)")
+                Log.upload.log("Cannot read \(segment.filename) from \(segment.localURL.path): \(error)")
                 onUploadResult?(segment.filename, false, "local read failed: \(error)")
                 return
             }
@@ -134,13 +134,13 @@ actor UploadActor {
             } catch APIClient.ClientError.missingAPIKey {
                 // No API key configured — retrying won't help. Surface a
                 // distinct failure so the Settings UI can react.
-                print("[upload] No API key configured — cannot upload \(segment.filename)")
+                Log.upload.log("No API key configured — cannot upload \(segment.filename)")
                 onUploadResult?(segment.filename, false, "missing API key")
                 return
             } catch {
                 // Unreachable in practice (authorizedRequest only throws
                 // missingAPIKey today) but the compiler needs it.
-                print("[upload] authorizedRequest failed for \(segment.filename): \(error)")
+                Log.upload.log("authorizedRequest failed for \(segment.filename): \(error)")
                 onUploadResult?(segment.filename, false, "\(error)")
                 return
             }
@@ -150,12 +150,12 @@ actor UploadActor {
                 guard http.statusCode == 200 else {
                     throw UploadError.serverError("Status \(http.statusCode)")
                 }
-                print("[upload] Uploaded \(segment.filename) (\(data.count) bytes)")
+                Log.upload.log("Uploaded \(segment.filename) (\(data.count) bytes)")
                 onUploadResult?(segment.filename, true, nil)
                 return
             } catch APIClient.ClientError.unauthorized {
                 // Revoked or invalid key — retrying won't help, bail out.
-                print("[upload] Unauthorized for \(segment.filename) — stored key is invalid or revoked")
+                Log.upload.log("Unauthorized for \(segment.filename) — stored key is invalid or revoked")
                 onUploadResult?(segment.filename, false, "unauthorized")
                 return
             } catch {
@@ -165,7 +165,7 @@ actor UploadActor {
                 if Task.isCancelled { return }
 
                 let delay = min(30.0, pow(2.0, Double(attempt - 1)))
-                print("[upload] Retry for \(segment.filename) in \(Int(delay))s (attempt \(attempt)): \(error)")
+                Log.upload.log("Retry for \(segment.filename) in \(Int(delay))s (attempt \(attempt)): \(error)")
                 do {
                     try await Task.sleep(for: .seconds(delay))
                 } catch {
@@ -200,8 +200,8 @@ actor UploadActor {
         }
 
         if let task = queueTask {
-            print(
-                "[upload] Drain timeout after \(Int(timeoutSeconds))s — cancelling queue, \(pendingSegments.count) segment(s) left for heal"
+            Log.upload.log(
+                "Drain timeout after \(Int(timeoutSeconds))s — cancelling queue, \(pendingSegments.count) segment(s) left for heal"
             )
             task.cancel()
             _ = await task.value
@@ -251,7 +251,7 @@ actor UploadActor {
         // reconstruct from baseURL + path.
         let videoURL = json.url
         let missing = json.missing ?? []
-        print("[upload] Complete: \(videoURL) (missing: \(missing.count))")
+        Log.upload.log("Complete: \(videoURL) (missing: \(missing.count))")
         return CompleteResult(
             url: videoURL,
             slug: json.slug,
@@ -279,19 +279,19 @@ actor UploadActor {
             let (_, http) = try await apiClient.send(request)
             switch http.statusCode {
             case 200:
-                print("[upload] Cancelled server-side: \(videoId)")
+                Log.upload.log("Cancelled server-side: \(videoId)")
             case 409:
                 // Video already completed — can't delete via API. Not an
                 // error from the user's perspective; the recording is safe.
-                print("[upload] Cancel skipped (video already complete): \(videoId)")
+                Log.upload.log("Cancel skipped (video already complete): \(videoId)")
             default:
-                print("[upload] Cancel returned status \(http.statusCode)")
+                Log.upload.log("Cancel returned status \(http.statusCode)")
             }
         } catch {
             // Fire-and-forget — log the reason (missing key, 401, transport,
             // non-2xx) but never throw. The local record is discarded either
             // way; orphaned server-side records fall to the admin cleanup.
-            print("[upload] Cancel failed: \(error)")
+            Log.upload.log("Cancel failed: \(error)")
         }
 
         self.videoId = nil

@@ -169,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let url = coordinator.lastVideo?.url {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
-                print("[app] URL copied to clipboard: \(url)")
+                Log.app.log("URL copied to clipboard: \(url)")
             }
         }
     }

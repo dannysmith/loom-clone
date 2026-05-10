@@ -97,7 +97,7 @@ final class CameraPreviewManager: NSObject {
                 session.addInput(input)
             }
         } catch {
-            print("[camera-preview] Failed to create input: \(error)")
+            Log.cameraPreview.log("Failed to create input: \(error)")
             return
         }
 
@@ -125,7 +125,7 @@ final class CameraPreviewManager: NSObject {
             }
         }
         self.isActive = true
-        print("[camera-preview] Started: \(device.localizedName) (attempt \(retryCount + 1))")
+        Log.cameraPreview.log("Started: \(device.localizedName) (attempt \(retryCount + 1))")
 
         // Watchdog: if no frame arrives within the timeout, the CMIO device
         // transport likely didn't re-attach. Tear down and retry.
@@ -135,10 +135,10 @@ final class CameraPreviewManager: NSObject {
             if self.hasReceivedFrame { return }
 
             if retryCount < Self.maxRetries {
-                print("[camera-preview] No frames after \(Self.frameWatchdogTimeout) — retrying (\(retryCount + 1)/\(Self.maxRetries))")
+                Log.cameraPreview.log("No frames after \(Self.frameWatchdogTimeout) — retrying (\(retryCount + 1)/\(Self.maxRetries))")
                 await self.startSession(device: device, retryCount: retryCount + 1)
             } else {
-                print("[camera-preview] No frames after \(Self.maxRetries) retries — giving up. Device may need app restart.")
+                Log.cameraPreview.log("No frames after \(Self.maxRetries) retries — giving up. Device may need app restart.")
             }
         }
     }
@@ -164,7 +164,7 @@ final class CameraPreviewManager: NSObject {
         self.session = nil
         currentDeviceID = nil
         isActive = false
-        print("[camera-preview] Stopped")
+        Log.cameraPreview.log("Stopped")
     }
 }
 
@@ -180,7 +180,7 @@ extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // sleep that far exceeds any reordering window.
         if !hasReceivedFrame {
             hasReceivedFrame = true
-            print("[camera-preview] First frame received")
+            Log.cameraPreview.log("First frame received")
         }
 
         // Tag the pixel buffer with explicit Rec. 709 colour metadata before

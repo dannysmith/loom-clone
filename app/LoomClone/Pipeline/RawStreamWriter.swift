@@ -179,8 +179,8 @@ actor RawStreamWriter {
         // dropped anyway, but this surfaces the failure moment in the console).
         if writer?.status == .failed {
             hasFailed = true
-            print(
-                "[raw-writer] \(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
+            Log.rawWriter.log(
+                "\(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
             )
             return
         }
@@ -195,8 +195,8 @@ actor RawStreamWriter {
               audioInput.isReadyForMoreMediaData else { return }
         if writer?.status == .failed {
             hasFailed = true
-            print(
-                "[raw-writer] \(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
+            Log.rawWriter.log(
+                "\(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
             )
             return
         }
@@ -233,7 +233,7 @@ actor RawStreamWriter {
         // Check status first and bail with a log if the writer already failed.
         if writer.status == .failed {
             let desc = writer.error?.localizedDescription ?? "unknown"
-            print("[raw-writer] \(url.lastPathComponent) FAILED before finish: \(desc)")
+            Log.rawWriter.log("\(url.lastPathComponent) FAILED before finish: \(desc)")
             self.writer = nil
             self.input = nil
             self.audioInput = nil
@@ -246,10 +246,10 @@ actor RawStreamWriter {
 
         let result: FinishResult
         if let error = writer.error {
-            print("[raw-writer] \(url.lastPathComponent) finished with error: \(error)")
+            Log.rawWriter.log("\(url.lastPathComponent) finished with error: \(error)")
             result = .failed(error.localizedDescription)
         } else {
-            print("[raw-writer] \(url.lastPathComponent) finished, status: \(writer.status.rawValue)")
+            Log.rawWriter.log("\(url.lastPathComponent) finished, status: \(writer.status.rawValue)")
             result = .ok
         }
 

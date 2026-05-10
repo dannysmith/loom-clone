@@ -32,10 +32,10 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
                 exceptingWindows: exceptingWindows
             )
             for app in excludingApps {
-                print("[screen] Excluding from capture: \(app.bundleIdentifier) (pid: \(app.processID))")
+                Log.screen.log("Excluding from capture: \(app.bundleIdentifier) (pid: \(app.processID))")
             }
             if !exceptingWindows.isEmpty {
-                print("[screen] Excepting \(exceptingWindows.count) window(s) from exclusion")
+                Log.screen.log("Excepting \(exceptingWindows.count) window(s) from exclusion")
             }
         } else {
             filter = SCContentFilter(display: display, excludingWindows: [])
@@ -73,7 +73,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
         try await stream.startCapture()
         self.stream = stream
 
-        print("[screen] Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ \(effectiveFPS)fps")
+        Log.screen.log("Capture started: native \(pixelWidth)x\(pixelHeight) (scale \(scale)) @ \(effectiveFPS)fps")
     }
 
     /// Display refresh rate for the given display. Returns the reported
@@ -99,7 +99,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
             exceptingWindows: exceptingWindows
         )
         try await stream.updateContentFilter(filter)
-        print("[screen] Filter updated: \(excludingApps.count) app(s) excluded, \(exceptingWindows.count) window(s) excepted")
+        Log.screen.log("Filter updated: \(excludingApps.count) app(s) excluded, \(exceptingWindows.count) window(s) excepted")
     }
 
     /// Look up the backing scale factor for a CGDirectDisplayID. Falls back
@@ -129,11 +129,11 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
         do {
             try await stream?.stopCapture()
         } catch {
-            print("[screen] Stop error: \(error)")
+            Log.screen.log("Stop error: \(error)")
         }
         stream = nil
         captureDisplay = nil
-        print("[screen] Capture stopped")
+        Log.screen.log("Capture stopped")
     }
 }
 
@@ -162,7 +162,7 @@ extension ScreenCaptureManager: SCStreamOutput {
 
 extension ScreenCaptureManager: SCStreamDelegate {
     func stream(_: SCStream, didStopWithError error: any Error) {
-        print("[screen] Stream stopped with error: \(error)")
+        Log.screen.log("Stream stopped with error: \(error)")
         onStreamError?(error)
     }
 }

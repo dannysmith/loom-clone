@@ -53,7 +53,7 @@ extension RecordingActor {
     /// the writer is a pure sink. The HLS path adds the AAC priming offset;
     /// the raw path doesn't (priming is an HLS-only concern).
     func handleAudioSample(_ sampleBuffer: CMSampleBuffer) async {
-        audioHasArrived = true
+        markAudioArrived()
         markAudioSampleReceived()
         guard isRecording else { return }
         guard let startTime = recordingStartTime else { return }
@@ -132,7 +132,7 @@ extension RecordingActor {
     /// the standalone mic session when camera + mic share a session (so the
     /// shared session's audio is the one feeding HLS).
     func handleStandaloneAudioSample(_ sampleBuffer: CMSampleBuffer) async {
-        audioHasArrived = true
+        markAudioArrived()
         markAudioSampleReceived()
         guard let audioRawWriter,
               let retimed = retimedSampleForRawWriter(sampleBuffer) else { return }

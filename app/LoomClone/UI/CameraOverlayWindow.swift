@@ -166,7 +166,11 @@ final class CameraOverlayWindow: @unchecked Sendable {
             object: panel,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            // NotificationCenter delivers on the main thread (queue:.main),
+            // but Swift concurrency doesn't formally guarantee that's the
+            // MainActor. Hop explicitly so we can't trip a future runtime
+            // check. Cheap — fires once per window-move event.
+            Task { @MainActor [weak self] in
                 self?.handlePanelMoved()
             }
         }

@@ -536,11 +536,51 @@ extension RecordingActor {
         // Wait briefly for the first audio sample to actually arrive.
         // The session is running but the first sample can take 50-200ms.
         if microphone != nil {
-            for _ in 0 ..< 100 {
-                if audioHasArrived { break }
-                try? await Task.sleep(for: .milliseconds(10))
+            let arrived = await waitForFirstAudio(timeout: .seconds(1))
+            print("[recording] Audio \(arrived ? "ready" : "timeout, proceeding anyway")")
+        }
+    }
+
+    /// Suspend until the first audio sample arrives or `timeout` elapses,
+    /// whichever comes first. Returns `true` if audio arrived in time.
+    /// Replaces a 10ms-tick polling loop. Single-waiter — concurrent calls
+    /// would clobber each other's continuation, but prepare is the only
+    /// caller and it runs once per recording.
+    private func waitForFirstAudio(timeout: Duration) async -> Bool {
+        if audioHasArrived { return true }
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask { [weak self] in
+                await self?.suspendUntilAudioArrives()
+                return true
             }
-            print("[recording] Audio \(audioHasArrived ? "ready" : "timeout, proceeding anyway")")
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            // If the timeout won, the suspended waiter is still parked on
+            // the stored continuation. Resume-and-discard so it unblocks
+            // and the actor doesn't hold a dangling continuation that a
+            // late audio sample would try to resume.
+            if !result {
+                resumeAudioReadyContinuationIfPending()
+            }
+            return result
+        }
+    }
+
+    private func suspendUntilAudioArrives() async {
+        if audioHasArrived { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            audioReadyContinuation = continuation
+        }
+    }
+
+    private func resumeAudioReadyContinuationIfPending() {
+        if let continuation = audioReadyContinuation {
+            audioReadyContinuation = nil
+            continuation.resume()
         }
     }
 

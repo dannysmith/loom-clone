@@ -114,6 +114,22 @@ actor RecordingActor {
     /// so the init segment includes both video and audio tracks.
     var audioHasArrived = false
 
+    /// Resumed once when the first audio sample arrives. `waitForFirstAudio`
+    /// installs this from prepare; the audio handler resumes it on receipt.
+    /// Single-shot — nilled out after resume.
+    var audioReadyContinuation: CheckedContinuation<Void, Never>?
+
+    /// Called from audio handlers on every sample. Sets the boolean flag and
+    /// resumes a parked `waitForFirstAudio` waiter on the first sample.
+    func markAudioArrived() {
+        let firstSample = !audioHasArrived
+        audioHasArrived = true
+        if firstSample, let continuation = audioReadyContinuation {
+            audioReadyContinuation = nil
+            continuation.resume()
+        }
+    }
+
     // MARK: - Overlay Frame Callback
 
     /// Set by the coordinator to receive raw camera sample buffers for the

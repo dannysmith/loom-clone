@@ -17,15 +17,17 @@ actor TranscribeAgent {
     private static let minTranscriptionDuration: TimeInterval = 5
     private static let modelName = "large-v3-v20240930_626MB"
 
-    private let apiClient: APIClient
     private let recordingsRoot: URL
 
     /// Lazily initialised WhisperKit pipeline, created after the model
     /// is confirmed on disk.
     private var whisperPipe: WhisperKit?
 
-    init(apiClient: APIClient = .shared) {
-        self.apiClient = apiClient
+    /// Read fresh per call so a Settings change to `serverURL` propagates
+    /// without an app restart. `APIClient.shared` is cheap to construct.
+    private var apiClient: APIClient { .shared }
+
+    init() {
         self.recordingsRoot = AppEnvironment.recordingsDirectory
     }
 

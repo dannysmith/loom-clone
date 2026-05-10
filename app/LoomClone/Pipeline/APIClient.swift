@@ -14,9 +14,11 @@ import Foundation
 /// response and let each call site interpret its own status codes (200
 /// success, 404 "orphaned" in heal, etc.).
 struct APIClient {
-    /// Reads the current server URL from preferences each time it's accessed.
-    /// New recording sessions capture this at init, so mid-session URL changes
-    /// don't affect in-flight recordings — only new ones.
+    /// Returns an `APIClient` configured against the user's currently-saved
+    /// server URL. Every access reads `AppEnvironment.serverURL` so agents
+    /// (HealAgent, TranscribeAgent) that call `APIClient.shared` per-request
+    /// pick up Settings changes without restart. Cheap to read — no network
+    /// activity at construction.
     static var shared: APIClient {
         APIClient(
             baseURL: AppEnvironment.serverURL,
@@ -46,19 +48,33 @@ struct APIClient {
         /// URLSession returned a non-HTTPURLResponse (should not happen with
         /// HTTP(S) URLs).
         case invalidResponse
+        /// Stored `serverURL` plus the requested path didn't form a valid
+        /// URL. Settings validates input on save, so this only fires when
+        /// the saved value is malformed (legacy) or the path is malformed.
+        case invalidBaseURL(String)
     }
 
-    /// Build a full URL for `path` on this client's base. Callers use this
-    /// when they need to show the user a URL (e.g. `"\(baseURL)\(json.url)"`).
-    func url(path: String) -> URL {
-        // Force-unwrap matches the existing call-site pattern. Paths passed
-        // here are hardcoded by callers, not untrusted input.
-        URL(string: "\(baseURL)\(path)")!
+    /// Build a full URL for `path` on this client's base. Throws
+    /// `.invalidBaseURL` rather than crashing on a malformed combination —
+    /// Settings validates URL input on save, but this is the defensive
+    /// fallback for legacy preferences or programmer error in path.
+    func url(path: String) throws -> URL {
+        let combined = "\(baseURL)\(path)"
+        guard let resolved = URL(string: combined) else {
+            throw ClientError.invalidBaseURL(combined)
+        }
+        return resolved
+    }
+
+    /// Same as `url(path:)` but returns `nil` on failure. Used by callers
+    /// (UI) that want a best-effort string conversion.
+    func optionalURL(path: String) -> URL? {
+        try? url(path: path)
     }
 
     /// Build an unauthenticated URLRequest. Used for `/api/health`.
-    func request(path: String, timeout: TimeInterval? = nil) -> URLRequest {
-        var req = URLRequest(url: url(path: path))
+    func request(path: String, timeout: TimeInterval? = nil) throws -> URLRequest {
+        var req = try URLRequest(url: url(path: path))
         if let timeout { req.timeoutInterval = timeout }
         return req
     }
@@ -72,7 +88,7 @@ struct APIClient {
         guard let token = keyStore.read() else {
             throw ClientError.missingAPIKey
         }
-        var req = URLRequest(url: url(path: path))
+        var req = try URLRequest(url: url(path: path))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let timeout { req.timeoutInterval = timeout }
         return req

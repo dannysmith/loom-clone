@@ -268,11 +268,11 @@ final class RecordingCoordinator {
     private static let healthCheckTimeout: TimeInterval = 2.0
 
     func checkServerHealth() async {
-        let request = APIClient.shared.request(
-            path: "/api/health",
-            timeout: Self.healthCheckTimeout
-        )
         do {
+            let request = try APIClient.shared.request(
+                path: "/api/health",
+                timeout: Self.healthCheckTimeout
+            )
             let (_, http) = try await APIClient.shared.send(request)
             serverReachable = (http.statusCode == 200)
         } catch {

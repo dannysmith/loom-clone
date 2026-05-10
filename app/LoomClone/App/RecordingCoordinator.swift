@@ -909,14 +909,21 @@ final class RecordingCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self,
-                  self.state == .recording || self.state == .paused,
-                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  let bundleID = app.bundleIdentifier,
-                  self.excludedAppBundleIDs.contains(bundleID)
+            // NSWorkspace delivers on the main thread (queue:.main) but Swift
+            // concurrency doesn't formally guarantee that's the MainActor.
+            // Hop explicitly so the `state` / `excludedAppBundleIDs` reads
+            // are isolated.
+            guard let bundleID = (notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication)?.bundleIdentifier
             else { return }
-            Log.coordinator.log("Excluded app launched mid-recording: \(bundleID)")
-            Task { await self.recordingActor?.updateExcludedApps() }
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.state == .recording || self.state == .paused,
+                      self.excludedAppBundleIDs.contains(bundleID)
+                else { return }
+                Log.coordinator.log("Excluded app launched mid-recording: \(bundleID)")
+                Task { await self.recordingActor?.updateExcludedApps() }
+            }
         }
     }
 

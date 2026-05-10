@@ -97,11 +97,10 @@ actor RecordingActor {
     /// CameraCaptureManager successfully added the mic to its session.
     var sharedSessionAudioActive = false
 
-    /// HAL-reported input latency for the selected mic, in seconds. Queried
-    /// once during `prepareRecording` and stored in `recording.json` for
-    /// diagnostics. Not applied as a PTS correction — testing showed that
-    /// AVFoundation already partially compensates for HAL latency internally,
-    /// so subtracting the full value overcorrects.
+    /// HAL-reported input latency for the selected mic, in seconds. Stored
+    /// in `recording.json` for diagnostics; not applied as a PTS correction
+    /// (AVFoundation partially compensates internally, so the full value
+    /// overcorrects).
     var audioInputLatency: Double = 0
 
     /// Structured account of the recording — metadata + events + segments.
@@ -109,26 +108,13 @@ actor RecordingActor {
     /// server as part of the complete payload.
     var timeline = RecordingTimelineBuilder()
 
-    /// Set when the first audio sample arrives from the mic.
-    /// Used to ensure audio hardware is active before starting the writer,
-    /// so the init segment includes both video and audio tracks.
+    /// Set when the first audio sample arrives from the mic. Used by
+    /// `waitForFirstAudio` to gate the writer-start on audio readiness so
+    /// the init segment includes both tracks. `markAudioArrived` (in
+    /// `+Prepare`) sets the flag and resumes any parked waiter via
+    /// `audioReadyContinuation` (single-shot, nilled after resume).
     var audioHasArrived = false
-
-    /// Resumed once when the first audio sample arrives. `waitForFirstAudio`
-    /// installs this from prepare; the audio handler resumes it on receipt.
-    /// Single-shot — nilled out after resume.
     var audioReadyContinuation: CheckedContinuation<Void, Never>?
-
-    /// Called from audio handlers on every sample. Sets the boolean flag and
-    /// resumes a parked `waitForFirstAudio` waiter on the first sample.
-    func markAudioArrived() {
-        let firstSample = !audioHasArrived
-        audioHasArrived = true
-        if firstSample, let continuation = audioReadyContinuation {
-            audioReadyContinuation = nil
-            continuation.resume()
-        }
-    }
 
     // MARK: - Overlay Frame Callback
 

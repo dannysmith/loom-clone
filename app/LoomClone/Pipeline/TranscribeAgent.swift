@@ -25,7 +25,9 @@ actor TranscribeAgent {
 
     /// Read fresh per call so a Settings change to `serverURL` propagates
     /// without an app restart. `APIClient.shared` is cheap to construct.
-    private var apiClient: APIClient { .shared }
+    private var apiClient: APIClient {
+        .shared
+    }
 
     init() {
         self.recordingsRoot = AppEnvironment.recordingsDirectory

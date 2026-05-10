@@ -15,12 +15,19 @@ import CoreMedia
 /// Draggable. Appears above fullscreen apps and follows Space switches via
 /// `.statusBar` window level + `.canJoinAllSpaces` / `.fullScreenAuxiliary`.
 ///
-/// Intentionally NOT `@MainActor` so the capture queue can call `enqueue`
-/// without an actor hop. Methods that manipulate AppKit state are explicitly
-/// `@MainActor`. `previewView` is mutated only on main, and read by `enqueue`
-/// on any thread — the read is a pointer load, atomic on ARM, and the worst
-/// case during a style change is that one frame gets enqueued into the
-/// outgoing preview view, which is harmless.
+/// Isolation contract:
+///   - The class is `@MainActor` so AppKit state (panel, observers) is
+///     only ever touched on main. Almost every method inherits that.
+///   - `@unchecked Sendable` lets references cross into the camera capture
+///     queue (a Sendable closure captures `overlay` and calls `enqueue`).
+///     Crossing is safe because everything reachable from the per-frame
+///     path is itself thread-safe: AVSampleBufferDisplayLayer.enqueue per
+///     Apple's docs, and the `previewView` pointer load is word-sized
+///     atomic on ARM64. The worst case during a style change is one
+///     frame enqueued into the outgoing preview view, which is harmless.
+///   - `enqueue(_:)` is the only `nonisolated` entry point. Everything
+///     else lives on main.
+@MainActor
 final class CameraOverlayWindow: @unchecked Sendable {
     enum Style: Equatable {
         case circle
@@ -41,24 +48,30 @@ final class CameraOverlayWindow: @unchecked Sendable {
         }
     }
 
-    @MainActor private var panel: NSPanel?
-    @MainActor private var currentStyle: Style = .circle
+    private var panel: NSPanel?
+    private var currentStyle: Style = .circle
+
+    /// Read by `enqueue(_:)` from any thread. The class invariant is that
+    /// writes only happen on MainActor (in `show` and `tearDownPanel`); the
+    /// nonisolated read in `enqueue` is a single word-sized atomic load on
+    /// ARM64. Marked unsafe rather than synchronised because the cost of a
+    /// dispatch round-trip per frame isn't justified by the harm (stale
+    /// pointer → enqueue into outgoing view → flushed on next tearDown).
     nonisolated(unsafe) private var previewView: CameraPreviewLayerView?
 
     /// Last known quadrant so we only fire the callback on actual changes.
-    @MainActor private var currentQuadrant: PipPosition = .bottomRight
+    private var currentQuadrant: PipPosition = .bottomRight
 
     /// Fired when the user drags the overlay into a different screen quadrant.
     /// Set by the coordinator before recording starts.
-    @MainActor var onQuadrantChanged: ((PipPosition) -> Void)?
+    var onQuadrantChanged: ((PipPosition) -> Void)?
 
-    @MainActor private var moveObserver: NSObjectProtocol?
+    private var moveObserver: NSObjectProtocol?
 
     /// Optional shared camera-adjustments state. Forwarded into the preview
     /// layer on every `show()` so the overlay reflects slider moves live.
-    @MainActor private var adjustmentsState: CameraAdjustmentsState?
+    private var adjustmentsState: CameraAdjustmentsState?
 
-    @MainActor
     func setAdjustmentsState(_ state: CameraAdjustmentsState?) {
         adjustmentsState = state
         previewView?.setAdjustmentsState(state)
@@ -69,7 +82,6 @@ final class CameraOverlayWindow: @unchecked Sendable {
     /// it's visible with a different style, rebuilds in place — the outer
     /// `CameraOverlayWindow` reference stays valid so callbacks that captured
     /// it keep working.
-    @MainActor
     func show(on screen: NSScreen?, style: Style) {
         if panel != nil, currentStyle == style {
             panel?.orderFrontRegardless()
@@ -132,7 +144,6 @@ final class CameraOverlayWindow: @unchecked Sendable {
         observePanelMoves()
     }
 
-    @MainActor
     private func clampedToVisibleFrame(_ frame: NSRect, on screen: NSScreen?) -> NSRect {
         guard let screen = screen ?? NSScreen.main else { return frame }
         let visible = screen.visibleFrame
@@ -155,7 +166,6 @@ final class CameraOverlayWindow: @unchecked Sendable {
 
     // MARK: - Quadrant Detection
 
-    @MainActor
     private func observePanelMoves() {
         if let old = moveObserver {
             NotificationCenter.default.removeObserver(old)
@@ -176,7 +186,6 @@ final class CameraOverlayWindow: @unchecked Sendable {
         }
     }
 
-    @MainActor
     private func handlePanelMoved() {
         guard let panel else { return }
         let frame = panel.frame
@@ -190,16 +199,16 @@ final class CameraOverlayWindow: @unchecked Sendable {
     }
 
     /// Enqueue a sample buffer for display. Thread-safe — call from any queue.
-    func enqueue(_ sampleBuffer: CMSampleBuffer) {
+    /// The only `nonisolated` entry point on this class; see class header
+    /// for the isolation contract.
+    nonisolated func enqueue(_ sampleBuffer: CMSampleBuffer) {
         previewView?.enqueue(sampleBuffer)
     }
 
-    @MainActor
     func hide() {
         tearDownPanel()
     }
 
-    @MainActor
     private func tearDownPanel() {
         if let observer = moveObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -211,12 +220,10 @@ final class CameraOverlayWindow: @unchecked Sendable {
         previewView = nil
     }
 
-    @MainActor
     var isVisible: Bool {
         panel != nil
     }
 
-    @MainActor
     private func positionPanel(on screen: NSScreen?) {
         guard let screen = screen ?? NSScreen.main else { return }
         let visibleFrame = screen.visibleFrame

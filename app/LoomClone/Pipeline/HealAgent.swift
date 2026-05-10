@@ -22,7 +22,6 @@ actor HealAgent {
     /// unlikely to ever heal cleanly.
     private static let startupWindow: TimeInterval = 3 * 24 * 60 * 60
 
-    private let apiClient: APIClient
     private let recordingsRoot: URL
 
     /// Guard against double-starting the same recording when the post-stop
@@ -30,8 +29,11 @@ actor HealAgent {
     /// cheap insurance).
     private var inFlight: Set<String> = []
 
-    init(apiClient: APIClient = .shared) {
-        self.apiClient = apiClient
+    /// Read fresh per call so a Settings change to `serverURL` propagates
+    /// without an app restart. `APIClient.shared` is cheap to construct.
+    private var apiClient: APIClient { .shared }
+
+    init() {
         self.recordingsRoot = AppEnvironment.recordingsDirectory
     }
 

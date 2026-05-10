@@ -12,6 +12,7 @@ struct SettingsView: View {
         case saved
         case cleared
         case urlSaved
+        case urlInvalid(String)
         case error(String)
     }
 
@@ -32,11 +33,7 @@ struct SettingsView: View {
                         .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Spacer()
-                    if status == .urlSaved {
-                        Label("Saved", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.caption)
-                    }
+                    urlStatusLabel
                 }
             } header: {
                 Text("Server")
@@ -103,6 +100,23 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private var urlStatusLabel: some View {
+        switch status {
+        case .urlSaved:
+            Label("Saved", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case let .urlInvalid(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .lineLimit(2)
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
     private var keyStatusLabel: some View {
         switch status {
         case .saved:
@@ -124,9 +138,27 @@ struct SettingsView: View {
     }
 
     private func saveURL() {
-        let url = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !url.isEmpty else { return }
-        AppEnvironment.serverURL = url
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        // Strip trailing slash so APIClient can append paths without doubling
+        // the separator.
+        let normalised = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+
+        // Validate: must parse as a URL with an http or https scheme. Reject
+        // anything else here so APIClient never has to fall back on its
+        // .invalidBaseURL throw at runtime.
+        guard let parsed = URL(string: normalised),
+              let scheme = parsed.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              parsed.host != nil
+        else {
+            status = .urlInvalid("Enter a full URL like https://v.danny.is")
+            return
+        }
+
+        AppEnvironment.serverURL = normalised
+        serverURL = normalised
         status = .urlSaved
     }
 

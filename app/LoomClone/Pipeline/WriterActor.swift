@@ -170,9 +170,19 @@ actor WriterActor {
 
     // MARK: - Writing
 
-    func startWriting() {
+    func startWriting() throws {
         guard let writer else { return }
-        writer.startWriting()
+        // AVAssetWriter.startWriting() returns false on failure (e.g. the
+        // hardware encoder is unavailable under load when
+        // RequireHardwareAcceleratedVideoEncoder is set). Without a guard
+        // we'd flip hasStartedSession=true and silently no-op every
+        // appendVideo/appendAudio because the inputs never become ready —
+        // no segment ever fires, so checkHLSWriterHealth has no boundary
+        // to run on, and the failure stays invisible until finish().
+        guard writer.startWriting() else {
+            let detail = writer.error?.localizedDescription ?? "unknown"
+            throw WriterError.startWritingFailed(detail)
+        }
         writer.startSession(atSourceTime: timestampAdjuster.primingOffset)
         hasStartedSession = true
         print("[writer] Started writing")
@@ -339,6 +349,7 @@ actor WriterActor {
 
     enum WriterError: Error {
         case cannotAddInput(String)
+        case startWritingFailed(String)
     }
 }
 

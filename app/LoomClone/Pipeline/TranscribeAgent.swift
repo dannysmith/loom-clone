@@ -362,10 +362,11 @@ actor TranscribeAgent {
                 return nil
             }
 
-            // Upload to server
+            // Upload to server. Don't log the title text — it's derived
+            // from the user's transcript and may contain sensitive content.
             do {
                 try await uploadSuggestedTitle(videoId: videoId, title: title)
-                Log.titleSuggest.log("\(videoId): \"\(title)\"")
+                Log.titleSuggest.log("\(videoId): uploaded")
             } catch {
                 Log.titleSuggest.log("\(videoId): upload failed: \(error)")
             }
@@ -403,9 +404,10 @@ actor TranscribeAgent {
                 return
             }
 
+            // Don't log description text — derived from user transcript.
             do {
                 try await uploadSuggestedDescription(videoId: videoId, description: description)
-                Log.descriptionSuggest.log("\(videoId): \"\(description)\"")
+                Log.descriptionSuggest.log("\(videoId): uploaded")
             } catch {
                 Log.descriptionSuggest.log("\(videoId): upload failed: \(error)")
             }

@@ -7,8 +7,12 @@ import Foundation
 ///
 /// Levels come from `AVCaptureConnection.audioChannels[].averagePowerLevel`
 /// (dBFS), which AVFoundation computes for free — no manual DSP on sample
-/// buffers. A 20 Hz timer polls the connection on the capture queue and hops
-/// to the main actor to publish a normalised 0…1 value for SwiftUI.
+/// buffers. A 20 Hz polling loop runs on a cancellation-aware `Task`
+/// (`pollTask`) that calls `sampleLevel()` and sleeps via `Task.sleep`
+/// between iterations. The loop exits cleanly when `Task.isCancelled`
+/// (from `stop()` cancelling `pollTask`). Both `sampleLevel()` and the
+/// loop body run on the main actor, so the published `level` is updated
+/// directly without a thread hop.
 @MainActor
 @Observable
 final class MicrophonePreviewManager {

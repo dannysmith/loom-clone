@@ -71,6 +71,11 @@ final class CameraPreviewManager: NSObject {
         let prior = inFlightStart
         let task = Task { [weak self] in
             await prior?.value
+            // If stop() ran while we were chained behind a prior start, it
+            // cancelled this task and bumped `sessionGeneration`. Bail out
+            // before re-allocating a session — otherwise a queued start
+            // could revive the preview after stop() returned.
+            guard !Task.isCancelled else { return }
             await self?.startSession(device: device, retryCount: 0)
         }
         inFlightStart = task
@@ -147,6 +152,15 @@ final class CameraPreviewManager: NSObject {
     /// This must complete before the recording camera session starts or the
     /// system throws "HALB_IOThread::_Start: there already is a thread" errors.
     func stop() async {
+        // Cancel any pending start that's queued behind a prior one. Without
+        // this, a `start(A) → start(B) → stop()` sequence would leave TaskB
+        // waiting on TaskA's completion, then call startSession(B) after
+        // stop() returns and recreate the preview. The cancelled TaskB
+        // observes Task.isCancelled in its chain and bails out before
+        // touching session state.
+        inFlightStart?.cancel()
+        inFlightStart = nil
+
         // Bump the generation so any in-flight watchdog task exits on its
         // next check. Without this, a watchdog spawned by the previous
         // start() could fire after stop() returns and restart the preview

@@ -52,6 +52,10 @@ struct APIClient {
         /// URL. Settings validates input on save, so this only fires when
         /// the saved value is malformed (legacy) or the path is malformed.
         case invalidBaseURL(String)
+        /// `path` passed to `url(path:)` did not start with `/`. Without the
+        /// leading slash, the concatenation `baseURL + path` parses as a
+        /// different host (`http://x.commyapi` instead of `http://x.com/myapi`).
+        case invalidPathMissingLeadingSlash(String)
     }
 
     /// Build a full URL for `path` on this client's base. Throws
@@ -59,6 +63,13 @@ struct APIClient {
     /// Settings validates URL input on save, but this is the defensive
     /// fallback for legacy preferences or programmer error in path.
     func url(path: String) throws -> URL {
+        // Without a leading slash, `baseURL + path` parses as a different
+        // host (e.g. `http://x.com` + `api/health` → `http://x.comapi/health`).
+        // All known call sites pass hardcoded paths starting with "/", so this
+        // is a programmer-error guard rather than a runtime input check.
+        guard path.hasPrefix("/") else {
+            throw ClientError.invalidPathMissingLeadingSlash(path)
+        }
         let combined = "\(baseURL)\(path)"
         guard let resolved = URL(string: combined) else {
             throw ClientError.invalidBaseURL(combined)

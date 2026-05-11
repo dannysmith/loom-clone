@@ -324,12 +324,18 @@ actor HealAgent {
     /// Mirrors `RecordingTimeline.SegmentEntry` but is its own type because
     /// the agent only needs read+write on a subset of fields, and the round-
     /// trip preserves unknown fields verbatim through JSONSerialization.
+    ///
+    /// `index`, `bytes`, and `emittedAt` are decoded as Optional so older or
+    /// partial JSON files (missing one of those fields for any reason) can
+    /// still be processed — healing only requires `filename`,
+    /// `durationSeconds`, and the upload flags. JSONEncoder omits nil values,
+    /// so a missing-in field stays missing on round-trip.
     private struct SegmentPatch: Codable {
-        let index: Int
+        let index: Int?
         let filename: String
-        let bytes: Int
+        let bytes: Int?
         let durationSeconds: Double
-        let emittedAt: Double
+        let emittedAt: Double?
         var uploaded: Bool
         var uploadError: String?
     }

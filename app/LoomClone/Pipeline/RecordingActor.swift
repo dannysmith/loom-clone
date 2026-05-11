@@ -108,11 +108,9 @@ actor RecordingActor {
     /// server as part of the complete payload.
     var timeline = RecordingTimelineBuilder()
 
-    /// Set when the first audio sample arrives from the mic. Used by
-    /// `waitForFirstAudio` to gate the writer-start on audio readiness so
-    /// the init segment includes both tracks. `markAudioArrived` (in
-    /// `+Prepare`) sets the flag and resumes any parked waiter via
-    /// `audioReadyContinuation` (single-shot, nilled after resume).
+    /// First-audio-sample flag and the parked waiter `waitForFirstAudio`
+    /// installs. `markAudioArrived` (+Prepare) sets the flag and resumes
+    /// the continuation once (single-shot, nilled after resume).
     var audioHasArrived = false
     var audioReadyContinuation: CheckedContinuation<Void, Never>?
 
@@ -354,8 +352,9 @@ actor RecordingActor {
         // parallel with the composited finish; this is the join point.
         let rawResults = await rawFinishTask.value
 
-        // Record timeline events for any raw writer that failed.
-        recordRawWriterFailures(rawResults)
+        // Use the frozen stop-time `logicalDuration` so failure events sit
+        // at `recording.stopped`, not a value seconds later (post finish).
+        recordRawWriterFailures(rawResults, t: logicalDuration)
 
         finalizeRawWriterMetadata(logicalDuration: logicalDuration, rawResults: rawResults)
 
@@ -376,7 +375,9 @@ actor RecordingActor {
         // Complete upload (includes the timeline in the payload)
         do {
             let result = try await upload.complete(timeline: timelineData)
-            Log.recording.log("Stopped, URL: \(result.url) (missing=\(result.missing.count))")
+            // Share URLs are sensitive for private/unlisted videos — don't
+            // log them.
+            Log.recording.log("Stopped (missing=\(result.missing.count))")
             guard let videoId = await upload.videoId,
                   let localDir = localSavePath
             else {
@@ -409,9 +410,8 @@ actor RecordingActor {
     }
 
     /// Emit a `raw.writer.failed` timeline event for each raw writer that
-    /// entered `.failed` state during the recording.
-    private func recordRawWriterFailures(_ results: RawFinishResults) {
-        let t = logicalElapsedSeconds()
+    /// entered `.failed`. `t` is the frozen stop-time logical duration.
+    private func recordRawWriterFailures(_ results: RawFinishResults, t: Double) {
         if case let .failed(error) = results.screen {
             timeline.recordRawWriterFailed(file: "screen.mov", error: error, t: t)
         }

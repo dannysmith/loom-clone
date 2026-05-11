@@ -35,11 +35,11 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(req.timeoutInterval, 2)
     }
 
-    func testURLThrowsForInvalidBaseURL() {
-        let client = APIClient(baseURL: "", keyStore: testKeyStore)
-        XCTAssertThrowsError(try client.url(path: "")) { error in
-            guard case APIClient.ClientError.invalidBaseURL = error else {
-                XCTFail("Expected invalidBaseURL, got \(error)")
+    func testURLThrowsForPathWithoutLeadingSlash() {
+        let client = APIClient(baseURL: "http://127.0.0.1:3000", keyStore: testKeyStore)
+        XCTAssertThrowsError(try client.url(path: "api/health")) { error in
+            guard case APIClient.ClientError.invalidPathMissingLeadingSlash = error else {
+                XCTFail("Expected invalidPathMissingLeadingSlash, got \(error)")
                 return
             }
         }

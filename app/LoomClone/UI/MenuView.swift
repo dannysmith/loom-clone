@@ -139,8 +139,10 @@ struct MenuView: View {
                 HideAppWindowsSection(coordinator: coordinator)
             }
 
-            // Record button — disabled if any prerequisite isn't satisfied
-            let canRecord = coordinator.state == .idle
+            // Record button — disabled if any prerequisite isn't satisfied.
+            // `.stopped` is the post-recording cooldown; resources are already
+            // released so a second recording can start without waiting.
+            let canRecord = (coordinator.state == .idle || coordinator.state == .stopped)
                 && !coordinator.screenPermissionDenied
                 && !coordinator.availableModes.isEmpty
                 && coordinator.serverReachable
@@ -365,12 +367,13 @@ struct MenuView: View {
 
             fpsPicker
         }
-        // Disable while a recording is active or stopping — the in-flight
-        // recording captured `preset` at start, so changes here only land
-        // in UserDefaults for the *next* recording. Leaving the picker
+        // Disable while a recording is active. The in-flight recording
+        // captured `preset` at start, so changes here only land in
+        // UserDefaults for the *next* recording. Leaving the picker
         // interactive made it look like it was retargeting the current
-        // recording.
-        .disabled(coordinator.state != .idle)
+        // recording. `.stopped` is the post-recording cooldown — picking
+        // a new preset for the next recording is legitimate there.
+        .disabled(coordinator.state != .idle && coordinator.state != .stopped)
         // 1440p availability depends on display and camera (not mode — see
         // is1440pAvailable). Re-check whenever either changes.
         .onChange(of: coordinator.selectedDisplay?.displayID) { _, _ in

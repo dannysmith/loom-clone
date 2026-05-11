@@ -1,5 +1,13 @@
 # Task 21: Output frame cadence rework — fix monotonicity-rejection bugs introduced by 30/60fps PR
 
+## Status — 2026-05-11
+
+Phases 1, 2, 3, 4, and 6 landed in [PR #29](https://github.com/dannysmith/loom-clone/pull/29). Phase 5 (investigate intermittent camera raw writer failure) split out to [issue #30](https://github.com/dannysmith/loom-clone/issues/30) as backlog — the cadence rework itself is done.
+
+Detailed commit-by-commit narrative is in the PR. The plan below is preserved as a record of how the problem was understood and what trade-offs were made.
+
+---
+
 Follow-up to the work in [#25 / b4cbb21](https://github.com/dannysmith/loom-clone/pull/25) which closed [issue #20](https://github.com/dannysmith/loom-clone/issues/20). That PR exposed a class of metronome bugs that was masked at the old hardcoded 30fps and is now causing 30-50% drops in the composited HLS output across **every** mode.
 
 Goal: get the composited output to honestly reflect whatever rate the sources actually deliver (e.g. 30fps if the camera is 30fps, ~22fps if the screen is mostly idle), with monotonic PTS, A/V sync preserved, and no silent frame loss. Do this without adding a separate code path per mode.
@@ -206,23 +214,7 @@ This is the cheap and small "what was the hardware actually doing" record. The f
 
 ### Phase 5 — Investigate intermittent camera raw writer failure
 
-Observed in two recordings so far:
-- `8d24c550…` (yesterday, 30fps cameraOnly): `raw.writer.failed` at t=4.676s, message "detected at segment boundary".
-- `1e8ff366…` (today, 30fps screenAndCamera): `failed: true` in `rawStreams.camera`.
-
-Not observed in: `a7288551…` (30fps cameraOnly, same camera, same day), `db8f815d…` (60fps cameraOnly, same camera), `9c89eb62…` (30fps screenOnly), `d949568a…` (60fps cameraOnly).
-
-Pattern is unclear from current data — both modes (`cameraOnly` and `screenAndCamera`) have hit it, both at 30fps. The 60fps recordings haven't (small sample size).
-
-**This is investigation, not implementation.** Tasks:
-
-1. Verify the writer's `error?.localizedDescription` is being captured in the `raw.writer.failed` event (it should — see `RecordingActor.swift:411-421` `recordRawWriterFailures`). Confirm a future failed run has the specific error string in `recording.json`.
-2. When next reproduced, examine the error string. Most-likely-to-least-likely hypotheses:
-   - **GPU/H.264 engine contention** (most likely): 1440p H.264 HLS + ProRes screen (separate engine) + 1080p H.264 raw camera all running. M2 Pro has one H.264 engine. Two concurrent H.264 sessions could contend or fail under load. See `docs/archive/m2-pro-video-pipeline-failures.md` for prior art.
-   - **AVAssetWriter resource exhaustion**: too many concurrent writers + raw H.264 bitrate too high. Consider lowering raw camera bitrate from 12Mbps to ~8Mbps.
-   - **Sample buffer PTS issues** (unlikely): `retimedSampleForRawWriter` at `RecordingActor+FrameHandling.swift:472` rejects negative-PTS samples — but that only affects startup, and the observed failures were mid-recording with data already written before the failure point. Almost certainly not the cause; included only so we don't waste investigation time on it next reproduction.
-3. If the error is consistent across reproductions and clearly engine-related, the fix may be: don't run the raw camera H.264 writer when the composited writer is also H.264 at 1440p. Trade-off: lose raw camera safety net at high resolutions. Or: queue depth tuning.
-4. Until reproduced cleanly with diagnostic detail, leave the existing failure-detection + timeline event in place. No code change yet.
+**Split out to [#30](https://github.com/dannysmith/loom-clone/issues/30)** so the cadence-rework PR can close cleanly. This phase is investigation-only — kept on the backlog until a clean reproduction is available. The detection infrastructure (`raw.writer.failed` timeline event) is already in place from prior work; the open question is *why* the raw camera writer intermittently fails, with H.264 engine contention against the composited writer being the leading hypothesis. See the issue for the full symptom log, hypotheses, reproduction strategy, and candidate remediations.
 
 ### Phase 6 — Diagnostic instrumentation policy
 

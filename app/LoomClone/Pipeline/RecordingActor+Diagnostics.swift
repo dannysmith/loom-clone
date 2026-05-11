@@ -47,6 +47,13 @@ enum MetronomeTickAction {
     static let rejectNegElapsed = "reject:negElapsed"
     static let rejectInvalidPTS = "reject:invalidPTS"
     static let rejectSampleBuild = "reject:sampleBuild"
+    /// Source-PTS freshness check skipped this tick (Phase 1/2). Distinct
+    /// from `noSource` — we have a cached frame, it's just not strictly
+    /// newer than what we last emitted.
+    static let skipStale = "skipStale"
+    /// Phase 3 keep-alive: emitted a synthetic-PTS repeat of the last
+    /// cached source during a long static-source run.
+    static let keepalive = "keepalive"
     static let noSource = "noSource"
     static let compositionFail = "compositionFail"
     static let notRecording = "notRecording"
@@ -127,9 +134,22 @@ struct MetronomeDiagnostics {
     var rejectNegElapsed: Int64 = 0
     var rejectInvalidPTS: Int64 = 0
     var rejectSampleBuild: Int64 = 0
+    /// Ticks that found a cached source frame but its capturePTS wasn't
+    /// strictly newer than `lastEmittedSourcePTS`. Distinct from
+    /// `noSourceTicks` (which counts ticks where no cached frame existed
+    /// at all). Expected to be non-zero — screen-bursty deliveries and
+    /// metronome-over-runs both contribute — and not a regression.
+    var skipsStale: Int64 = 0
+    /// Phase 3 keep-alive emits — synthetic-PTS repeats fired during a
+    /// long static-source run so the segment cutter doesn't see dead air.
+    var keepaliveEmits: Int64 = 0
     var noSourceTicks: Int64 = 0
     var compositionFailures: Int64 = 0
     var cameraOnlyPopBranch: Int64 = 0
+    /// Pre task-21 (PR #25): the synthetic-host-clock peek-with-repeat
+    /// path's fire count. Bug A removed this path; the counter is kept
+    /// for one release as a regression-detector — any non-zero value
+    /// after task-21 means the path silently re-emerged.
     var cameraOnlyRepeatBranch: Int64 = 0
     var cameraOnlyNoSourceBranch: Int64 = 0
     var idleSleeps: Int64 = 0
@@ -308,6 +328,7 @@ struct MetronomeDiagnostics {
             ? Double(cameraFramesReceived) / max(cameraTrace.last?.hostT ?? 1, 1) : 0)
         return """
         iters=\(iterations) emit=\(emitOK) \
+        skipStale=\(skipsStale) keepAlive=\(keepaliveEmits) \
         mono=\(rejectMonotonicity) neg=\(rejectNegElapsed) noSrc=\(noSourceTicks) \
         peek=\(cameraOnlyRepeatBranch) pop=\(cameraOnlyPopBranch) \
         camFrames=\(cameraFramesReceived) (~\(camRate)fps) \
@@ -341,6 +362,8 @@ struct MetronomeDiagnostics {
                 rejectNegElapsed: rejectNegElapsed,
                 rejectInvalidPTS: rejectInvalidPTS,
                 rejectSampleBuild: rejectSampleBuild,
+                skipsStale: skipsStale,
+                keepaliveEmits: keepaliveEmits,
                 noSourceTicks: noSourceTicks,
                 compositionFailures: compositionFailures,
                 cameraOnlyPopBranch: cameraOnlyPopBranch,
@@ -400,6 +423,8 @@ struct MetronomeDiagnostics {
         let rejectNegElapsed: Int64
         let rejectInvalidPTS: Int64
         let rejectSampleBuild: Int64
+        let skipsStale: Int64
+        let keepaliveEmits: Int64
         let noSourceTicks: Int64
         let compositionFailures: Int64
         let cameraOnlyPopBranch: Int64

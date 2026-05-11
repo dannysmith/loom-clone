@@ -186,8 +186,19 @@ actor RecordingActor {
     var pauseStartHostTime: CMTime?
 
     /// Strictly-monotonic guard for video PTS. Prevents same-PTS appends
-    /// across pause/resume edge cases (which AVAssetWriter rejects).
+    /// across pause/resume edge cases (which AVAssetWriter rejects). Post
+    /// task-21 this is a safety net — the source-PTS freshness check below
+    /// is the primary defence; this only fires on real bugs.
     var lastEmittedVideoPTS: CMTime = .invalid
+
+    /// Last source-capture PTS that produced a successful emit. Tracked in
+    /// the source-capture clock domain (NOT the encoder/priming-offset
+    /// domain that `lastEmittedVideoPTS` lives in) so the
+    /// `compositeForCurrentMode` freshness check can compare directly
+    /// against incoming frames' `capturePTS`. Bumped on every real emit;
+    /// keep-alive emits intentionally do not update it (so a fresh frame
+    /// arriving after a static period still passes the check).
+    var lastEmittedSourcePTS: CMTime = .invalid
 
     // MARK: - Frame Cache
 
@@ -213,11 +224,10 @@ actor RecordingActor {
     /// queue lets bursts wait instead of being overwritten. Drop-oldest
     /// keeps memory bounded if the metronome stalls.
     ///
-    /// - `cameraOnly`: the metronome pops one frame per emit, so every
-    ///   captured frame lands in the output in order. When the target fps
-    ///   exceeds the camera's delivery rate (e.g. 60fps metronome with a
-    ///   30fps camera), the most-recently-popped frame is re-emitted on
-    ///   empty ticks — see `lastPoppedCameraFrame`.
+    /// - `cameraOnly`: the metronome pops one frame per emit. Output rate
+    ///   tracks the camera's actual delivery rate — if the metronome ticks
+    ///   faster than the camera delivers, empty ticks become no-ops and
+    ///   the encoder receives frames at the camera's native cadence.
     /// - `screenAndCamera`: the metronome peeks the most recent frame as
     ///   the PiP backdrop without popping; older entries age out via the
     ///   capacity cap.
@@ -225,13 +235,11 @@ actor RecordingActor {
     var cameraFrameQueue: [CachedFrame] = []
     static let cameraFrameQueueCapacity = 8
 
-    /// Most recently popped camera frame from the FIFO. Used for the
-    /// peek-with-repeat policy in `cameraOnly` mode when the metronome
-    /// ticks faster than the camera delivers (e.g. 60fps target with a
-    /// 30fps camera). Re-emitting this frame on empty ticks fills the
-    /// timeline with repeated frames that compress to nearly nothing
-    /// in H.264, while preserving the guarantee that every original
-    /// camera frame reaches the output exactly once.
+    /// Most recently popped camera frame from the FIFO. Retained for the
+    /// keep-alive path (Phase 3) — when a `cameraOnly` recording goes
+    /// >1s with no fresh camera frame (e.g. user covers the lens), the
+    /// metronome emits a synthetic-PTS repeat of this frame so the HLS
+    /// segment cutter doesn't see dead air.
     var lastPoppedCameraFrame: CachedFrame?
 
     // MARK: - Metronome
@@ -628,13 +636,23 @@ actor RecordingActor {
 
         // Drop any camera frames that arrived during the pause. In cameraOnly
         // the metronome pops the *oldest* queued frame; without this drain it
-        // would pop frames whose capturePTS predates the resume moment, and
-        // their elapsedLogical = (capturePTS - start) - pauseAccumulator
-        // works out to ~queue-depth × frame-interval *before* the last
-        // pre-pause emitted PTS — the strict-monotonic guard then rejects
-        // them silently. screenAndCamera peeks the latest frame so it's
-        // less affected, but draining keeps semantics consistent.
+        // would walk through pause-period frames one tick at a time
+        // (discarded by the freshness check below) before reaching fresh
+        // post-resume content. screenAndCamera peeks the latest frame so
+        // it's less affected, but draining keeps semantics consistent.
         cameraFrameQueue.removeAll(keepingCapacity: true)
+
+        // Bump the source-PTS watermark forward to `now` so any frame
+        // captured during the pause window — `latestScreenFrame` will
+        // typically have been overwritten by an SCK update mid-pause — is
+        // treated as stale by `compositeForCurrentMode`. Without this, a
+        // mid-pause screen frame would pass the freshness check (its
+        // capturePTS is newer than the pre-pause emit's), then compute
+        // an encoder PTS below `lastEmittedVideoPTS` and trip the
+        // monotonicity safety net.
+        if lastEmittedSourcePTS.isValid {
+            lastEmittedSourcePTS = max(lastEmittedSourcePTS, now)
+        }
 
         timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: pauseSeconds)
 

@@ -15,7 +15,11 @@ import Foundation
 ///
 /// Schema is versioned from day one so we can evolve it without ambiguity.
 struct RecordingTimeline: Encodable {
-    static let currentSchemaVersion = 2
+    /// v3 introduced the top-level `runtime` block and the optional
+    /// `advertisedFormats` / `selectedFormat` fields on `Inputs.Device`
+    /// for cameras. All new fields are optional / `encodeIfPresent`, so
+    /// v3 documents are forwards-compatible with v2-aware consumers.
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     var session: Session
@@ -26,8 +30,70 @@ struct RecordingTimeline: Encodable {
     var encoder: EncoderInfo
     var rawStreams: RawStreams?
     var compositionStats: CompositionStats?
+    var runtime: Runtime?
     var segments: [SegmentEntry]
     var events: [Event]
+
+    /// v3+ aggregate runtime metrics. Computed at stop time from
+    /// `MetronomeDiagnostics`. Lets downstream code answer "what
+    /// actually happened during this recording?" without parsing the
+    /// full diagnostics.json. Absent (`nil`) on recordings where no
+    /// runtime data was captured — e.g. a prepare-only run that never
+    /// committed.
+    struct Runtime: Encodable {
+        /// Frames received from the camera per second of recording
+        /// duration. May be less than the camera's advertised rate
+        /// during periods of low light or USB contention.
+        let effectiveCameraFps: Double?
+        /// Frames received from ScreenCaptureKit per second of recording
+        /// duration. SCK only delivers `.complete` frames so this is
+        /// content-dependent — a static screen produces near zero.
+        let effectiveScreenFps: Double?
+        /// Frames the metronome successfully emitted (real + keep-alive)
+        /// per second of recording duration. This is the rate of frames
+        /// that actually reach the encoder.
+        let outputFps: Double?
+        /// Median camera capture-to-capture interval, in milliseconds.
+        /// Computed from the bucketed histogram so this is the upper
+        /// edge of the bucket containing the median — coarse but
+        /// useful for "is camera delivery healthy at ~33ms (30fps)?"
+        let cameraIntervalP50Ms: Double?
+        let cameraIntervalP95Ms: Double?
+        let screenIntervalP50Ms: Double?
+        let screenIntervalP95Ms: Double?
+        let metronome: MetronomeCounters
+
+        struct MetronomeCounters: Encodable {
+            let iterations: Int64
+            let emitOK: Int64
+            let skipsStale: Int64
+            let keepAliveEmits: Int64
+            let monoRejects: Int64
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(effectiveCameraFps, forKey: .effectiveCameraFps)
+            try c.encodeIfPresent(effectiveScreenFps, forKey: .effectiveScreenFps)
+            try c.encodeIfPresent(outputFps, forKey: .outputFps)
+            try c.encodeIfPresent(cameraIntervalP50Ms, forKey: .cameraIntervalP50Ms)
+            try c.encodeIfPresent(cameraIntervalP95Ms, forKey: .cameraIntervalP95Ms)
+            try c.encodeIfPresent(screenIntervalP50Ms, forKey: .screenIntervalP50Ms)
+            try c.encodeIfPresent(screenIntervalP95Ms, forKey: .screenIntervalP95Ms)
+            try c.encode(metronome, forKey: .metronome)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case effectiveCameraFps
+            case effectiveScreenFps
+            case outputFps
+            case cameraIntervalP50Ms
+            case cameraIntervalP95Ms
+            case screenIntervalP50Ms
+            case screenIntervalP95Ms
+            case metronome
+        }
+    }
 
     /// Non-zero values here are a hint that the GPU path wobbled during the
     /// recording — either a CoreImage render returned an error (typically
@@ -177,12 +243,66 @@ struct RecordingTimeline: Encodable {
             /// HAL-reported input latency in milliseconds (audio devices only).
             /// Nil for non-audio devices (camera).
             let halInputLatencyMs: Double?
+            /// v3+ camera-only: trimmed advertised formats list. Nil on
+            /// non-camera devices and on v2-vintage recordings.
+            var advertisedFormats: [AdvertisedFormat]?
+            /// v3+ camera-only: the format AVCaptureSession actually
+            /// selected, plus whether we managed to lock the frame rate.
+            /// Nil on non-camera devices and on v2-vintage recordings.
+            var selectedFormat: SelectedFormat?
 
-            init(uniqueID: String, name: String, halInputLatencyMs: Double? = nil) {
+            init(
+                uniqueID: String,
+                name: String,
+                halInputLatencyMs: Double? = nil,
+                advertisedFormats: [AdvertisedFormat]? = nil,
+                selectedFormat: SelectedFormat? = nil
+            ) {
                 self.uniqueID = uniqueID
                 self.name = name
                 self.halInputLatencyMs = halInputLatencyMs
+                self.advertisedFormats = advertisedFormats
+                self.selectedFormat = selectedFormat
             }
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(uniqueID, forKey: .uniqueID)
+                try c.encode(name, forKey: .name)
+                try c.encodeIfPresent(halInputLatencyMs, forKey: .halInputLatencyMs)
+                try c.encodeIfPresent(advertisedFormats, forKey: .advertisedFormats)
+                try c.encodeIfPresent(selectedFormat, forKey: .selectedFormat)
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case uniqueID, name, halInputLatencyMs, advertisedFormats, selectedFormat
+            }
+        }
+
+        /// v3+ trimmed camera advertised-format entry. One row per unique
+        /// (width, height, maxFrameRate) — the full per-rate-range list
+        /// stays in diagnostics.json. Nil minFrameRate / maxFrameRate
+        /// when the device reported no rate ranges.
+        struct AdvertisedFormat: Encodable {
+            let width: Int
+            let height: Int
+            let pixelFormat: String
+            let minFrameRate: Double
+            let maxFrameRate: Double
+        }
+
+        /// v3+ post-`AVCaptureSession.startRunning()` snapshot of what
+        /// format the camera ended up running. `didLockRate` is false
+        /// when `1/targetFPS` wasn't strictly inside the format's rate
+        /// range (e.g. Opal Tadpole's UVC quirk), in which case the
+        /// camera runs at its own rate.
+        struct SelectedFormat: Encodable {
+            let width: Int
+            let height: Int
+            let pixelFormat: String
+            let didLockRate: Bool
+            let activeMinFrameDurationSeconds: Double
+            let activeMaxFrameDurationSeconds: Double
         }
     }
 
@@ -266,6 +386,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
     private var stallTimeoutCount: Int = 0
     private var rebuildSuccessCount: Int = 0
     private var terminalCompositionFailure: Bool = false
+    private var runtime: RecordingTimeline.Runtime?
     private var segments: [RecordingTimeline.SegmentEntry] = []
     private var events: [RecordingTimeline.Event] = []
 
@@ -337,6 +458,26 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         microphone: RecordingTimeline.Inputs.Device?
     ) {
         self.inputs = .init(display: display, camera: camera, microphone: microphone)
+    }
+
+    /// Phase 4 (task-21): attach the camera's advertised + selected
+    /// format details to the existing `inputs.camera` entry. Called
+    /// after camera capture has actually started and we know what
+    /// AVCaptureSession picked.
+    func setCameraFormatDetails(
+        advertised: [RecordingTimeline.Inputs.AdvertisedFormat]?,
+        selected: RecordingTimeline.Inputs.SelectedFormat?
+    ) {
+        guard var camera = inputs.camera else { return }
+        camera.advertisedFormats = advertised
+        camera.selectedFormat = selected
+        self.inputs = .init(display: inputs.display, camera: camera, microphone: inputs.microphone)
+    }
+
+    /// Phase 4: aggregate runtime metrics computed at stop time from
+    /// diagnostic histograms + counters.
+    func setRuntime(_ runtime: RecordingTimeline.Runtime) {
+        self.runtime = runtime
     }
 
     /// Called at commit — anchors t=0 and marks the session start.
@@ -543,6 +684,23 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
+    /// Phase 4: the encoder-level monotonicity safety net rejected a
+    /// frame. Should never fire post task-21 — the source-PTS freshness
+    /// check is the primary defence. Any non-zero count in a recording
+    /// is a regression hint. `branch` is the composite-mode label
+    /// (`"pop"`, `"skipStale"`, etc.) so forensics can tell where the
+    /// rejection originated.
+    func recordMonotonicityRejected(deltaMs: Double, branch: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "monotonicity.rejected",
+            data: [
+                "deltaMs": .double(deltaMs),
+                "branch": .string(branch),
+            ]
+        )
+    }
+
     /// Seconds since t=0 (the commit anchor). Safe to call before the anchor
     /// is set — returns 0.
     func now() -> Double {
@@ -595,6 +753,7 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
                 ? nil
                 : .init(screen: rawScreen, camera: rawCamera, audio: rawAudio),
             compositionStats: compositionStatsIfInteresting(),
+            runtime: runtime,
             segments: segments,
             events: sortedEvents
         )

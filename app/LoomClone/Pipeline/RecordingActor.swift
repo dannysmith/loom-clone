@@ -414,6 +414,17 @@ actor RecordingActor {
         // recording.json. The full dump lives in diagnostics.json.
         recordDiagnosticsSummaryEvent()
 
+        // Phase 4: feed runtime metrics + camera format details into the
+        // timeline so recording.json carries the aggregate "what
+        // happened" view of this session. Diagnostics has the raw
+        // counters + histograms; the builder gets the projection.
+        diagnostics.recordingDurationS = logicalDuration
+        timeline.setCameraFormatDetails(
+            advertised: diagnostics.trimmedAdvertisedFormats(),
+            selected: diagnostics.selectedFormatForRecordingJson()
+        )
+        timeline.setRuntime(diagnostics.buildRuntime())
+
         // NOW the builder is fully up-to-date: all segments, all pauses,
         // all mode switches, all upload results. Snapshot it.
         let builtTimeline = timeline.build()

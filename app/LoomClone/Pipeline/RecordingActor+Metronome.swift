@@ -62,7 +62,17 @@ extension RecordingActor {
         let sleepNanos = UInt64(1_000_000_000 / UInt64(targetFrameRate))
 
         while !Task.isCancelled, isRecording {
-            let emitted = await emitMetronomeFrame()
+            diagnostics.iterations += 1
+            let iterIdx = diagnostics.iterations
+
+            let emitted = await emitMetronomeFrame(iterIdx: iterIdx)
+
+            // Periodic snapshot every ~2 logical seconds.
+            let nowLogical = logicalElapsedSeconds()
+            if nowLogical - lastPeriodicSnapshotS >= 2 {
+                diagnostics.pushPeriodicSnapshot(t: nowLogical)
+                lastPeriodicSnapshotS = nowLogical
+            }
 
             // Re-check cancellation immediately after composite returns.
             // A wedged GPU can leave a render task waiting up to 2s before
@@ -73,6 +83,7 @@ extension RecordingActor {
             if Task.isCancelled { return }
 
             if !emitted {
+                diagnostics.idleSleeps += 1
                 try? await Task.sleep(for: .nanoseconds(sleepNanos))
                 continue
             }
@@ -90,7 +101,10 @@ extension RecordingActor {
             let now = CMClockGetTime(CMClockGetHostTimeClock())
             let sleepSeconds = (nextTarget - now).seconds
             if sleepSeconds > 0 {
+                diagnostics.driftPositiveSleep += 1
                 try? await Task.sleep(for: .seconds(sleepSeconds))
+            } else {
+                diagnostics.driftZeroSleep += 1
             }
         }
     }

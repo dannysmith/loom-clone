@@ -75,6 +75,30 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Diagnostics: capture every advertised format for a device into the
+    /// JSON-friendly shape used by the recording actor's diagnostics dump.
+    /// Read-only, called once per recording at startup.
+    static func snapshotAdvertisedFormats(for device: AVCaptureDevice) -> [CameraAdvertisedFormat] {
+        device.formats.map { format -> CameraAdvertisedFormat in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let pf = CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            let ranges = format.videoSupportedFrameRateRanges.map { range in
+                CameraAdvertisedFormat.RateRange(
+                    minFrameRate: range.minFrameRate,
+                    maxFrameRate: range.maxFrameRate,
+                    minFrameDurationSeconds: range.minFrameDuration.seconds,
+                    maxFrameDurationSeconds: range.maxFrameDuration.seconds
+                )
+            }
+            return CameraAdvertisedFormat(
+                width: Int(dims.width),
+                height: Int(dims.height),
+                pixelFormat: PixelFormatLabel.string(for: pf),
+                rateRanges: ranges
+            )
+        }
+    }
+
     static func availableDevices() -> [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external],
@@ -91,6 +115,18 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// camera writer's dimensions.
     private(set) var nativePixelSize: CGSize = .zero
 
+    /// Diagnostics: every format the device advertised, captured at startup
+    /// so the recording actor can include it in the diagnostics dump.
+    /// Useful for confirming whether a camera (e.g. Opal Tadpole) actually
+    /// exposes a 60fps format.
+    private(set) var lastAdvertisedFormats: [CameraAdvertisedFormat] = []
+
+    /// Diagnostics: which format we actually picked + whether we managed
+    /// to lock `activeVideoMinFrameDuration` to the target. If `didLockRate`
+    /// is false, the camera ran at its own native rate (which is what we
+    /// log to console), not the user-picked rate.
+    private(set) var lastSelectedFormat: MetronomeDiagnostics.SelectedCameraFormat?
+
     func startCapture(
         device: AVCaptureDevice,
         maxHeight: Int = Int.max,
@@ -101,6 +137,18 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         guard granted else {
             Log.camera.log("Permission denied")
             return
+        }
+
+        // Diagnostics: snapshot every advertised format before we touch the
+        // session. Helpful for confirming "what does the Opal actually
+        // expose?" — log to console and stash for the diagnostics dump.
+        lastAdvertisedFormats = Self.snapshotAdvertisedFormats(for: device)
+        print("[camera-diag] \(device.localizedName) advertises \(lastAdvertisedFormats.count) format(s):")
+        for (i, fmt) in lastAdvertisedFormats.enumerated() {
+            let ranges = fmt.rateRanges
+                .map { String(format: "%.2f-%.2ffps", $0.minFrameRate, $0.maxFrameRate) }
+                .joined(separator: ", ")
+            print("[camera-diag]   [\(i)] \(fmt.width)x\(fmt.height) pf=\(fmt.pixelFormat) ranges=[\(ranges)]")
         }
 
         let session = AVCaptureSession()
@@ -126,23 +174,40 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 // crashes the app. When 1/fps isn't in range, the format's
                 // own rate applies — leave it alone.
                 let targetDur = targetFPS.frameDuration
+                var didLockRate = false
                 if best.videoSupportedFrameRateRanges.contains(where: {
                     $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
                 }) {
                     device.activeVideoMinFrameDuration = targetDur
                     device.activeVideoMaxFrameDuration = targetDur
+                    didLockRate = true
                 }
                 device.unlockForConfiguration()
                 let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
                 let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
                 Log.camera.log(String(
-                    format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d)",
+                    format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d, lockedRate=%@)",
                     dims.width,
                     dims.height,
                     min(rate, Double(targetFPS.rawValue)),
                     targetFPS.rawValue,
-                    maxHeight
+                    maxHeight,
+                    didLockRate ? "yes" : "NO (range mismatch — camera runs at its own rate)"
                 ))
+
+                // Diagnostics: stash the selected format details so the
+                // recording actor can include them in the dump.
+                let pf = CMFormatDescriptionGetMediaSubType(best.formatDescription)
+                lastSelectedFormat = MetronomeDiagnostics.SelectedCameraFormat(
+                    width: Int(dims.width),
+                    height: Int(dims.height),
+                    pixelFormat: PixelFormatLabel.string(for: pf),
+                    targetFPS: Int(targetFPS.rawValue),
+                    didLockRate: didLockRate,
+                    activeMinFrameDurationSeconds: device.activeVideoMinFrameDuration.seconds,
+                    activeMaxFrameDurationSeconds: device.activeVideoMaxFrameDuration.seconds,
+                    advertisedMaxFrameRate: rate
+                )
             } catch {
                 Log.camera.log("Could not set activeFormat: \(error) — falling back to .high")
                 session.sessionPreset = .high

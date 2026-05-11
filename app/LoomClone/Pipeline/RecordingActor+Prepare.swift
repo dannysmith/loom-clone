@@ -322,6 +322,13 @@ extension RecordingActor {
         lastAudioSampleHostTime = nil
         activeSourceWarnings.removeAll()
         timeline = RecordingTimelineBuilder()
+
+        // Diagnostics: reset all counters + buffers for the new recording.
+        diagnostics.reset()
+        lastCameraCapturePTS = .invalid
+        lastScreenCapturePTS = .invalid
+        lastEmitLogicalSeconds = -1
+        lastPeriodicSnapshotS = -1
     }
 
     /// Resolve a display ID to its SCDisplay and find our own app for exclusion.
@@ -528,6 +535,11 @@ extension RecordingActor {
             await cameraCapture.startCapture(device: camera, maxHeight: preset.height, targetFPS: frameRate, micDevice: microphone)
             sharedSessionAudioActive = cameraCapture.hasAudioCapture
             await configureCameraRawWriter(withAudio: sharedSessionAudioActive)
+            // Diagnostics: snapshot what the camera advertised + what we
+            // picked. Stored on RecordingActor for inclusion in
+            // diagnostics.json at stop.
+            diagnostics.advertisedCameraFormats = cameraCapture.lastAdvertisedFormats
+            diagnostics.selectedCameraFormat = cameraCapture.lastSelectedFormat
         }
 
         if let microphone {

@@ -260,6 +260,29 @@ actor RecordingActor {
     /// Resets to 0 when the metronome (re)starts after pause.
     var metronomeTickIdx: Int64 = 0
 
+    // MARK: - Diagnostics
+
+    /// Aggregate counters, histograms, and per-tick / per-frame trace
+    /// ring-buffers for this recording. Mutated on the hot path; dumped to
+    /// `diagnostics.json` at stop. See `RecordingActor+Diagnostics.swift`.
+    var diagnostics = MetronomeDiagnostics()
+
+    /// Last camera capturePTS seen — used to compute camera frame intervals
+    /// without scanning the trace buffer.
+    var lastCameraCapturePTS: CMTime = .invalid
+    /// Last screen capturePTS seen — same purpose for screen frames.
+    var lastScreenCapturePTS: CMTime = .invalid
+    /// Last successful emit PTS (logical seconds since start, stripped of
+    /// priming offset). Used to bucket the inter-emit cadence histogram.
+    var lastEmitLogicalSeconds: Double = -1
+    /// Wall-clock anchor for periodic snapshots — fires roughly every 2s.
+    var lastPeriodicSnapshotS: Double = -1
+    /// Verbose console logging toggle. Set from the
+    /// `LOOMCLONE_DIAGNOSTICS_VERBOSE` env var at startup. When true, every
+    /// monotonicity rejection and peek-with-repeat fire is logged
+    /// individually. When false, only periodic + summary lines are logged.
+    let verboseDiagnostics: Bool = ProcessInfo.processInfo.environment["LOOMCLONE_DIAGNOSTICS_VERBOSE"] == "1"
+
     // MARK: - Stop
 
     /// What the stop flow hands back to the coordinator. `url` drives the
@@ -358,6 +381,11 @@ actor RecordingActor {
 
         finalizeRawWriterMetadata(logicalDuration: logicalDuration, rawResults: rawResults)
 
+        // Diagnostics: append the one-line summary as an "error" timeline
+        // event (kind=error, message="diagnostics: …") so it's visible in
+        // recording.json. The full dump lives in diagnostics.json.
+        recordDiagnosticsSummaryEvent()
+
         // NOW the builder is fully up-to-date: all segments, all pauses,
         // all mode switches, all upload results. Snapshot it.
         let builtTimeline = timeline.build()
@@ -371,6 +399,11 @@ actor RecordingActor {
                 Log.recording.log("Failed to write local timeline: \(error)")
             }
         }
+
+        // Dump diagnostics. Sibling file `diagnostics.json` next to the
+        // recording bundle. Also logs a one-line summary to console for
+        // immediate at-a-glance feedback.
+        writeDiagnosticsDump(sessionID: builtTimeline.session.id)
 
         // Complete upload (includes the timeline in the payload)
         do {

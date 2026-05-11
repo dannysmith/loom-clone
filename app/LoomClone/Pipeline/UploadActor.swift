@@ -117,8 +117,12 @@ actor UploadActor {
             do {
                 data = try Data(contentsOf: segment.localURL)
             } catch {
-                Log.upload.log("Cannot read \(segment.filename) from \(segment.localURL.path): \(error)")
-                onUploadResult?(segment.filename, false, "local read failed: \(error)")
+                // Avoid logging the absolute path — it's a user-specific
+                // Application Support location that doesn't aid diagnosis
+                // beyond the filename + error.
+                let errorCode = (error as NSError).code
+                Log.upload.log("Cannot read \(segment.filename) (code=\(errorCode))")
+                onUploadResult?(segment.filename, false, "local read failed (code \(errorCode))")
                 return
             }
 

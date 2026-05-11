@@ -21,6 +21,13 @@ final class ScreenPreviewManager {
     @ObservationIgnored
     private var currentDisplayID: CGDirectDisplayID?
 
+    /// Monotonically increasing generation token. Bumped on every start()
+    /// and stop(); the in-flight capture compares its captured value
+    /// against the current one and bails out if they differ, so a late
+    /// SCK callback can't overwrite state after stop() or a display switch.
+    @ObservationIgnored
+    private var generation: Int = 0
+
     /// Maximum width of the preview image. Scaled down from the native
     /// display resolution so we don't pay a full-screen readback for a
     /// 160-point-tall preview slot.
@@ -33,9 +40,18 @@ final class ScreenPreviewManager {
     func start(display: SCDisplay) {
         if currentDisplayID == display.displayID, image != nil || captureTask != nil { return }
         stop()
-        currentDisplayID = display.displayID
-        captureTask = Task { @MainActor in
-            await self.capture(display: display)
+        let targetID = display.displayID
+        currentDisplayID = targetID
+        generation += 1
+        let myGeneration = generation
+        captureTask = Task { @MainActor [weak self] in
+            await self?.capture(display: display, generation: myGeneration)
+            // Clear our handle only if no later start() bumped the generation
+            // past us. Without this guard a fast re-start() for the same
+            // display could be no-op'd because the prior task is still set
+            // until it returns.
+            guard let self, self.generation == myGeneration else { return }
+            self.captureTask = nil
         }
     }
 
@@ -44,9 +60,10 @@ final class ScreenPreviewManager {
         captureTask = nil
         currentDisplayID = nil
         image = nil
+        generation += 1
     }
 
-    private func capture(display: SCDisplay) async {
+    private func capture(display: SCDisplay, generation myGeneration: Int) async {
         do {
             let filter = SCContentFilter(display: display, excludingWindows: [])
             let config = SCStreamConfiguration()
@@ -64,6 +81,11 @@ final class ScreenPreviewManager {
                 contentFilter: filter,
                 configuration: config
             )
+            // Only publish if we're still the active generation. A stop()
+            // or display switch during the await would have bumped
+            // `generation`; bailing here keeps a late SCK callback from
+            // overwriting the new state.
+            guard generation == myGeneration else { return }
             self.image = img
         } catch {
             Log.screenPreview.log("Capture failed: \(error)")

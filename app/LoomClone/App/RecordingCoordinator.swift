@@ -468,7 +468,12 @@ final class RecordingCoordinator {
     // MARK: - Actions
 
     func startRecording() {
-        guard state == .idle else { return }
+        // `.stopped` is the brief post-recording window (until
+        // `stoppedToIdleDelay` flips it back to `.idle`) — recording
+        // resources are already released at that point, so a second
+        // recording can start immediately. The pending revert-to-idle
+        // Task no-ops because we'll move state out of `.stopped` here.
+        guard state == .idle || state == .stopped else { return }
         guard !availableModes.isEmpty else {
             Log.coordinator.log("No sources selected — record button should be disabled")
             return

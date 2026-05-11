@@ -72,20 +72,7 @@ extension RecordingActor {
         // sample buffer copy.
         if pauseStartHostTime == nil, logicalPTS >= .zero {
             let hlsPTS = TimestampAdjuster.defaultPrimingOffset + logicalPTS
-            var hlsTiming = CMSampleTimingInfo(
-                duration: duration,
-                presentationTimeStamp: hlsPTS,
-                decodeTimeStamp: .invalid
-            )
-            var hlsOut: CMSampleBuffer?
-            CMSampleBufferCreateCopyWithNewTiming(
-                allocator: kCFAllocatorDefault,
-                sampleBuffer: sampleBuffer,
-                sampleTimingEntryCount: 1,
-                sampleTimingArray: &hlsTiming,
-                sampleBufferOut: &hlsOut
-            )
-            if let hlsOut {
+            if let hlsOut = retimedCopy(of: sampleBuffer, pts: hlsPTS, duration: duration, label: "hls audio") {
                 await writer.appendAudio(hlsOut)
             }
         }
@@ -93,20 +80,7 @@ extension RecordingActor {
         // Raw audio path: routes to camera.mp4 audio when shared session is
         // active, or audio.m4a when the standalone mic feeds the HLS writer.
         if pauseStartHostTime == nil, logicalPTS >= .zero {
-            var rawTiming = CMSampleTimingInfo(
-                duration: duration,
-                presentationTimeStamp: logicalPTS,
-                decodeTimeStamp: .invalid
-            )
-            var rawOut: CMSampleBuffer?
-            CMSampleBufferCreateCopyWithNewTiming(
-                allocator: kCFAllocatorDefault,
-                sampleBuffer: sampleBuffer,
-                sampleTimingEntryCount: 1,
-                sampleTimingArray: &rawTiming,
-                sampleBufferOut: &rawOut
-            )
-            if let rawOut {
+            if let rawOut = retimedCopy(of: sampleBuffer, pts: logicalPTS, duration: duration, label: "raw audio") {
                 if sharedSessionAudioActive {
                     await cameraRawWriter?.appendAudio(rawOut)
                 } else {
@@ -114,6 +88,36 @@ extension RecordingActor {
                 }
             }
         }
+    }
+
+    /// Wrap CMSampleBufferCreateCopyWithNewTiming so failures are logged
+    /// rather than silently dropped. The OSStatus is surfaced as a
+    /// `[health]` log line with the call's `label` for diagnosis;
+    /// callers receive `nil` and skip the append.
+    private func retimedCopy(
+        of sampleBuffer: CMSampleBuffer,
+        pts: CMTime,
+        duration: CMTime,
+        label: String
+    ) -> CMSampleBuffer? {
+        var timing = CMSampleTimingInfo(
+            duration: duration,
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid
+        )
+        var out: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &out
+        )
+        guard status == noErr else {
+            Log.health.log("CMSampleBufferCreateCopyWithNewTiming failed (\(label)): status=\(status)")
+            return nil
+        }
+        return out
     }
 
     /// Audio from the standalone mic session. When the camera's shared session

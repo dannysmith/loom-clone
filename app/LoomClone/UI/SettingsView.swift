@@ -12,6 +12,7 @@ struct SettingsView: View {
         case saved
         case cleared
         case urlSaved
+        case urlCleared
         case urlInvalid(String)
         case error(String)
     }
@@ -28,9 +29,10 @@ struct SettingsView: View {
                     .onSubmit { saveURL() }
 
                 HStack(spacing: 8) {
+                    // Save is always available — an empty field clears the
+                    // saved override (reverts to the build-config default).
                     Button("Save") { saveURL() }
                         .buttonStyle(.borderedProminent)
-                        .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Spacer()
                     urlStatusLabel
@@ -106,6 +108,10 @@ struct SettingsView: View {
             Label("Saved", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.caption)
+        case .urlCleared:
+            Label("Cleared — using default", systemImage: "arrow.uturn.backward")
+                .foregroundStyle(.secondary)
+                .font(.caption)
         case let .urlInvalid(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
@@ -139,7 +145,15 @@ struct SettingsView: View {
 
     private func saveURL() {
         let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+
+        // Empty trimmed value is an explicit "clear the override" — reverts
+        // to AppEnvironment.defaultServerURL (the build-config default).
+        if trimmed.isEmpty {
+            AppEnvironment.serverURL = ""
+            serverURL = ""
+            status = .urlCleared
+            return
+        }
 
         // Strip trailing slash so APIClient can append paths without doubling
         // the separator.

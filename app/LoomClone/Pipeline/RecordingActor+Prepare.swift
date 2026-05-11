@@ -311,6 +311,7 @@ extension RecordingActor {
         pauseAccumulator = .zero
         pauseStartHostTime = nil
         lastEmittedVideoPTS = .invalid
+        lastEmittedSourcePTS = .invalid
         latestScreenFrame = nil
         cameraFrameQueue.removeAll(keepingCapacity: true)
         lastPoppedCameraFrame = nil

@@ -169,8 +169,16 @@ extension RecordingActor {
     }
 
     /// Acquire source frames for the current mode, composite them, and return
-    /// a decision record. Always returns — the caller inspects `output` and
-    /// `compositionFailed` to decide whether to emit.
+    /// a decision record. Always returns — the caller inspects `output`,
+    /// `compositionFailed`, and `branch` to decide whether to emit.
+    ///
+    /// Source-PTS freshness is enforced here: a tick whose source frame is
+    /// not strictly newer than `lastEmittedSourcePTS` returns with
+    /// `branch = "skipStale"` and no composition is performed. This
+    /// replaces the encoder-level monotonicity rejection that previously
+    /// fired on every static-screen tick (Bug B) and on every
+    /// cameraOnly tick where the metronome over-ran the camera's
+    /// delivery rate (Bug A).
     private func compositeForCurrentMode() async -> CompositeDecision {
         var decision = CompositeDecision(
             output: nil,
@@ -188,6 +196,11 @@ extension RecordingActor {
                 decision.branch = "noSource"
                 return decision
             }
+            if isStaleSource(screen.capturePTS) {
+                decision.branch = "skipStale"
+                decision.sourcePTS = screen.capturePTS
+                return decision
+            }
             decision.sourcePTS = screen.capturePTS
             let startedAt = Date()
             result = await composition.compositeFrame(
@@ -201,14 +214,17 @@ extension RecordingActor {
                 decision.branch = "noSource"
                 return decision
             }
-            let camera = cameraFrameQueue.last
             // Screen drives timing in screenAndCamera mode — it's the
-            // primary content, camera is just a PiP overlay. Using
-            // screen PTS ensures the output advances at the screen's
-            // delivery rate (60fps when configured). Using camera PTS
-            // would throttle to the camera's rate when it's slower
-            // (e.g. 30fps camera + 60fps screen), causing the
-            // monotonicity check to reject every other tick.
+            // primary content, camera is just a PiP overlay. Using screen
+            // PTS ensures the output advances at the screen's delivery
+            // rate and lets a static screen short-circuit through the
+            // stale-source check below.
+            if isStaleSource(screen.capturePTS) {
+                decision.branch = "skipStale"
+                decision.sourcePTS = screen.capturePTS
+                return decision
+            }
+            let camera = cameraFrameQueue.last
             decision.sourcePTS = screen.capturePTS
             let cameraAvailable = camera != nil
                 && !activeSourceWarnings.contains(.cameraFailed)
@@ -230,49 +246,41 @@ extension RecordingActor {
             }
             decision.compositeS = -startedAt.timeIntervalSinceNow
         case .cameraOnly:
-            // Pop a fresh frame if available; otherwise re-emit the most
-            // recently popped frame (peek-with-repeat). This handles the
-            // case where the metronome ticks at 60fps but the camera only
-            // delivers at 30fps — every other tick has an empty FIFO.
-            // Repeated frames compress to nearly nothing in H.264.
-            let cameraBuffer: CVPixelBuffer
-            if !cameraFrameQueue.isEmpty {
-                let popped = cameraFrameQueue.removeFirst()
-                lastPoppedCameraFrame = popped
-                cameraBuffer = popped.pixelBuffer
-                decision.sourcePTS = popped.capturePTS
-                decision.branch = "pop"
-                diagnostics.cameraOnlyPopBranch += 1
-                MetronomeDiagnostics.bumpHistogram(
-                    &diagnostics.queueDepthHist,
-                    edges: MetronomeDiagnostics.queueDepthEdges,
-                    value: decision.queueDepthBefore
-                )
-            } else if let last = lastPoppedCameraFrame {
-                cameraBuffer = last.pixelBuffer
-                // Use the current host clock for repeated frames so the
-                // PTS advances monotonically. The original capturePTS is
-                // stale (same as the previous tick's), which would fail
-                // the monotonicity guard and silently drop the frame.
-                decision.sourcePTS = CMClockGetTime(CMClockGetHostTimeClock())
-                decision.branch = "repeat"
-                diagnostics.cameraOnlyRepeatBranch += 1
-                if verboseDiagnostics {
-                    print(String(
-                        format: "[diag] peek-with-repeat fire #%d at hostT=%.4f (queue=0)",
-                        diagnostics.cameraOnlyRepeatBranch,
-                        logicalElapsedSeconds()
-                    ))
-                }
-            } else {
+            // Pop the next camera frame if available. Output cadence
+            // tracks the camera's actual delivery rate — empty ticks
+            // become no-ops rather than synthesising host-clock PTS
+            // values (which was Bug A: the synthetic PTS landed ahead
+            // of the next real frame's capturePTS, causing the encoder
+            // to reject every newly-arrived real frame).
+            guard !cameraFrameQueue.isEmpty else {
                 decision.branch = "noSource"
                 diagnostics.cameraOnlyNoSourceBranch += 1
                 return decision
             }
+            let popped = cameraFrameQueue.removeFirst()
+            lastPoppedCameraFrame = popped
+            if isStaleSource(popped.capturePTS) {
+                // Pause/resume drop-through (camera frames captured during
+                // a pause survive in the FIFO past the drain on a tight
+                // race) or mode switch into cameraOnly (FIFO inherits
+                // stale frames from screen-mode emits). Drop silently
+                // and wait for the next tick.
+                decision.branch = "skipStale"
+                decision.sourcePTS = popped.capturePTS
+                return decision
+            }
+            decision.sourcePTS = popped.capturePTS
+            decision.branch = "pop"
+            diagnostics.cameraOnlyPopBranch += 1
+            MetronomeDiagnostics.bumpHistogram(
+                &diagnostics.queueDepthHist,
+                edges: MetronomeDiagnostics.queueDepthEdges,
+                value: decision.queueDepthBefore
+            )
             let startedAt = Date()
             result = await composition.compositeFrame(
                 screenBuffer: nil,
-                cameraBuffer: cameraBuffer,
+                cameraBuffer: popped.pixelBuffer,
                 mode: .cameraOnly
             )
             decision.compositeS = -startedAt.timeIntervalSinceNow
@@ -299,9 +307,18 @@ extension RecordingActor {
         return decision
     }
 
+    /// True when the source's capturePTS is not strictly newer than what
+    /// we last emitted. Used by the per-mode branches of
+    /// `compositeForCurrentMode` to skip a tick before spending GPU time
+    /// compositing content the encoder would only reject downstream.
+    private func isStaleSource(_ capturePTS: CMTime) -> Bool {
+        guard lastEmittedSourcePTS.isValid else { return false }
+        return capturePTS <= lastEmittedSourcePTS
+    }
+
     /// Compose and append a single metronome frame. Returns true if a frame
-    /// was actually appended (source available, composition succeeded, PTS
-    /// strictly monotonic).
+    /// was actually appended (source available, fresh, composition succeeded,
+    /// PTS strictly monotonic).
     ///
     /// `iterIdx` is the loop iteration counter, used in the diagnostic trace
     /// row so we can correlate this row with the metronome loop's idea of
@@ -343,14 +360,29 @@ extension RecordingActor {
             return false
         }
         guard let output = decision.output else {
-            diagnostics.noSourceTicks += 1
-            recordTickRejection(
-                iterIdx: iterIdx,
-                action: MetronomeTickAction.noSource,
-                decision: decision,
-                ptsLogical: nil,
-                lastEmitLogical: lastEmitLogical
-            )
+            // No composited frame this tick. Distinguish the two reasons
+            // so diagnostics can tell "static screen / metronome over-ran
+            // camera" (skipStale, expected in normal operation) from
+            // "no source ever arrived" (noSource, real problem).
+            if decision.branch == "skipStale" {
+                diagnostics.skipsStale += 1
+                recordTickRejection(
+                    iterIdx: iterIdx,
+                    action: MetronomeTickAction.skipStale,
+                    decision: decision,
+                    ptsLogical: nil,
+                    lastEmitLogical: lastEmitLogical
+                )
+            } else {
+                diagnostics.noSourceTicks += 1
+                recordTickRejection(
+                    iterIdx: iterIdx,
+                    action: MetronomeTickAction.noSource,
+                    decision: decision,
+                    ptsLogical: nil,
+                    lastEmitLogical: lastEmitLogical
+                )
+            }
             return false
         }
         let sourcePTS = decision.sourcePTS
@@ -408,6 +440,7 @@ extension RecordingActor {
             return false
         }
         lastEmittedVideoPTS = pts
+        lastEmittedSourcePTS = sourcePTS
 
         guard let outputSample = createSampleBuffer(
             from: output,

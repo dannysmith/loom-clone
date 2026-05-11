@@ -423,12 +423,23 @@ extension RecordingActor {
         let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
 
         if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS {
+            // Encoder safety net. Post task-21 Phases 1+2 this should
+            // never fire on the happy path — the source-PTS freshness
+            // check in `compositeForCurrentMode` is the primary defence
+            // and is intentionally less strict than the encoder gate
+            // here. A fire is a real bug; surface it on the timeline
+            // (Phase 4) so it shows up in recording.json forensics.
             diagnostics.rejectMonotonicity += 1
             let deltaMs = (lastEmittedVideoPTS - pts).seconds * 1000
             MetronomeDiagnostics.bumpHistogram(
                 &diagnostics.monoRejectHist,
                 edges: MetronomeDiagnostics.monoRejectEdgesMs,
                 valueMs: deltaMs
+            )
+            timeline.recordMonotonicityRejected(
+                deltaMs: deltaMs,
+                branch: decision.branch,
+                t: logicalElapsedSeconds()
             )
             if verboseDiagnostics {
                 print(String(

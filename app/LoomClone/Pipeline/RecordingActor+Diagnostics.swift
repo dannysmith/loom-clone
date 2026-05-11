@@ -211,6 +211,11 @@ struct MetronomeDiagnostics {
     /// can tell whether `activeVideoMin/MaxFrameDuration` actually got set.
     var selectedCameraFormat: SelectedCameraFormat?
 
+    /// Frozen at stop time so derived rates (`effectiveCameraFps`, etc.)
+    /// can normalise against the actual recording duration rather than
+    /// `cameraTrace.last?.hostT` (which caps at 300 frames). 0 until set.
+    var recordingDurationS: Double = 0
+
     struct SelectedCameraFormat: Encodable {
         let width: Int
         let height: Int
@@ -237,6 +242,109 @@ struct MetronomeDiagnostics {
         let cameraOnlyRepeatBranch: Int64
         let cameraFramesReceived: Int64
         let screenFramesReceived: Int64
+    }
+
+    // MARK: Phase 4 — runtime / camera-format projections
+
+    /// Build the v3 `runtime` block on `RecordingTimeline` from the
+    /// counters and histograms collected during this recording.
+    func buildRuntime() -> RecordingTimeline.Runtime {
+        let dur = recordingDurationS
+        let canRate = dur > 0.1
+        let camFps: Double? = canRate ? Double(cameraFramesReceived) / dur : nil
+        let scrFps: Double? = canRate ? Double(screenFramesReceived) / dur : nil
+        let outFps: Double? = canRate ? Double(emitOK + keepaliveEmits) / dur : nil
+        let camP50 = Self.percentileFromHistogram(
+            cameraIntervalHist, edges: Self.cameraIntervalEdgesMs, percentile: 0.5
+        )
+        let camP95 = Self.percentileFromHistogram(
+            cameraIntervalHist, edges: Self.cameraIntervalEdgesMs, percentile: 0.95
+        )
+        let scrP50 = Self.percentileFromHistogram(
+            screenIntervalHist, edges: Self.screenIntervalEdgesMs, percentile: 0.5
+        )
+        let scrP95 = Self.percentileFromHistogram(
+            screenIntervalHist, edges: Self.screenIntervalEdgesMs, percentile: 0.95
+        )
+        return RecordingTimeline.Runtime(
+            effectiveCameraFps: camFps,
+            effectiveScreenFps: scrFps,
+            outputFps: outFps,
+            cameraIntervalP50Ms: camP50,
+            cameraIntervalP95Ms: camP95,
+            screenIntervalP50Ms: scrP50,
+            screenIntervalP95Ms: scrP95,
+            metronome: .init(
+                iterations: iterations,
+                emitOK: emitOK,
+                skipsStale: skipsStale,
+                keepAliveEmits: keepaliveEmits,
+                monoRejects: rejectMonotonicity
+            )
+        )
+    }
+
+    /// Estimate a percentile from a bucketed histogram. Returns the upper
+    /// edge of the bucket containing the target cumulative count — coarse
+    /// (~one bucket width) but fine for "is camera delivery ~33ms?"
+    /// questions. Returns nil when the histogram is empty.
+    private static func percentileFromHistogram(
+        _ counts: [Int64],
+        edges: [Double],
+        percentile: Double
+    ) -> Double? {
+        let total = counts.reduce(0, +)
+        guard total > 0 else { return nil }
+        let target = Int64((Double(total) * percentile).rounded(.up))
+        var cumulative: Int64 = 0
+        for (i, c) in counts.enumerated() {
+            cumulative += c
+            if cumulative >= target {
+                return i < edges.count ? edges[i] : edges.last
+            }
+        }
+        return edges.last
+    }
+
+    /// Trimmed advertised-formats list for the recording.json
+    /// `inputs.camera.advertisedFormats` field. Deduplicates by
+    /// `(width, height, maxFrameRate)` so the JSON stays small even on
+    /// cameras that expose many format descriptors for the same dims.
+    func trimmedAdvertisedFormats() -> [RecordingTimeline.Inputs.AdvertisedFormat]? {
+        guard !advertisedCameraFormats.isEmpty else { return nil }
+        var seen: Set<String> = []
+        var result: [RecordingTimeline.Inputs.AdvertisedFormat] = []
+        for fmt in advertisedCameraFormats {
+            let maxRate = fmt.rateRanges.map(\.maxFrameRate).max() ?? 0
+            let minRate = fmt.rateRanges.map(\.minFrameRate).min() ?? 0
+            let key = "\(fmt.width)x\(fmt.height)@\(maxRate)"
+            if seen.insert(key).inserted {
+                result.append(.init(
+                    width: fmt.width,
+                    height: fmt.height,
+                    pixelFormat: fmt.pixelFormat,
+                    minFrameRate: minRate,
+                    maxFrameRate: maxRate
+                ))
+            }
+        }
+        return result
+    }
+
+    /// Selected-format projection for `inputs.camera.selectedFormat`.
+    /// Drops the diagnostic-only fields (`targetFPS`,
+    /// `advertisedMaxFrameRate`) that already exist in
+    /// `diagnostics.json`.
+    func selectedFormatForRecordingJson() -> RecordingTimeline.Inputs.SelectedFormat? {
+        guard let s = selectedCameraFormat else { return nil }
+        return .init(
+            width: s.width,
+            height: s.height,
+            pixelFormat: s.pixelFormat,
+            didLockRate: s.didLockRate,
+            activeMinFrameDurationSeconds: s.activeMinFrameDurationSeconds,
+            activeMaxFrameDurationSeconds: s.activeMaxFrameDurationSeconds
+        )
     }
 
     // MARK: Reset

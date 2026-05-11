@@ -531,6 +531,18 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
+    /// Phase 3 keep-alive emit (one per static run, not per tick). Fired
+    /// when the source has been static for ≥ `keepAliveThresholdSeconds`
+    /// and the metronome emits a synthetic-PTS repeat of the last cached
+    /// frame to keep HLS segments well-formed.
+    func recordKeepaliveEmitted(staleDurationSeconds: Double, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "keepalive.emitted",
+            data: ["staleDurationSeconds": .double(staleDurationSeconds)]
+        )
+    }
+
     /// Seconds since t=0 (the commit anchor). Safe to call before the anchor
     /// is set — returns 0.
     func now() -> Double {

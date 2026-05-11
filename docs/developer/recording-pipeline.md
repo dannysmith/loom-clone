@@ -65,21 +65,33 @@ The coordinator runs the countdown and `prepareRecording()` in parallel. After c
 
 ## Frame flow by mode
 
-The metronome ticks at the configured frame rate (30fps or 60fps) regardless of source frame rates. What it reads on each tick depends on the current mode:
+The metronome ticks at a wall-clock cadence set by the target frame rate (30fps or 60fps), but the tick interval is a **budget, not a contract**. Output rate tracks whatever the active mode's source is actually delivering — every tick consults the cached source frame and only emits when its `capturePTS` is strictly newer than `lastEmittedSourcePTS`. Stale-source ticks become no-ops; a long-static run triggers a [keep-alive](#keep-alive-for-long-static-sources) emit so HLS segments don't go empty.
+
+This source-PTS freshness gate is the primary monotonicity defence. The encoder-level monotonicity check survives as a safety net — post [task-21](../tasks-todo/task-21-output-frame-cadence-rework.md) it should never fire on the happy path; any fire surfaces as a `monotonicity.rejected` event in `recording.json`.
 
 ### `cameraOnly`
 
-Camera delivers frames into a bounded FIFO queue (capacity 8). Each metronome tick pops one frame from the queue. Every camera frame reaches the output in capture order at its native PTS. If the camera delivers faster than the metronome rate, the queue absorbs bursts; if slower (e.g. 30fps camera with 60fps metronome), the most-recently-popped frame is re-emitted on empty ticks — repeated frames compress to nearly nothing in H.264.
+Camera delivers frames into a bounded FIFO queue (capacity 8). Each metronome tick pops one frame from the queue. Every popped frame whose `capturePTS` passes the freshness check reaches the output in capture order. Output cadence matches the camera's actual delivery rate: a 30fps camera produces ~30fps output even when the metronome runs at 60fps. When the FIFO is empty, or when a popped frame is older than the last emit (e.g. pause-period leftovers, mode-switch carryover), the tick is a no-op — no synthetic-PTS frames.
 
 ### `screenOnly`
 
-Screen frames go into a single-slot cache (latest wins). Metronome reads the latest cached frame on each tick. This means idle screens (no pixel changes) still produce a steady output with repeated frames — which is correct for HLS encoding.
+Screen frames go into a single-slot cache (latest wins). The metronome reads the cached frame on each tick and emits only when its `capturePTS` advances. ScreenCaptureKit only delivers `.complete` frames on content change, so a static screen produces no real emits — the keep-alive path handles segment hygiene in that case.
 
 ### `screenAndCamera`
 
-Metronome drives at the configured rate from the screen cache. On each tick it also *peeks* (without popping) the most recent camera frame from the FIFO as the PiP overlay. The camera frame isn't consumed because it's decorative — the screen timing drives the output.
+Screen drives the output cadence (it's the primary content; camera is a PiP overlay). The freshness check runs on `screen.capturePTS`. Each tick peeks (without popping) the most recent camera frame from the FIFO as the overlay content. The camera FIFO accumulates and ages out via the capacity cap; no frames are consumed by this mode.
 
-In all modes, the output frame is stamped with the source frame's hardware capture PTS, not the wall clock at emit time. This is what the writer uses for segment timing.
+In all three modes, the emitted frame is stamped with the source frame's hardware capture PTS — not the wall clock at emit time. Audio samples are stamped with their own hardware capture PTS. Both share the same clock domain, which keeps A/V aligned through capture-pipeline latency.
+
+### Keep-alive for long-static sources
+
+When the freshness gate has been skipping for ≥ 1.0s (`host_now - lastEmitHostTime`), the metronome emits a synthetic-PTS repeat of the last cached source frame. This stops AVAssetWriter's 4-second segmenter from cutting empty segments during a static-screen run (which would freeze playback past the gap).
+
+Keep-alive PTS uses the same formula real frames use — `primingOffset + (host_now - start) - pauseAccumulator` — substituting `host_now` for the source capture time. The wall-clock anchor is what keeps audio and video aligned across the static period: audio PTS also advances at wall-clock rate, so a 10s static run produces 10 keep-alives whose PTS spans 10 seconds, matching audio exactly.
+
+Keep-alive intentionally does NOT update `lastEmittedSourcePTS`. When fresh source content eventually arrives, the freshness gate still accepts it — its `capturePTS` will be at least 1s past the keep-alive PTS, comfortably beyond capture-lag noise. This is what prevents the keep-alive from re-introducing the pre-task-21 host-clock-PTS bug.
+
+One `keepalive.emitted` timeline event fires per static run (debounced); subsequent keep-alives in the same run are silent on the timeline.
 
 ## Composition (Metal/CIContext)
 
@@ -145,6 +157,9 @@ Pause is a first-class concept in the pipeline, not a stop-and-restart:
 **On resume:**
 - Pause duration computed: `now - pauseStartHostTime`.
 - Added to `pauseAccumulator`.
+- `cameraFrameQueue` drained — any frames captured during the pause are pre-discarded so the metronome doesn't walk through them one tick at a time post-resume.
+- `lastEmittedSourcePTS` bumped to `max(it, now)` so any *screen* frame captured during the pause (latestScreenFrame can be overwritten mid-pause) is treated as stale by the freshness gate. Without this bump the mid-pause screen frame would pass the freshness check but compute an encoder PTS behind `lastEmittedVideoPTS` and trip the monotonicity safety net.
+- `lastEmitHostTime` bumped to `now` so a long pause isn't misread as a static-source run by the keep-alive path.
 - Metronome restarted (drift-corrected sleep resets from tick 0).
 - Next audio sample's PTS is retimed by subtracting the accumulated pause total.
 - Next video frame from the metronome uses the same accumulator in its elapsed-time calculation.
@@ -157,7 +172,7 @@ What happens today when a capture source dies mid-recording. GPU/composition fai
 
 ### Screen capture (SCStream)
 
-`ScreenCaptureManager` implements the `SCStreamDelegate` method `stream(_:didStopWithError:)` but only logs the error to console. There is no callback to RecordingActor, no timeline event, and no user notification. If SCStream dies, the single-slot `latestScreenFrame` cache retains the last delivered frame and the metronome continues emitting it as frozen pixels indefinitely. The recording appears normal from the pipeline's perspective — just with a static image.
+`ScreenCaptureManager` implements the `SCStreamDelegate` method `stream(_:didStopWithError:)` but only logs the error to console. There is no callback to RecordingActor, no timeline event, and no user notification. If SCStream dies, the single-slot `latestScreenFrame` cache retains the last delivered frame and the freshness gate begins rejecting every tick (its `capturePTS` stops advancing). After 1s the keep-alive starts firing at ~1Hz, so the recording continues with frozen pixels at low cadence rather than a hard freeze. The recording appears normal from the pipeline's perspective — just with a static image.
 
 ### Camera (AVCaptureSession)
 
@@ -189,6 +204,8 @@ Switching mode mid-recording is instant:
 
 No transition effects, no writer restart, no segment boundary forced. The switch happens on the next frame (~33ms). The output is a hard cut from one composition to another within the same continuous HLS stream.
 
+One edge case: switching INTO `cameraOnly` from a screen mode can show a brief (~100-300ms) warm-up. The camera FIFO inherits frames whose `capturePTS` predates the most recent screen-mode emit; the freshness gate discards them one tick at a time before reaching post-switch fresh content. The viewer sees the last screen frame held for those few hundred ms, then the camera takes over.
+
 ## Raw safety-net writers
 
 Three parallel writers run alongside the composited HLS pipeline:
@@ -207,16 +224,19 @@ Raw writers are retimed by the same pause accumulator as the main pipeline, so t
 
 ## Recording timeline
 
-The `RecordingTimeline` is a structured JSON artifact built incrementally during recording and written to `recording.json` at stop. It contains:
+The `RecordingTimeline` is a structured JSON artifact built incrementally during recording and written to `recording.json` at stop. Schema is versioned (`schemaVersion`) — current is v3.
+
+It contains:
 
 - **Session:** video id, slug, initial mode, start/end wall-clock, logical duration.
 - **Hardware:** machine model, OS version, architecture.
-- **Inputs:** which display, camera, mic were used (ids, names, dimensions).
+- **Inputs:** which display, camera, mic were used (ids, names, dimensions). For cameras v3 additionally carries an `advertisedFormats` list (deduplicated by `(width, height, maxFrameRate)`) and a `selectedFormat` block — what AVCaptureSession actually picked plus whether `1/targetFPS` was inside the format's rate range (`didLockRate`).
 - **Preset:** output dimensions and bitrate.
 - **Segments:** per-segment index, filename, bytes, duration, upload status.
-- **Events:** timestamped log of commits, stops, mode switches, pauses, resumes, segment emissions, upload outcomes, composition failures/rebuilds.
+- **Events:** timestamped log of commits, stops, mode switches, pauses, resumes, segment emissions, upload outcomes, composition failures/rebuilds. v3 adds `keepalive.emitted` (one per static run) and `monotonicity.rejected` (every safety-net fire — should be zero on healthy recordings).
 - **Raw streams (optional):** codec, dimensions, bitrate, final bytes for each raw writer.
 - **Composition stats (optional):** error/stall/rebuild counts, only present if non-zero.
+- **Runtime (v3, optional):** aggregate metronome metrics — `effectiveCameraFps`, `effectiveScreenFps`, `outputFps`, camera/screen capture-interval P50 and P95 in ms (estimated from histogram buckets — coarse but enough to answer "is the camera delivering at ~33ms?"), and a `metronome` counter sub-block (`iterations`, `emitOK`, `skipsStale`, `keepAliveEmits`, `monoRejects`).
 
 The timeline serves three purposes: debugging (correlate events with segment boundaries), server-side forensics (what the client believed it uploaded), and as the authoritative segment list for healing (see [Streaming & Healing](streaming-and-healing.md)).
 
@@ -248,9 +268,10 @@ Schema and ring-buffer semantics are documented on `MetronomeDiagnostics.FullDum
 | ------------------------------------------ | --------------------------------------------------- |
 | Orchestrator + clock + pause               | `Pipeline/RecordingActor.swift`                     |
 | Two-phase start                            | `Pipeline/RecordingActor+Prepare.swift`             |
-| Metronome (30/60fps emit loop)              | `Pipeline/RecordingActor+Metronome.swift`           |
-| Capture callbacks + PTS retiming           | `Pipeline/RecordingActor+FrameHandling.swift`       |
+| Metronome (drift-corrected tick budget)    | `Pipeline/RecordingActor+Metronome.swift`           |
+| Composite, freshness gate, keep-alive      | `Pipeline/RecordingActor+FrameHandling.swift`       |
 | GPU failure recovery                       | `Pipeline/RecordingActor+CompositionRecovery.swift` |
+| Diagnostics (counters + per-tick trace)    | `Pipeline/RecordingActor+Diagnostics.swift`         |
 | Metal/CIContext rendering                  | `Pipeline/CompositionActor.swift`                   |
 | AVAssetWriter + HLS segmentation           | `Pipeline/WriterActor.swift`                        |
 | Segment upload + retry                     | `Pipeline/UploadActor.swift`                        |

@@ -67,7 +67,7 @@ The coordinator runs the countdown and `prepareRecording()` in parallel. After c
 
 The metronome ticks at a wall-clock cadence set by the target frame rate (30fps or 60fps), but the tick interval is a **budget, not a contract**. Output rate tracks whatever the active mode's source is actually delivering — every tick consults the cached source frame and only emits when its `capturePTS` is strictly newer than `lastEmittedSourcePTS`. Stale-source ticks become no-ops; a long-static run triggers a [keep-alive](#keep-alive-for-long-static-sources) emit so HLS segments don't go empty.
 
-This source-PTS freshness gate is the primary monotonicity defence. The encoder-level monotonicity check survives as a safety net — post [task-21](../tasks-todo/task-21-output-frame-cadence-rework.md) it should never fire on the happy path; any fire surfaces as a `monotonicity.rejected` event in `recording.json`.
+This source-PTS freshness gate is the primary monotonicity defence. The encoder-level monotonicity check survives as a safety net — post [task-21](../tasks-done/task-2026-05-11-21-output-frame-cadence-rework.md) it should never fire on the happy path; any fire surfaces as a `monotonicity.rejected` event in `recording.json`.
 
 ### `cameraOnly`
 

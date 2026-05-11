@@ -156,6 +156,33 @@ final class RecordingTimelineBuilderTests: XCTestCase {
         XCTAssertEqual(resumeEvent?.data?["pauseDurationSeconds"], .double(3.0))
     }
 
+    // MARK: - Chapter Markers
+
+    func testChapterMarkerRecordsEvent() {
+        let b = makeBuilder()
+        b.markStarted()
+        b.recordChapterMarker(id: "abc-123", t: 12.5)
+        let timeline = b.build()
+
+        let event = timeline.events.first(where: { $0.kind == "chapter.marker" })
+        XCTAssertNotNil(event)
+        XCTAssertEqual(event?.t, 12.5)
+        XCTAssertEqual(event?.data?["id"], .string("abc-123"))
+    }
+
+    func testMultipleChapterMarkersAreOrdered() {
+        let b = makeBuilder()
+        b.markStarted()
+        b.recordChapterMarker(id: "second", t: 30.0)
+        b.recordChapterMarker(id: "first", t: 10.0)
+        let timeline = b.build()
+
+        let markers = timeline.events.filter { $0.kind == "chapter.marker" }
+        XCTAssertEqual(markers.count, 2)
+        XCTAssertEqual(markers[0].data?["id"], .string("first"))
+        XCTAssertEqual(markers[1].data?["id"], .string("second"))
+    }
+
     // MARK: - Event Ordering
 
     func testEventsAreSortedByLogicalTime() {

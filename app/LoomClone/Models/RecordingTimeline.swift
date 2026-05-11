@@ -526,6 +526,19 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         appendEvent(t: t, kind: "paused", data: nil)
     }
 
+    /// Anonymous chapter marker created by the user during recording. `id`
+    /// is a UUID generated at press time so the server can match server-side
+    /// chapter records back to the originating press (used by the AI
+    /// title-suggestion flow to update the right chapter even if the user
+    /// has added/removed others in the admin in the meantime).
+    func recordChapterMarker(id: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "chapter.marker",
+            data: ["id": .string(id)]
+        )
+    }
+
     func recordResumed(t: Double, pauseDuration: Double) {
         appendEvent(
             t: t,

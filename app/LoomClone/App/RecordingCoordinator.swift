@@ -296,6 +296,20 @@ final class RecordingCoordinator {
     private var recordingStartDate: Date?
     private var accumulatedBeforePause: TimeInterval = 0
 
+    // MARK: - Chapter Markers
+
+    /// Number of anonymous chapter markers the user has added during the
+    /// current recording. Reset at each new recording start. Drives the
+    /// badge on the recording-panel chapter button.
+    private(set) var chapterMarkerCount: Int = 0
+
+    /// Wall-clock timestamp of the last marker press, used to coalesce
+    /// rapid double-clicks. A real "I want two chapters here" press
+    /// pattern is many seconds apart; anything sub-quarter-second is
+    /// accidental.
+    private var lastChapterMarkerPressAt: Date?
+    private static let chapterMarkerDebounceInterval: TimeInterval = 0.25
+
     // MARK: - Result
 
     struct LastVideoInfo {
@@ -490,6 +504,8 @@ final class RecordingCoordinator {
         elapsedSeconds = 0
         lastVideo = nil
         recordingStartDate = nil
+        chapterMarkerCount = 0
+        lastChapterMarkerPressAt = nil
 
         // Enter the countdown state immediately so the panel renders.
         state = .countingDown
@@ -770,6 +786,25 @@ final class RecordingCoordinator {
         startTimer()
 
         Task { await recordingActor?.resume() }
+    }
+
+    /// Drop an anonymous chapter marker on the timeline at the current
+    /// (or paused) clock position. Coalesces rapid double-clicks so a
+    /// twitchy press doesn't produce two markers a few ms apart. Title
+    /// and ordering are handled later by the admin editor.
+    func addChapterMarker() {
+        guard state == .recording || state == .paused else { return }
+
+        let now = Date()
+        if let last = lastChapterMarkerPressAt,
+           now.timeIntervalSince(last) < Self.chapterMarkerDebounceInterval
+        {
+            return
+        }
+        lastChapterMarkerPressAt = now
+        chapterMarkerCount += 1
+
+        Task { await recordingActor?.addChapterMarker() }
     }
 
     func switchMode(to newMode: RecordingMode) {

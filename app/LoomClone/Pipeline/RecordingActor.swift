@@ -305,11 +305,6 @@ actor RecordingActor {
     var lastEmitLogicalSeconds: Double = -1
     /// Wall-clock anchor for periodic snapshots — fires roughly every 2s.
     var lastPeriodicSnapshotS: Double = -1
-    /// Verbose console logging toggle. Set from the
-    /// `LOOMCLONE_DIAGNOSTICS_VERBOSE` env var at startup. When true, every
-    /// monotonicity rejection and peek-with-repeat fire is logged
-    /// individually. When false, only periodic + summary lines are logged.
-    let verboseDiagnostics: Bool = ProcessInfo.processInfo.environment["LOOMCLONE_DIAGNOSTICS_VERBOSE"] == "1"
 
     // MARK: - Stop
 

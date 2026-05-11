@@ -123,11 +123,13 @@ struct CameraAdvertisedFormat: Encodable {
 /// reset time to avoid per-tick allocations.
 struct MetronomeDiagnostics {
     // MARK: Configuration
+
     static let metronomeTraceCapacity = 4000 // ~67s at 60fps, ~133s at 30fps
     static let cameraTraceCapacity = 300 // first N camera frames in detail
     static let screenTraceCapacity = 300 // first N screen frames in detail
 
     // MARK: Counters — metronome
+
     var iterations: Int64 = 0
     var emitOK: Int64 = 0
     var rejectMonotonicity: Int64 = 0
@@ -157,12 +159,14 @@ struct MetronomeDiagnostics {
     var driftZeroSleep: Int64 = 0
 
     // MARK: Counters — sources
+
     var cameraFramesReceived: Int64 = 0
     var cameraFramesEvicted: Int64 = 0
     var screenFramesReceived: Int64 = 0
     var audioSamplesReceived: Int64 = 0
 
     // MARK: Histograms
+
     // Buckets are inclusive of the right edge of the previous bucket and
     // exclusive of their own right edge: [0, edge[0]), [edge[0], edge[1]), …
     // Last bucket is "≥ last edge".
@@ -200,6 +204,7 @@ struct MetronomeDiagnostics {
     var captureLagHist: [Int64] = Array(repeating: 0, count: captureLagEdgesMs.count + 1)
 
     // MARK: Ring buffers
+
     var metronomeTrace: [MetronomeTickEntry] = []
     var cameraTrace: [CameraFrameTraceEntry] = []
     var screenTrace: [ScreenFrameTraceEntry] = []
@@ -430,10 +435,16 @@ struct MetronomeDiagnostics {
     func summaryLine() -> String {
         let dropRate: Double = iterations > 0
             ? Double(rejectMonotonicity + rejectNegElapsed + rejectInvalidPTS + rejectSampleBuild)
-                / Double(iterations)
+            / Double(iterations)
             : 0
-        let camRate = String(format: "%.2f", cameraFramesReceived > 0 && !cameraTrace.isEmpty
-            ? Double(cameraFramesReceived) / max(cameraTrace.last?.hostT ?? 1, 1) : 0)
+        // Camera rate denominator is the actual recording duration —
+        // not `cameraTrace.last?.hostT`, which caps at the 300th frame
+        // and would massively over-estimate fps on long recordings.
+        let camRate = String(
+            format: "%.2f",
+            cameraFramesReceived > 0 && recordingDurationS > 0.1
+                ? Double(cameraFramesReceived) / recordingDurationS : 0
+        )
         return """
         iters=\(iterations) emit=\(emitOK) \
         skipStale=\(skipsStale) keepAlive=\(keepaliveEmits) \
@@ -559,6 +570,17 @@ struct MetronomeDiagnostics {
 
     /// Top-level dump shape. Written to `diagnostics.json` next to
     /// `recording.json`.
+    ///
+    /// Buffer caps to be aware of when reading the dump:
+    /// - `metronomeTrace` is a ring buffer of `metronomeTraceCapacity`
+    ///   (4000) entries. At 60fps that fills in ~67s; at 30fps ~133s.
+    ///   Longer recordings retain only the most-recent N ticks — earlier
+    ///   ones are overwritten by `pushTick`. Aggregate counters +
+    ///   histograms cover the whole recording regardless.
+    /// - `cameraTrace` and `screenTrace` are first-N captures
+    ///   (`cameraTraceCapacity` = `screenTraceCapacity` = 300), so they
+    ///   describe the recording's start-up window, not its steady
+    ///   state.
     struct FullDump: Encodable {
         let schemaVersion: Int
         let sessionId: String

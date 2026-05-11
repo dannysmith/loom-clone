@@ -220,6 +220,18 @@ The `RecordingTimeline` is a structured JSON artifact built incrementally during
 
 The timeline serves three purposes: debugging (correlate events with segment boundaries), server-side forensics (what the client believed it uploaded), and as the authoritative segment list for healing (see [Streaming & Healing](streaming-and-healing.md)).
 
+Alongside `recording.json`, a sibling **`diagnostics.json`** is written locally on every stop. This is a permanent, local-only debugging artifact — never uploaded, never served. It carries:
+
+- Per-tick metronome trace (4000-entry ring buffer; the most-recent 4000 ticks for long recordings).
+- First 300 camera-frame arrivals and 300 screen-frame arrivals in detail.
+- Aggregate counters and bucketed histograms covering the whole recording (camera intervals, screen intervals, queue depths at pop, composition wall time, emit gaps, capture lag, monotonicity-reject deltas).
+- Periodic snapshots every ~2s of logical time, so you can see how rates evolved through pauses and mode switches.
+- The camera's advertised formats and the format AVCaptureSession actually selected (`activeMin/MaxFrameDuration` and whether the target rate locked).
+
+A condensed view of the same data lands in `recording.json`'s `runtime` block (`effectiveCameraFps`, percentile-summarised intervals, metronome counters). Use that for quick "what happened on this recording?" — drop into `diagnostics.json` when you need per-tick detail.
+
+Schema and ring-buffer semantics are documented on `MetronomeDiagnostics.FullDump` in `Pipeline/RecordingActor+Diagnostics.swift`.
+
 ## Coordinator and UI
 
 `RecordingCoordinator` lives on the main actor and bridges the UI to the pipeline. Key responsibilities:

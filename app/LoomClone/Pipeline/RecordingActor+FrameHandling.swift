@@ -329,7 +329,13 @@ extension RecordingActor {
         // but by the time we enter here the stop is in progress — submitting
         // a render task now just races against teardown.
         guard isRecording else {
-            recordTickRejection(iterIdx: iterIdx, action: MetronomeTickAction.notRecording, decision: nil, ptsLogical: nil, lastEmitLogical: nil)
+            recordTickRejection(
+                iterIdx: iterIdx,
+                action: MetronomeTickAction.notRecording,
+                decision: nil,
+                ptsLogical: nil,
+                lastEmitLogical: nil
+            )
             return false
         }
         guard let start = recordingStartTime else {
@@ -441,16 +447,6 @@ extension RecordingActor {
                 branch: decision.branch,
                 t: logicalElapsedSeconds()
             )
-            if verboseDiagnostics {
-                print(String(
-                    format: "[diag] MONO REJECT #%d branch=%@ delta=%.3fms sourcePTS=%.4f lastEmit=%.4f",
-                    diagnostics.rejectMonotonicity,
-                    decision.branch,
-                    deltaMs,
-                    elapsedLogical.seconds,
-                    lastEmitLogical ?? -1
-                ))
-            }
             recordTickRejection(
                 iterIdx: iterIdx,
                 action: MetronomeTickAction.rejectMonotonicity,
@@ -681,13 +677,17 @@ extension RecordingActor {
         lastEmitLogical: Double?
     ) {
         let host = logicalElapsedSeconds()
+        let sourceRelative: Double? = decision.flatMap { d in
+            guard d.sourcePTS.isValid, let start = recordingStartTime else { return nil }
+            return (d.sourcePTS - start).seconds
+        }
         let entry = MetronomeTickEntry(
             iter: iterIdx,
             emittedTickIdx: metronomeTickIdx,
             hostT: host,
             queueDepthBefore: decision?.queueDepthBefore ?? cameraFrameQueue.count,
             cameraBranch: decision?.branch ?? "n/a",
-            sourcePTS: decision.flatMap { d in d.sourcePTS.isValid ? d.sourcePTS.seconds : nil },
+            sourcePTS: sourceRelative,
             elapsedLogical: ptsLogical,
             emitPTS: nil,
             lastEmitPTS: lastEmitLogical,

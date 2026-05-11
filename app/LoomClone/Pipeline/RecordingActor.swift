@@ -200,6 +200,26 @@ actor RecordingActor {
     /// arriving after a static period still passes the check).
     var lastEmittedSourcePTS: CMTime = .invalid
 
+    /// Host clock at the last successful emit — real or keep-alive. Used
+    /// by `tryEmitKeepAlive` to decide whether enough wall-clock time has
+    /// elapsed since the last frame to warrant a keep-alive emit (default
+    /// threshold: 1s, see `keepAliveThresholdSeconds`).
+    var lastEmitHostTime: CMTime = .invalid
+
+    /// Phase 3 debounce: when a keep-alive fires during a static-source
+    /// run, we emit one `keepalive.emitted` timeline event for the run.
+    /// Cleared when a real (fresh-source) emit happens, so the next
+    /// static run starts a new event.
+    var keepAliveEventFiredForCurrentStaleRun: Bool = false
+
+    /// How long the source must have been static before a keep-alive emit
+    /// fires. Picked at 1s as a balance: much greater than the metronome
+    /// tick interval (so we don't constantly re-emit duplicates), much
+    /// less than AVAssetWriter's 4s segment interval (so segments never
+    /// see >4s of dead air and start producing empty / zero-duration
+    /// segments).
+    static let keepAliveThresholdSeconds: Double = 1.0
+
     // MARK: - Frame Cache
 
     /// A cached source frame with the sample buffer's original presentation
@@ -653,6 +673,14 @@ actor RecordingActor {
         if lastEmittedSourcePTS.isValid {
             lastEmittedSourcePTS = max(lastEmittedSourcePTS, now)
         }
+
+        // Restart the keep-alive threshold from resume — long pauses
+        // would otherwise look like a static run to `tryEmitKeepAlive`
+        // and fire a synthetic frame on the first post-resume tick.
+        if lastEmitHostTime.isValid {
+            lastEmitHostTime = now
+        }
+        keepAliveEventFiredForCurrentStaleRun = false
 
         timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: pauseSeconds)
 

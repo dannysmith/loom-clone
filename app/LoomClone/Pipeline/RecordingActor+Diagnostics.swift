@@ -144,7 +144,7 @@ struct MetronomeDiagnostics {
     var skipsStale: Int64 = 0
     /// Phase 3 keep-alive emits — synthetic-PTS repeats fired during a
     /// long static-source run so the segment cutter doesn't see dead air.
-    var keepaliveEmits: Int64 = 0
+    var keepAliveEmits: Int64 = 0
     var noSourceTicks: Int64 = 0
     var compositionFailures: Int64 = 0
     var cameraOnlyPopBranch: Int64 = 0
@@ -258,7 +258,7 @@ struct MetronomeDiagnostics {
         let canRate = dur > 0.1
         let camFps: Double? = canRate ? Double(cameraFramesReceived) / dur : nil
         let scrFps: Double? = canRate ? Double(screenFramesReceived) / dur : nil
-        let outFps: Double? = canRate ? Double(emitOK + keepaliveEmits) / dur : nil
+        let outFps: Double? = canRate ? Double(emitOK + keepAliveEmits) / dur : nil
         let camP50 = Self.percentileFromHistogram(
             cameraIntervalHist, edges: Self.cameraIntervalEdgesMs, percentile: 0.5
         )
@@ -283,16 +283,31 @@ struct MetronomeDiagnostics {
                 iterations: iterations,
                 emitOK: emitOK,
                 skipsStale: skipsStale,
-                keepAliveEmits: keepaliveEmits,
+                keepAliveEmits: keepAliveEmits,
                 monoRejects: rejectMonotonicity
             )
         )
     }
 
-    /// Estimate a percentile from a bucketed histogram. Returns the upper
-    /// edge of the bucket containing the target cumulative count — coarse
-    /// (~one bucket width) but fine for "is camera delivery ~33ms?"
-    /// questions. Returns nil when the histogram is empty.
+    /// Estimate a percentile from a bucketed histogram.
+    ///
+    /// Conventions:
+    /// - For non-overflow buckets, returns the bucket's **upper edge**
+    ///   (`edges[i]`). The true percentile lies in `[edges[i-1], edges[i])`.
+    /// - For the overflow bucket (counts past `edges.count`), returns
+    ///   `edges.last` — which is the overflow bucket's **lower bound**,
+    ///   not an upper bound. Samples here are ≥ `edges.last` by an
+    ///   unknown amount.
+    /// - `percentile == 1.0` therefore commonly hits `edges.last` (the
+    ///   overflow bucket's lower bound) when even a single sample
+    ///   overflows. Treat it as a floor, not a ceiling.
+    /// - Cumulative target uses `ceil(total * percentile)`, so a
+    ///   percentile-100% query on a 1-sample histogram still resolves
+    ///   to whichever bucket holds that one sample.
+    /// - Returns nil when the histogram is empty (total == 0).
+    ///
+    /// Coarse — resolution is one bucket width — but enough for "is
+    /// camera delivery ~33ms?" questions.
     private static func percentileFromHistogram(
         _ counts: [Int64],
         edges: [Double],
@@ -447,7 +462,7 @@ struct MetronomeDiagnostics {
         )
         return """
         iters=\(iterations) emit=\(emitOK) \
-        skipStale=\(skipsStale) keepAlive=\(keepaliveEmits) \
+        skipStale=\(skipsStale) keepAlive=\(keepAliveEmits) \
         mono=\(rejectMonotonicity) neg=\(rejectNegElapsed) noSrc=\(noSourceTicks) \
         peek=\(cameraOnlyRepeatBranch) pop=\(cameraOnlyPopBranch) \
         camFrames=\(cameraFramesReceived) (~\(camRate)fps) \
@@ -482,7 +497,7 @@ struct MetronomeDiagnostics {
                 rejectInvalidPTS: rejectInvalidPTS,
                 rejectSampleBuild: rejectSampleBuild,
                 skipsStale: skipsStale,
-                keepaliveEmits: keepaliveEmits,
+                keepAliveEmits: keepAliveEmits,
                 noSourceTicks: noSourceTicks,
                 compositionFailures: compositionFailures,
                 cameraOnlyPopBranch: cameraOnlyPopBranch,
@@ -543,7 +558,7 @@ struct MetronomeDiagnostics {
         let rejectInvalidPTS: Int64
         let rejectSampleBuild: Int64
         let skipsStale: Int64
-        let keepaliveEmits: Int64
+        let keepAliveEmits: Int64
         let noSourceTicks: Int64
         let compositionFailures: Int64
         let cameraOnlyPopBranch: Int64

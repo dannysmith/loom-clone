@@ -435,6 +435,12 @@ extension RecordingActor {
             // and is intentionally less strict than the encoder gate
             // here. A fire is a real bug; surface it on the timeline
             // (Phase 4) so it shows up in recording.json forensics.
+            //
+            // Rate-limit timeline events to avoid ballooning
+            // recording.json under a regression scenario: first N fire
+            // normally, the (N+1)th fires a one-shot suppression
+            // sentinel, subsequent fires only update the aggregate
+            // counter + histogram (which already carry the full totals).
             diagnostics.rejectMonotonicity += 1
             let deltaMs = (lastEmittedVideoPTS - pts).seconds * 1000
             MetronomeDiagnostics.bumpHistogram(
@@ -442,11 +448,19 @@ extension RecordingActor {
                 edges: MetronomeDiagnostics.monoRejectEdgesMs,
                 valueMs: deltaMs
             )
-            timeline.recordMonotonicityRejected(
-                deltaMs: deltaMs,
-                branch: decision.branch,
-                t: logicalElapsedSeconds()
-            )
+            if diagnostics.rejectMonotonicity <= Self.monoRejectEventCap {
+                timeline.recordMonotonicityRejected(
+                    deltaMs: deltaMs,
+                    branch: decision.branch,
+                    t: logicalElapsedSeconds()
+                )
+            } else if diagnostics.rejectMonotonicity == Self.monoRejectEventCap + 1 {
+                timeline.recordMonotonicityRejectedSuppressed(
+                    cap: Self.monoRejectEventCap,
+                    branch: decision.branch,
+                    t: logicalElapsedSeconds()
+                )
+            }
             recordTickRejection(
                 iterIdx: iterIdx,
                 action: MetronomeTickAction.rejectMonotonicity,
@@ -604,7 +618,7 @@ extension RecordingActor {
         lastEmittedVideoPTS = pts
         lastEmitHostTime = nowHost
         // NOTE: lastEmittedSourcePTS deliberately unchanged.
-        diagnostics.keepaliveEmits += 1
+        diagnostics.keepAliveEmits += 1
 
         // One timeline event per static run.
         if !keepAliveEventFiredForCurrentStaleRun {

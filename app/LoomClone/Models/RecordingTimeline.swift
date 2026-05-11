@@ -245,11 +245,11 @@ struct RecordingTimeline: Encodable {
             let halInputLatencyMs: Double?
             /// v3+ camera-only: trimmed advertised formats list. Nil on
             /// non-camera devices and on v2-vintage recordings.
-            var advertisedFormats: [AdvertisedFormat]?
+            let advertisedFormats: [AdvertisedFormat]?
             /// v3+ camera-only: the format AVCaptureSession actually
             /// selected, plus whether we managed to lock the frame rate.
             /// Nil on non-camera devices and on v2-vintage recordings.
-            var selectedFormat: SelectedFormat?
+            let selectedFormat: SelectedFormat?
 
             init(
                 uniqueID: String,
@@ -463,15 +463,21 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
     /// Phase 4 (task-21): attach the camera's advertised + selected
     /// format details to the existing `inputs.camera` entry. Called
     /// after camera capture has actually started and we know what
-    /// AVCaptureSession picked.
+    /// AVCaptureSession picked. Rebuilds the `Device` immutably rather
+    /// than mutating in place.
     func setCameraFormatDetails(
         advertised: [RecordingTimeline.Inputs.AdvertisedFormat]?,
         selected: RecordingTimeline.Inputs.SelectedFormat?
     ) {
-        guard var camera = inputs.camera else { return }
-        camera.advertisedFormats = advertised
-        camera.selectedFormat = selected
-        self.inputs = .init(display: inputs.display, camera: camera, microphone: inputs.microphone)
+        guard let existing = inputs.camera else { return }
+        let updated = RecordingTimeline.Inputs.Device(
+            uniqueID: existing.uniqueID,
+            name: existing.name,
+            halInputLatencyMs: existing.halInputLatencyMs,
+            advertisedFormats: advertised,
+            selectedFormat: selected
+        )
+        self.inputs = .init(display: inputs.display, camera: updated, microphone: inputs.microphone)
     }
 
     /// Phase 4: aggregate runtime metrics computed at stop time from
@@ -696,6 +702,23 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
             kind: "monotonicity.rejected",
             data: [
                 "deltaMs": .double(deltaMs),
+                "branch": .string(branch),
+            ]
+        )
+    }
+
+    /// One-shot sentinel emitted when per-recording `monotonicity.rejected`
+    /// events hit the cap (`RecordingActor.monoRejectEventCap`). After
+    /// this event, further rejections only update the aggregate counter
+    /// and histogram — the timeline stops growing. `branch` is the
+    /// composite-mode label of the rejection that *triggered* suppression
+    /// (typically the cap+1'th fire).
+    func recordMonotonicityRejectedSuppressed(cap: Int64, branch: String, t: Double) {
+        appendEvent(
+            t: t,
+            kind: "monotonicity.rejected.suppressed",
+            data: [
+                "cap": .int(Int(cap)),
                 "branch": .string(branch),
             ]
         )

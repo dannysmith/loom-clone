@@ -220,6 +220,16 @@ actor RecordingActor {
     /// segments).
     static let keepAliveThresholdSeconds: Double = 1.0
 
+    /// Cap on per-recording `monotonicity.rejected` timeline events.
+    /// Post task-21 the encoder-level safety net should never fire on
+    /// the happy path — but if a regression makes it fire continuously,
+    /// `recording.json` would balloon with one event per rejected tick.
+    /// First N fire normally; the (N+1)th fires a single
+    /// `monotonicity.rejected.suppressed` sentinel; subsequent fires
+    /// only update the aggregate counter + histogram (which are the
+    /// authoritative totals anyway).
+    static let monoRejectEventCap: Int64 = 32
+
     // MARK: - Frame Cache
 
     /// A cached source frame with the sample buffer's original presentation
@@ -676,6 +686,13 @@ actor RecordingActor {
         // capturePTS is newer than the pre-pause emit's), then compute
         // an encoder PTS below `lastEmittedVideoPTS` and trip the
         // monotonicity safety net.
+        //
+        // The invalid-skip on both bumps below is deliberate: if either
+        // watermark is `.invalid`, no real emit has happened yet, so
+        // `isStaleSource` already returns false and `tryEmitKeepAlive`
+        // already short-circuits — nothing here to fix. We never
+        // initialise watermarks from a pause path; that's the first real
+        // emit's job.
         if lastEmittedSourcePTS.isValid {
             lastEmittedSourcePTS = max(lastEmittedSourcePTS, now)
         }

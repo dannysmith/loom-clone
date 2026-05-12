@@ -303,6 +303,74 @@ describe("POST /:id/complete", () => {
     expect(await Bun.file(join(DATA_DIR, id, "recording.json")).exists()).toBe(true);
   });
 
+  test("extracts chapter markers from timeline into chapters.json", async () => {
+    const { id } = await createVideoViaApi();
+    await Bun.write(join(DATA_DIR, id, "init.mp4"), new Uint8Array([0]));
+    await Bun.write(join(DATA_DIR, id, "seg_000.m4s"), new Uint8Array([0]));
+
+    await videos.request(`/${id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        timeline: {
+          segments: [{ filename: "seg_000.m4s" }],
+          events: [
+            { kind: "chapter.marker", t: 5.5, data: { id: "chap-a" } },
+            { kind: "chapter.marker", t: 20, data: { id: "chap-b" } },
+          ],
+        },
+      }),
+    });
+
+    const chaptersFile = Bun.file(join(DATA_DIR, id, "chapters.json"));
+    expect(await chaptersFile.exists()).toBe(true);
+    const data = (await chaptersFile.json()) as {
+      chapters: { id: string; title: string | null; t: number; createdDuringRecording: boolean }[];
+    };
+    expect(data.chapters).toHaveLength(2);
+    expect(data.chapters[0]).toMatchObject({
+      id: "chap-a",
+      title: null,
+      t: 5.5,
+      createdDuringRecording: true,
+    });
+  });
+
+  test("re-completing does not overwrite existing chapters.json", async () => {
+    const { id } = await createVideoViaApi();
+    await Bun.write(join(DATA_DIR, id, "init.mp4"), new Uint8Array([0]));
+    await Bun.write(join(DATA_DIR, id, "seg_000.m4s"), new Uint8Array([0]));
+
+    const timeline = {
+      segments: [{ filename: "seg_000.m4s" }],
+      events: [{ kind: "chapter.marker", t: 1, data: { id: "first" } }],
+    };
+    await videos.request(`/${id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ timeline }),
+    });
+    // Simulate a user rename via admin: title is no longer null.
+    const chaptersPath = join(DATA_DIR, id, "chapters.json");
+    const after = (await Bun.file(chaptersPath).json()) as {
+      version: number;
+      chapters: { id: string; title: string | null; t: number; createdDuringRecording: boolean }[];
+    };
+    after.chapters[0]!.title = "Edited";
+    await Bun.write(chaptersPath, JSON.stringify(after));
+
+    // Second /complete with the same payload should NOT clobber the edit.
+    await videos.request(`/${id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ timeline }),
+    });
+    const final = (await Bun.file(chaptersPath).json()) as {
+      chapters: { title: string | null }[];
+    };
+    expect(final.chapters[0]?.title).toBe("Edited");
+  });
+
   test("with timeline body and missing segments: status healing", async () => {
     const { id } = await createVideoViaApi();
     // Only init.mp4 present; seg_000.m4s and seg_001.m4s are expected but missing.

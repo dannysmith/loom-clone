@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { join, resolve } from "path";
 import { z } from "zod";
+import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../lib/chapters";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { scheduleDerivatives } from "../../lib/derivatives";
 import { apiError, ErrorCode } from "../../lib/errors";
@@ -229,6 +230,18 @@ videos.post("/:id/complete", async (c) => {
       timeline = body.timeline;
       const path = join(DATA_DIR, id, "recording.json");
       await Bun.write(path, JSON.stringify(timeline, null, 2));
+
+      // Extract chapter markers from the timeline into chapters.json. Only
+      // writes on the first /complete that carries markers — subsequent
+      // calls (re-completes during healing) leave any user edits alone.
+      // Re-runs without new markers also leave chapters.json untouched.
+      const recordedChapters = extractChaptersFromTimeline(timeline as { events?: unknown });
+      if (recordedChapters.length > 0) {
+        const existing = await readChapters(id);
+        if (!existing) {
+          await writeChapters(id, recordedChapters);
+        }
+      }
     }
   }
 

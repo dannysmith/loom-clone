@@ -11,6 +11,7 @@ import { getVideosDirSizes } from "../../lib/files";
 import { listVideosFiltered } from "../../lib/store";
 import { LoginPage } from "../../views/admin/pages/LoginPage";
 import { TrashBinPage } from "../../views/admin/pages/TrashBinPage";
+import chapters from "./chapters";
 import dashboard from "./dashboard";
 import editor from "./editor";
 import type { AdminEnv } from "./helpers";
@@ -84,6 +85,7 @@ admin.route("/", dashboard);
 admin.route("/videos", videoRoutes);
 admin.route("/videos", media);
 admin.route("/videos", editor);
+admin.route("/videos", chapters);
 admin.route("/upload", upload);
 admin.route("/settings", settings);
 

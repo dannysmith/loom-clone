@@ -255,6 +255,50 @@ body {
   transform: translateX(-1px);
 }
 
+/* Chapter flag markers on the storyboard strip */
+
+.editor-timeline-chapter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.editor-timeline-chapter-flag {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid oklch(0.78 0.18 60); /* amber, distinct from playhead */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+}
+
+.editor-timeline-chapter::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: oklch(0.78 0.18 60 / 0.55);
+  transform: translateX(-0.5px);
+  pointer-events: none;
+}
+
+.editor-timeline-chapter:hover .editor-timeline-chapter-flag {
+  border-top-color: oklch(0.88 0.2 60);
+}
+
 /* Waveform */
 
 .editor-waveform {
@@ -473,4 +517,156 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Chapters panel — list editor inside the bottom panel */
+
+.editor-chapters-panel {
+  border-top: 1px solid #2a2a2a;
+  padding: 0.5rem 1rem 0.75rem;
+}
+
+.editor-chapters-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.4rem;
+}
+
+.editor-chapters-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  margin: 0;
+}
+
+.editor-chapters-count {
+  font-weight: 400;
+  color: #666;
+}
+
+.editor-chapters-status {
+  flex: 1;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.editor-chapters-saving {
+  color: oklch(0.78 0.18 60);
+}
+
+.editor-chapters-error {
+  color: oklch(0.7 0.21 25);
+}
+
+.editor-chapters-add {
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-chapters-empty {
+  font-size: 0.8rem;
+  color: #666;
+  padding: 0.5rem 0;
+  margin: 0;
+}
+
+.editor-chapters-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0;
+  margin: 0;
+}
+
+.editor-chapter-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-chapter-jump {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: oklch(0.78 0.18 60);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 4.5rem;
+  text-align: left;
+}
+
+.editor-chapter-jump:hover {
+  background: #232323;
+  border-color: #3a3a3a;
+}
+
+.editor-chapter-title-input {
+  background: #1d1d1d;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  color: #e5e5e5;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.editor-chapter-title-input::placeholder {
+  color: #555;
+  font-style: italic;
+}
+
+.editor-chapter-title-input:focus {
+  outline: none;
+  border-color: oklch(0.78 0.18 60);
+  background: #222;
+}
+
+.editor-chapter-time-input {
+  background: #1d1d1d;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  color: #ccc;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  width: 5.5rem;
+  text-align: right;
+}
+
+.editor-chapter-time-input:focus {
+  outline: none;
+  border-color: oklch(0.78 0.18 60);
+}
+
+.editor-chapter-time-input--error {
+  border-color: oklch(0.7 0.21 25);
+}
+
+.editor-chapter-remove {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #666;
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-chapter-remove:hover {
+  color: oklch(0.78 0.21 25);
+  background: oklch(0.25 0.05 25 / 0.5);
+  border-color: oklch(0.4 0.12 25);
 }

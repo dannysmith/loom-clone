@@ -163,7 +163,7 @@ private struct ChapterMarkerButton: View {
         Button(
             action: { coordinator.addChapterMarker() },
             label: {
-                Image(systemName: "bookmark.fill")
+                Image(systemName: "bookmark.circle.fill")
                     .font(.title)
                     .foregroundStyle(coordinator.chapterMarkerCount > 0 ? Color.accentColor : .primary)
                     .symbolEffect(.bounce, value: coordinator.chapterMarkerCount)
@@ -175,7 +175,7 @@ private struct ChapterMarkerButton: View {
                                 .padding(.horizontal, 3)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.accentColor))
-                                .offset(x: 6, y: -4)
+                                .offset(x: 4, y: -2)
                         }
                     }
             }

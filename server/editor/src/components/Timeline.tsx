@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { editorMediaUrl } from "../api";
-import type { StoryboardCue } from "../types";
+import type { Chapter, StoryboardCue } from "../types";
 
 type Props = {
   videoId: string;
   duration: number;
   currentTime: number;
+  chapters: Chapter[];
   onSeek: (time: number) => void;
 };
 
@@ -51,7 +52,7 @@ function parseVttTime(str: string): number {
   return 0;
 }
 
-export function Timeline({ videoId, duration, currentTime, onSeek }: Props) {
+export function Timeline({ videoId, duration, currentTime, chapters, onSeek }: Props) {
   const [cues, setCues] = useState<StoryboardCue[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -126,6 +127,24 @@ export function Timeline({ videoId, duration, currentTime, onSeek }: Props) {
           />
         ))}
       </div>
+      {duration > 0 &&
+        chapters.map((ch) => (
+          <button
+            key={ch.id}
+            type="button"
+            className="editor-timeline-chapter"
+            style={{ left: `${(ch.t / duration) * 100}%` }}
+            title={ch.title ?? "Untitled chapter"}
+            aria-label={`Chapter at ${ch.t.toFixed(1)}s`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSeek(ch.t);
+            }}
+          >
+            <span className="editor-timeline-chapter-flag" aria-hidden="true" />
+          </button>
+        ))}
       <div className="editor-timeline-playhead" style={{ left: `${playheadPct}%` }} />
     </div>
   );

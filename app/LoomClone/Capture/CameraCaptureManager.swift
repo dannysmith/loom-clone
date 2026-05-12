@@ -139,9 +139,39 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             return
         }
 
-        // Diagnostics: snapshot every advertised format before we touch the
-        // session. Helpful for confirming "what does the Opal actually
-        // expose?" — log to console and stash for the diagnostics dump.
+        logAdvertisedFormats(for: device)
+
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+
+        configureDeviceFormat(device: device, session: session, maxHeight: maxHeight, targetFPS: targetFPS)
+
+        guard addVideoInput(session: session, device: device) else { return }
+        addVideoOutput(session: session)
+        addMicInput(session: session, micDevice: micDevice)
+
+        session.commitConfiguration()
+        self.session = session
+
+        installSessionObservers(session: session)
+
+        // startRunning() blocks until the session is actually running. Wait for
+        // it to complete before returning so callers don't race against the
+        // hardware coming up.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+                continuation.resume()
+            }
+        }
+
+        finalizeActiveFormatDiagnostics(device: device)
+    }
+
+    /// Diagnostic: dump every advertised format for the camera before any
+    /// configuration. Helpful for confirming "what does this camera
+    /// actually expose?"
+    private func logAdvertisedFormats(for device: AVCaptureDevice) {
         lastAdvertisedFormats = Self.snapshotAdvertisedFormats(for: device)
         print("[camera-diag] \(device.localizedName) advertises \(lastAdvertisedFormats.count) format(s):")
         for (i, fmt) in lastAdvertisedFormats.enumerated() {
@@ -150,82 +180,99 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 .joined(separator: ", ")
             print("[camera-diag]   [\(i)] \(fmt.width)x\(fmt.height) pf=\(fmt.pixelFormat) ranges=[\(ranges)]")
         }
+    }
 
-        let session = AVCaptureSession()
-        session.beginConfiguration()
+    /// Pick the highest-resolution format whose height is <= maxHeight and
+    /// supports the target fps, then lock the device to it. Falls back to
+    /// `.high` preset on failure. Stashes the chosen format details for the
+    /// diagnostics dump.
+    ///
+    /// This lets a good camera (4K webcam, DSLR via capture card) deliver
+    /// at the output preset's height rather than being pegged to
+    /// AVCaptureSession.Preset.high's ~720p default.
+    private func configureDeviceFormat(
+        device: AVCaptureDevice,
+        session: AVCaptureSession,
+        maxHeight: Int,
+        targetFPS: FrameRate
+    ) {
+        guard let best = Self.bestFormat(for: device, maxHeight: maxHeight, targetFPS: targetFPS) else {
+            session.sessionPreset = .high
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = best
+            let didLockRate = lockFrameRateIfSupported(device: device, format: best, targetFPS: targetFPS)
+            device.unlockForConfiguration()
 
-        // Pick the highest-resolution format whose height is <= maxHeight and
-        // supports the target fps. This lets a good camera (4K webcam, DSLR
-        // via capture card) deliver at the output preset's height rather than
-        // being pegged to AVCaptureSession.Preset.high's ~720p default.
-        if let best = Self.bestFormat(for: device, maxHeight: maxHeight, targetFPS: targetFPS) {
-            do {
-                try device.lockForConfiguration()
-                device.activeFormat = best
-                // Only lock the frame rate when 1/fps is within the format's
-                // supported duration range. UVC cameras like the ZV-1
-                // advertise fixed-rate ranges whose min and max duration
-                // are both `1000000/30000030` (essentially-but-not-exactly
-                // 30fps — UVC intervals are stored in 100ns units, which
-                // doesn't hit 1/30 on the nose). Setting
-                // activeVideoMinFrameDuration to CMTime(1, fps) in that
-                // case throws NSInvalidArgumentException — an ObjC
-                // exception Swift's `try/catch` can't catch, which
-                // crashes the app. When 1/fps isn't in range, the format's
-                // own rate applies — leave it alone.
-                let targetDur = targetFPS.frameDuration
-                var didLockRate = false
-                if best.videoSupportedFrameRateRanges.contains(where: {
-                    $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
-                }) {
-                    device.activeVideoMinFrameDuration = targetDur
-                    device.activeVideoMaxFrameDuration = targetDur
-                    didLockRate = true
-                }
-                device.unlockForConfiguration()
-                let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
-                let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                Log.camera.log(String(
-                    format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d, lockedRate=%@)",
-                    dims.width,
-                    dims.height,
-                    min(rate, Double(targetFPS.rawValue)),
-                    targetFPS.rawValue,
-                    maxHeight,
-                    didLockRate ? "yes" : "NO (range mismatch — camera runs at its own rate)"
-                ))
+            let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
+            let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+            Log.camera.log(String(
+                format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d, lockedRate=%@)",
+                dims.width,
+                dims.height,
+                min(rate, Double(targetFPS.rawValue)),
+                targetFPS.rawValue,
+                maxHeight,
+                didLockRate ? "yes" : "NO (range mismatch — camera runs at its own rate)"
+            ))
 
-                // Diagnostics: stash the selected format details so the
-                // recording actor can include them in the dump.
-                let pf = CMFormatDescriptionGetMediaSubType(best.formatDescription)
-                lastSelectedFormat = MetronomeDiagnostics.SelectedCameraFormat(
-                    width: Int(dims.width),
-                    height: Int(dims.height),
-                    pixelFormat: PixelFormatLabel.string(for: pf),
-                    targetFPS: Int(targetFPS.rawValue),
-                    didLockRate: didLockRate,
-                    activeMinFrameDurationSeconds: device.activeVideoMinFrameDuration.seconds,
-                    activeMaxFrameDurationSeconds: device.activeVideoMaxFrameDuration.seconds,
-                    advertisedMaxFrameRate: rate
-                )
-            } catch {
-                Log.camera.log("Could not set activeFormat: \(error) — falling back to .high")
-                session.sessionPreset = .high
-            }
-        } else {
+            let pf = CMFormatDescriptionGetMediaSubType(best.formatDescription)
+            lastSelectedFormat = MetronomeDiagnostics.SelectedCameraFormat(
+                width: Int(dims.width),
+                height: Int(dims.height),
+                pixelFormat: PixelFormatLabel.string(for: pf),
+                targetFPS: Int(targetFPS.rawValue),
+                didLockRate: didLockRate,
+                activeMinFrameDurationSeconds: device.activeVideoMinFrameDuration.seconds,
+                activeMaxFrameDurationSeconds: device.activeVideoMaxFrameDuration.seconds,
+                advertisedMaxFrameRate: rate
+            )
+        } catch {
+            Log.camera.log("Could not set activeFormat: \(error) — falling back to .high")
             session.sessionPreset = .high
         }
+    }
 
+    /// Only lock the frame rate when 1/fps is within the format's supported
+    /// duration range. UVC cameras like the ZV-1 advertise fixed-rate ranges
+    /// whose min and max duration are both `1000000/30000030`
+    /// (essentially-but-not-exactly 30fps — UVC intervals are stored in
+    /// 100ns units, which doesn't hit 1/30 on the nose). Setting
+    /// activeVideoMinFrameDuration to CMTime(1, fps) in that case throws
+    /// NSInvalidArgumentException — an ObjC exception Swift's `try/catch`
+    /// can't catch, which crashes the app. When 1/fps isn't in range, the
+    /// format's own rate applies — leave it alone.
+    private func lockFrameRateIfSupported(
+        device: AVCaptureDevice,
+        format: AVCaptureDevice.Format,
+        targetFPS: FrameRate
+    ) -> Bool {
+        let targetDur = targetFPS.frameDuration
+        let inRange = format.videoSupportedFrameRateRanges.contains {
+            $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
+        }
+        guard inRange else { return false }
+        device.activeVideoMinFrameDuration = targetDur
+        device.activeVideoMaxFrameDuration = targetDur
+        return true
+    }
+
+    private func addVideoInput(session: AVCaptureSession, device: AVCaptureDevice) -> Bool {
         do {
             let input = try AVCaptureDeviceInput(device: device)
             if session.canAddInput(input) {
                 session.addInput(input)
             }
+            return true
         } catch {
             Log.camera.log("Failed to create input: \(error)")
-            return
+            return false
         }
+    }
 
+    private func addVideoOutput(session: AVCaptureSession) {
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -236,36 +283,34 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         if session.canAddOutput(output) {
             session.addOutput(output)
         }
+    }
 
-        // Optional mic audio: when a mic device is provided, add it to this
-        // session so audio and video share a single synchronizationClock.
-        // This eliminates the cross-session clock jitter (5-30ms) that caused
-        // lip-sync issues in cameraOnly recordings.
-        if let micDevice {
-            do {
-                let audioInput = try AVCaptureDeviceInput(device: micDevice)
-                if session.canAddInput(audioInput) {
-                    session.addInput(audioInput)
-                    let audioOut = AVCaptureAudioDataOutput()
-                    audioOut.setSampleBufferDelegate(self, queue: audioCaptureQueue)
-                    if session.canAddOutput(audioOut) {
-                        session.addOutput(audioOut)
-                        audioOutput = audioOut
-                        hasAudioCapture = true
-                        Log.camera.log("Added mic to shared session: \(micDevice.localizedName)")
-                    }
-                }
-            } catch {
-                Log.camera.log("Failed to add mic to shared session: \(error) — standalone mic will be used")
-            }
+    /// Optional mic audio: when a mic device is provided, add it to this
+    /// session so audio and video share a single synchronizationClock.
+    /// This eliminates the cross-session clock jitter (5-30ms) that caused
+    /// lip-sync issues in cameraOnly recordings.
+    private func addMicInput(session: AVCaptureSession, micDevice: AVCaptureDevice?) {
+        guard let micDevice else { return }
+        do {
+            let audioInput = try AVCaptureDeviceInput(device: micDevice)
+            guard session.canAddInput(audioInput) else { return }
+            session.addInput(audioInput)
+            let audioOut = AVCaptureAudioDataOutput()
+            audioOut.setSampleBufferDelegate(self, queue: audioCaptureQueue)
+            guard session.canAddOutput(audioOut) else { return }
+            session.addOutput(audioOut)
+            audioOutput = audioOut
+            hasAudioCapture = true
+            Log.camera.log("Added mic to shared session: \(micDevice.localizedName)")
+        } catch {
+            Log.camera.log("Failed to add mic to shared session: \(error) — standalone mic will be used")
         }
+    }
 
-        session.commitConfiguration()
-        self.session = session
-
-        // Subscribe to session error and interruption notifications so we can
-        // detect device disconnects, resource pressure, and other failures
-        // mid-recording.
+    /// Subscribe to session error and interruption notifications so we can
+    /// detect device disconnects, resource pressure, and other failures
+    /// mid-recording.
+    private func installSessionObservers(session: AVCaptureSession) {
         let errorObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureSession.runtimeErrorNotification,
             object: session,
@@ -287,35 +332,28 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             self.onSessionInterrupted?()
         }
         sessionObservers = [errorObserver, interruptionObserver]
+    }
 
-        // startRunning() blocks until the session is actually running. Wait for
-        // it to complete before returning so callers don't race against the
-        // hardware coming up.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                session.startRunning()
-                continuation.resume()
-            }
-        }
-
-        // Now that the session is actually running, read the device's
-        // active format dims. This is the source of truth: it works whether
-        // we configured a specific format above or fell through to .high
-        // (which mutates `device.activeFormat` itself when the session is
-        // applied). Previously we only set `nativePixelSize` inside the
-        // `bestFormat` success branch, which meant cameras whose format
-        // discovery returned nil (e.g. ZV-1 over USB) silently left the
-        // size at zero — and the raw camera writer was never created.
+    /// After `startRunning()`, read the device's active format dims. This is
+    /// the source of truth: it works whether we configured a specific format
+    /// above or fell through to .high (which mutates `device.activeFormat`
+    /// itself when the session is applied). Previously we only set
+    /// `nativePixelSize` inside the `bestFormat` success branch, which meant
+    /// cameras whose format discovery returned nil (e.g. ZV-1 over USB)
+    /// silently left the size at zero — and the raw camera writer was never
+    /// created.
+    ///
+    /// Also logs the active format's declared pixel format + colour
+    /// metadata. Many USB cameras and capture cards deliver buffers with
+    /// missing or inconsistent colour extensions, which is why the delegate
+    /// callback tags pixel buffers explicitly with Rec. 709 before
+    /// forwarding. Logging the declared values at startup gives us a
+    /// diagnostic trail for future camera debugging.
+    private func finalizeActiveFormatDiagnostics(device: AVCaptureDevice) {
         let activeDims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         nativePixelSize = CGSize(width: Int(activeDims.width), height: Int(activeDims.height))
         Log.camera.log("Capture started: \(device.localizedName) @ \(activeDims.width)x\(activeDims.height)")
 
-        // Format introspection — logs what the active format declares for
-        // pixel format + colour metadata. Many USB cameras and capture cards
-        // deliver buffers with missing or inconsistent colour extensions,
-        // which is why the delegate callback tags pixel buffers explicitly
-        // with Rec. 709 before forwarding. Logging the declared values at
-        // startup gives us a diagnostic trail for future camera debugging.
         let fmtDesc = device.activeFormat.formatDescription
         let subType = CMFormatDescriptionGetMediaSubType(fmtDesc)
         let subTypeStr = String(

@@ -168,123 +168,46 @@ extension RecordingActor {
         var compositionFailed: Bool
     }
 
+    /// Per-mode composite result. Each `composite<Mode>` helper returns one
+    /// of these so `compositeForCurrentMode` can assemble the final decision
+    /// without growing past the per-function-body line cap.
+    struct ModeCompositeStep {
+        let result: Result<CVPixelBuffer, CompositionError>?
+        let sourcePTS: CMTime
+        let branch: String
+        let compositeS: Double
+    }
+
     /// Acquire source frames for the current mode, composite them, and return
     /// a decision record. Always returns — the caller inspects `output`,
     /// `compositionFailed`, and `branch` to decide whether to emit.
     ///
-    /// Source-PTS freshness is enforced here: a tick whose source frame is
-    /// not strictly newer than `lastEmittedSourcePTS` returns with
-    /// `branch = "skipStale"` and no composition is performed. This
+    /// Source-PTS freshness is enforced in the per-mode helpers: a tick whose
+    /// source frame is not strictly newer than `lastEmittedSourcePTS` returns
+    /// with `branch = "skipStale"` and no composition is performed. This
     /// replaces the encoder-level monotonicity rejection that previously
-    /// fired on every static-screen tick (Bug B) and on every
-    /// cameraOnly tick where the metronome over-ran the camera's
-    /// delivery rate (Bug A).
+    /// fired on every static-screen tick and on every cameraOnly tick where
+    /// the metronome over-ran the camera's delivery rate.
     private func compositeForCurrentMode() async -> CompositeDecision {
-        var decision = CompositeDecision(
-            output: nil,
-            sourcePTS: .invalid,
-            branch: "n/a",
-            queueDepthBefore: cameraFrameQueue.count,
-            compositeS: 0,
-            compositionFailed: false
-        )
-
-        let result: Result<CVPixelBuffer, CompositionError>?
+        let queueDepthBefore = cameraFrameQueue.count
+        let step: ModeCompositeStep
         switch mode {
         case .screenOnly:
-            guard let screen = latestScreenFrame else {
-                decision.branch = "noSource"
-                return decision
-            }
-            if isStaleSource(screen.capturePTS) {
-                decision.branch = "skipStale"
-                decision.sourcePTS = screen.capturePTS
-                return decision
-            }
-            decision.sourcePTS = screen.capturePTS
-            let startedAt = Date()
-            result = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: nil,
-                mode: .screenOnly
-            )
-            decision.compositeS = -startedAt.timeIntervalSinceNow
+            step = await compositeScreenOnly()
         case .screenAndCamera:
-            guard let screen = latestScreenFrame else {
-                decision.branch = "noSource"
-                return decision
-            }
-            // Screen drives timing in screenAndCamera mode — it's the
-            // primary content, camera is just a PiP overlay. Using screen
-            // PTS ensures the output advances at the screen's delivery
-            // rate and lets a static screen short-circuit through the
-            // stale-source check below.
-            if isStaleSource(screen.capturePTS) {
-                decision.branch = "skipStale"
-                decision.sourcePTS = screen.capturePTS
-                return decision
-            }
-            let camera = cameraFrameQueue.last
-            decision.sourcePTS = screen.capturePTS
-            let cameraAvailable = camera != nil
-                && !activeSourceWarnings.contains(.cameraFailed)
-                && !activeSourceWarnings.contains(.cameraStale)
-            let startedAt = Date()
-            if cameraAvailable, let camera {
-                result = await composition.compositeFrame(
-                    screenBuffer: screen.pixelBuffer,
-                    cameraBuffer: camera.pixelBuffer,
-                    mode: .screenAndCamera,
-                    pipPosition: pipPosition
-                )
-            } else {
-                result = await composition.compositeFrame(
-                    screenBuffer: screen.pixelBuffer,
-                    cameraBuffer: nil,
-                    mode: .screenOnly
-                )
-            }
-            decision.compositeS = -startedAt.timeIntervalSinceNow
+            step = await compositeScreenAndCamera()
         case .cameraOnly:
-            // Pop the next camera frame if available. Output cadence
-            // tracks the camera's actual delivery rate — empty ticks
-            // become no-ops rather than synthesising host-clock PTS
-            // values (which was Bug A: the synthetic PTS landed ahead
-            // of the next real frame's capturePTS, causing the encoder
-            // to reject every newly-arrived real frame).
-            guard !cameraFrameQueue.isEmpty else {
-                decision.branch = "noSource"
-                diagnostics.cameraOnlyNoSourceBranch += 1
-                return decision
-            }
-            let popped = cameraFrameQueue.removeFirst()
-            lastPoppedCameraFrame = popped
-            if isStaleSource(popped.capturePTS) {
-                // Pause/resume drop-through (camera frames captured during
-                // a pause survive in the FIFO past the drain on a tight
-                // race) or mode switch into cameraOnly (FIFO inherits
-                // stale frames from screen-mode emits). Drop silently
-                // and wait for the next tick.
-                decision.branch = "skipStale"
-                decision.sourcePTS = popped.capturePTS
-                return decision
-            }
-            decision.sourcePTS = popped.capturePTS
-            decision.branch = "pop"
-            diagnostics.cameraOnlyPopBranch += 1
-            MetronomeDiagnostics.bumpHistogram(
-                &diagnostics.queueDepthHist,
-                edges: MetronomeDiagnostics.queueDepthEdges,
-                value: decision.queueDepthBefore
-            )
-            let startedAt = Date()
-            result = await composition.compositeFrame(
-                screenBuffer: nil,
-                cameraBuffer: popped.pixelBuffer,
-                mode: .cameraOnly
-            )
-            decision.compositeS = -startedAt.timeIntervalSinceNow
+            step = await compositeCameraOnly(queueDepthBefore: queueDepthBefore)
         }
+
+        var decision = CompositeDecision(
+            output: nil,
+            sourcePTS: step.sourcePTS,
+            branch: step.branch,
+            queueDepthBefore: queueDepthBefore,
+            compositeS: step.compositeS,
+            compositionFailed: false
+        )
 
         MetronomeDiagnostics.bumpHistogram(
             &diagnostics.compositeHist,
@@ -292,8 +215,8 @@ extension RecordingActor {
             valueMs: decision.compositeS * 1000
         )
 
-        guard let result else {
-            decision.branch = decision.branch == "n/a" ? "noSource" : decision.branch
+        guard let result = step.result else {
+            if decision.branch == "n/a" { decision.branch = "noSource" }
             return decision
         }
         switch result {
@@ -305,6 +228,105 @@ extension RecordingActor {
             await handleCompositionFailure(compositionError)
         }
         return decision
+    }
+
+    private func compositeScreenOnly() async -> ModeCompositeStep {
+        guard let screen = latestScreenFrame else {
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+        }
+        if isStaleSource(screen.capturePTS) {
+            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: "skipStale", compositeS: 0)
+        }
+        let startedAt = Date()
+        let result = await composition.compositeFrame(
+            screenBuffer: screen.pixelBuffer,
+            cameraBuffer: nil,
+            mode: .screenOnly
+        )
+        return ModeCompositeStep(
+            result: result,
+            sourcePTS: screen.capturePTS,
+            branch: "n/a",
+            compositeS: -startedAt.timeIntervalSinceNow
+        )
+    }
+
+    private func compositeScreenAndCamera() async -> ModeCompositeStep {
+        guard let screen = latestScreenFrame else {
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+        }
+        // Screen drives timing in screenAndCamera mode — it's the primary
+        // content, camera is just a PiP overlay. Using screen PTS ensures
+        // the output advances at the screen's delivery rate and lets a
+        // static screen short-circuit through the stale-source check.
+        if isStaleSource(screen.capturePTS) {
+            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: "skipStale", compositeS: 0)
+        }
+        let camera = cameraFrameQueue.last
+        let cameraAvailable = camera != nil
+            && !activeSourceWarnings.contains(.cameraFailed)
+            && !activeSourceWarnings.contains(.cameraStale)
+        let startedAt = Date()
+        let result: Result<CVPixelBuffer, CompositionError>?
+        if cameraAvailable, let camera {
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: camera.pixelBuffer,
+                mode: .screenAndCamera,
+                pipPosition: pipPosition
+            )
+        } else {
+            result = await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: nil,
+                mode: .screenOnly
+            )
+        }
+        return ModeCompositeStep(
+            result: result,
+            sourcePTS: screen.capturePTS,
+            branch: "n/a",
+            compositeS: -startedAt.timeIntervalSinceNow
+        )
+    }
+
+    private func compositeCameraOnly(queueDepthBefore: Int) async -> ModeCompositeStep {
+        // Pop the next camera frame if available. Output cadence tracks the
+        // camera's actual delivery rate — empty ticks become no-ops rather
+        // than synthesising host-clock PTS values (which was the bug where
+        // synthetic PTS landed ahead of the next real frame's capturePTS,
+        // causing the encoder to reject every newly-arrived real frame).
+        guard !cameraFrameQueue.isEmpty else {
+            diagnostics.cameraOnlyNoSourceBranch += 1
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+        }
+        let popped = cameraFrameQueue.removeFirst()
+        lastPoppedCameraFrame = popped
+        if isStaleSource(popped.capturePTS) {
+            // Pause/resume drop-through (camera frames captured during a
+            // pause survive in the FIFO past the drain on a tight race) or
+            // mode switch into cameraOnly (FIFO inherits stale frames from
+            // screen-mode emits). Drop silently and wait for the next tick.
+            return ModeCompositeStep(result: nil, sourcePTS: popped.capturePTS, branch: "skipStale", compositeS: 0)
+        }
+        diagnostics.cameraOnlyPopBranch += 1
+        MetronomeDiagnostics.bumpHistogram(
+            &diagnostics.queueDepthHist,
+            edges: MetronomeDiagnostics.queueDepthEdges,
+            value: queueDepthBefore
+        )
+        let startedAt = Date()
+        let result = await composition.compositeFrame(
+            screenBuffer: nil,
+            cameraBuffer: popped.pixelBuffer,
+            mode: .cameraOnly
+        )
+        return ModeCompositeStep(
+            result: result,
+            sourcePTS: popped.capturePTS,
+            branch: "pop",
+            compositeS: -startedAt.timeIntervalSinceNow
+        )
     }
 
     /// True when the source's capturePTS is not strictly newer than what
@@ -366,40 +388,12 @@ extension RecordingActor {
             return false
         }
         guard let output = decision.output else {
-            // No composited frame this tick. Distinguish the two reasons
-            // so diagnostics can tell "static screen / metronome over-ran
-            // camera" (skipStale, expected in normal operation) from
-            // "no source ever arrived" (noSource, real problem).
-            if decision.branch == "skipStale" {
-                // Phase 3: in a long static run, emit a synthetic-PTS
-                // repeat of the last cached source so AVAssetWriter's
-                // segment cutter doesn't see >4s of dead air.
-                if await tryEmitKeepAlive(
-                    iterIdx: iterIdx,
-                    start: start,
-                    lastEmitLogical: lastEmitLogical
-                ) {
-                    return true
-                }
-                diagnostics.skipsStale += 1
-                recordTickRejection(
-                    iterIdx: iterIdx,
-                    action: MetronomeTickAction.skipStale,
-                    decision: decision,
-                    ptsLogical: nil,
-                    lastEmitLogical: lastEmitLogical
-                )
-            } else {
-                diagnostics.noSourceTicks += 1
-                recordTickRejection(
-                    iterIdx: iterIdx,
-                    action: MetronomeTickAction.noSource,
-                    decision: decision,
-                    ptsLogical: nil,
-                    lastEmitLogical: lastEmitLogical
-                )
-            }
-            return false
+            return await handleEmptyComposite(
+                iterIdx: iterIdx,
+                decision: decision,
+                start: start,
+                lastEmitLogical: lastEmitLogical
+            )
         }
         let sourcePTS = decision.sourcePTS
 
@@ -429,43 +423,11 @@ extension RecordingActor {
         let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
 
         if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS {
-            // Encoder safety net. Post task-21 Phases 1+2 this should
-            // never fire on the happy path — the source-PTS freshness
-            // check in `compositeForCurrentMode` is the primary defence
-            // and is intentionally less strict than the encoder gate
-            // here. A fire is a real bug; surface it on the timeline
-            // (Phase 4) so it shows up in recording.json forensics.
-            //
-            // Rate-limit timeline events to avoid ballooning
-            // recording.json under a regression scenario: first N fire
-            // normally, the (N+1)th fires a one-shot suppression
-            // sentinel, subsequent fires only update the aggregate
-            // counter + histogram (which already carry the full totals).
-            diagnostics.rejectMonotonicity += 1
-            let deltaMs = (lastEmittedVideoPTS - pts).seconds * 1000
-            MetronomeDiagnostics.bumpHistogram(
-                &diagnostics.monoRejectHist,
-                edges: MetronomeDiagnostics.monoRejectEdgesMs,
-                valueMs: deltaMs
-            )
-            if diagnostics.rejectMonotonicity <= Self.monoRejectEventCap {
-                timeline.recordMonotonicityRejected(
-                    deltaMs: deltaMs,
-                    branch: decision.branch,
-                    t: logicalElapsedSeconds()
-                )
-            } else if diagnostics.rejectMonotonicity == Self.monoRejectEventCap + 1 {
-                timeline.recordMonotonicityRejectedSuppressed(
-                    cap: Self.monoRejectEventCap,
-                    branch: decision.branch,
-                    t: logicalElapsedSeconds()
-                )
-            }
-            recordTickRejection(
+            handleMonotonicityRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectMonotonicity,
+                pts: pts,
                 decision: decision,
-                ptsLogical: elapsedLogical.seconds,
+                elapsedLogical: elapsedLogical,
                 lastEmitLogical: lastEmitLogical
             )
             return false
@@ -493,7 +455,29 @@ extension RecordingActor {
             return false
         }
 
-        // Successful emit. Record cadence + trace row.
+        recordSuccessfulEmit(
+            iterIdx: iterIdx,
+            decision: decision,
+            sourcePTS: sourcePTS,
+            start: start,
+            elapsedLogical: elapsedLogical,
+            lastEmitLogical: lastEmitLogical
+        )
+
+        await writer.appendVideo(outputSample)
+        return true
+    }
+
+    /// Bookkeep a successful metronome emit: bump the inter-emit cadence
+    /// histogram, advance the cadence anchor, and append a trace row.
+    private func recordSuccessfulEmit(
+        iterIdx: Int64,
+        decision: CompositeDecision,
+        sourcePTS: CMTime,
+        start: CMTime,
+        elapsedLogical: CMTime,
+        lastEmitLogical: Double?
+    ) {
         let logicalSec = elapsedLogical.seconds
         if lastEmitLogicalSeconds >= 0 {
             let gapMs = (logicalSec - lastEmitLogicalSeconds) * 1000
@@ -514,9 +498,97 @@ extension RecordingActor {
             lastEmitLogical: lastEmitLogical,
             action: MetronomeTickAction.emit
         )
+    }
 
-        await writer.appendVideo(outputSample)
-        return true
+    /// Handle the no-composited-frame branches of `emitMetronomeFrame`.
+    /// `skipStale` first tries a keep-alive emit; both branches fall back
+    /// to a rejection trace row.
+    private func handleEmptyComposite(
+        iterIdx: Int64,
+        decision: CompositeDecision,
+        start: CMTime,
+        lastEmitLogical: Double?
+    ) async -> Bool {
+        // Distinguish the two reasons so diagnostics can tell "static
+        // screen / metronome over-ran camera" (skipStale, expected in
+        // normal operation) from "no source ever arrived" (noSource,
+        // real problem).
+        if decision.branch == "skipStale" {
+            // Phase 3: in a long static run, emit a synthetic-PTS repeat
+            // of the last cached source so AVAssetWriter's segment cutter
+            // doesn't see >4s of dead air.
+            if await tryEmitKeepAlive(
+                iterIdx: iterIdx,
+                start: start,
+                lastEmitLogical: lastEmitLogical
+            ) {
+                return true
+            }
+            diagnostics.skipsStale += 1
+            recordTickRejection(
+                iterIdx: iterIdx,
+                action: MetronomeTickAction.skipStale,
+                decision: decision,
+                ptsLogical: nil,
+                lastEmitLogical: lastEmitLogical
+            )
+        } else {
+            diagnostics.noSourceTicks += 1
+            recordTickRejection(
+                iterIdx: iterIdx,
+                action: MetronomeTickAction.noSource,
+                decision: decision,
+                ptsLogical: nil,
+                lastEmitLogical: lastEmitLogical
+            )
+        }
+        return false
+    }
+
+    /// Encoder-level monotonicity safety net. Post task-21 Phases 1+2 this
+    /// should never fire on the happy path — the source-PTS freshness check
+    /// in `compositeForCurrentMode` is the primary defence. A fire here is a
+    /// real bug; surface it on the timeline so it shows up in recording.json
+    /// forensics.
+    ///
+    /// Timeline events are rate-limited to avoid ballooning recording.json
+    /// under a regression scenario: first N fire normally, the (N+1)th fires
+    /// a one-shot suppression sentinel, subsequent fires only update the
+    /// aggregate counter + histogram (which already carry the full totals).
+    private func handleMonotonicityRejection(
+        iterIdx: Int64,
+        pts: CMTime,
+        decision: CompositeDecision,
+        elapsedLogical: CMTime,
+        lastEmitLogical: Double?
+    ) {
+        diagnostics.rejectMonotonicity += 1
+        let deltaMs = (lastEmittedVideoPTS - pts).seconds * 1000
+        MetronomeDiagnostics.bumpHistogram(
+            &diagnostics.monoRejectHist,
+            edges: MetronomeDiagnostics.monoRejectEdgesMs,
+            valueMs: deltaMs
+        )
+        if diagnostics.rejectMonotonicity <= Self.monoRejectEventCap {
+            timeline.recordMonotonicityRejected(
+                deltaMs: deltaMs,
+                branch: decision.branch,
+                t: logicalElapsedSeconds()
+            )
+        } else if diagnostics.rejectMonotonicity == Self.monoRejectEventCap + 1 {
+            timeline.recordMonotonicityRejectedSuppressed(
+                cap: Self.monoRejectEventCap,
+                branch: decision.branch,
+                t: logicalElapsedSeconds()
+            )
+        }
+        recordTickRejection(
+            iterIdx: iterIdx,
+            action: MetronomeTickAction.rejectMonotonicity,
+            decision: decision,
+            ptsLogical: elapsedLogical.seconds,
+            lastEmitLogical: lastEmitLogical
+        )
     }
 
     /// Phase 3: emit a synthetic-PTS repeat of the last cached source
@@ -650,183 +722,5 @@ extension RecordingActor {
 
         await writer.appendVideo(outputSample)
         return true
-    }
-
-    /// Compact trace-row writer for the non-rejection (emit) path.
-    private func recordTickRow(
-        iterIdx: Int64,
-        decision: CompositeDecision,
-        sourceLogical: Double?,
-        elapsedLogical: Double?,
-        emitLogical: Double?,
-        lastEmitLogical: Double?,
-        action: String
-    ) {
-        let host = logicalElapsedSeconds()
-        let entry = MetronomeTickEntry(
-            iter: iterIdx,
-            emittedTickIdx: metronomeTickIdx,
-            hostT: host,
-            queueDepthBefore: decision.queueDepthBefore,
-            cameraBranch: decision.branch,
-            sourcePTS: sourceLogical,
-            elapsedLogical: elapsedLogical,
-            emitPTS: emitLogical,
-            lastEmitPTS: lastEmitLogical,
-            compositeS: decision.compositeS,
-            action: action,
-            driftS: 0, // filled by metronomeLoop after the call if desired
-            sleepS: 0
-        )
-        diagnostics.pushTick(entry)
-    }
-
-    /// Trace-row writer for rejection paths. `decision` may be nil if we
-    /// rejected before composition ran (e.g. notRecording / noStart).
-    private func recordTickRejection(
-        iterIdx: Int64,
-        action: String,
-        decision: CompositeDecision?,
-        ptsLogical: Double?,
-        lastEmitLogical: Double?
-    ) {
-        let host = logicalElapsedSeconds()
-        let sourceRelative: Double? = decision.flatMap { d in
-            guard d.sourcePTS.isValid, let start = recordingStartTime else { return nil }
-            return (d.sourcePTS - start).seconds
-        }
-        let entry = MetronomeTickEntry(
-            iter: iterIdx,
-            emittedTickIdx: metronomeTickIdx,
-            hostT: host,
-            queueDepthBefore: decision?.queueDepthBefore ?? cameraFrameQueue.count,
-            cameraBranch: decision?.branch ?? "n/a",
-            sourcePTS: sourceRelative,
-            elapsedLogical: ptsLogical,
-            emitPTS: nil,
-            lastEmitPTS: lastEmitLogical,
-            compositeS: decision?.compositeS ?? 0,
-            action: action,
-            driftS: 0,
-            sleepS: 0
-        )
-        diagnostics.pushTick(entry)
-    }
-
-    // MARK: - Source Frame Diagnostics
-
-    /// Record per-camera-frame timing details for the first N frames, plus
-    /// aggregate histogram for all frames. Called from `handleCameraFrame`
-    /// after the queue update.
-    func recordCameraFrameForDiagnostics(capturePTS: CMTime, causedEviction: Bool) {
-        diagnostics.cameraFramesReceived += 1
-        let hostNow = CMClockGetTime(CMClockGetHostTimeClock())
-        let logicalHost: Double = recordingStartTime.map { (hostNow - $0).seconds } ?? -1
-        let logicalCap: Double = recordingStartTime.map { (capturePTS - $0).seconds } ?? -1
-        let captureLagS = (hostNow - capturePTS).seconds
-
-        // Interval-from-previous histogram (in seconds, converted to ms).
-        var gapMs: Double?
-        if lastCameraCapturePTS.isValid {
-            let g = (capturePTS - lastCameraCapturePTS).seconds
-            gapMs = g * 1000
-            MetronomeDiagnostics.bumpHistogram(
-                &diagnostics.cameraIntervalHist,
-                edges: MetronomeDiagnostics.cameraIntervalEdgesMs,
-                valueMs: g * 1000
-            )
-        }
-        lastCameraCapturePTS = capturePTS
-
-        // Capture-lag histogram.
-        if captureLagS >= 0 {
-            MetronomeDiagnostics.bumpHistogram(
-                &diagnostics.captureLagHist,
-                edges: MetronomeDiagnostics.captureLagEdgesMs,
-                valueMs: captureLagS * 1000
-            )
-        }
-
-        // First-N detailed trace.
-        if diagnostics.cameraTrace.count < MetronomeDiagnostics.cameraTraceCapacity {
-            let entry = CameraFrameTraceEntry(
-                n: diagnostics.cameraFramesReceived,
-                hostT: logicalHost,
-                capturePTS: logicalCap,
-                captureLagS: captureLagS,
-                gapFromPreviousS: gapMs.map { $0 / 1000 },
-                queueDepthAfter: cameraFrameQueue.count,
-                causedEviction: causedEviction
-            )
-            diagnostics.pushCameraFrame(entry)
-        }
-    }
-
-    /// Same for screen frames. Lighter — we don't need to confirm screen is
-    /// well-behaved, but it's useful to have parity for cross-source
-    /// comparison.
-    func recordScreenFrameForDiagnostics(capturePTS: CMTime) {
-        diagnostics.screenFramesReceived += 1
-        let hostNow = CMClockGetTime(CMClockGetHostTimeClock())
-        let logicalHost: Double = recordingStartTime.map { (hostNow - $0).seconds } ?? -1
-        let logicalCap: Double = recordingStartTime.map { (capturePTS - $0).seconds } ?? -1
-        let captureLagS = (hostNow - capturePTS).seconds
-
-        var gapMs: Double?
-        if lastScreenCapturePTS.isValid {
-            let g = (capturePTS - lastScreenCapturePTS).seconds
-            gapMs = g * 1000
-            MetronomeDiagnostics.bumpHistogram(
-                &diagnostics.screenIntervalHist,
-                edges: MetronomeDiagnostics.screenIntervalEdgesMs,
-                valueMs: g * 1000
-            )
-        }
-        lastScreenCapturePTS = capturePTS
-
-        if diagnostics.screenTrace.count < MetronomeDiagnostics.screenTraceCapacity {
-            let entry = ScreenFrameTraceEntry(
-                n: diagnostics.screenFramesReceived,
-                hostT: logicalHost,
-                capturePTS: logicalCap,
-                captureLagS: captureLagS,
-                gapFromPreviousS: gapMs.map { $0 / 1000 }
-            )
-            diagnostics.pushScreenFrame(entry)
-        }
-    }
-
-    // MARK: - PTS Helpers
-
-    /// Retime a sample buffer onto the recording's logical timeline so it
-    /// can be appended to a raw writer. Returns nil if the recording isn't
-    /// committed yet, the recording is paused, or the sample's PTS is
-    /// before the recording start anchor.
-    func retimedSampleForRawWriter(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
-        guard isRecording,
-              pauseStartHostTime == nil,
-              let startTime = recordingStartTime else { return nil }
-
-        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard originalPTS.isValid else { return nil }
-
-        let relPTS = (originalPTS - startTime) - pauseAccumulator
-        guard relPTS >= .zero else { return nil }
-
-        let duration = CMSampleBufferGetDuration(sampleBuffer)
-        var timing = CMSampleTimingInfo(
-            duration: duration,
-            presentationTimeStamp: relPTS,
-            decodeTimeStamp: .invalid
-        )
-        var out: CMSampleBuffer?
-        CMSampleBufferCreateCopyWithNewTiming(
-            allocator: kCFAllocatorDefault,
-            sampleBuffer: sampleBuffer,
-            sampleTimingEntryCount: 1,
-            sampleTimingArray: &timing,
-            sampleBufferOut: &out
-        )
-        return out
     }
 }

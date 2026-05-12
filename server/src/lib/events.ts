@@ -28,7 +28,8 @@ export type EventType =
   | "title_suggested"
   | "description_suggested"
   | "edits_committed"
-  | "chapters_updated";
+  | "chapters_updated"
+  | "chapter_title_suggested";
 
 // Returns all events for a video, oldest first. The `data` field is raw
 // JSON text — callers parse it as needed for display.

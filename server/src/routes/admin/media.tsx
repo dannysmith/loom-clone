@@ -1,8 +1,17 @@
 import { Hono } from "hono";
 import { join } from "path";
+import {
+  chaptersForViewer,
+  generateChaptersVTT,
+  readChapters,
+  viewerDurationFromEdits,
+} from "../../lib/chapters";
+import type { Edit } from "../../lib/edit-transcript";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/store";
 import { type AdminEnv, requireVideo } from "./helpers";
+
+type EditsFileLike = { edits?: unknown };
 
 const media = new Hono<AdminEnv>();
 
@@ -45,6 +54,42 @@ media.get("/:id/media/poster.jpg", async (c) => {
     "image/jpeg",
     "immutable",
   );
+});
+
+media.get("/:id/media/chapters.vtt", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const video = result;
+  const data = await readChapters(video.id);
+  if (!data || data.chapters.length === 0) return c.text("Not found", 404);
+
+  const sourceDuration = video.durationSeconds ?? 0;
+  let edits: Edit[] = [];
+  const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
+  if (await editsFile.exists()) {
+    try {
+      const parsed = (await editsFile.json()) as EditsFileLike;
+      if (Array.isArray(parsed.edits)) edits = parsed.edits as Edit[];
+    } catch {
+      // Malformed edits.json — fall back to no edits.
+    }
+  }
+  // Defensive: malformed edit entries past the JSON parse (wrong types,
+  // missing fields) could surface as arithmetic errors inside
+  // chaptersForViewer. Treat that the same as "no edits".
+  let mapped: typeof data.chapters;
+  let viewerDuration: number;
+  try {
+    mapped = chaptersForViewer(data.chapters, edits, sourceDuration);
+    viewerDuration = viewerDurationFromEdits(edits, sourceDuration);
+  } catch {
+    mapped = chaptersForViewer(data.chapters, [], sourceDuration);
+    viewerDuration = sourceDuration;
+  }
+  if (mapped.length === 0) return c.text("Not found", 404);
+  c.header("Cache-Control", "no-store");
+  c.header("Content-Type", "text/vtt");
+  return c.body(generateChaptersVTT(mapped, viewerDuration));
 });
 
 // Serve thumbnail candidate images for the admin picker.

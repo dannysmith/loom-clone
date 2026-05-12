@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { purgeVideo } from "../../lib/cdn";
+import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
 import { slugFromTitle } from "../../lib/slug-utils";
@@ -56,14 +57,16 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = parseTab(c.req.query("tab"));
-  const [videoTags, allTags, events, files, thumbnailCandidates, transcript] = await Promise.all([
-    getVideoTags(video.id),
-    listTags(),
-    listEvents(video.id),
-    listVideoFiles(video.id),
-    listThumbnailCandidates(video.id),
-    getTranscript(video.id),
-  ]);
+  const [videoTags, allTags, events, files, thumbnailCandidates, transcript, hasChapters] =
+    await Promise.all([
+      getVideoTags(video.id),
+      listTags(),
+      listEvents(video.id),
+      listVideoFiles(video.id),
+      listThumbnailCandidates(video.id),
+      getTranscript(video.id),
+      chaptersExist(video.id),
+    ]);
 
   return c.html(
     <VideoDetailPage
@@ -75,6 +78,7 @@ videoRoutes.get("/:id", async (c) => {
       thumbnailCandidates={thumbnailCandidates}
       transcript={transcript}
       activeTab={activeTab}
+      hasChapters={hasChapters}
     />,
   );
 });

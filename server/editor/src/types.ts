@@ -39,3 +39,19 @@ export type SuggestedEdits = {
   source: string;
   edits: Edit[];
 };
+
+// Chapter as seen by the editor — times are in the VIEWER timeline (the
+// server has already remapped them through edits.json on GET, and will
+// reverse-map them on PUT). createdDuringRecording is read-only from
+// the server's perspective; the editor only sets it implicitly (new
+// chapters added in the UI default to false on the server).
+export type Chapter = {
+  id: string;
+  title: string | null;
+  t: number;
+};
+
+export type ChaptersFile = {
+  version: 1;
+  chapters: Chapter[];
+};

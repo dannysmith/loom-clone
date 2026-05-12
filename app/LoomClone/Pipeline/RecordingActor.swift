@@ -720,6 +720,29 @@ actor RecordingActor {
         return ((now - start) - pauseAccumulator).seconds
     }
 
+    /// Variant of `logicalElapsedSeconds()` that freezes at the moment the
+    /// current pause started, so events triggered *during* a pause land on
+    /// the timeline at the user-visible (paused) clock time rather than
+    /// advancing past it. Falls back to live elapsed when not paused.
+    func userVisibleElapsedSeconds() -> Double {
+        guard let start = recordingStartTime else { return 0 }
+        let when = pauseStartHostTime ?? CMClockGetTime(CMClockGetHostTimeClock())
+        return ((when - start) - pauseAccumulator).seconds
+    }
+
+    /// Append an anonymous chapter marker to the timeline at the current
+    /// logical time (or the frozen pause time if currently paused). The
+    /// UUID is generated here so the server can match server-side chapter
+    /// records back to the originating press for later AI title updates.
+    /// No-op before commit.
+    @discardableResult
+    func addChapterMarker() -> String? {
+        guard recordingStartTime != nil else { return nil }
+        let id = UUID().uuidString.lowercased()
+        timeline.recordChapterMarker(id: id, t: userVisibleElapsedSeconds())
+        return id
+    }
+
     /// Called from the upload actor callback to fold upload results into the
     /// timeline. `t` is captured at the moment the callback fires.
     func recordUploadResult(filename: String, success: Bool, error: String?) {

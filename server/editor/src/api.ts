@@ -1,4 +1,4 @@
-import type { Edl, PeaksData, SuggestedEdits, Word } from "./types";
+import type { Chapter, ChaptersFile, Edl, PeaksData, SuggestedEdits, Word } from "./types";
 
 const base = (videoId: string) => `/admin/videos/${videoId}`;
 
@@ -52,4 +52,19 @@ export function editorMediaUrl(videoId: string, file: string): string {
 
 export function videoSrcUrl(videoId: string): string {
   return `${base(videoId)}/media/raw/source.mp4`;
+}
+
+export async function loadChapters(videoId: string): Promise<ChaptersFile> {
+  const res = await fetch(`${base(videoId)}/chapters`);
+  if (!res.ok) throw new Error(`Failed to load chapters: ${res.status}`);
+  return res.json();
+}
+
+export async function saveChapters(videoId: string, chapters: Chapter[]): Promise<void> {
+  const res = await fetch(`${base(videoId)}/chapters`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version: 1, chapters }),
+  });
+  if (!res.ok) throw new Error(`Failed to save chapters: ${res.status}`);
 }

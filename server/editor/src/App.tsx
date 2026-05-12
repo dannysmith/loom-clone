@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
+import { ChaptersPanel } from "./components/ChaptersPanel";
 import { CommitDialog } from "./components/CommitDialog";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { TranscriptOverlay } from "./components/TranscriptOverlay";
 import { VideoPreview } from "./components/VideoPreview";
 import { Waveform } from "./components/Waveform";
+import { useChapters } from "./hooks/useChapters";
 import { useEdl } from "./hooks/useEdl";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useVideoPlayback } from "./hooks/useVideoPlayback";
@@ -18,6 +20,7 @@ type Props = {
 
 export function App({ videoId, videoTitle, videoDuration }: Props) {
   const edlState = useEdl(videoId);
+  const chaptersState = useChapters(videoId);
   const playback = useVideoPlayback(edlState.edl.edits);
   const [showCommitDialog, setShowCommitDialog] = useState(false);
 
@@ -131,7 +134,9 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           videoId={videoId}
           duration={duration}
           currentTime={playback.currentTime}
+          chapters={chaptersState.chapters}
           onSeek={playback.seek}
+          onChapterDrop={chaptersState.updateTime}
         />
 
         <Waveform
@@ -151,6 +156,19 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           currentTime={playback.currentTime}
           edits={edlState.edl.edits}
           onSeek={playback.seek}
+        />
+
+        <ChaptersPanel
+          chapters={chaptersState.chapters}
+          currentTime={playback.currentTime}
+          duration={duration}
+          saving={chaptersState.saving}
+          saveError={chaptersState.saveError}
+          onSeek={playback.seek}
+          onAddAtPlayhead={() => chaptersState.addAtTime(playback.currentTime)}
+          onTitleChange={chaptersState.updateTitle}
+          onTimeChange={chaptersState.updateTime}
+          onRemove={chaptersState.remove}
         />
       </div>
 

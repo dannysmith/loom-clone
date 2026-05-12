@@ -10,6 +10,7 @@ type Props = {
   sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
+  chaptersUrl: string | null;
   title?: string;
   description?: string;
   duration?: string;
@@ -26,6 +27,7 @@ export function EmbedPage({
   sources,
   poster,
   captionsUrl,
+  chaptersUrl,
   title,
   description,
   duration,
@@ -104,6 +106,7 @@ export function EmbedPage({
           {captionsUrl && (
             <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
+          {chaptersUrl && <track src={chaptersUrl} kind="chapters" srclang="en" default />}
           {poster && <media-poster class="vds-poster" src={poster} alt={title ?? ""} />}
         </media-provider>
 

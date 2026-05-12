@@ -200,7 +200,18 @@ actor TranscribeAgent {
             srt: srt,
             titleHint: nil
         )
-        _ = await (titleTask, descTask)
+        let (titleResult, _) = await (titleTask, descTask)
+
+        // Chapter title suggestions — only runs if the user added at least
+        // one chapter marker during recording. Sequential per-chapter so
+        // each generation can see prior titles as context. Skipped entirely
+        // on machines without Foundation Models or when no markers exist.
+        await suggestChapterTitles(
+            videoId: videoId,
+            localDir: localDir,
+            wordsData: wordsData,
+            videoTitle: titleResult
+        )
 
         let now = ISO8601DateFormatter().string(from: Date())
         try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)
@@ -446,6 +457,154 @@ actor TranscribeAgent {
         // Any 2xx is fine (applied or not).
         guard http.statusCode == 200 || http.statusCode == 404 else {
             throw TranscribeError.server("suggest-title status \(http.statusCode)")
+        }
+    }
+
+    // MARK: - Chapter Title Suggestion
+
+    /// Generate AI-suggested titles for each chapter marker that was added
+    /// during recording. Skips the whole step if no markers exist in
+    /// `recording.json` — per the issue, AI suggestions only ever update
+    /// existing markers, never create them.
+    ///
+    /// Sequential per-chapter so each call can see the running list of
+    /// generated titles for context. Server-side, application is
+    /// idempotent: any chapter whose title has been set by the user (or
+    /// deleted entirely) wins over the AI guess.
+    private func suggestChapterTitles(
+        videoId: String,
+        localDir: URL,
+        wordsData: [[String: Any]],
+        videoTitle: String?
+    ) async {
+        #if canImport(FoundationModels)
+            guard #available(macOS 26, *) else { return }
+
+            let recordingJsonURL = localDir.appendingPathComponent("recording.json")
+            guard let markers = readChapterMarkers(from: recordingJsonURL),
+                  !markers.isEmpty
+            else {
+                return
+            }
+
+            let preamble = RecordingContextBuilder.buildPreamble(from: recordingJsonURL)
+                ?? "video recording"
+            let videoDuration = readDurationSeconds(from: recordingJsonURL)
+                ?? (markers.last?.t ?? 0) + 60
+
+            var priorTitles: [String] = []
+            for index in markers.indices {
+                let chapter = markers[index]
+                let endT = index + 1 < markers.count ? markers[index + 1].t : videoDuration
+                let slice = transcriptSlice(words: wordsData, start: chapter.t, end: endT)
+                guard !slice.isEmpty else {
+                    Log.titleSuggest.log("\(videoId): chapter \(chapter.id) has empty transcript slice — skipping")
+                    continue
+                }
+
+                guard let title = await ChapterTitleSuggestionGenerator.suggest(
+                    chapterTranscript: slice,
+                    videoPreamble: preamble,
+                    videoTitle: videoTitle,
+                    priorChapterTitles: priorTitles
+                ) else {
+                    Log.titleSuggest.log("\(videoId): chapter \(chapter.id) no usable suggestion")
+                    continue
+                }
+
+                priorTitles.append(title)
+
+                do {
+                    try await uploadSuggestedChapterTitle(
+                        videoId: videoId,
+                        chapterId: chapter.id,
+                        title: title
+                    )
+                    Log.titleSuggest.log("\(videoId): chapter \(chapter.id) uploaded")
+                } catch {
+                    Log.titleSuggest.log("\(videoId): chapter \(chapter.id) upload failed: \(error)")
+                }
+            }
+        #endif
+    }
+
+    private struct ChapterMarker {
+        let id: String
+        let t: Double
+    }
+
+    /// Read `chapter.marker` events from recording.json, in chronological order.
+    /// Returns nil on parse failure, empty array if no markers (caller treats
+    /// either as "skip the AI step").
+    private func readChapterMarkers(from url: URL) -> [ChapterMarker]? {
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        let events = json["events"] as? [[String: Any]] ?? []
+        var markers: [ChapterMarker] = []
+        for event in events {
+            guard event["kind"] as? String == "chapter.marker" else { continue }
+            guard let t = event["t"] as? Double, t >= 0 else { continue }
+            guard let payload = event["data"] as? [String: Any],
+                  let id = payload["id"] as? String, !id.isEmpty
+            else { continue }
+            markers.append(ChapterMarker(id: id, t: t))
+        }
+        return markers.sorted { $0.t < $1.t }
+    }
+
+    private func readDurationSeconds(from url: URL) -> Double? {
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = json["session"] as? [String: Any]
+        else { return nil }
+        return session["durationSeconds"] as? Double
+    }
+
+    /// Build a plain-text transcript covering [start, end) seconds. Word
+    /// timings come from whisper's view of the raw mic audio, which is
+    /// anchored slightly before the recording timeline's t=0 (raw audio
+    /// capture starts at prepare, t=0 anchors at commit). The offset is
+    /// usually well under a second — fine for naming purposes, where
+    /// being a word or two off at chapter boundaries is invisible.
+    private func transcriptSlice(
+        words: [[String: Any]],
+        start: Double,
+        end: Double
+    ) -> String {
+        guard end > start else { return "" }
+        var pieces: [String] = []
+        for entry in words {
+            guard let word = entry["word"] as? String,
+                  let wordStart = entry["start"] as? Double
+            else { continue }
+            if wordStart < start { continue }
+            if wordStart >= end { break }
+            pieces.append(word)
+        }
+        return pieces.joined(separator: " ")
+    }
+
+    private func uploadSuggestedChapterTitle(
+        videoId: String,
+        chapterId: String,
+        title: String
+    ) async throws {
+        var request = try apiClient.authorizedRequest(
+            path: "/api/videos/\(videoId)/chapters/\(chapterId)/suggest-title"
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = try JSONSerialization.data(withJSONObject: ["title": title])
+        request.httpBody = body
+
+        let (_, http) = try await apiClient.send(request)
+        // 200 = applied or not (server returns reason); 404 = video gone.
+        // Treat both as fine — the AI step is best-effort.
+        guard http.statusCode == 200 || http.statusCode == 404 else {
+            throw TranscribeError.server("suggest-chapter-title status \(http.statusCode)")
         }
     }
 

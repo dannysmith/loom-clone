@@ -15,7 +15,7 @@ embed.get("/:slug/embed", async (c) => {
   if (!result) return c.text("Not found", 404);
   if ("redirect" in result) return c.redirect(`/${result.redirect}/embed`, 301);
 
-  const { video, poster, captionsUrl, urls } = result;
+  const { video, poster, captionsUrl, chaptersUrl, urls } = result;
   const canonicalUrl = absoluteUrl(urls.page);
   const posterAbsolute = poster ? absoluteUrl(urls.poster) : null;
 
@@ -31,6 +31,7 @@ embed.get("/:slug/embed", async (c) => {
       sources={result.sources}
       poster={result.poster}
       captionsUrl={captionsUrl}
+      chaptersUrl={chaptersUrl}
       title={video.title ?? undefined}
       description={video.description ?? undefined}
       duration={formatDuration(video.durationSeconds) ?? undefined}

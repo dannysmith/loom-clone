@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { join, resolve } from "path";
 import { z } from "zod";
+import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../lib/chapters";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { scheduleDerivatives } from "../../lib/derivatives";
 import { apiError, ErrorCode } from "../../lib/errors";
@@ -229,6 +230,18 @@ videos.post("/:id/complete", async (c) => {
       timeline = body.timeline;
       const path = join(DATA_DIR, id, "recording.json");
       await Bun.write(path, JSON.stringify(timeline, null, 2));
+
+      // Extract chapter markers from the timeline into chapters.json. Only
+      // writes on the first /complete that carries markers — subsequent
+      // calls (re-completes during healing) leave any user edits alone.
+      // Re-runs without new markers also leave chapters.json untouched.
+      const recordedChapters = extractChaptersFromTimeline(timeline as { events?: unknown });
+      if (recordedChapters.length > 0) {
+        const existing = await readChapters(id);
+        if (!existing) {
+          await writeChapters(id, recordedChapters);
+        }
+      }
     }
   }
 
@@ -416,6 +429,67 @@ videos.put(
     await updateVideo(id, { description });
     await logEvent(id, "description_suggested", { description, applied: true });
     console.log(`[suggest-description] ${id}: "${description}"`);
+    return c.json({ applied: true });
+  },
+);
+
+// Accept an AI-suggested chapter title. Mirrors /suggest-title: only applies
+// if the chapter's current title is null and the chapter still exists. The
+// Mac generates these from on-device Foundation Models after transcription
+// completes, one per chapter created during recording.
+const suggestChapterTitleSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+
+videos.put(
+  "/:id/chapters/:chapterId/suggest-title",
+  zValidator("json", suggestChapterTitleSchema, (result, c) => {
+    if (!result.success) {
+      return apiError(c, 400, result.error.message, ErrorCode.VALIDATION_ERROR);
+    }
+  }),
+  async (c) => {
+    const { id, chapterId } = c.req.param();
+    const video = await getVideo(id);
+    if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
+
+    const { title } = c.req.valid("json");
+    const data = await readChapters(id);
+    if (!data) {
+      await logEvent(id, "chapter_title_suggested", {
+        chapterId,
+        title,
+        applied: false,
+        reason: "no_chapters",
+      });
+      return c.json({ applied: false, reason: "no_chapters" });
+    }
+    const idx = data.chapters.findIndex((c) => c.id === chapterId);
+    if (idx === -1) {
+      await logEvent(id, "chapter_title_suggested", {
+        chapterId,
+        title,
+        applied: false,
+        reason: "not_found",
+      });
+      return c.json({ applied: false, reason: "not_found" });
+    }
+    const chapter = data.chapters[idx]!;
+    if (chapter.title !== null) {
+      await logEvent(id, "chapter_title_suggested", {
+        chapterId,
+        title,
+        applied: false,
+        reason: "user_set",
+      });
+      return c.json({ applied: false, reason: "user_set" });
+    }
+
+    const nextChapters = [...data.chapters];
+    nextChapters[idx] = { ...chapter, title };
+    await writeChapters(id, nextChapters);
+    await logEvent(id, "chapter_title_suggested", { chapterId, title, applied: true });
+    console.log(`[chapter-suggest] ${id}/${chapterId}: "${title}"`);
     return c.json({ applied: true });
   },
 );

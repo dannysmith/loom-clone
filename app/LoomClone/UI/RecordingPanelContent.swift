@@ -88,6 +88,11 @@ struct RecordingPanelContent: View {
             .buttonStyle(.plain)
             .help(coordinator.state == .paused ? "Resume" : "Pause")
 
+            // Chapter marker — drops an anonymous marker on the timeline
+            // at the current (or paused) clock position. Available in
+            // both recording and paused states.
+            ChapterMarkerButton(coordinator: coordinator)
+
             // Discard / cancel
             Button(action: onCancel) {
                 Image(systemName: "trash.circle.fill")
@@ -145,6 +150,38 @@ struct RecordingPanelContent: View {
         let minutes = total / 60
         let seconds = total % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// Chapter-marker button isolated in its own view so its observable
+/// reads (`chapterMarkerCount`) don't invalidate the parent toolbar on
+/// every press. The icon bounces on each press via `.symbolEffect`.
+private struct ChapterMarkerButton: View {
+    @Bindable var coordinator: RecordingCoordinator
+
+    var body: some View {
+        Button(
+            action: { coordinator.addChapterMarker() },
+            label: {
+                Image(systemName: "bookmark.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(coordinator.chapterMarkerCount > 0 ? Color.accentColor : .primary)
+                    .symbolEffect(.bounce, value: coordinator.chapterMarkerCount)
+                    .overlay(alignment: .topTrailing) {
+                        if coordinator.chapterMarkerCount > 0 {
+                            Text("\(coordinator.chapterMarkerCount)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.accentColor))
+                                .offset(x: 4, y: -2)
+                        }
+                    }
+            }
+        )
+        .buttonStyle(.plain)
+        .help("Add Chapter Marker")
     }
 }
 

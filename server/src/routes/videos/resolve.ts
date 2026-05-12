@@ -1,4 +1,5 @@
 import { join } from "path";
+import { chaptersExist } from "../../lib/chapters";
 import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
 import { urlsForVideo, type VideoUrls } from "../../lib/url";
 
@@ -61,6 +62,7 @@ export type ViewerVideo = {
   sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
+  chaptersUrl: string | null;
 };
 
 // Result of resolving a slug for viewer-facing routes:
@@ -82,7 +84,10 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
   }
 
   const { video } = resolved;
-  const { hasSource, variantHeights, hasThumb, hasCaptions } = await derivativeFlags(video.id);
+  const [{ hasSource, variantHeights, hasThumb, hasCaptions }, hasChapters] = await Promise.all([
+    derivativeFlags(video.id),
+    chaptersExist(video.id),
+  ]);
   const urls = urlsForVideo(video);
 
   let src: string | null = null;
@@ -145,5 +150,6 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     sources,
     poster: hasThumb ? urls.poster : null,
     captionsUrl: hasCaptions ? `/${video.slug}/captions.vtt` : null,
+    chaptersUrl: hasChapters ? `/${video.slug}/chapters.vtt` : null,
   };
 }

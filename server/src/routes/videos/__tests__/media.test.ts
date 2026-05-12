@@ -1,10 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import { getDb } from "../../../db/client";
+import { videos as videosTable } from "../../../db/schema";
+import { writeChapters } from "../../../lib/chapters";
 import { createVideo, DATA_DIR, trashVideo, updateSlug } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
 import media from "../media";
+
+async function setDuration(videoId: string, seconds: number) {
+  await getDb()
+    .update(videosTable)
+    .set({ durationSeconds: seconds })
+    .where(eq(videosTable.id, videoId));
+}
 
 let env: TestEnv;
 beforeEach(async () => {
@@ -162,5 +173,79 @@ describe("GET /:slug.mp4 (via aggregator)", () => {
     await trashVideo(video.id);
     const res = await videos.request(`/${video.slug}.mp4`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /:slug/chapters.vtt", () => {
+  test("returns 404 when no chapters.json exists", async () => {
+    const video = await createVideo();
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 404 when chapters.json is empty", async () => {
+    const video = await createVideo();
+    await writeChapters(video.id, []);
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(404);
+  });
+
+  test("serves a WebVTT chapters track", async () => {
+    const video = await createVideo();
+    await setDuration(video.id, 90);
+    await writeChapters(video.id, [
+      { id: "a", title: "Intro", t: 0, createdDuringRecording: true },
+      { id: "b", title: null, t: 30, createdDuringRecording: true },
+    ]);
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/vtt");
+    const body = await res.text();
+    expect(body.startsWith("WEBVTT")).toBe(true);
+    expect(body).toContain("Intro");
+    expect(body).toContain("Chapter 2");
+  });
+
+  test("remaps timestamps through edits.json", async () => {
+    const video = await createVideo();
+    await setDuration(video.id, 100);
+    const derivDir = join(DATA_DIR, video.id, "derivatives");
+    await mkdir(derivDir, { recursive: true });
+    await Bun.write(
+      join(derivDir, "edits.json"),
+      JSON.stringify({ version: 1, edits: [{ type: "cut", startTime: 20, endTime: 40 }] }),
+    );
+    await writeChapters(video.id, [
+      { id: "a", title: "Intro", t: 0, createdDuringRecording: true },
+      { id: "b", title: "Cut me", t: 30, createdDuringRecording: true },
+      { id: "c", title: "After", t: 60, createdDuringRecording: true },
+    ]);
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Intro");
+    expect(body).toContain("After");
+    expect(body).not.toContain("Cut me");
+  });
+
+  test("last cue ends at the edited duration, not the source duration", async () => {
+    const video = await createVideo();
+    await setDuration(video.id, 100); // source duration 100s
+    const derivDir = join(DATA_DIR, video.id, "derivatives");
+    await mkdir(derivDir, { recursive: true });
+    // Cut 20-40 → viewer duration is 80s.
+    await Bun.write(
+      join(derivDir, "edits.json"),
+      JSON.stringify({ version: 1, edits: [{ type: "cut", startTime: 20, endTime: 40 }] }),
+    );
+    await writeChapters(video.id, [
+      { id: "a", title: "Start", t: 0, createdDuringRecording: true },
+    ]);
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // 80s = 00:01:20.000 in the WebVTT timestamp format.
+    expect(body).toContain("00:01:20.000");
+    expect(body).not.toContain("00:01:40.000"); // would be the source-duration end
   });
 });

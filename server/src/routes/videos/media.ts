@@ -1,10 +1,20 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
+import {
+  chaptersForViewer,
+  generateChaptersVTT,
+  readChapters,
+  viewerDurationFromEdits,
+} from "../../lib/chapters";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { srtToVtt } from "../../lib/srt";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
 import { activeRawFilename } from "../../lib/url";
+
+// Loose-typed EDL shape — we only need the edits array. Avoids pulling the
+// edit-pipeline module into the media route just for a type.
+type EditsFileLike = { edits?: unknown };
 
 // Allowlists constrain which on-disk files each route can serve, preventing
 // traversal and keeping the public surface focused.
@@ -104,6 +114,47 @@ media.get("/:slug/captions.vtt", async (c) => {
   c.header("Cache-Control", "public, max-age=3600");
   c.header("Content-Type", "text/vtt");
   return c.body(srtToVtt(await srtFile.text()));
+});
+
+media.get("/:slug/chapters.vtt", async (c) => {
+  const { slug } = c.req.param();
+  const video = await resolveForMedia(slug);
+  if (!video) return c.text("Not found", 404);
+  const data = await readChapters(video.id);
+  if (!data || data.chapters.length === 0) return c.text("Not found", 404);
+
+  // Remap recording-timeline timestamps through the EDL (if any) so the
+  // VTT reflects the viewer-facing timeline. Chapters that fall inside
+  // cuts are dropped from the rendered VTT but stay in chapters.json.
+  const sourceDuration = video.durationSeconds ?? 0;
+  let edits: unknown[] = [];
+  const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
+  if (await editsFile.exists()) {
+    try {
+      const parsed = (await editsFile.json()) as EditsFileLike;
+      if (Array.isArray(parsed.edits)) edits = parsed.edits;
+    } catch {
+      // Malformed edits.json — fall back to no edits.
+    }
+  }
+  // Belt-and-braces: even past the JSON parse, malformed edit entries
+  // (wrong types, missing fields) could surface as arithmetic errors
+  // inside chaptersForViewer. Treat that the same as "no edits".
+  let mapped: typeof data.chapters;
+  let viewerDuration: number;
+  try {
+    const typedEdits = edits as Parameters<typeof chaptersForViewer>[1];
+    mapped = chaptersForViewer(data.chapters, typedEdits, sourceDuration);
+    viewerDuration = viewerDurationFromEdits(typedEdits, sourceDuration);
+  } catch {
+    mapped = chaptersForViewer(data.chapters, [], sourceDuration);
+    viewerDuration = sourceDuration;
+  }
+  if (mapped.length === 0) return c.text("Not found", 404);
+  const vtt = generateChaptersVTT(mapped, viewerDuration);
+  c.header("Cache-Control", "public, max-age=3600");
+  c.header("Content-Type", "text/vtt");
+  return c.body(vtt);
 });
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file

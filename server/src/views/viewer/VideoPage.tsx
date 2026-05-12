@@ -16,6 +16,7 @@ type Props = {
   sources: SourceDescriptor[] | null;
   poster: string | null;
   captionsUrl: string | null;
+  chaptersUrl: string | null;
   canonicalUrl: string;
   posterAbsolute: string | null;
   embedAbsolute: string;
@@ -28,6 +29,7 @@ export function VideoPage({
   sources,
   poster,
   captionsUrl,
+  chaptersUrl,
   canonicalUrl,
   posterAbsolute,
   embedAbsolute,
@@ -203,6 +205,7 @@ export function VideoPage({
           {captionsUrl && (
             <track src={captionsUrl} kind="subtitles" srclang="en" label="English" default />
           )}
+          {chaptersUrl && <track src={chaptersUrl} kind="chapters" srclang="en" default />}
           {poster && <media-poster class="vds-poster" src={poster} alt={video.title ?? ""} />}
         </media-provider>
         <media-video-layout

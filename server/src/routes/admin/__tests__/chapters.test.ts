@@ -171,3 +171,40 @@ describe("PUT /admin/videos/:id/chapters", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /admin/videos/:id/media/chapters.vtt", () => {
+  test("returns 404 when no chapters exist", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    const res = await app.request(`/admin/videos/${video.id}/media/chapters.vtt`);
+    expect(res.status).toBe(404);
+  });
+
+  test("serves WebVTT chapter cues for an unedited video", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    await setDuration(video.id, 60);
+    await writeChapters(video.id, [
+      { id: "a", title: "Intro", t: 0, createdDuringRecording: true },
+      { id: "b", title: "Main", t: 20, createdDuringRecording: true },
+    ]);
+    const res = await app.request(`/admin/videos/${video.id}/media/chapters.vtt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/vtt");
+    const body = await res.text();
+    expect(body).toContain("WEBVTT");
+    expect(body).toContain("Intro");
+    expect(body).toContain("Main");
+  });
+
+  test("admin variant works for trashed videos", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    await setDuration(video.id, 60);
+    await writeChapters(video.id, [{ id: "a", title: "x", t: 0, createdDuringRecording: true }]);
+    const { trashVideo } = await import("../../../lib/store");
+    await trashVideo(video.id);
+    const res = await app.request(`/admin/videos/${video.id}/media/chapters.vtt`);
+    expect(res.status).toBe(200);
+  });
+});

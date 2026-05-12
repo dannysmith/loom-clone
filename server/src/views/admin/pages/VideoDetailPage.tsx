@@ -36,6 +36,7 @@ type Props = {
   thumbnailCandidates: ThumbnailCandidate[];
   transcript: VideoTranscript | undefined;
   activeTab: "events" | "files" | "transcript";
+  hasChapters: boolean;
 };
 
 export function VideoDetailPage({
@@ -47,7 +48,9 @@ export function VideoDetailPage({
   thumbnailCandidates,
   transcript,
   activeTab,
+  hasChapters,
 }: Props) {
+  const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
   const duration = formatDuration(video.durationSeconds);
   const hasMp4 = files.some((f) => f.path === "derivatives/source.mp4");
@@ -93,7 +96,9 @@ export function VideoDetailPage({
       {/* --- Player --- */}
       <div class="video-player-container">
         <media-player src={playerSrc} poster={posterSrc} playsinline>
-          <media-provider />
+          <media-provider>
+            {chaptersUrl && <track src={chaptersUrl} kind="chapters" srclang="en" default />}
+          </media-provider>
           <media-video-layout />
         </media-player>
       </div>

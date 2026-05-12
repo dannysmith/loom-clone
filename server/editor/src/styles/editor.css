@@ -266,8 +266,33 @@ body {
   background: none;
   border: 0;
   padding: 0;
-  cursor: pointer;
+  cursor: grab;
   z-index: 2;
+  touch-action: none;
+}
+
+.editor-timeline-chapter:active,
+.editor-timeline-chapter--dragging {
+  cursor: grabbing;
+  z-index: 3;
+}
+
+/* Inline time read-out shown while the user is dragging a flag. Sits
+   just above the flag tip so it doesn't cover the storyboard thumb. */
+.editor-timeline-chapter-time {
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: oklch(0.78 0.18 60);
+  color: #111;
+  font-size: 0.7rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .editor-timeline-chapter-flag {

@@ -225,6 +225,24 @@ Accept an AI-suggested description. Only applies if the video's description is s
 
 **Side effects**: when applied, updates the video description (logs `description_changed` event via `updateVideo`). Always logs a `description_suggested` event with `{ description, applied }` data regardless of whether the description was applied.
 
+### `PUT /api/videos/:id/chapters/:chapterId/suggest-title`
+
+Accept an AI-suggested title for a single chapter marker. Mirrors `/suggest-title` but targets one chapter inside `chapters.json`. Used by the Mac app after on-device transcription completes, once per chapter that was created during recording.
+
+**Body**: `{ "title": "<string, 1-200 chars>" }`
+
+**Content-Type**: `application/json`
+
+**Response** `200`:
+- `{ "applied": true }` — chapter found, title was null, title was set
+- `{ "applied": false, "reason": "user_set" }` — chapter already has a title
+- `{ "applied": false, "reason": "not_found" }` — chapter id does not exist in `chapters.json` (e.g. deleted via admin)
+- `{ "applied": false, "reason": "no_chapters" }` — `chapters.json` does not exist for this video
+
+**Errors**: `400` `VALIDATION_ERROR` (empty title, over 200 chars) | `404` `VIDEO_NOT_FOUND`
+
+**Side effects**: when applied, rewrites `data/<id>/chapters.json` with the new title (sorted by `t` as usual). Always logs a `chapter_title_suggested` event with `{ chapterId, title, applied, reason? }` regardless of outcome.
+
 ### `DELETE /api/videos/:id`
 
 Cancel/delete a recording. Only works for non-complete videos.
@@ -282,6 +300,14 @@ SRT transcript/subtitles. Serves `data/<id>/derivatives/captions.srt`. Returns 4
 ### `/:slug/captions.vtt`
 
 VTT variant of the transcript, if the original upload was VTT format. Same behaviour as the SRT route. `Content-Type: text/vtt`.
+
+### `/:slug/chapters.vtt`
+
+WebVTT chapters track, generated on the fly from `data/<id>/chapters.json`. Returns 404 when the file is missing or empty. `Content-Type: text/vtt`. Cached for 1 hour.
+
+Chapter timestamps in `chapters.json` are stored in the **original recording timeline**. The route remaps them to the viewer timeline through `data/<id>/derivatives/edits.json` at request time — chapters that fall inside a cut are dropped from the rendered VTT (but stay in `chapters.json`, so un-cutting brings them back). The remapping is read-only — no on-disk state mutates per request.
+
+Vidstack picks this up via a conditional `<track kind="chapters" srclang="en" default />` rendered into `<media-provider>` on the viewer + embed pages whenever the underlying file exists.
 
 ### `/:slug.mp4`
 
@@ -392,6 +418,14 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | PATCH | `/admin/videos/:id/visibility` | Change visibility |
 | POST | `/admin/videos/:id/tags` | Add tag to video |
 | DELETE | `/admin/videos/:id/tags/:tagId` | Remove tag from video |
+
+### Chapters (editor)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/admin/videos/:id/chapters` | Returns `{ version: 1, chapters: [...] }` with times mapped to the **viewer** timeline (i.e. already remapped through `edits.json` if any) |
+| PUT  | `/admin/videos/:id/chapters` | Bulk replace. Body: `{ version: 1, chapters: [{ id, title \| null, t }] }` (max 100). Server reverse-maps `t` from viewer-timeline back to the recording timeline before persisting. Preserves `createdDuringRecording` on existing rows. Logs `chapters_updated`. Purges CDN. |
+| GET  | `/admin/videos/:id/media/chapters.vtt` | Admin variant of the public `/:slug/chapters.vtt`. Same on-the-fly generation, but bypasses slug resolution so trashed videos and admin previews still get markers. `no-store` cache. |
 
 ### Thumbnail picker
 

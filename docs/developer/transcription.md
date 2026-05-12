@@ -61,7 +61,7 @@ At app launch, `TranscribeAgent.runStartupScan()` walks the recordings directory
 7. PUT SRT bytes to `/api/videos/:id/transcript` with `Content-Type: application/x-subrip`.
 8. On 404 → write `.orphaned` sidecar, stop (server record was deleted).
 9. On other failure → log, exit (retries at next startup scan).
-10. On success → suggest a title via Apple Intelligence (see below). Failures are logged and swallowed.
+10. On success → suggest a title and description via Apple Intelligence in parallel (see below). After they finish, if any chapter markers exist in `recording.json`, suggest titles for each chapter sequentially. All AI failures are logged and swallowed.
 11. Write `.transcribed` sidecar with timestamp.
 
 ## Server-side handling
@@ -134,6 +134,36 @@ Title and description are independent. If title generation fails, description st
 | Description suggestion generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/DescriptionSuggestion.swift` |
 | Wiring (called after title suggestion) | `app/LoomClone/Pipeline/TranscribeAgent.swift` (`suggestDescription(...)`) |
 | Suggest-description endpoint | `server/src/routes/api/videos.ts` |
+
+## AI chapter title suggestion
+
+After title and description suggestion finish, `TranscribeAgent` runs a third Foundation Models pass — but only if at least one `chapter.marker` event exists in `recording.json`. Chapters added later via the admin editor never trigger this pass; per the original issue, AI may only ever **rename** existing markers, never create them.
+
+### How it works
+
+1. `TranscribeAgent` reads `chapter.marker` events from `recording.json` and sorts by `t`. If none exist, the AI step is skipped entirely.
+2. For each marker in order, with `nextT = nextChapter.t ?? videoDuration`:
+   - Slice `wordsData` (the per-word timings from WhisperKit) to `[t, nextT)` and join into plain text — truncated to 400 words.
+   - Build a prompt with: the recording context preamble, the suggested video title (when available), the running list of chapter titles generated so far in this run, and the chapter's transcript slice.
+   - Generate a short title via `ChapterTitleSuggestionGenerator`. Same `@Generable` pattern as `TitleSuggestion` (topic first, then title) with chapter-specific instructions (2–6 words, no "Chapter N:" prefix, no filler openings).
+   - PUT to `/api/videos/:id/chapters/:chapterId/suggest-title`.
+3. Generated titles are processed **sequentially** so each call sees prior titles as context, helping the model produce distinct titles consistent with the overall video.
+
+### Clock alignment
+
+Chapter event `t` is in the logical recording timeline (zero at commit). Whisper's word timings come from the raw `audio.m4a` file, which started during prepare — slightly before `t=0`. The offset is sub-second in practice and the slice is used for naming only, so a word or two of slop at chapter boundaries is invisible. No explicit offset correction is applied.
+
+### Server-side application
+
+`PUT /api/videos/:id/chapters/:chapterId/suggest-title` finds the chapter in `chapters.json` and applies the title **only if** the chapter still exists and its current title is `null`. Otherwise it returns `{ applied: false, reason }` with `reason ∈ { "user_set", "not_found", "no_chapters" }`. The user always wins — a concurrent rename or delete via the admin is never overwritten by the AI guess.
+
+### Where the code lives
+
+| Concern | File |
+|---|---|
+| Chapter title generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/ChapterTitleSuggestion.swift` |
+| Wiring (called after title + description) | `app/LoomClone/Pipeline/TranscribeAgent.swift` (`suggestChapterTitles(...)`) |
+| Suggest-chapter-title endpoint | `server/src/routes/api/videos.ts` |
 
 ## Where the code lives
 

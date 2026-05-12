@@ -136,6 +136,7 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           currentTime={playback.currentTime}
           chapters={chaptersState.chapters}
           onSeek={playback.seek}
+          onChapterDrop={chaptersState.updateTime}
         />
 
         <Waveform
@@ -150,6 +151,13 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           onDismissSuggestion={edlState.dismissSuggestion}
         />
 
+        <TranscriptOverlay
+          videoId={videoId}
+          currentTime={playback.currentTime}
+          edits={edlState.edl.edits}
+          onSeek={playback.seek}
+        />
+
         <ChaptersPanel
           chapters={chaptersState.chapters}
           currentTime={playback.currentTime}
@@ -161,13 +169,6 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
           onTitleChange={chaptersState.updateTitle}
           onTimeChange={chaptersState.updateTime}
           onRemove={chaptersState.remove}
-        />
-
-        <TranscriptOverlay
-          videoId={videoId}
-          currentTime={playback.currentTime}
-          edits={edlState.edl.edits}
-          onSeek={playback.seek}
         />
       </div>
 

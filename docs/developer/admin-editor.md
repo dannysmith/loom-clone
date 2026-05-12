@@ -41,19 +41,21 @@ server/editor/              # Vite + React sub-project
   src/
     main.tsx                # React entry — reads data attributes from the HTML shell
     App.tsx                 # orchestrates all components and hooks
-    api.ts                  # fetch helpers for EDL load/save/commit, media URLs
-    types.ts                # shared types: Edit, Edl, PeaksData, Word
+    api.ts                  # fetch helpers for EDL load/save/commit, chapters, media URLs
+    types.ts                # shared types: Edit, Edl, PeaksData, Word, Chapter
     hooks/
       useEdl.ts             # EDL state management with undo/redo history
+      useChapters.ts        # chapter list state + debounced auto-save
       useVideoPlayback.ts   # video element control, playback through cuts
       useKeyboard.ts        # keyboard shortcut bindings
     components/
       VideoPreview.tsx      # <video> element playing source.mp4
       Waveform.tsx          # wavesurfer.js with Regions plugin for trim/cut handles
-      Timeline.tsx          # thumbnail strip from editor storyboard sprite sheet
+      Timeline.tsx          # thumbnail strip + draggable chapter flag markers
       Toolbar.tsx           # controls: play, trim, cut, undo/redo, save, commit
       CommitDialog.tsx      # confirmation dialog before processing
       TranscriptOverlay.tsx # word-level transcript with current-word highlighting
+      ChaptersPanel.tsx     # chapter list editor (title/time/jump/delete + add)
     styles/
       editor.css            # dark theme, full-viewport layout
 ```
@@ -138,6 +140,12 @@ Generated server-side from ffmpeg's `silencedetect` filter (run after audio post
 **Timeline:** Thumbnail strip rendered from `editor-storyboard.jpg` + `editor-storyboard.vtt`. One frame per second up to 10 minutes, one every 2 seconds beyond. Supports click-to-seek and drag-to-scrub.
 
 **Transcript overlay:** Word-level display from `words.json` (uploaded by WhisperKit with per-word start/end timestamps). Words in cut regions are shown with strikethrough. The current word is highlighted. Click a word to seek to its timestamp.
+
+**Chapters panel:** Sits at the bottom of the bottom panel (below the transcript). Lists each chapter as a row with a jump-to time button, editable title, editable time field (mm:ss.s or h:mm:ss.s), and remove ×. "+ Add at PLAYHEAD" creates a new anonymous chapter at the current player time.
+
+Chapter timestamps are managed independently of the EDL — saves go to `/admin/videos/:id/chapters` and do not run `applyEdits`. The server returns chapter times in the **viewer timeline** (already mapped through any committed `edits.json`); on PUT, the server reverse-maps incoming viewer-timeline times back to the original recording timeline before persisting. This means `chapters.json` is canonical against the original source — re-editing (or un-cutting) automatically picks up the right chapter positions on the next page load without rewriting the file. Text edits are debounced 600ms; add / delete / drag-time-change saves are immediate.
+
+Small amber flag markers render on the storyboard thumbnail strip at each chapter position. **Click a flag** to seek to it; **drag a flag** along the strip to move the chapter's `t`. While dragging, an inline timestamp pill above the flag shows the live target time; on release the new time is committed and saved. The flag's "end" is implicit — each chapter spans from its `t` to the next chapter's `t` (or video end).
 
 **Keyboard shortcuts:**
 

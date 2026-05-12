@@ -227,4 +227,25 @@ describe("GET /:slug/chapters.vtt", () => {
     expect(body).toContain("After");
     expect(body).not.toContain("Cut me");
   });
+
+  test("last cue ends at the edited duration, not the source duration", async () => {
+    const video = await createVideo();
+    await setDuration(video.id, 100); // source duration 100s
+    const derivDir = join(DATA_DIR, video.id, "derivatives");
+    await mkdir(derivDir, { recursive: true });
+    // Cut 20-40 → viewer duration is 80s.
+    await Bun.write(
+      join(derivDir, "edits.json"),
+      JSON.stringify({ version: 1, edits: [{ type: "cut", startTime: 20, endTime: 40 }] }),
+    );
+    await writeChapters(video.id, [
+      { id: "a", title: "Start", t: 0, createdDuringRecording: true },
+    ]);
+    const res = await media.request(`/${video.slug}/chapters.vtt`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // 80s = 00:01:20.000 in the WebVTT timestamp format.
+    expect(body).toContain("00:01:20.000");
+    expect(body).not.toContain("00:01:40.000"); // would be the source-duration end
+  });
 });

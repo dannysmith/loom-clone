@@ -182,6 +182,20 @@ export function Timeline({
     setDragState(null);
   }, []);
 
+  // Keyboard activation for the chapter flag. Mirrors the click-without-drag
+  // path so keyboard users get the same seek-to-chapter behaviour without
+  // having to mouse over the storyboard strip.
+  const handleChapterKeyDown = useCallback(
+    (e: React.KeyboardEvent, chapter: Chapter) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        onSeek(chapter.t);
+      }
+    },
+    [onSeek],
+  );
+
   if (cues.length === 0) return null;
 
   const playheadPct = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -225,6 +239,7 @@ export function Timeline({
               onPointerMove={handleChapterPointerMove}
               onPointerUp={(e) => handleChapterPointerUp(e, ch)}
               onPointerCancel={handleChapterPointerCancel}
+              onKeyDown={(e) => handleChapterKeyDown(e, ch)}
             >
               <span className="editor-timeline-chapter-flag" aria-hidden="true" />
               {dragging && (

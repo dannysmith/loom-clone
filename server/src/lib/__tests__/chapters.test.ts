@@ -9,6 +9,7 @@ import {
   forwardMapTime,
   generateChaptersVTT,
   readChapters,
+  viewerDurationFromEdits,
   writeChapters,
 } from "../chapters";
 import type { Edit } from "../edit-transcript";
@@ -196,6 +197,21 @@ describe("chaptersForViewer", () => {
     // chapter "c" was at recording-t=50; after cutting 20-40, kept = [0-20, 40-100],
     // viewer-t = 20 (first kept block length) + (50-40) = 30
     expect(out[1]?.t).toBe(30);
+  });
+});
+
+describe("viewerDurationFromEdits", () => {
+  test("returns sourceDuration when no edits", () => {
+    expect(viewerDurationFromEdits(undefined, 100)).toBe(100);
+    expect(viewerDurationFromEdits([], 100)).toBe(100);
+  });
+
+  test("subtracts cut duration", () => {
+    expect(viewerDurationFromEdits([{ type: "cut", startTime: 20, endTime: 40 }], 100)).toBe(80);
+  });
+
+  test("respects trim bounds", () => {
+    expect(viewerDurationFromEdits([{ type: "trim", startTime: 10, endTime: 70 }], 100)).toBe(60);
   });
 });
 

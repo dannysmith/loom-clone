@@ -144,6 +144,15 @@ export function chaptersForViewer(
   return out.sort((a, b) => a.t - b.t);
 }
 
+// Computes the runtime of the edited (viewer-facing) video by summing kept
+// segment lengths. Falls back to `sourceDuration` when no edits exist so the
+// VTT cue for the final chapter ends at the right place either way.
+export function viewerDurationFromEdits(edits: Edit[] | undefined, sourceDuration: number): number {
+  if (!edits || edits.length === 0) return sourceDuration;
+  const kept = computeKeptSegments(edits, sourceDuration);
+  return kept.reduce((total, seg) => total + (seg.end - seg.start), 0);
+}
+
 // --- VTT generation ---
 
 function formatVttTimestamp(t: number): string {

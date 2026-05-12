@@ -27,6 +27,13 @@ export function useChapters(videoId: string) {
   // Tracks scheduled debounced save so a follow-up edit can reset the
   // timer instead of stacking up writes.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of the latest `chapters` state, kept in a ref so the unmount
+  // cleanup below can read the current value without re-binding the effect
+  // on every change (which would clear pending save timers prematurely).
+  const latestChaptersRef = useRef<Chapter[]>([]);
+  useEffect(() => {
+    latestChaptersRef.current = chapters;
+  }, [chapters]);
 
   useEffect(() => {
     loadChapters(videoId)
@@ -117,22 +124,22 @@ export function useChapters(videoId: string) {
   );
 
   // Flush any pending debounce on unmount so a half-typed title isn't lost.
+  // Reads the latest chapters from a ref because depending on `chapters`
+  // directly would clear pending timers prematurely on every keystroke.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
-        // Fire-and-forget — the user is leaving the page anyway.
-        const pending = JSON.stringify(chapters);
+        const current = latestChaptersRef.current;
+        const pending = JSON.stringify(current);
         if (pending !== lastSavedRef.current) {
-          saveChapters(videoId, chapters).catch(() => {
+          // Fire-and-forget — the user is leaving the page anyway.
+          saveChapters(videoId, current).catch(() => {
             /* ignore — page is going away */
           });
         }
       }
     };
-    // We intentionally only depend on videoId — re-running on every
-    // chapter change would clear pending timers prematurely.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   }, [videoId]);
 
   return {

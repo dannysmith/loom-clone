@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import { join } from "path";
-import { chaptersForViewer, generateChaptersVTT, readChapters } from "../../lib/chapters";
+import {
+  chaptersForViewer,
+  generateChaptersVTT,
+  readChapters,
+  viewerDurationFromEdits,
+} from "../../lib/chapters";
 import type { Edit } from "../../lib/edit-transcript";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/store";
@@ -69,11 +74,22 @@ media.get("/:id/media/chapters.vtt", async (c) => {
       // Malformed edits.json — fall back to no edits.
     }
   }
-  const mapped = chaptersForViewer(data.chapters, edits, sourceDuration);
+  // Defensive: malformed edit entries past the JSON parse (wrong types,
+  // missing fields) could surface as arithmetic errors inside
+  // chaptersForViewer. Treat that the same as "no edits".
+  let mapped: typeof data.chapters;
+  let viewerDuration: number;
+  try {
+    mapped = chaptersForViewer(data.chapters, edits, sourceDuration);
+    viewerDuration = viewerDurationFromEdits(edits, sourceDuration);
+  } catch {
+    mapped = chaptersForViewer(data.chapters, [], sourceDuration);
+    viewerDuration = sourceDuration;
+  }
   if (mapped.length === 0) return c.text("Not found", 404);
   c.header("Cache-Control", "no-store");
   c.header("Content-Type", "text/vtt");
-  return c.body(generateChaptersVTT(mapped, sourceDuration));
+  return c.body(generateChaptersVTT(mapped, viewerDuration));
 });
 
 // Serve thumbnail candidate images for the admin picker.

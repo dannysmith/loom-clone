@@ -1,7 +1,12 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
-import { chaptersForViewer, generateChaptersVTT, readChapters } from "../../lib/chapters";
+import {
+  chaptersForViewer,
+  generateChaptersVTT,
+  readChapters,
+  viewerDurationFromEdits,
+} from "../../lib/chapters";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { srtToVtt } from "../../lib/srt";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
@@ -132,13 +137,21 @@ media.get("/:slug/chapters.vtt", async (c) => {
       // Malformed edits.json — fall back to no edits.
     }
   }
-  const mapped = chaptersForViewer(
-    data.chapters,
-    edits as Parameters<typeof chaptersForViewer>[1],
-    sourceDuration,
-  );
+  // Belt-and-braces: even past the JSON parse, malformed edit entries
+  // (wrong types, missing fields) could surface as arithmetic errors
+  // inside chaptersForViewer. Treat that the same as "no edits".
+  let mapped: typeof data.chapters;
+  let viewerDuration: number;
+  try {
+    const typedEdits = edits as Parameters<typeof chaptersForViewer>[1];
+    mapped = chaptersForViewer(data.chapters, typedEdits, sourceDuration);
+    viewerDuration = viewerDurationFromEdits(typedEdits, sourceDuration);
+  } catch {
+    mapped = chaptersForViewer(data.chapters, [], sourceDuration);
+    viewerDuration = sourceDuration;
+  }
   if (mapped.length === 0) return c.text("Not found", 404);
-  const vtt = generateChaptersVTT(mapped, sourceDuration);
+  const vtt = generateChaptersVTT(mapped, viewerDuration);
   c.header("Cache-Control", "public, max-age=3600");
   c.header("Content-Type", "text/vtt");
   return c.body(vtt);

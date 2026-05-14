@@ -188,7 +188,7 @@ When camera and mic share an `AVCaptureSession` (for AV sync — see the "shared
 
 ### Raw writer failures
 
-Handled via `RawStreamWriter`. Each writer checks `writer.status == .failed` on append and sets a `hasFailed` flag. `checkRawWriterStatus()` is called at segment boundaries and records a timeline event on first detection. At stop time, `finish()` returns a `FinishResult` (.ok / .neverStarted / .failed) that is recorded in the timeline metadata. Raw writer failures do not stop the recording — the HLS path is independent.
+Handled via `RawStreamWriter`. Each writer checks `writer.status == .failed` on append and sets a `hasFailed` flag. The moment the writer transitions to `.failed`, a `WriterFailure` snapshot of the underlying `NSError` (description, code, domain) is captured into `lastFailure` so the diagnostic survives even after the writer is nilled out. `checkRawWriterStatus()` is called at segment boundaries and emits a `raw.writer.failed` timeline event with those fields on first detection. At stop time, `finish()` returns a `FinishResult` (.ok / .neverStarted / .failed(WriterFailure)) carrying the same snapshot, which is recorded in the timeline metadata. Raw writer failures do not stop the recording — the HLS path is independent.
 
 ### HLS writer health
 

@@ -176,14 +176,32 @@ extension RecordingActor {
     /// Emit a `raw.writer.failed` timeline event for each raw writer that
     /// entered `.failed`. `t` is the frozen stop-time logical duration.
     private func recordRawWriterFailures(_ results: RawFinishResults, t: Double) {
-        if case let .failed(error) = results.screen {
-            timeline.recordRawWriterFailed(file: "screen.mov", error: error, t: t)
+        if case let .failed(failure) = results.screen {
+            timeline.recordRawWriterFailed(
+                file: "screen.mov",
+                error: failure.description,
+                code: failure.code,
+                domain: failure.domain,
+                t: t
+            )
         }
-        if case let .failed(error) = results.camera {
-            timeline.recordRawWriterFailed(file: "camera.mp4", error: error, t: t)
+        if case let .failed(failure) = results.camera {
+            timeline.recordRawWriterFailed(
+                file: "camera.mp4",
+                error: failure.description,
+                code: failure.code,
+                domain: failure.domain,
+                t: t
+            )
         }
-        if case let .failed(error) = results.audio {
-            timeline.recordRawWriterFailed(file: "audio.m4a", error: error, t: t)
+        if case let .failed(failure) = results.audio {
+            timeline.recordRawWriterFailed(
+                file: "audio.m4a",
+                error: failure.description,
+                code: failure.code,
+                domain: failure.domain,
+                t: t
+            )
         }
     }
 
@@ -243,19 +261,44 @@ extension RecordingActor {
 
     /// Check each raw writer for mid-recording failure and emit a timeline
     /// event the first time one is detected. Called at each segment boundary.
+    /// Emits the underlying `AVAssetWriter` error description, code, and
+    /// domain so issue investigations have the real Apple-framework error
+    /// rather than the generic "detected at segment boundary" string we used
+    /// to record.
     func checkRawWriterStatus() async {
         let t = logicalElapsedSeconds()
         if let w = screenRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("screen") {
             rawWriterFailureReported.insert("screen")
-            timeline.recordRawWriterFailed(file: "screen.mov", error: "detected at segment boundary", t: t)
+            let failure = await w.lastFailure
+            timeline.recordRawWriterFailed(
+                file: "screen.mov",
+                error: failure?.description ?? "detected at segment boundary",
+                code: failure?.code,
+                domain: failure?.domain,
+                t: t
+            )
         }
         if let w = cameraRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("camera") {
             rawWriterFailureReported.insert("camera")
-            timeline.recordRawWriterFailed(file: "camera.mp4", error: "detected at segment boundary", t: t)
+            let failure = await w.lastFailure
+            timeline.recordRawWriterFailed(
+                file: "camera.mp4",
+                error: failure?.description ?? "detected at segment boundary",
+                code: failure?.code,
+                domain: failure?.domain,
+                t: t
+            )
         }
         if let w = audioRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("audio") {
             rawWriterFailureReported.insert("audio")
-            timeline.recordRawWriterFailed(file: "audio.m4a", error: "detected at segment boundary", t: t)
+            let failure = await w.lastFailure
+            timeline.recordRawWriterFailed(
+                file: "audio.m4a",
+                error: failure?.description ?? "detected at segment boundary",
+                code: failure?.code,
+                domain: failure?.domain,
+                t: t
+            )
         }
     }
 

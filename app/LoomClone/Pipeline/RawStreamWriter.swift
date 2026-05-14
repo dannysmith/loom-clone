@@ -54,6 +54,11 @@ actor RawStreamWriter {
     /// Guards so we only log the mid-recording failure once rather than
     /// spamming on every subsequent append call.
     private(set) var hasFailed = false
+    /// Captured at the moment the writer transitions to `.failed`, so callers
+    /// can read the underlying NSError details (domain, code, localized
+    /// description) for diagnostics. Once `writer` is nilled out at stop, the
+    /// NSError is no longer reachable — this snapshot survives.
+    private(set) var lastFailure: WriterFailure?
 
     init(url: URL, kind: Kind) {
         self.url = url
@@ -175,13 +180,11 @@ actor RawStreamWriter {
               let input,
               input.isReadyForMoreMediaData else { return }
         // Detect mid-recording failure: the writer entered .failed between
-        // frames. Log once and stop further appends (they'd be silently
-        // dropped anyway, but this surfaces the failure moment in the console).
+        // frames. Capture the underlying NSError once, log it, and stop
+        // further appends (they'd be silently dropped anyway, but this
+        // surfaces the failure moment in the console and the timeline).
         if writer?.status == .failed {
-            hasFailed = true
-            Log.rawWriter.log(
-                "\(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
-            )
+            captureFailure()
             return
         }
         input.append(sampleBuffer)
@@ -194,13 +197,31 @@ actor RawStreamWriter {
               let audioInput,
               audioInput.isReadyForMoreMediaData else { return }
         if writer?.status == .failed {
-            hasFailed = true
-            Log.rawWriter.log(
-                "\(url.lastPathComponent) entered .failed during recording: \(writer?.error?.localizedDescription ?? "unknown")"
-            )
+            captureFailure()
             return
         }
         audioInput.append(sampleBuffer)
+    }
+
+    /// Snapshot the underlying `AVAssetWriter.error` into `lastFailure` and
+    /// flip `hasFailed`. Idempotent — repeated calls within the same recording
+    /// will not overwrite an already-captured failure. Called from the append
+    /// paths and from `finish()`.
+    private func captureFailure() {
+        guard !hasFailed else { return }
+        hasFailed = true
+        let nsError = writer?.error as NSError?
+        let failure = WriterFailure(
+            description: nsError?.localizedDescription ?? "unknown",
+            code: nsError?.code,
+            domain: nsError?.domain
+        )
+        lastFailure = failure
+        let codeStr = failure.code.map(String.init) ?? "?"
+        let domainStr = failure.domain ?? "?"
+        Log.rawWriter.log(
+            "\(url.lastPathComponent) entered .failed during recording: \(failure.description) [domain=\(domainStr) code=\(codeStr)]"
+        )
     }
 
     // MARK: - Finish
@@ -232,12 +253,13 @@ actor RawStreamWriter {
         // Wrapping it in withCheckedContinuation would hang the actor forever.
         // Check status first and bail with a log if the writer already failed.
         if writer.status == .failed {
-            let desc = writer.error?.localizedDescription ?? "unknown"
-            Log.rawWriter.log("\(url.lastPathComponent) FAILED before finish: \(desc)")
+            captureFailure()
+            let failure = lastFailure ?? WriterFailure(description: "unknown", code: nil, domain: nil)
+            Log.rawWriter.log("\(url.lastPathComponent) FAILED before finish: \(failure.description)")
             self.writer = nil
             self.input = nil
             self.audioInput = nil
-            return .failed(desc)
+            return .failed(failure)
         }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -245,9 +267,15 @@ actor RawStreamWriter {
         }
 
         let result: FinishResult
-        if let error = writer.error {
-            Log.rawWriter.log("\(url.lastPathComponent) finished with error: \(error)")
-            result = .failed(error.localizedDescription)
+        if writer.error != nil {
+            captureFailure()
+            let failure = lastFailure ?? WriterFailure(description: "unknown", code: nil, domain: nil)
+            let codeStr = failure.code.map(String.init) ?? "?"
+            let domainStr = failure.domain ?? "?"
+            Log.rawWriter.log(
+                "\(url.lastPathComponent) finished with error: \(failure.description) [domain=\(domainStr) code=\(codeStr)]"
+            )
+            result = .failed(failure)
         } else {
             Log.rawWriter.log("\(url.lastPathComponent) finished, status: \(writer.status.rawValue)")
             result = .ok
@@ -277,7 +305,21 @@ actor RawStreamWriter {
         /// Writer was never started (cancelled during prepare/countdown). File removed.
         case neverStarted
         /// AVAssetWriter entered `.failed` before or during `finishWriting()`.
-        case failed(String)
+        /// Payload carries the underlying NSError details for diagnostics.
+        case failed(WriterFailure)
+    }
+
+    /// Snapshot of an `AVAssetWriter.error` at the moment the writer transitions
+    /// to `.failed`. Used by both the mid-recording detection path
+    /// (`checkRawWriterStatus` via `lastFailure`) and the stop-time path
+    /// (`FinishResult.failed`). Storing the structured NSError fields means we
+    /// can match against specific Apple error codes (e.g. `AVError`,
+    /// VideoToolbox `-12909`/`-12903`) in `recording.json` rather than just a
+    /// localized string.
+    struct WriterFailure: Sendable, Equatable {
+        let description: String
+        let code: Int?
+        let domain: String?
     }
 
     enum RawWriterError: Error {

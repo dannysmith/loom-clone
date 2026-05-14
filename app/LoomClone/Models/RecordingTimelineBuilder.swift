@@ -278,16 +278,29 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         )
     }
 
-    /// Called when a raw stream writer finished in `.failed` state — the file
-    /// is truncated and unplayable. Records a timeline event for diagnostics.
-    func recordRawWriterFailed(file: String, error: String, t: Double) {
+    /// Called when a raw stream writer entered `.failed` state — either
+    /// mid-recording (detected at segment boundary) or at finish. The file is
+    /// truncated and unplayable from the failure point. `code` and `domain`
+    /// carry the underlying NSError so timelines can be matched against
+    /// specific Apple error codes (e.g. VideoToolbox `-12909`,
+    /// `AVErrorEncoderResourcesAllocationFailure`).
+    func recordRawWriterFailed(
+        file: String,
+        error: String,
+        code: Int? = nil,
+        domain: String? = nil,
+        t: Double
+    ) {
+        var data: [String: JSONValue] = [
+            "file": .string(file),
+            "error": .string(error),
+        ]
+        if let code { data["code"] = .int(code) }
+        if let domain { data["domain"] = .string(domain) }
         appendEvent(
             t: t,
             kind: "raw.writer.failed",
-            data: [
-                "file": .string(file),
-                "error": .string(error),
-            ]
+            data: data
         )
     }
 

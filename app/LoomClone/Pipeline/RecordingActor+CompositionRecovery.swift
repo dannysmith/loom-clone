@@ -22,12 +22,14 @@ extension RecordingActor {
         // If the stop flow is already in progress, don't wait for the 2s
         // rebuild — the context is about to be torn down. This avoids a
         // spurious gpu_wobble flag when the final metronome tick races the
-        // stop signal.
+        // stop signal. The diagnostic counter is also gated on the same
+        // check, so `compFails` doesn't tick up on this benign race.
         if isStopping {
             Log.recording.log("Composition failure during stop — skipping rebuild")
             return
         }
 
+        diagnostics.compositionFailures += 1
         let t = logicalElapsedSeconds()
         let kind: String
         let detail: String

@@ -458,7 +458,7 @@ struct MetronomeDiagnostics {
         let camRate = String(
             format: "%.2f",
             cameraFramesReceived > 0 && recordingDurationS > 0.1
-                ? Double(cameraFramesReceived) / recordingDurationS : 0
+                ? Double(cameraFramesReceived) / recordingDurationS : 0.0
         )
         return """
         iters=\(iterations) emit=\(emitOK) \

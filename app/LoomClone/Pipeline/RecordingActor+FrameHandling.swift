@@ -224,7 +224,10 @@ extension RecordingActor {
             decision.output = buffer
         case let .failure(compositionError):
             decision.compositionFailed = true
-            diagnostics.compositionFailures += 1
+            // Counter incremented inside handleCompositionFailure so it
+            // skips the stop-time race that's benign (final metronome tick
+            // racing teardown). Otherwise `compFails=1` shows up on every
+            // recording even though nothing actually failed.
             await handleCompositionFailure(compositionError)
         }
         return decision

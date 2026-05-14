@@ -262,6 +262,39 @@ final class RecordingTimelineBuilderTests: XCTestCase {
         XCTAssertEqual(timeline.rawStreams?.audio?.sampleRate, 48000)
     }
 
+    func testRecordRawWriterFailedWithoutCodeOrDomainOmitsOptionalFields() throws {
+        let b = makeBuilder()
+        b.markStarted()
+        b.recordRawWriterFailed(file: "camera.mp4", error: "detected at segment boundary", t: 4.5)
+        let timeline = b.build()
+
+        let event = try XCTUnwrap(timeline.events.first(where: { $0.kind == "raw.writer.failed" }))
+        XCTAssertEqual(event.t, 4.5)
+        XCTAssertEqual(event.data?["file"], .string("camera.mp4"))
+        XCTAssertEqual(event.data?["error"], .string("detected at segment boundary"))
+        XCTAssertNil(event.data?["code"])
+        XCTAssertNil(event.data?["domain"])
+    }
+
+    func testRecordRawWriterFailedWithCodeAndDomainSerialisesIntoEvent() throws {
+        let b = makeBuilder()
+        b.markStarted()
+        b.recordRawWriterFailed(
+            file: "camera.mp4",
+            error: "The operation could not be completed",
+            code: -12909,
+            domain: "AVFoundationErrorDomain",
+            t: 4.5
+        )
+        let timeline = b.build()
+
+        let event = try XCTUnwrap(timeline.events.first(where: { $0.kind == "raw.writer.failed" }))
+        XCTAssertEqual(event.data?["file"], .string("camera.mp4"))
+        XCTAssertEqual(event.data?["error"], .string("The operation could not be completed"))
+        XCTAssertEqual(event.data?["code"], .int(-12909))
+        XCTAssertEqual(event.data?["domain"], .string("AVFoundationErrorDomain"))
+    }
+
     // MARK: - JSON Encoding
 
     func testTimelineEncodesToValidJSON() throws {

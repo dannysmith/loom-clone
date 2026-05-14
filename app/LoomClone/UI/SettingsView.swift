@@ -1,20 +1,67 @@
+import AppKit
 import SwiftUI
 
-/// Settings window content. Manages server URL, API key, and transcription model.
+/// Settings window — sidebar layout, System-Settings-style.
+///
+/// Built on `NavigationSplitView` (not `TabView` + `.sidebarAdaptable`)
+/// because Settings needs an explicit fixed sidebar width and no collapse
+/// toggle — both of which `.sidebarAdaptable` doesn't expose. Each pane is
+/// its own subview so `@Observable` reads scope tightly and a single pane's
+/// state change doesn't reflow the whole window. The shared
+/// `SettingsWindowConfigurator` runs once on appear to activate the app,
+/// key the window, and set collection behavior so the window follows the
+/// user across spaces and floats over full-screen apps.
 struct SettingsView: View {
-    @State private var serverURL: String = AppEnvironment.serverURL
-    @State private var keyText: String = ""
-    @State private var status: SaveStatus = .idle
+    @State private var selection: Pane = .general
     var transcribeAgent: TranscribeAgent?
 
-    private enum SaveStatus: Equatable {
+    private enum Pane: Hashable {
+        case general
+        case apiKey
+        case transcription
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                Label("General", systemImage: "gear")
+                    .tag(Pane.general)
+                Label("API Key", systemImage: "key.fill")
+                    .tag(Pane.apiKey)
+                Label("Transcription", systemImage: "waveform")
+                    .tag(Pane.transcription)
+            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            Group {
+                switch selection {
+                case .general:
+                    GeneralSettingsTab()
+                case .apiKey:
+                    APIKeySettingsTab()
+                case .transcription:
+                    TranscriptionSettingsTab(transcribeAgent: transcribeAgent)
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(width: 640, height: 380)
+        .background(SettingsWindowConfigurator())
+    }
+}
+
+// MARK: - General Tab
+
+private struct GeneralSettingsTab: View {
+    @State private var serverURL: String = AppEnvironment.serverURL
+    @State private var status: Status = .idle
+
+    private enum Status: Equatable {
         case idle
         case saved
         case cleared
-        case urlSaved
-        case urlCleared
-        case urlInvalid(String)
-        case error(String)
+        case invalid(String)
     }
 
     var body: some View {
@@ -26,19 +73,16 @@ struct SettingsView: View {
                     .onChange(of: serverURL) { _, _ in
                         if status != .idle { status = .idle }
                     }
-                    .onSubmit { saveURL() }
+                    .onSubmit { save() }
 
                 HStack(spacing: 8) {
                     // Save is always available — an empty field clears the
                     // saved override (reverts to the build-config default).
-                    Button("Save") { saveURL() }
+                    Button("Save") { save() }
                         .buttonStyle(.borderedProminent)
-
                     Spacer()
-                    urlStatusLabel
+                    statusLabel
                 }
-            } header: {
-                Text("Server")
             } footer: {
                 if AppEnvironment.isDebug {
                     Text("Debug build — defaults to localhost:3000. Release builds require explicit configuration.")
@@ -49,6 +93,87 @@ struct SettingsView: View {
             }
 
             Section {
+                LabeledContent("App data") {
+                    Button("Show in Finder") {
+                        let url = AppEnvironment.appSupportDirectory
+                        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var statusLabel: some View {
+        switch status {
+        case .saved:
+            Label("Saved", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .cleared:
+            Label("Cleared — using default", systemImage: "arrow.uturn.backward")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        case let .invalid(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .lineLimit(2)
+        case .idle:
+            EmptyView()
+        }
+    }
+
+    private func save() {
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Empty trimmed value is an explicit "clear the override" — reverts
+        // to AppEnvironment.defaultServerURL (the build-config default).
+        if trimmed.isEmpty {
+            AppEnvironment.serverURL = ""
+            serverURL = ""
+            status = .cleared
+            return
+        }
+
+        // Strip trailing slash so APIClient can append paths without doubling
+        // the separator.
+        let normalised = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+
+        guard let parsed = URL(string: normalised),
+              let scheme = parsed.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              parsed.host != nil
+        else {
+            status = .invalid("Enter a full URL like https://v.danny.is")
+            return
+        }
+
+        AppEnvironment.serverURL = normalised
+        serverURL = normalised
+        status = .saved
+    }
+}
+
+// MARK: - API Key Tab
+
+private struct APIKeySettingsTab: View {
+    @State private var keyText: String = ""
+    @State private var status: Status = .idle
+    @State private var apiKeyStatus = APIKeyStatus.shared
+
+    private enum Status: Equatable {
+        case idle
+        case saved
+        case cleared
+        case error(String)
+    }
+
+    var body: some View {
+        Form {
+            Section {
                 SecureField("Paste token", text: $keyText, prompt: Text("lck_…"))
                     .textFieldStyle(.roundedBorder)
                     .disableAutocorrection(true)
@@ -57,18 +182,16 @@ struct SettingsView: View {
                     }
 
                 HStack(spacing: 8) {
-                    Button("Save") { saveKey() }
+                    Button("Save") { save() }
                         .buttonStyle(.borderedProminent)
                         .disabled(trimmedKey.isEmpty)
 
-                    Button("Clear stored key", role: .destructive) { clearKey() }
-                        .disabled(!APIKeyStatus.shared.hasKey)
+                    Button("Clear stored key", role: .destructive) { clear() }
+                        .disabled(!apiKeyStatus.hasKey)
 
                     Spacer()
-                    keyStatusLabel
+                    statusLabel
                 }
-            } header: {
-                Text("API Key")
             } footer: {
                 Text(
                     "Generate a token on the server with `bun run keys:create <name>`. " +
@@ -82,19 +205,15 @@ struct SettingsView: View {
 
             Section {
                 LabeledContent("Key stored") {
-                    if APIKeyStatus.shared.hasKey {
+                    if apiKeyStatus.hasKey {
                         Text("Yes").foregroundStyle(.secondary)
                     } else {
                         Text("No").foregroundStyle(.orange)
                     }
                 }
             }
-
-            TranscriptionModelSection(transcribeAgent: transcribeAgent)
         }
         .formStyle(.grouped)
-        .padding()
-        .frame(width: 520, height: 420)
     }
 
     private var trimmedKey: String {
@@ -102,28 +221,7 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private var urlStatusLabel: some View {
-        switch status {
-        case .urlSaved:
-            Label("Saved", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption)
-        case .urlCleared:
-            Label("Cleared — using default", systemImage: "arrow.uturn.backward")
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        case let .urlInvalid(message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-                .font(.caption)
-                .lineLimit(2)
-        default:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var keyStatusLabel: some View {
+    private var statusLabel: some View {
         switch status {
         case .saved:
             Label("Saved", systemImage: "checkmark.circle.fill")
@@ -138,45 +236,12 @@ struct SettingsView: View {
                 .foregroundStyle(.red)
                 .font(.caption)
                 .lineLimit(2)
-        default:
+        case .idle:
             EmptyView()
         }
     }
 
-    private func saveURL() {
-        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Empty trimmed value is an explicit "clear the override" — reverts
-        // to AppEnvironment.defaultServerURL (the build-config default).
-        if trimmed.isEmpty {
-            AppEnvironment.serverURL = ""
-            serverURL = ""
-            status = .urlCleared
-            return
-        }
-
-        // Strip trailing slash so APIClient can append paths without doubling
-        // the separator.
-        let normalised = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
-
-        // Validate: must parse as a URL with an http or https scheme. Reject
-        // anything else here so APIClient never has to fall back on its
-        // .invalidBaseURL throw at runtime.
-        guard let parsed = URL(string: normalised),
-              let scheme = parsed.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              parsed.host != nil
-        else {
-            status = .urlInvalid("Enter a full URL like https://v.danny.is")
-            return
-        }
-
-        AppEnvironment.serverURL = normalised
-        serverURL = normalised
-        status = .urlSaved
-    }
-
-    private func saveKey() {
+    private func save() {
         let token = trimmedKey
         guard !token.isEmpty else { return }
         do {
@@ -189,7 +254,7 @@ struct SettingsView: View {
         }
     }
 
-    private func clearKey() {
+    private func clear() {
         do {
             try APIKeyStore.shared.delete()
             APIKeyStatus.shared.refresh()
@@ -200,66 +265,93 @@ struct SettingsView: View {
     }
 }
 
-/// Leaf subview for the transcription model section. Reads from
-/// TranscriptionModelStatus in its own observation scope so changes
-/// don't trigger a full SettingsView re-render.
-private struct TranscriptionModelSection: View {
+// MARK: - Transcription Tab
+
+private struct TranscriptionSettingsTab: View {
     let transcribeAgent: TranscribeAgent?
     private var modelStatus: TranscriptionModelStatus {
         .shared
     }
 
     var body: some View {
-        Section {
-            HStack {
-                switch modelStatus.state {
-                case .notDownloaded:
-                    Label("Not downloaded", systemImage: "arrow.down.circle")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Download") {
-                        guard let agent = transcribeAgent else { return }
-                        Task { await agent.downloadModel() }
-                    }
-                    .buttonStyle(.borderedProminent)
+        Form {
+            Section {
+                HStack {
+                    switch modelStatus.state {
+                    case .notDownloaded:
+                        Label("Not downloaded", systemImage: "arrow.down.circle")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Download") {
+                            guard let agent = transcribeAgent else { return }
+                            Task { await agent.downloadModel() }
+                        }
+                        .buttonStyle(.borderedProminent)
 
-                case .downloading:
-                    Label("Downloading…", systemImage: "arrow.down.circle.dotted")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    ProgressView()
-                        .controlSize(.small)
+                    case .downloading:
+                        Label("Downloading…", systemImage: "arrow.down.circle.dotted")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
 
-                case .ready:
-                    Label("Ready", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Spacer()
-                    Button("Remove", role: .destructive) {
-                        modelStatus.deleteModel()
-                    }
+                    case .ready:
+                        Label("Ready", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            modelStatus.deleteModel()
+                        }
 
-                case let .failed(message):
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                        .lineLimit(2)
-                    Spacer()
-                    Button("Retry") {
-                        guard let agent = transcribeAgent else { return }
-                        Task { await agent.downloadModel() }
+                    case let .failed(message):
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .lineLimit(2)
+                        Spacer()
+                        Button("Retry") {
+                            guard let agent = transcribeAgent else { return }
+                            Task { await agent.downloadModel() }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
+            } footer: {
+                Text(
+                    "Downloads the Whisper large-v3-turbo model (~626 MB). Recordings are transcribed automatically after this model is installed."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
-        } header: {
-            Text("Transcription")
-        } footer: {
-            Text(
-                "Downloads the Whisper large-v3-turbo model (~626 MB). Recordings are transcribed automatically after this model is installed."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
+        .formStyle(.grouped)
     }
+}
+
+// MARK: - Window Configurator
+
+/// Runs once when the Settings window appears: activates the app, makes the
+/// window key, and sets collection behavior so the window follows the user
+/// across spaces and floats over full-screen apps.
+///
+/// Required because the app is `LSUIElement` (menubar accessory). Without
+/// this, the Settings window opens but the app doesn't become active —
+/// `.borderedProminent` buttons render as faded greys until the user clicks
+/// inside the window. The `.moveToActiveSpace` + `.fullScreenAuxiliary`
+/// pair fixes the "Settings opens on the wrong space when I'm in a
+/// full-screen app" papercut.
+private struct SettingsWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.collectionBehavior.formUnion([.moveToActiveSpace, .fullScreenAuxiliary])
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+        }
+        return view
+    }
+
+    func updateNSView(_: NSView, context _: Context) {}
 }

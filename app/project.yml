@@ -2,7 +2,7 @@ name: LoomClone
 options:
   bundleIdPrefix: is.danny.loomclone
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
   xcodeVersion: "16.0"
   minimumXcodeGenVersion: "2.40"
   createIntermediateGroups: true
@@ -21,7 +21,7 @@ settingGroups:
 settings:
   base:
     SWIFT_VERSION: "5"
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     groups:
       - codeQuality
 

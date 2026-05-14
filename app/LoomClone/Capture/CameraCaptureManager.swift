@@ -235,28 +235,53 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Only lock the frame rate when 1/fps is within the format's supported
-    /// duration range. UVC cameras like the ZV-1 advertise fixed-rate ranges
-    /// whose min and max duration are both `1000000/30000030`
-    /// (essentially-but-not-exactly 30fps — UVC intervals are stored in
-    /// 100ns units, which doesn't hit 1/30 on the nose). Setting
-    /// activeVideoMinFrameDuration to CMTime(1, fps) in that case throws
-    /// NSInvalidArgumentException — an ObjC exception Swift's `try/catch`
-    /// can't catch, which crashes the app. When 1/fps isn't in range, the
-    /// format's own rate applies — leave it alone.
+    /// Lock the camera to the target frame rate when one of the format's
+    /// supported rate ranges contains the target (with a 0.5fps tolerance for
+    /// NTSC fractional rates).
+    ///
+    /// The comparison is on frame **rate** (Double), not frame **duration**
+    /// (CMTime). UVC cameras like the ZV-1 and the Cam Link 4K advertise
+    /// rates as a list of fixed-rate ranges whose durations are stored in
+    /// 100ns units (e.g. `333333/10000000`). `CMTime(1, 30)` is not
+    /// byte-equal to that representation, so the previous CMTime-based
+    /// boundary check `minDur <= 1/30 <= maxDur` collapsed to `==` for
+    /// single-rate ranges and failed — leaving the camera at HDMI source rate
+    /// regardless of what we picked.
+    ///
+    /// When the matching range is discrete (min == max), we use the range's
+    /// own reported duration to lock — not `CMTime(1, fps)` — because
+    /// `AVCaptureDevice` throws an **uncatchable** `NSInvalidArgumentException`
+    /// if `activeVideoMinFrameDuration` is set to a value outside the
+    /// format's reported range, even by a fp-precision sliver. The range's
+    /// own value is guaranteed in-range.
     private func lockFrameRateIfSupported(
         device: AVCaptureDevice,
         format: AVCaptureDevice.Format,
         targetFPS: FrameRate
     ) -> Bool {
-        let targetDur = targetFPS.frameDuration
-        let inRange = format.videoSupportedFrameRateRanges.contains {
-            $0.minFrameDuration <= targetDur && targetDur <= $0.maxFrameDuration
-        }
-        guard inRange else { return false }
-        device.activeVideoMinFrameDuration = targetDur
-        device.activeVideoMaxFrameDuration = targetDur
+        let target = Double(targetFPS.rawValue)
+        guard let match = format.videoSupportedFrameRateRanges.first(where: { range in
+            Self.targetRateFits(target: target, minRate: range.minFrameRate, maxRate: range.maxFrameRate)
+        }) else { return false }
+
+        let isDiscrete = match.minFrameRate == match.maxFrameRate
+        let durationToSet: CMTime = isDiscrete
+            ? match.minFrameDuration
+            : targetFPS.frameDuration
+        device.activeVideoMinFrameDuration = durationToSet
+        device.activeVideoMaxFrameDuration = durationToSet
         return true
+    }
+
+    /// Predicate: does `target` fit within `[minRate, maxRate]` with a
+    /// 0.5fps tolerance? 0.5 is wide enough to bridge NTSC fractional rates
+    /// (29.97 ↔ 30, 59.94 ↔ 60) and CMTime/100ns precision noise, but well
+    /// narrower than the gap between any two standard rates (24/25/30/50/60),
+    /// so it can never falsely match an adjacent supported rate.
+    /// Extracted as a pure static helper for unit testing.
+    static func targetRateFits(target: Double, minRate: Double, maxRate: Double) -> Bool {
+        let epsilon = 0.5
+        return (minRate - epsilon) <= target && target <= (maxRate + epsilon)
     }
 
     private func addVideoInput(session: AVCaptureSession, device: AVCaptureDevice) -> Bool {

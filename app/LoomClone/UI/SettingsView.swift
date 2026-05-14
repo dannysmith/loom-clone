@@ -19,6 +19,7 @@ struct SettingsView: View {
         case general
         case apiKey
         case transcription
+        case recordings
     }
 
     var body: some View {
@@ -30,6 +31,8 @@ struct SettingsView: View {
                     .tag(Pane.apiKey)
                 Label("Transcription", systemImage: "waveform")
                     .tag(Pane.transcription)
+                Label("Recordings", systemImage: "tray.full")
+                    .tag(Pane.recordings)
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
             .toolbar(removing: .sidebarToggle)
@@ -42,11 +45,13 @@ struct SettingsView: View {
                     APIKeySettingsTab()
                 case .transcription:
                     TranscriptionSettingsTab(transcribeAgent: transcribeAgent)
+                case .recordings:
+                    RecordingsSettingsTab()
                 }
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(width: 640, height: 380)
+        .frame(minWidth: 820, minHeight: 500)
         .background(SettingsWindowConfigurator())
     }
 }

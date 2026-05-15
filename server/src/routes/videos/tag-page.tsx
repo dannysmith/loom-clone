@@ -16,7 +16,7 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
   const { tag } = result;
   if (!tag.slug) return c.text("Not found", 404); // should never happen post-resolve
 
-  const videos = await getVideosForTag(tag.id);
+  const videos = await getVideosForTag(tag.id, tag.videoSort);
 
   if (tag.visibility !== "public") {
     c.header("X-Robots-Tag", "noindex");

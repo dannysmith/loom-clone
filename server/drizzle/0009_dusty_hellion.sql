@@ -1,0 +1,1 @@
+ALTER TABLE `tags` ADD `video_sort` text DEFAULT 'date-desc' NOT NULL;

@@ -300,6 +300,22 @@ describe("tag visibility / slug / description", () => {
     expect(cleared.description).toBeNull();
   });
 
+  test("videoSort defaults to date-desc and accepts the three valid options", async () => {
+    const tag = await createTag("demo");
+    expect(tag.videoSort).toBe("date-desc");
+
+    const a = await updateTag(tag.id, { videoSort: "date-asc" });
+    expect(a.videoSort).toBe("date-asc");
+
+    const b = await updateTag(tag.id, { videoSort: "alpha" });
+    expect(b.videoSort).toBe("alpha");
+
+    // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+    expect(updateTag(tag.id, { videoSort: "random" as any })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
   test("invalid slug format rejected", async () => {
     const tag = await createTag("demo");
     expect(updateTag(tag.id, { visibility: "public", slug: "Bad Slug!" })).rejects.toBeInstanceOf(
@@ -445,6 +461,52 @@ describe("getVideosForTag", () => {
     await addTagToVideo(video.id, tag.id);
 
     expect(await getVideosForTag(tag.id)).toHaveLength(0);
+  });
+
+  test("date-desc puts newest completedAt first", async () => {
+    const tag = await createTag("demo");
+    const a = await makeCompleteVideo("public");
+    const b = await makeCompleteVideo("public");
+    const c = await makeCompleteVideo("public");
+    await addTagToVideo(a.id, tag.id);
+    await addTagToVideo(b.id, tag.id);
+    await addTagToVideo(c.id, tag.id);
+
+    const sorted = await getVideosForTag(tag.id, "date-desc");
+    expect(sorted.map((v) => v.id)).toEqual([c.id, b.id, a.id]);
+  });
+
+  test("date-asc puts oldest completedAt first", async () => {
+    const tag = await createTag("demo");
+    const a = await makeCompleteVideo("public");
+    const b = await makeCompleteVideo("public");
+    const c = await makeCompleteVideo("public");
+    await addTagToVideo(a.id, tag.id);
+    await addTagToVideo(b.id, tag.id);
+    await addTagToVideo(c.id, tag.id);
+
+    const sorted = await getVideosForTag(tag.id, "date-asc");
+    expect(sorted.map((v) => v.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  test("alpha sorts by title (case-insensitive), falling back to slug", async () => {
+    const tag = await createTag("demo");
+    const titled = await makeCompleteVideo("public");
+    const otherTitled = await makeCompleteVideo("public");
+    const untitled = await makeCompleteVideo("public");
+    await updateVideo(titled.id, { title: "zebra" });
+    await updateVideo(otherTitled.id, { title: "Apple" });
+    // untitled keeps its random slug. Force a known slug so we can predict order.
+    const { updateSlug } = await import("../store");
+    await updateSlug(untitled.id, "kangaroo");
+
+    await addTagToVideo(titled.id, tag.id);
+    await addTagToVideo(otherTitled.id, tag.id);
+    await addTagToVideo(untitled.id, tag.id);
+
+    const sorted = await getVideosForTag(tag.id, "alpha");
+    // "Apple" → "apple", slug "kangaroo", title "zebra"
+    expect(sorted.map((v) => v.id)).toEqual([otherTitled.id, untitled.id, titled.id]);
   });
 });
 

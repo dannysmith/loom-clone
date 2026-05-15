@@ -1,9 +1,11 @@
-import { and, desc, eq, getTableColumns, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import {
   TAG_COLORS,
+  TAG_VIDEO_SORTS,
   type Tag,
   type TagColor,
+  type TagVideoSort,
   tagSlugRedirects,
   tags,
   type Video,
@@ -75,7 +77,16 @@ export type TagPatch = {
   // null clears the slug (only valid when visibility is private).
   slug?: string | null;
   description?: string | null;
+  videoSort?: TagVideoSort;
 };
+
+function validateTagVideoSort(v: string): asserts v is TagVideoSort {
+  if (!TAG_VIDEO_SORTS.includes(v as TagVideoSort)) {
+    throw new ValidationError(
+      `Invalid videoSort "${v}". Must be one of: ${TAG_VIDEO_SORTS.join(", ")}`,
+    );
+  }
+}
 
 // Updates a tag's mutable fields. Slug renames preserve the old slug as a
 // redirect (mirroring video slug behaviour). Visibility rules:
@@ -126,6 +137,12 @@ export async function updateTag(id: number, patch: TagPatch): Promise<Tag> {
   if (patch.description !== undefined) {
     const desc = patch.description === null ? null : patch.description.trim() || null;
     if (desc !== existing.description) changes.description = desc;
+  }
+
+  // Video sort order
+  if (patch.videoSort !== undefined) {
+    validateTagVideoSort(patch.videoSort);
+    if (patch.videoSort !== existing.videoSort) changes.videoSort = patch.videoSort;
   }
 
   // Invariant check across merged state: public/unlisted tags must have a slug.
@@ -284,9 +301,31 @@ export async function resolveTagSlug(
   return { tag: target, redirected: true };
 }
 
+// Sort columns for the three supported tag video orders. `alpha` uses
+// COALESCE(title, slug) lowered so untitled videos sort sensibly. Stable
+// tiebreaker on createdAt then id so pagination/feed ordering is deterministic
+// on duplicates.
+function tagSortColumns(sort: TagVideoSort) {
+  switch (sort) {
+    case "date-desc":
+      return [desc(videos.completedAt), desc(videos.createdAt), desc(videos.id)] as const;
+    case "date-asc":
+      return [asc(videos.completedAt), asc(videos.createdAt), asc(videos.id)] as const;
+    case "alpha": {
+      const key = sql`LOWER(COALESCE(${videos.title}, ${videos.slug}))`;
+      return [asc(key), asc(videos.id)] as const;
+    }
+  }
+}
+
 // Lists public/unlisted, complete, non-trashed videos attached to a tag.
-// Excludes private videos per the public-tag-page contract. Newest first.
-export async function getVideosForTag(tagId: number): Promise<Video[]> {
+// Excludes private videos per the public-tag-page contract. Order defaults
+// to date-desc (newest first); callers can pass the tag's `videoSort` to
+// match the public page's configured order.
+export async function getVideosForTag(
+  tagId: number,
+  sort: TagVideoSort = "date-desc",
+): Promise<Video[]> {
   return getDb()
     .select(getTableColumns(videos))
     .from(videoTags)
@@ -300,5 +339,5 @@ export async function getVideosForTag(tagId: number): Promise<Video[]> {
         ne(videos.visibility, "private"),
       ),
     )
-    .orderBy(desc(videos.completedAt), desc(videos.createdAt));
+    .orderBy(...tagSortColumns(sort));
 }

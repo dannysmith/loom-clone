@@ -103,6 +103,13 @@ export const TAG_COLORS = [
 ] as const;
 export type TagColor = (typeof TAG_COLORS)[number];
 
+// Sort orders for videos on a tag's public page and per-tag feeds.
+//   date-desc — newest first (default; matches the rest of the site)
+//   date-asc  — oldest first
+//   alpha     — alphanumeric by title (falling back to slug for untitled videos)
+export const TAG_VIDEO_SORTS = ["date-desc", "date-asc", "alpha"] as const;
+export type TagVideoSort = (typeof TAG_VIDEO_SORTS)[number];
+
 export const tags = sqliteTable("tags", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
@@ -118,6 +125,7 @@ export const tags = sqliteTable("tags", {
   // and the two redirect tables) is enforced at the application layer.
   slug: text("slug").unique(),
   description: text("description"),
+  videoSort: text("video_sort", { enum: TAG_VIDEO_SORTS }).notNull().default("date-desc"),
   createdAt: text("created_at").notNull().$defaultFn(nowIso),
 });
 

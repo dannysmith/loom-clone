@@ -31,7 +31,7 @@ tagFeeds.get("/:slug/feed.xml", async (c) => {
   const { tag } = result;
   if (!tag.slug) return c.text("Not found", 404);
 
-  const videos = await getVideosForTag(tag.id);
+  const videos = await getVideosForTag(tag.id, tag.videoSort);
   const items = videos.map(renderRssItem);
   const feedUrl = absoluteUrl(`/${tag.slug}/feed.xml`);
   const pageUrl = absoluteUrl(`/${tag.slug}`);
@@ -73,7 +73,7 @@ tagFeeds.get("/:slug/feed.json", async (c) => {
   const { tag } = result;
   if (!tag.slug) return c.text("Not found", 404);
 
-  const videos = await getVideosForTag(tag.id);
+  const videos = await getVideosForTag(tag.id, tag.videoSort);
   const transcriptMap = await loadTranscriptMap(videos.map((v) => v.id));
   const items = videos.map((v) => buildJsonFeedItem(v, transcriptMap));
 

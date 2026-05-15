@@ -72,6 +72,9 @@ settings.patch("/tags/:id", async (c) => {
     const desc = String(body.description).trim();
     patch.description = desc.length > 0 ? desc : null;
   }
+  if (body.videoSort !== undefined) {
+    patch.videoSort = String(body.videoSort) as Parameters<typeof updateTag>[1]["videoSort"];
+  }
 
   try {
     await updateTag(id, patch);

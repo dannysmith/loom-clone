@@ -1,5 +1,11 @@
-import { TAG_COLORS, type Tag, type TagColor } from "../../../db/schema";
+import { TAG_COLORS, TAG_VIDEO_SORTS, type Tag, type TagColor } from "../../../db/schema";
 import { absoluteUrl } from "../../../lib/url";
+
+const VIDEO_SORT_LABELS: Record<(typeof TAG_VIDEO_SORTS)[number], string> = {
+  "date-desc": "Date (newest first)",
+  "date-asc": "Date (oldest first)",
+  alpha: "Alphanumeric",
+};
 
 export function TagsPane({ tags }: { tags: Tag[] }) {
   return (
@@ -136,6 +142,18 @@ export function TagEditRow({ tag, error }: { tag: Tag; error?: string }) {
             sneaking into the textarea's initial value. */}
         {/* biome-ignore format: preserves textarea whitespace */}
         <textarea class="input" name="description" rows={3} placeholder="Optional. Markdown supported.">{tag.description ?? ""}</textarea>
+      </label>
+
+      <label class="tag-edit-field">
+        <span class="tag-edit-label">Video order</span>
+        <select class="input" name="videoSort">
+          {TAG_VIDEO_SORTS.map((s) => (
+            <option value={s} selected={s === tag.videoSort}>
+              {VIDEO_SORT_LABELS[s]}
+            </option>
+          ))}
+        </select>
+        <span class="tag-edit-help">How videos are ordered on the public tag page and feeds.</span>
       </label>
 
       <div class="tag-edit-actions">

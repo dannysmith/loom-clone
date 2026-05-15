@@ -64,6 +64,13 @@
       "when": 1778844840963,
       "tag": "0008_neat_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778848487622,
+      "tag": "0009_dusty_hellion",
+      "breakpoints": true
     }
   ]
 }

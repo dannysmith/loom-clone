@@ -94,7 +94,7 @@ media-player {
   & a {
     color: var(--viewer-link);
     text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, currentColor, transparent 60%);
+    text-decoration-color: color-mix(in srgb, currentcolor, transparent 60%);
   }
 
   & a:hover {
@@ -186,7 +186,7 @@ media-player {
   & a {
     color: var(--viewer-link);
     text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, currentColor, transparent 60%);
+    text-decoration-color: color-mix(in srgb, currentcolor, transparent 60%);
   }
 
   & a:hover {

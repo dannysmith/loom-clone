@@ -19,6 +19,7 @@ type Props = {
   filters: DashboardFilters;
   tags: Tag[];
   diskSizes: Record<string, number>;
+  videoTags: Record<string, Tag[]>;
   view: string;
 };
 
@@ -67,7 +68,15 @@ function visibilityIcon(v: string, size: number) {
   }
 }
 
-export function DashboardPage({ videos, nextCursor, filters, tags, diskSizes, view }: Props) {
+export function DashboardPage({
+  videos,
+  nextCursor,
+  filters,
+  tags,
+  diskSizes,
+  videoTags,
+  view,
+}: Props) {
   const sort = filters.sort ?? "date-desc";
   const [sortField, sortDir] = sort.split("-") as [string, string];
 
@@ -222,6 +231,7 @@ export function DashboardPage({ videos, nextCursor, filters, tags, diskSizes, vi
         nextCursor={nextCursor}
         filters={filters}
         diskSizes={diskSizes}
+        videoTags={videoTags}
         view={view}
       />
 

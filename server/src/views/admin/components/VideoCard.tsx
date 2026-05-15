@@ -1,4 +1,4 @@
-import type { Video } from "../../../db/schema";
+import type { Tag, Video } from "../../../db/schema";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDurationShort } from "../../../lib/format";
 import { activeRawFilename } from "../../../lib/url";
@@ -18,12 +18,13 @@ type Props = {
   video: Video;
   mode?: "default" | "trash";
   diskSize?: number;
+  tags?: Tag[];
 };
 
 // Shared card component for both grid and table views. The containing
 // element's `data-view` attribute controls the layout via CSS.
 // In trash mode, the popover menu is replaced with a Restore button.
-export function VideoCard({ video, mode = "default", diskSize }: Props) {
+export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
   const title = video.title || video.slug;
   const duration = formatDurationShort(video.durationSeconds);
   const date = formatDate(video.createdAt);
@@ -68,6 +69,18 @@ export function VideoCard({ video, mode = "default", diskSize }: Props) {
                 )}
               </>
             )}
+          </div>
+          {/* Always present so table-view grid columns align across rows.
+              Empty when the video has no tags. */}
+          <div class="video-card-tags">
+            {tags?.map((t) => (
+              <span
+                class="tag-chip tag-chip--sm"
+                style={`background-color: var(--tag-${t.color}); color: #fff`}
+              >
+                {t.name}
+              </span>
+            ))}
           </div>
           <time class="video-card-date" datetime={video.createdAt}>
             {date}

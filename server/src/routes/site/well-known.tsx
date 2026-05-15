@@ -1,7 +1,7 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
-import { videos } from "../../db/schema";
+import { tags, videos } from "../../db/schema";
 import { siteConfig } from "../../lib/site-config";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
 
@@ -55,14 +55,37 @@ wellKnown.get("/robots.txt", (c) =>
 wellKnown.get("/favicon.ico", (c) => c.body(null, 204));
 
 wellKnown.get("/sitemap.xml", async (c) => {
-  // Only public, complete, non-trashed videos appear in the sitemap.
-  const rows = await getDb()
-    .select()
-    .from(videos)
-    .where(
-      and(eq(videos.visibility, "public"), eq(videos.status, "complete"), isNull(videos.trashedAt)),
-    )
-    .orderBy(desc(videos.createdAt));
+  // Only public, complete, non-trashed videos appear in the sitemap. Public
+  // tags with a slug also get a `<url>` entry (no video:video child).
+  const [rows, tagRows] = await Promise.all([
+    getDb()
+      .select()
+      .from(videos)
+      .where(
+        and(
+          eq(videos.visibility, "public"),
+          eq(videos.status, "complete"),
+          isNull(videos.trashedAt),
+        ),
+      )
+      .orderBy(desc(videos.createdAt)),
+    getDb()
+      .select()
+      .from(tags)
+      .where(and(eq(tags.visibility, "public"), isNotNull(tags.slug)))
+      .orderBy(desc(tags.createdAt)),
+  ]);
+
+  const tagEntries = tagRows
+    .filter((t) => t.slug)
+    .map((t) =>
+      [
+        "  <url>",
+        `    <loc>${escapeXml(absoluteUrl(`/${t.slug}`))}</loc>`,
+        `    <lastmod>${t.createdAt}</lastmod>`,
+        "  </url>",
+      ].join("\n"),
+    );
 
   const entries = rows.map((v) => {
     const pageUrl = absoluteUrl(`/${v.slug}`);
@@ -97,6 +120,7 @@ wellKnown.get("/sitemap.xml", async (c) => {
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"',
     '        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">',
     ...entries,
+    ...tagEntries,
     "</urlset>",
     "",
   ].join("\n");

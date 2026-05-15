@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createAdminToken, listAdminTokens, revokeAdminToken } from "../../lib/admin-tokens";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
+import { ConflictError, ValidationError } from "../../lib/store";
 import { createTag, deleteTag, getTag, listTags, updateTag } from "../../lib/tags";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
 import { ApiKeysPane } from "../../views/admin/partials/ApiKeysPane";
@@ -54,9 +55,35 @@ settings.get("/tags/:id/display", async (c) => {
 settings.patch("/tags/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const body = await c.req.parseBody();
-  const name = body.name ? String(body.name).trim() : undefined;
-  const color = body.color ? String(body.color) : undefined;
-  await updateTag(id, { name, color: color as Parameters<typeof updateTag>[1]["color"] });
+
+  const patch: Parameters<typeof updateTag>[1] = {};
+  if (body.name !== undefined) patch.name = String(body.name).trim();
+  if (body.color !== undefined) {
+    patch.color = String(body.color) as Parameters<typeof updateTag>[1]["color"];
+  }
+  if (body.visibility !== undefined) {
+    patch.visibility = String(body.visibility) as Parameters<typeof updateTag>[1]["visibility"];
+  }
+  if (body.slug !== undefined) {
+    const slug = String(body.slug).trim();
+    patch.slug = slug.length > 0 ? slug : null;
+  }
+  if (body.description !== undefined) {
+    const desc = String(body.description).trim();
+    patch.description = desc.length > 0 ? desc : null;
+  }
+
+  try {
+    await updateTag(id, patch);
+  } catch (err) {
+    if (err instanceof ValidationError || err instanceof ConflictError) {
+      const existing = await getTag(id);
+      if (!existing) return c.text("Tag not found", 404);
+      return c.html(<TagEditRow tag={existing} error={err.message} />);
+    }
+    throw err;
+  }
+
   const tag = await getTag(id);
   if (!tag) return c.text("Tag not found", 404);
   return c.html(<TagRow tag={tag} />);

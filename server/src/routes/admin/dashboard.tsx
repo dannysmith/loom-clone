@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Video } from "../../db/schema";
 import { getVideosDirSizes } from "../../lib/files";
 import { type DashboardFilters, listVideosFiltered } from "../../lib/store";
-import { listTags } from "../../lib/tags";
+import { getTagsForVideos, listTags } from "../../lib/tags";
 import { DashboardPage } from "../../views/admin/pages/DashboardPage";
 import { VideoList, VideoListAppend } from "../../views/admin/partials/VideoList";
 import type { AdminEnv } from "./helpers";
@@ -36,7 +36,11 @@ dashboard.get("/", async (c) => {
   const isSizeSort = sort === "size-desc" || sort === "size-asc";
 
   const [result, tags] = await Promise.all([listVideosFiltered(filters), listTags()]);
-  const diskSizes = await getVideosDirSizes(result.items.map((v) => v.id));
+  const ids = result.items.map((v) => v.id);
+  const [diskSizes, videoTagsMap] = await Promise.all([
+    getVideosDirSizes(ids),
+    getTagsForVideos(ids),
+  ]);
 
   const { items, nextCursor } = isSizeSort
     ? sizeSortAndPaginate(result.items, diskSizes, sort, 20)
@@ -49,6 +53,7 @@ dashboard.get("/", async (c) => {
       filters={filters}
       tags={tags}
       diskSizes={diskSizes}
+      videoTags={videoTagsMap}
       view={view}
     />,
   );
@@ -62,7 +67,11 @@ dashboard.get("/partials/video-list", async (c) => {
   const isSizeSort = sort === "size-desc" || sort === "size-asc";
 
   const result = await listVideosFiltered(filters);
-  const diskSizes = await getVideosDirSizes(result.items.map((v) => v.id));
+  const ids = result.items.map((v) => v.id);
+  const [diskSizes, videoTagsMap] = await Promise.all([
+    getVideosDirSizes(ids),
+    getTagsForVideos(ids),
+  ]);
 
   const { items, nextCursor } = isSizeSort
     ? sizeSortAndPaginate(result.items, diskSizes, sort, 20)
@@ -76,6 +85,7 @@ dashboard.get("/partials/video-list", async (c) => {
         nextCursor={nextCursor}
         filters={filters}
         diskSizes={diskSizes}
+        videoTags={videoTagsMap}
         view={view}
       />,
     );
@@ -87,6 +97,7 @@ dashboard.get("/partials/video-list", async (c) => {
       nextCursor={nextCursor}
       filters={filters}
       diskSizes={diskSizes}
+      videoTags={videoTagsMap}
       view={view}
     />,
   );

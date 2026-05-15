@@ -413,6 +413,19 @@ body.admin--login {
 	color: var(--color-fg-muted);
 }
 
+[data-view="grid"] .video-card-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-1);
+	margin-block-start: var(--space-1);
+}
+
+/* Collapse empty tag row in grid view so it doesn't introduce extra spacing.
+   Table view keeps it so grid columns stay aligned across rows. */
+[data-view="grid"] .video-card-tags:empty {
+	display: none;
+}
+
 /* Table view */
 [data-view="table"] .video-list-items {
 	display: flex;
@@ -439,7 +452,7 @@ body.admin--login {
 
 [data-view="table"] .video-card-link {
 	display: grid;
-	grid-template-columns: 3rem 1fr 1fr auto auto auto;
+	grid-template-columns: 3rem 1fr 1fr auto minmax(0, 1fr) auto;
 	align-items: center;
 	gap: var(--space-3);
 	padding: var(--space-2) var(--space-3);
@@ -513,6 +526,21 @@ body.admin--login {
 [data-view="table"] .video-card-date {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
+	white-space: nowrap;
+}
+
+[data-view="table"] .video-card-tags {
+	display: flex;
+	gap: var(--space-1);
+	overflow: hidden;
+	min-inline-size: 0;
+}
+
+[data-view="table"] .video-card-tags .tag-chip {
+	flex-shrink: 0;
+	max-inline-size: 8rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
@@ -972,11 +1000,75 @@ select.input {
 .tag-name {
 	font-size: var(--font-size-sm);
 	font-weight: var(--font-weight-medium);
+}
+
+.tag-row-summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
 	flex: 1;
+	min-inline-size: 0;
+}
+
+.tag-row-public-url {
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
+	text-decoration: none;
+	font-family: var(--font-mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+
+	&:hover {
+		color: var(--color-accent);
+		text-decoration: underline;
+	}
 }
 
 .tag-edit-name {
 	flex: 1;
+}
+
+/* Expanded vertical edit form */
+.tag-row--form {
+	display: grid;
+	gap: var(--space-3);
+	padding: var(--space-4);
+}
+
+.tag-edit-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.tag-edit-label {
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.tag-edit-help {
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
+}
+
+.tag-edit-error {
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background-color: var(--color-danger-bg);
+	color: var(--color-danger);
+	font-size: var(--font-size-sm);
+	border: 1px solid var(--color-danger-border);
+}
+
+.tag-edit-actions {
+	display: flex;
+	gap: var(--space-2);
+	justify-content: flex-end;
+	margin-block-start: var(--space-1);
 }
 
 /* Color picker */
@@ -1438,6 +1530,12 @@ select.input {
 	font-size: var(--font-size-xs);
 	font-weight: var(--font-weight-medium);
 	line-height: 1;
+}
+
+/* Compact chip variant used in dense lists (e.g. dashboard cards). */
+.tag-chip--sm {
+	padding: 1px var(--space-2);
+	font-size: 0.7rem;
 }
 
 .tag-chip-remove {

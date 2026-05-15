@@ -36,5 +36,10 @@ jobs:
           username: ${{ secrets.VPS_SSH_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/loom-clone && git pull
-            cd server && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+            set -euo pipefail
+            cd ~/loom-clone
+            git fetch --prune origin
+            git reset --hard origin/main
+            cd server
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+            docker image prune -f

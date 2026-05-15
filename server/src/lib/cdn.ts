@@ -50,8 +50,9 @@ export function purgeSlugRename(oldSlug: string, newSlug: string): void {
 // sitemap since tag pages appear there.
 export function purgeTag(slug: string): void {
   const base = getPublicBaseUrl();
-  // Tag pages have no sub-paths beyond /feed.xml + /feed.json — use the
-  // same wildcard pattern as videos for simplicity and future-proofing.
+  // Explicit URLs rather than a wildcard: tag pages live at the bare `/:slug`
+  // path (which a `/${slug}/*` wildcard wouldn't match) plus the two feed
+  // sub-paths. Sitemap is purged because public tags appear in it.
   purgeUrl(`${base}/${slug}`);
   purgeUrl(`${base}/${slug}/feed.xml`);
   purgeUrl(`${base}/${slug}/feed.json`);

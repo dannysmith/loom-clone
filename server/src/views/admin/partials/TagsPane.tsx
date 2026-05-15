@@ -132,14 +132,10 @@ export function TagEditRow({ tag, error }: { tag: Tag; error?: string }) {
 
       <label class="tag-edit-field">
         <span class="tag-edit-label">Description</span>
-        <textarea
-          class="input"
-          name="description"
-          rows={3}
-          placeholder="Optional. Markdown supported."
-        >
-          {tag.description ?? ""}
-        </textarea>
+        {/* Keep the expression flush against the tags to avoid whitespace
+            sneaking into the textarea's initial value. */}
+        {/* biome-ignore format: preserves textarea whitespace */}
+        <textarea class="input" name="description" rows={3} placeholder="Optional. Markdown supported.">{tag.description ?? ""}</textarea>
       </label>
 
       <div class="tag-edit-actions">

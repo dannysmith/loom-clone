@@ -44,6 +44,6 @@ describe("dashboard tag display", () => {
     expect(html).toContain("video-card-tags");
     // But the video has no chip referencing it.
     expect(html).not.toContain(">untagged-tag<");
-    void video;
+    expect(html).toContain(video.slug);
   });
 });

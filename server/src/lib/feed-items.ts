@@ -31,7 +31,7 @@ export function renderRssItem(v: Video): string {
   const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
   const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
   const title = v.title ?? v.slug;
-  const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;
+  const durationSec = v.durationSeconds != null ? Math.round(v.durationSeconds) : undefined;
   const pubDate = new Date(v.completedAt ?? v.createdAt).toUTCString();
   const duration = formatDuration(v.durationSeconds);
   const descParts = [duration, v.description].filter(Boolean);
@@ -74,7 +74,7 @@ export async function loadTranscriptMap(videoIds: string[]): Promise<Map<string,
 export function buildJsonFeedItem(v: Video, transcriptMap: Map<string, string>) {
   const pageUrl = absoluteUrl(`/${v.slug}`);
   const title = v.title ?? v.slug;
-  const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;
+  const durationSec = v.durationSeconds != null ? Math.round(v.durationSeconds) : undefined;
   const transcript = transcriptMap.get(v.id);
   const transcriptExcerpt = transcript ? truncateWords(transcript, TRANSCRIPT_WORD_LIMIT) : null;
 

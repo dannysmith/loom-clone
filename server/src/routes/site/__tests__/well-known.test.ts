@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { siteConfig } from "../../../lib/site-config";
 import { createVideo, setVideoStatus, updateVideo } from "../../../lib/store";
+import { createTag, updateTag } from "../../../lib/tags";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import wellKnown from "../well-known";
 
@@ -106,5 +107,25 @@ describe("GET /sitemap.xml", () => {
     const res = await wellKnown.request("/sitemap.xml");
     const body = await res.text();
     expect(body).not.toContain(video.slug);
+  });
+
+  test("includes public tag pages (no video child)", async () => {
+    const tag = await createTag("tutorials");
+    await updateTag(tag.id, { visibility: "public", slug: "tutorials" });
+
+    const res = await wellKnown.request("/sitemap.xml");
+    const body = await res.text();
+    expect(body).toContain("/tutorials</loc>");
+  });
+
+  test("excludes unlisted and private tags", async () => {
+    const u = await createTag("unl");
+    await updateTag(u.id, { visibility: "unlisted", slug: "unlisted-tag" });
+    await createTag("internal"); // remains private by default
+
+    const res = await wellKnown.request("/sitemap.xml");
+    const body = await res.text();
+    expect(body).not.toContain("unlisted-tag");
+    expect(body).not.toContain("internal");
   });
 });

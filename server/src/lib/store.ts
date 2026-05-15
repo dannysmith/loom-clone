@@ -5,6 +5,8 @@ import { join } from "path";
 import { getDb } from "../db/client";
 import {
   slugRedirects,
+  tagSlugRedirects,
+  tags,
   type Video,
   type VideoTranscript,
   videoSegments,
@@ -112,26 +114,60 @@ export function validateSlugFormat(slug: string): void {
   }
 }
 
-// Checks that a slug is not already taken by another video or redirect.
-// Throws ConflictError if unavailable. `excludeVideoId` is used when
-// renaming an existing video's slug (so its own current slug doesn't clash).
-export function checkSlugAvailable(slug: string, excludeVideoId?: string): void {
+// Checks that a slug is not already taken by any video, tag, or redirect
+// across both namespaces. Throws ConflictError if unavailable.
+//
+// The slug namespace is globally unique across videos and tags so the viewer
+// router has unambiguous dispatch at `/:slug`. Callers pass `exclude` to skip
+// the row that owns the slug today (e.g. when renaming a video's own slug).
+//
+// Signature note: older callers used the positional `excludeVideoId` form;
+// it's still accepted as a string for back-compat with existing test/route
+// code, but new callers should prefer the object form.
+export function checkSlugAvailable(
+  slug: string,
+  exclude?: string | { videoId?: string; tagId?: number },
+): void {
+  const excludeVideoId = typeof exclude === "string" ? exclude : exclude?.videoId;
+  const excludeTagId = typeof exclude === "object" ? exclude?.tagId : undefined;
   const db = getDb();
+
+  // 1. Live video slug
   const slugWhere = excludeVideoId
     ? and(eq(videos.slug, slug), ne(videos.id, excludeVideoId))
     : eq(videos.slug, slug);
-  const taken = db.select({ id: videos.id }).from(videos).where(slugWhere).get();
-  if (taken) {
+  const videoTaken = db.select({ id: videos.id }).from(videos).where(slugWhere).get();
+  if (videoTaken) {
     throw new ConflictError(`Slug "${slug}" is already in use by another video`);
   }
 
-  const redirectTaken = db
-    .select({ oldSlug: slugRedirects.oldSlug, videoId: slugRedirects.videoId })
+  // 2. Video slug redirect
+  const videoRedirect = db
+    .select({ videoId: slugRedirects.videoId })
     .from(slugRedirects)
     .where(eq(slugRedirects.oldSlug, slug))
     .get();
-  if (redirectTaken && redirectTaken.videoId !== excludeVideoId) {
-    throw new ConflictError(`Slug "${slug}" is reserved as a redirect`);
+  if (videoRedirect && videoRedirect.videoId !== excludeVideoId) {
+    throw new ConflictError(`Slug "${slug}" is reserved as a video redirect`);
+  }
+
+  // 3. Live tag slug
+  const tagWhere = excludeTagId
+    ? and(eq(tags.slug, slug), ne(tags.id, excludeTagId))
+    : eq(tags.slug, slug);
+  const tagTaken = db.select({ id: tags.id }).from(tags).where(tagWhere).get();
+  if (tagTaken) {
+    throw new ConflictError(`Slug "${slug}" is already in use by a tag`);
+  }
+
+  // 4. Tag slug redirect
+  const tagRedirect = db
+    .select({ tagId: tagSlugRedirects.tagId })
+    .from(tagSlugRedirects)
+    .where(eq(tagSlugRedirects.oldSlug, slug))
+    .get();
+  if (tagRedirect && tagRedirect.tagId !== excludeTagId) {
+    throw new ConflictError(`Slug "${slug}" is reserved as a tag redirect`);
   }
 }
 

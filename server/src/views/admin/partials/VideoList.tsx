@@ -1,4 +1,4 @@
-import type { Video } from "../../../db/schema";
+import type { Tag, Video } from "../../../db/schema";
 import type { DashboardFilters } from "../../../lib/store";
 import { filtersToParams } from "../../../routes/admin/helpers";
 import { VideoCard } from "../components/VideoCard";
@@ -8,12 +8,13 @@ type Props = {
   nextCursor: string | null;
   filters: DashboardFilters;
   diskSizes: Record<string, number>;
+  videoTags: Record<string, Tag[]>;
   view: string;
 };
 
 // Fragment partial returned by HTMX for search/filter/sort/pagination.
 // Also used inline by DashboardPage for the initial render.
-export function VideoList({ videos, nextCursor, filters, diskSizes, view }: Props) {
+export function VideoList({ videos, nextCursor, filters, diskSizes, videoTags, view }: Props) {
   if (videos.length === 0 && !filters.cursor) {
     return (
       <div id="video-list" class="video-list-empty" data-view={view}>
@@ -26,7 +27,7 @@ export function VideoList({ videos, nextCursor, filters, diskSizes, view }: Prop
     <div id="video-list" data-view={view}>
       <div class="video-list-items">
         {videos.map((v) => (
-          <VideoCard video={v} diskSize={diskSizes[v.id]} />
+          <VideoCard video={v} diskSize={diskSizes[v.id]} tags={videoTags[v.id]} />
         ))}
         {nextCursor && <LoadMoreButton nextCursor={nextCursor} filters={filters} view={view} />}
       </div>
@@ -64,11 +65,18 @@ function LoadMoreButton({
 
 // Appended batch — when "Load More" is clicked, the server returns just the
 // new cards + a new Load More button, meant to replace the old button.
-export function VideoListAppend({ videos, nextCursor, filters, diskSizes, view }: Props) {
+export function VideoListAppend({
+  videos,
+  nextCursor,
+  filters,
+  diskSizes,
+  videoTags,
+  view,
+}: Props) {
   return (
     <>
       {videos.map((v) => (
-        <VideoCard video={v} diskSize={diskSizes[v.id]} />
+        <VideoCard video={v} diskSize={diskSizes[v.id]} tags={videoTags[v.id]} />
       ))}
       {nextCursor && <LoadMoreButton nextCursor={nextCursor} filters={filters} view={view} />}
     </>

@@ -44,3 +44,16 @@ export function purgeSlugRename(oldSlug: string, newSlug: string): void {
   purgeUrl(`${base}/${newSlug}/*`);
   purgeGlobalFeeds();
 }
+
+// Purge the tag page + its feeds. Used when a tag's content/visibility/slug
+// changes, or when a video is added/removed from a tag. Also purges the
+// sitemap since tag pages appear there.
+export function purgeTag(slug: string): void {
+  const base = getPublicBaseUrl();
+  // Tag pages have no sub-paths beyond /feed.xml + /feed.json — use the
+  // same wildcard pattern as videos for simplicity and future-proofing.
+  purgeUrl(`${base}/${slug}`);
+  purgeUrl(`${base}/${slug}/feed.xml`);
+  purgeUrl(`${base}/${slug}/feed.json`);
+  purgeUrl(`${base}/sitemap.xml`);
+}

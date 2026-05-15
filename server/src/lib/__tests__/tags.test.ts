@@ -1,18 +1,30 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../db/client";
-import { videoEvents, videoTags } from "../../db/schema";
+import { tagSlugRedirects, videoEvents, videoTags } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { ConflictError, createVideo, deleteVideo } from "../store";
+import {
+  ConflictError,
+  checkSlugAvailable,
+  completeVideo,
+  createVideo,
+  deleteVideo,
+  updateSlug,
+  updateVideo,
+  ValidationError,
+} from "../store";
 import {
   addTagToVideo,
   createTag,
   deleteTag,
   getTag,
+  getTagsForVideos,
+  getVideosForTag,
   getVideoTags,
   listTags,
   removeTagFromVideo,
   renameTag,
+  resolveTagSlug,
   updateTag,
 } from "../tags";
 
@@ -242,5 +254,220 @@ describe("addTagToVideo / removeTagFromVideo / getVideoTags", () => {
     expect(remaining).toHaveLength(0);
     // Tag itself is not deleted.
     expect(await getTag(tag.id)).toBeDefined();
+  });
+});
+
+describe("tag visibility / slug / description", () => {
+  test("new tags default to private with no slug", async () => {
+    const tag = await createTag("demo");
+    expect(tag.visibility).toBe("private");
+    expect(tag.slug).toBeNull();
+    expect(tag.description).toBeNull();
+  });
+
+  test("public/unlisted tags require a slug", async () => {
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { visibility: "public" })).rejects.toBeInstanceOf(ValidationError);
+    expect(updateTag(tag.id, { visibility: "unlisted" })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("can set slug + visibility together", async () => {
+    const tag = await createTag("demo");
+    const updated = await updateTag(tag.id, { visibility: "public", slug: "demo-tag" });
+    expect(updated.visibility).toBe("public");
+    expect(updated.slug).toBe("demo-tag");
+  });
+
+  test("clearing slug while public throws", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "demo" });
+    expect(updateTag(tag.id, { slug: null })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("can go back to private without clearing slug", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "demo" });
+    const updated = await updateTag(tag.id, { visibility: "private" });
+    expect(updated.visibility).toBe("private");
+    expect(updated.slug).toBe("demo"); // slug preserved
+  });
+
+  test("description is trimmed and nullified when empty", async () => {
+    const tag = await createTag("demo");
+    const updated = await updateTag(tag.id, { description: "  hello world  " });
+    expect(updated.description).toBe("hello world");
+    const cleared = await updateTag(tag.id, { description: "   " });
+    expect(cleared.description).toBeNull();
+  });
+
+  test("invalid slug format rejected", async () => {
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { visibility: "public", slug: "Bad Slug!" })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
+  test("reserved slug rejected", async () => {
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { visibility: "public", slug: "admin" })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+});
+
+describe("slug namespace uniqueness (videos vs tags)", () => {
+  test("a tag slug can't collide with a video slug", async () => {
+    const video = await createVideo();
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { visibility: "public", slug: video.slug })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+  });
+
+  test("a video slug can't collide with a tag slug", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "shared" });
+    const video = await createVideo();
+    expect(updateSlug(video.id, "shared")).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("a tag slug can't collide with a video slug redirect", async () => {
+    const video = await createVideo();
+    const oldSlug = video.slug;
+    await updateSlug(video.id, "renamed");
+    // oldSlug now lives in slug_redirects
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { visibility: "public", slug: oldSlug })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+  });
+
+  test("a video slug can't collide with a tag slug redirect", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "old" });
+    await updateTag(tag.id, { slug: "new" });
+    // 'old' now lives in tag_slug_redirects
+    const video = await createVideo();
+    expect(updateSlug(video.id, "old")).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("checkSlugAvailable accepts a slug nobody owns", () => {
+    expect(() => checkSlugAvailable("brand-new-slug")).not.toThrow();
+  });
+});
+
+describe("tag slug rename and redirect", () => {
+  test("renaming a tag's slug creates a redirect entry", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "old-slug" });
+    await updateTag(tag.id, { slug: "new-slug" });
+
+    const redirect = await getDb()
+      .select()
+      .from(tagSlugRedirects)
+      .where(eq(tagSlugRedirects.oldSlug, "old-slug"))
+      .get();
+    expect(redirect).toBeDefined();
+    expect(redirect?.tagId).toBe(tag.id);
+  });
+
+  test("resolveTagSlug follows redirects with redirected=true", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "old" });
+    await updateTag(tag.id, { slug: "new" });
+
+    const direct = await resolveTagSlug("new");
+    expect(direct?.redirected).toBe(false);
+    expect(direct?.tag.slug).toBe("new");
+
+    const viaRedirect = await resolveTagSlug("old");
+    expect(viaRedirect?.redirected).toBe(true);
+    expect(viaRedirect?.tag.slug).toBe("new");
+  });
+
+  test("resolveTagSlug returns null for private tags", async () => {
+    const tag = await createTag("demo");
+    // Private tag with a slug (set via flipping to public then back).
+    await updateTag(tag.id, { visibility: "public", slug: "demo" });
+    await updateTag(tag.id, { visibility: "private" });
+    expect(await resolveTagSlug("demo")).toBeNull();
+  });
+
+  test("resolveTagSlug returns null for unknown slugs", async () => {
+    expect(await resolveTagSlug("nonexistent")).toBeNull();
+  });
+
+  test("reclaiming an old slug deletes the matching redirect row", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "a" });
+    await updateTag(tag.id, { slug: "b" });
+    // Now 'a' is a redirect → tag
+    await updateTag(tag.id, { slug: "a" });
+    // The 'a' redirect should be gone (otherwise checkSlugAvailable would
+    // have rejected the rename back to 'a').
+    const remaining = await getDb()
+      .select()
+      .from(tagSlugRedirects)
+      .where(eq(tagSlugRedirects.oldSlug, "a"))
+      .get();
+    expect(remaining).toBeUndefined();
+  });
+});
+
+describe("getVideosForTag", () => {
+  async function makeCompleteVideo(visibility: "public" | "unlisted" | "private" = "public") {
+    const v = await createVideo();
+    await updateVideo(v.id, { visibility });
+    await completeVideo(v.id);
+    return v;
+  }
+
+  test("returns public + unlisted videos, excludes private", async () => {
+    const tag = await createTag("demo");
+    const pub = await makeCompleteVideo("public");
+    const unl = await makeCompleteVideo("unlisted");
+    const priv = await makeCompleteVideo("private");
+    await addTagToVideo(pub.id, tag.id);
+    await addTagToVideo(unl.id, tag.id);
+    await addTagToVideo(priv.id, tag.id);
+
+    const videos = await getVideosForTag(tag.id);
+    const ids = videos.map((v) => v.id);
+    expect(ids).toContain(pub.id);
+    expect(ids).toContain(unl.id);
+    expect(ids).not.toContain(priv.id);
+  });
+
+  test("excludes incomplete videos", async () => {
+    const tag = await createTag("demo");
+    const video = await createVideo(); // status: recording
+    await updateVideo(video.id, { visibility: "public" });
+    await addTagToVideo(video.id, tag.id);
+
+    expect(await getVideosForTag(tag.id)).toHaveLength(0);
+  });
+});
+
+describe("getTagsForVideos", () => {
+  test("returns an empty map for an empty input", async () => {
+    expect(await getTagsForVideos([])).toEqual({});
+  });
+
+  test("returns tags grouped by video, sorted by name within each entry", async () => {
+    const a = await createVideo();
+    const b = await createVideo();
+    const c = await createVideo(); // no tags
+    const zulu = await createTag("zulu");
+    const alpha = await createTag("alpha");
+    const mike = await createTag("mike");
+
+    await addTagToVideo(a.id, zulu.id);
+    await addTagToVideo(a.id, alpha.id);
+    await addTagToVideo(b.id, mike.id);
+
+    const map = await getTagsForVideos([a.id, b.id, c.id]);
+    expect(map[a.id]?.map((t) => t.name)).toEqual(["alpha", "zulu"]);
+    expect(map[b.id]?.map((t) => t.name)).toEqual(["mike"]);
+    expect(map[c.id]).toBeUndefined();
   });
 });

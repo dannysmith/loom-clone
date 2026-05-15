@@ -107,8 +107,33 @@ export const tags = sqliteTable("tags", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
   color: text("color").notNull().default("gray"),
+  // Same semantics as videos: private (default) means no public page;
+  // public/unlisted require a slug. unlisted = X-Robots-Tag noindex but
+  // reachable by URL.
+  visibility: text("visibility", { enum: ["public", "unlisted", "private"] })
+    .notNull()
+    .default("private"),
+  // Optional — only required when visibility is unlisted or public. Unique
+  // within the tags table; cross-namespace uniqueness (against video slugs
+  // and the two redirect tables) is enforced at the application layer.
+  slug: text("slug").unique(),
+  description: text("description"),
   createdAt: text("created_at").notNull().$defaultFn(nowIso),
 });
+
+// Mirrors slug_redirects but for tag slug renames. Lookup order at the viewer
+// route is videos.slug → slug_redirects → tags.slug → tag_slug_redirects.
+export const tagSlugRedirects = sqliteTable(
+  "tag_slug_redirects",
+  {
+    oldSlug: text("old_slug").primaryKey(),
+    tagId: integer("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().$defaultFn(nowIso),
+  },
+  (t) => [index("tag_slug_redirects_tag_id_idx").on(t.tagId)],
+);
 
 export const videoTags = sqliteTable(
   "video_tags",
@@ -191,6 +216,7 @@ export type VideoInsert = typeof videos.$inferInsert;
 export type VideoSegment = typeof videoSegments.$inferSelect;
 export type SlugRedirect = typeof slugRedirects.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
+export type TagSlugRedirect = typeof tagSlugRedirects.$inferSelect;
 export type VideoTag = typeof videoTags.$inferSelect;
 export type VideoEvent = typeof videoEvents.$inferSelect;
 export type VideoTranscript = typeof videoTranscripts.$inferSelect;

@@ -1,4 +1,5 @@
 import { TAG_COLORS, type Tag, type TagColor } from "../../../db/schema";
+import { absoluteUrl } from "../../../lib/url";
 
 export function TagsPane({ tags }: { tags: Tag[] }) {
   return (
@@ -36,10 +37,26 @@ export function TagsPane({ tags }: { tags: Tag[] }) {
 }
 
 export function TagRow({ tag }: { tag: Tag }) {
+  const publicUrl = tag.slug && tag.visibility !== "private" ? absoluteUrl(`/${tag.slug}`) : null;
+
   return (
     <div class="tag-row" id={`tag-${tag.id}`}>
       <span class="tag-swatch" style={`background-color: var(--tag-${tag.color})`} />
-      <span class="tag-name">{tag.name}</span>
+      <div class="tag-row-summary">
+        <span class="tag-name">{tag.name}</span>
+        <span class={`badge badge--${tag.visibility}`}>{tag.visibility}</span>
+        {publicUrl && (
+          <a
+            href={publicUrl}
+            class="tag-row-public-url"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open public tag page"
+          >
+            /{tag.slug}
+          </a>
+        )}
+      </div>
       <button
         type="button"
         class="btn btn--sm"
@@ -63,29 +80,82 @@ export function TagRow({ tag }: { tag: Tag }) {
   );
 }
 
-export function TagEditRow({ tag }: { tag: Tag }) {
+export function TagEditRow({ tag, error }: { tag: Tag; error?: string }) {
   return (
     <form
-      class="tag-row tag-row--editing"
+      class="tag-row tag-row--editing tag-row--form"
       id={`tag-${tag.id}`}
       hx-patch={`/admin/settings/tags/${tag.id}`}
       hx-target={`#tag-${tag.id}`}
       hx-swap="outerHTML"
     >
-      <input class="input tag-edit-name" type="text" name="name" value={tag.name} required />
-      <ColorPicker current={tag.color as TagColor} />
-      <button type="submit" class="btn btn--primary btn--sm">
-        Save
-      </button>
-      <button
-        type="button"
-        class="btn btn--sm"
-        hx-get={`/admin/settings/tags/${tag.id}/display`}
-        hx-target={`#tag-${tag.id}`}
-        hx-swap="outerHTML"
-      >
-        Cancel
-      </button>
+      {error && <div class="tag-edit-error">{error}</div>}
+
+      <label class="tag-edit-field">
+        <span class="tag-edit-label">Name</span>
+        <input class="input" type="text" name="name" value={tag.name} required />
+      </label>
+
+      <div class="tag-edit-field">
+        <span class="tag-edit-label">Colour</span>
+        <ColorPicker current={tag.color as TagColor} />
+      </div>
+
+      <label class="tag-edit-field">
+        <span class="tag-edit-label">Visibility</span>
+        <select class="input" name="visibility">
+          {(["private", "unlisted", "public"] as const).map((v) => (
+            <option value={v} selected={v === tag.visibility}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <span class="tag-edit-help">
+          Public/unlisted tags need a slug. Private tags have no public page.
+        </span>
+      </label>
+
+      <label class="tag-edit-field">
+        <span class="tag-edit-label">Slug</span>
+        <input
+          class="input"
+          type="text"
+          name="slug"
+          value={tag.slug ?? ""}
+          placeholder="my-tag"
+          pattern="[a-z0-9](?:-?[a-z0-9])*"
+        />
+        <span class="tag-edit-help">
+          Lowercase letters, digits, dashes. Renaming preserves a redirect from the old slug.
+        </span>
+      </label>
+
+      <label class="tag-edit-field">
+        <span class="tag-edit-label">Description</span>
+        <textarea
+          class="input"
+          name="description"
+          rows={3}
+          placeholder="Optional. Markdown supported."
+        >
+          {tag.description ?? ""}
+        </textarea>
+      </label>
+
+      <div class="tag-edit-actions">
+        <button type="submit" class="btn btn--primary btn--sm">
+          Save
+        </button>
+        <button
+          type="button"
+          class="btn btn--sm"
+          hx-get={`/admin/settings/tags/${tag.id}/display`}
+          hx-target={`#tag-${tag.id}`}
+          hx-swap="outerHTML"
+        >
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

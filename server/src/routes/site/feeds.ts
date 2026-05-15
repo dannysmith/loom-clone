@@ -1,10 +1,16 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
-import { type Video, videos, videoTranscripts } from "../../db/schema";
+import { type Video, videos } from "../../db/schema";
+import {
+  buildJsonFeedItem,
+  escapeXml,
+  loadTranscriptMap,
+  renderRssItem,
+} from "../../lib/feed-items";
 import { formatDuration } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
-import { absoluteUrl, activeRawFilename, getPublicBaseUrl } from "../../lib/url";
+import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
 
 // Public feeds: RSS, JSON Feed, llms.txt. No auth.
 const feeds = new Hono();
@@ -28,37 +34,7 @@ feeds.get("/rss", (c) => c.redirect("/feed.xml", 301));
 
 feeds.get("/feed.xml", async (c) => {
   const rows = await listPublicVideos();
-
-  const items = rows.map((v) => {
-    const pageUrl = absoluteUrl(`/${v.slug}`);
-    const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
-    const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
-    const title = v.title ?? v.slug;
-    const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;
-    const pubDate = new Date(v.completedAt ?? v.createdAt).toUTCString();
-    const duration = formatDuration(v.durationSeconds);
-    const descParts = [duration, v.description].filter(Boolean);
-    const descText = descParts.length > 0 ? descParts.join(" — ") : undefined;
-
-    return [
-      "    <item>",
-      `      <title>${escapeXml(title)}</title>`,
-      `      <link>${escapeXml(pageUrl)}</link>`,
-      `      <guid isPermaLink="true">${escapeXml(pageUrl)}</guid>`,
-      `      <pubDate>${pubDate}</pubDate>`,
-      descText ? `      <description>${escapeXml(descText)}</description>` : null,
-      v.fileBytes != null
-        ? `      <enclosure url="${escapeXml(mp4Url)}" length="${v.fileBytes}" type="video/mp4" />`
-        : `      <enclosure url="${escapeXml(mp4Url)}" length="0" type="video/mp4" />`,
-      `      <media:content url="${escapeXml(mp4Url)}" type="video/mp4" medium="video"${durationSec != null ? ` duration="${durationSec}"` : ""}${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""} />`,
-      `      <media:thumbnail url="${escapeXml(posterUrl)}" />`,
-      `      <media:title>${escapeXml(title)}</media:title>`,
-      descText ? `      <media:description>${escapeXml(descText)}</media:description>` : null,
-      "    </item>",
-    ]
-      .filter(Boolean)
-      .join("\n");
-  });
+  const items = rows.map(renderRssItem);
 
   const feedUrl = absoluteUrl("/feed.xml");
   const siteUrl = absoluteUrl("/");
@@ -87,62 +63,12 @@ feeds.get("/feed.xml", async (c) => {
 // JSON Feed 1.1
 // ---------------------------------------------------------------------------
 
-const TRANSCRIPT_WORD_LIMIT = 200;
-
 feeds.get("/feed.json", async (c) => {
   const rows = await listPublicVideos();
-
-  // Batch-fetch transcripts for all public videos in one query.
-  const videoIds = rows.map((v) => v.id);
-  const transcriptMap = new Map<string, string>();
-  if (videoIds.length > 0) {
-    const transcripts = await getDb()
-      .select({
-        videoId: videoTranscripts.videoId,
-        plainText: videoTranscripts.plainText,
-      })
-      .from(videoTranscripts)
-      .where(inArray(videoTranscripts.videoId, videoIds));
-    for (const t of transcripts) {
-      transcriptMap.set(t.videoId, t.plainText);
-    }
-  }
-
+  const transcriptMap = await loadTranscriptMap(rows.map((v) => v.id));
   const base = getPublicBaseUrl();
 
-  const items = rows.map((v) => {
-    const pageUrl = absoluteUrl(`/${v.slug}`);
-    const title = v.title ?? v.slug;
-    const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;
-    const transcript = transcriptMap.get(v.id);
-    const transcriptExcerpt = transcript ? truncateWords(transcript, TRANSCRIPT_WORD_LIMIT) : null;
-
-    return {
-      id: pageUrl,
-      url: pageUrl,
-      title,
-      ...(v.description && { content_text: v.description }),
-      image: absoluteUrl(`/${v.slug}/poster.jpg`),
-      date_published: v.completedAt ?? v.createdAt,
-      ...(durationSec != null && { _duration_seconds: durationSec }),
-      ...(transcriptExcerpt && { _transcript_excerpt: transcriptExcerpt }),
-      attachments: [
-        {
-          url: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
-          mime_type: "video/mp4",
-          ...(durationSec != null && { duration_in_seconds: durationSec }),
-        },
-      ],
-      _urls: {
-        page: pageUrl,
-        embed: absoluteUrl(`/${v.slug}/embed`),
-        json: absoluteUrl(`/${v.slug}.json`),
-        md: absoluteUrl(`/${v.slug}.md`),
-        raw: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
-        poster: absoluteUrl(`/${v.slug}/poster.jpg`),
-      },
-    };
-  });
+  const items = rows.map((v) => buildJsonFeedItem(v, transcriptMap));
 
   const feed = {
     info_for_llms: `This is a JSON Feed (v1.1) of all public videos hosted at ${base}. Each item includes video metadata, URLs, and a truncated transcript excerpt. For a full machine-readable index of this site, see ${absoluteUrl("/llms.txt")}. For full metadata on any individual video, append .json to its URL (e.g. ${base}/<slug>.json).`,
@@ -223,24 +149,5 @@ feeds.get("/llms.txt", async (c) => {
     "content-type": "text/plain; charset=utf-8",
   });
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function truncateWords(text: string, limit: number): string {
-  const words = text.split(/\s+/);
-  if (words.length <= limit) return text;
-  return `${words.slice(0, limit).join(" ")}…`;
-}
 
 export default feeds;

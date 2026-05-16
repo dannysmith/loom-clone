@@ -341,10 +341,42 @@ videoRoutes.post("/:id/thumbnail/promote", async (c) => {
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_UPLOAD_WIDTH = 3840;
 
-// Save a thumbnail JPEG as a candidate without promoting it. Called by the
-// cover-image generator, which produces a 1545×869 image whose dimensions
-// we already control — so the ffprobe width check from /thumbnail/upload
-// is skipped here. saveCustomThumbnail() resizes to ≤1280px wide regardless.
+// Probe the image's pixel width via ffprobe. Returns null if ffprobe isn't
+// available or can't read the file (in which case the caller proceeds —
+// saveCustomThumbnail will resize regardless). Writes a temp file because
+// ffprobe needs a path, not a buffer.
+async function probeImageWidth(videoId: string, imageData: ArrayBuffer): Promise<number | null> {
+  const ffprobePath = Bun.which("ffprobe");
+  if (!ffprobePath) return null;
+
+  const tmpPath = `data/${videoId}/derivatives/thumbnail-candidates/_upload-check.tmp`;
+  await Bun.write(tmpPath, imageData);
+  try {
+    const proc = Bun.spawn(
+      [
+        ffprobePath,
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_streams",
+        "-select_streams",
+        "v:0",
+        tmpPath,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (exitCode !== 0) return null;
+    const data = JSON.parse(stdout) as { streams?: Array<{ width?: number }> };
+    return data.streams?.[0]?.width ?? null;
+  } finally {
+    const { rm } = await import("fs/promises");
+    await rm(tmpPath, { force: true }).catch(() => {});
+  }
+}
+
+// Save a thumbnail JPEG as a candidate without promoting it.
 videoRoutes.post("/:id/thumbnail/add-candidate", async (c) => {
   const id = c.req.param("id");
   const result = await requireVideo(c);
@@ -359,6 +391,12 @@ videoRoutes.post("/:id/thumbnail/add-candidate", async (c) => {
   }
 
   const imageData = await file.arrayBuffer();
+
+  const width = await probeImageWidth(id, imageData);
+  if (width !== null && width > MAX_UPLOAD_WIDTH) {
+    return c.json({ error: `Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)` }, 400);
+  }
+
   const candidateId = await saveCustomThumbnail(id, imageData);
   await logEvent(id, "thumbnail_uploaded", { candidateId, source: "cover-generator" });
 
@@ -377,38 +415,9 @@ videoRoutes.post("/:id/thumbnail/upload", async (c) => {
 
   const imageData = await file.arrayBuffer();
 
-  // Basic dimension check via ffprobe before saving.
-  const ffprobePath = Bun.which("ffprobe");
-  if (ffprobePath) {
-    const tmpPath = `data/${id}/derivatives/thumbnail-candidates/_upload-check.tmp`;
-    await Bun.write(tmpPath, imageData);
-    try {
-      const proc = Bun.spawn(
-        [
-          ffprobePath,
-          "-v",
-          "quiet",
-          "-print_format",
-          "json",
-          "-show_streams",
-          "-select_streams",
-          "v:0",
-          tmpPath,
-        ],
-        { stdout: "pipe", stderr: "pipe" },
-      );
-      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      if (exitCode === 0) {
-        const data = JSON.parse(stdout) as { streams?: Array<{ width?: number }> };
-        const width = data.streams?.[0]?.width ?? 0;
-        if (width > MAX_UPLOAD_WIDTH) {
-          return c.text(`Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)`, 400);
-        }
-      }
-    } finally {
-      const { rm } = await import("fs/promises");
-      await rm(tmpPath, { force: true }).catch(() => {});
-    }
+  const width = await probeImageWidth(id, imageData);
+  if (width !== null && width > MAX_UPLOAD_WIDTH) {
+    return c.text(`Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)`, 400);
   }
 
   const candidateId = await saveCustomThumbnail(id, imageData);

@@ -56,6 +56,8 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
     try {
       const url = await withSvg(exportPng);
       if (url) setPreviewUrl(url);
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'Preview failed');
     } finally {
       setWorking(null);
     }
@@ -68,6 +70,8 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
       if (!url) return;
       const ext = kind === 'jpeg' ? 'jpg' : kind;
       downloadDataUrl(url, `cover.${ext}`);
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : `${kind.toUpperCase()} export failed`);
     } finally {
       setWorking(null);
     }

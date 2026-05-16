@@ -19,10 +19,15 @@ export function loadEntryAssets(entryName: string): { scripts: string } {
   if (existsSync(manifestPath)) {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Manifest;
     const entry = manifest[entryName];
-    const css = (entry?.css ?? [])
+    if (!entry?.file) {
+      throw new Error(
+        `Vite manifest is missing entry "${entryName}". Run \`bun run build\` in server/editor.`,
+      );
+    }
+    const css = (entry.css ?? [])
       .map((f) => `<link rel="stylesheet" href="/static/editor/${f}">`)
       .join("\n    ");
-    const script = `<script type="module" src="/static/editor/${entry?.file}"></script>`;
+    const script = `<script type="module" src="/static/editor/${entry.file}"></script>`;
     return { scripts: `${css}\n    ${script}` };
   }
 

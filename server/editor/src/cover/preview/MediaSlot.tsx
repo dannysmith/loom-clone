@@ -29,9 +29,20 @@ export function MediaSlot({ slot, onMove }: Props) {
       setNaturalAspect(null);
       return;
     }
+    let cancelled = false;
     const img = new Image();
-    img.onload = () => setNaturalAspect(img.naturalWidth / img.naturalHeight);
+    img.onload = () => {
+      if (!cancelled) setNaturalAspect(img.naturalWidth / img.naturalHeight);
+    };
+    img.onerror = () => {
+      if (!cancelled) setNaturalAspect(null);
+    };
     img.src = slot.imageSrc;
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+    };
   }, [slot.imageSrc]);
 
   if (!slot.enabled || !slot.imageSrc) return null;

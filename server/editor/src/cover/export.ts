@@ -192,6 +192,9 @@ async function buildEmbeddedFontsCss(): Promise<string> {
 
 async function fetchAsDataUrl(url: string): Promise<string> {
   const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  }
   const blob = await res.blob();
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();

@@ -341,6 +341,30 @@ videoRoutes.post("/:id/thumbnail/promote", async (c) => {
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_UPLOAD_WIDTH = 3840;
 
+// Save a thumbnail JPEG as a candidate without promoting it. Called by the
+// cover-image generator, which produces a 1545×869 image whose dimensions
+// we already control — so the ffprobe width check from /thumbnail/upload
+// is skipped here. saveCustomThumbnail() resizes to ≤1280px wide regardless.
+videoRoutes.post("/:id/thumbnail/add-candidate", async (c) => {
+  const id = c.req.param("id");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+
+  const body = await c.req.parseBody();
+  const file = body.thumbnail;
+  if (!(file instanceof File)) return c.json({ error: "No file uploaded" }, 400);
+  if (file.size > MAX_UPLOAD_SIZE) return c.json({ error: "File too large (max 5 MB)" }, 400);
+  if (!file.type.startsWith("image/jpeg") && !file.type.startsWith("image/png")) {
+    return c.json({ error: "Only JPEG and PNG uploads accepted" }, 400);
+  }
+
+  const imageData = await file.arrayBuffer();
+  const candidateId = await saveCustomThumbnail(id, imageData);
+  await logEvent(id, "thumbnail_uploaded", { candidateId, source: "cover-generator" });
+
+  return c.json({ ok: true, candidateId });
+});
+
 videoRoutes.post("/:id/thumbnail/upload", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.parseBody();

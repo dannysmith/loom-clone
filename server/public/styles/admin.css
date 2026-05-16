@@ -1848,6 +1848,10 @@ select.input {
 	gap: var(--space-3);
 }
 
+.cover-editor-link {
+	margin-top: var(--space-3);
+}
+
 /* ------- Transcript view ------- */
 
 .transcript-view {

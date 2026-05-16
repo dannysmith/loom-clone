@@ -1,13 +1,12 @@
 import { zValidator } from "@hono/zod-validator";
-import { readFileSync } from "fs";
 import { Hono } from "hono";
 import { raw } from "hono/html";
 import { join } from "path";
 import { z } from "zod";
 import { applyEdits } from "../../lib/edit-pipeline";
 import { serveFileWithRange } from "../../lib/file-serve";
-import { PUBLIC_ROOT } from "../../lib/static-assets";
 import { DATA_DIR } from "../../lib/store";
+import { loadEntryAssets } from "../../lib/vite-manifest";
 import { type AdminEnv, requireVideo } from "./helpers";
 
 function escapeAttr(s: string): string {
@@ -30,28 +29,7 @@ editor.get("/:id/editor", async (c) => {
     return c.text("Cannot edit a trashed video", 400);
   }
 
-  let scripts: string;
-  const manifestPath = join(PUBLIC_ROOT, "editor", ".vite", "manifest.json");
-  const manifestExists = await Bun.file(manifestPath).exists();
-
-  if (manifestExists) {
-    // Production: load built assets from the Vite manifest.
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
-      string,
-      { file: string; css?: string[] }
-    >;
-    const entry = manifest["index.html"];
-    const css = (entry?.css ?? [])
-      .map((f: string) => `<link rel="stylesheet" href="/static/editor/${f}">`)
-      .join("\n    ");
-    scripts = `${css}\n    <script type="module" src="/static/editor/${entry?.file}"></script>`;
-  } else {
-    // Dev: load from Vite dev server for HMR.
-    scripts = [
-      '<script type="module" src="http://localhost:5173/static/editor/@vite/client"></script>',
-      '<script type="module" src="http://localhost:5173/static/editor/src/main.tsx"></script>',
-    ].join("\n    ");
-  }
+  const { scripts } = loadEntryAssets("index.html");
 
   const title = escapeAttr(video.title || video.slug);
 

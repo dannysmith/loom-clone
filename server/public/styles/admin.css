@@ -1848,8 +1848,11 @@ select.input {
 	gap: var(--space-3);
 }
 
-.cover-editor-link {
-	margin-top: var(--space-3);
+.thumbnail-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
 }
 
 /* ------- Transcript view ------- */

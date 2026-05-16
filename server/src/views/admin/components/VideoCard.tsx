@@ -9,7 +9,9 @@ import {
   IconDuplicate,
   IconEllipsis,
   IconExternalLink,
+  IconFileImage,
   IconFolder,
+  IconScissors,
   IconTrash,
   VisibilityBadge,
 } from "./Icons";
@@ -115,6 +117,12 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
             <IconEllipsis size={14} />
           </button>
           <div id={popoverId} popover="auto" class="video-card-popover">
+            <a href={`/admin/videos/${video.id}/editor`} class="popover-item">
+              <IconScissors size={14} /> Open editor
+            </a>
+            <a href={`/admin/videos/${video.id}/cover`} class="popover-item">
+              <IconFileImage size={14} /> Open cover editor
+            </a>
             {isPublicOrUnlisted && (
               <>
                 <a href={`/${video.slug}`} target="_blank" rel="noopener" class="popover-item">

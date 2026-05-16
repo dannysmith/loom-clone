@@ -189,11 +189,6 @@ export function VideoDetailPage({
 
       {/* --- Thumbnail picker --- */}
       <ThumbnailPicker video={video} candidates={thumbnailCandidates} />
-      <div class="cover-editor-link">
-        <a href={`/admin/videos/${video.id}/cover`} class="btn btn--sm btn--secondary">
-          Open cover editor
-        </a>
-      </div>
 
       {/* --- Tabs --- */}
       <VideoTabsSection

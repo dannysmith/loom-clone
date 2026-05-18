@@ -49,8 +49,8 @@ These are dark-mode only and are currently pretty simple. Styling these may also
 - Brand Accent - red-500-standard (#FF7369)
 - Brand BG Dark - bg-light-700 (#2F3437)
 - Brand BG Darker - bg-light-800 (#191919)
-- Brand BG Light - 
-- Brand BG Lighter - 
+- Brand BG Light - TBD
+- Brand BG Lighter - TBD
 - Brand White - #fff
 - Brand Black - #191919
 - Brand Highlight 1 (Pink) - red-400
@@ -59,7 +59,93 @@ These are dark-mode only and are currently pretty simple. Styling these may also
 
 ### Full Palette
 
-[insert here]
+Each hue runs from 800 (darkest) → 300 (lightest). The `-500-standard` shade is the canonical/standard tone for that hue.
+
+#### Pink
+
+- pink-800 — `#533B4C`
+- pink-700 — `#602D51`
+- pink-600 — `#AD1A72`
+- pink-500-standard — `#E255A1`
+- pink-400 — `#FAC8E4`
+- pink-300 — `#F4DFEB`
+
+#### Red
+
+- red-800 — `#594141`
+- red-700 — `#B84848`
+- red-600 — `#E03E3E`
+- red-500-standard — `#FF7369`
+- red-400 — `#FFD4D4`
+- red-300 — `#FBE4E4`
+
+#### Orange
+
+- orange-800 — `#594A3A`
+- orange-700 — `#765839`
+- orange-600 — `#D9730D`
+- orange-500-standard — `#FFA344`
+- orange-400 — `#FED9B7`
+- orange-300 — `#FAEBDD`
+
+#### Yellow
+
+- yellow-800 — `#59563B`
+- yellow-700 — `#645E26`
+- yellow-600 — `#DFAB01`
+- yellow-500-standard — `#FFDC49`
+- yellow-400 — `#FEEEBE`
+- yellow-300 — `#FBF3DB`
+
+#### Green
+
+- green-800 — `#354C4B`
+- green-700 — `#2C5C5A`
+- green-600 — `#0F7B6C`
+- green-500-standard — `#4DAB9A`
+- green-400 — `#C8EAE3`
+- green-300 — `#DDEDEA`
+
+#### Blue
+
+- blue-800 — `#364954`
+- blue-700 — `#254E66`
+- blue-600 — `#0B6E99`
+- blue-500-standard — `#529CCA`
+- blue-400 — `#C4E4F2`
+- blue-300 — `#DDEBF1`
+
+#### Purple
+
+- purple-800 — `#443F57`
+- purple-700 — `#6F6695`
+- purple-600 — `#6940A5`
+- purple-500-standard — `#9A6DD7`
+- purple-400 — `#E6D7F9`
+- purple-300 — `#EAE4F2`
+
+#### Brown
+
+- brown-800 — `#434040`
+- brown-700 — `#534343`
+- brown-600 — `#64473A`
+- brown-500-standard — `#937264`
+- brown-400 — `#F1E0D8`
+- brown-300 — `#E9E5E3`
+
+#### Grey
+
+- grey-800 — `#454B4E`
+- grey-700 — `#596063`
+- grey-600 — `#9B9A97`
+- grey-500-standard — `rgba(151, 154, 155, 0.95)`
+- grey-400 — `#EBECED`
+- grey-300 — `#EBECED`
+
+#### Neutrals & Backgrounds
+
+- bg/light/bg-light-700 — `#2F3437`
+- bg/light/bg-light-800 — `#191919`
 
 ## Implementation Plan
 

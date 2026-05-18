@@ -18,7 +18,7 @@ type Props = {
 
 const CUT_COLOR = "rgba(239, 68, 68, 0.4)";
 const DIMMED_COLOR = "rgba(0, 0, 0, 0.65)";
-const TRIM_HANDLE_COLOR = "rgba(255, 255, 255, 0.15)";
+const TRIM_HANDLE_COLOR = "rgba(255, 255, 255, 0.06)";
 // Amber, distinct from the red of committed cuts and the white-ish trim handles.
 const SUGGESTED_CUT_COLOR = "rgba(217, 119, 6, 0.55)";
 const SUGGESTED_TRIM_COLOR = "rgba(217, 119, 6, 0.35)";
@@ -169,8 +169,11 @@ export function Waveform({
     const ws = WaveSurfer.create({
       container: containerRef.current,
       height: 80,
-      waveColor: "oklch(0.65 0.12 250)",
-      progressColor: "oklch(0.55 0.15 250)",
+      // Match the cover editor's accent (#ff7369). Wavesurfer reads these
+      // once at create time and bakes them into the canvas, so CSS vars
+      // won't propagate — keep these in sync with --accent in editor.css.
+      waveColor: "#ff7369",
+      progressColor: "#cc5852",
       cursorColor: "#fff",
       cursorWidth: 2,
       barWidth: 2,

@@ -77,6 +77,9 @@ body {
 .editor-toolbar-left {
   flex: 1;
   min-width: 0;
+  /* Wider gap between back link and title — matches the cover editor's
+     16px spacing in its topbar. Button clusters keep 0.5rem. */
+  gap: 1rem;
 }
 
 .editor-toolbar-right {
@@ -357,10 +360,12 @@ body {
   position: relative;
   padding: 0.25rem 0;
   min-height: 90px;
+  background: var(--panel-bg-input);
 }
 
 .editor-waveform-container {
   width: 100%;
+  background: transparent;
 }
 
 .editor-waveform-loading {
@@ -369,7 +374,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--text-dim);
   font-size: 0.8rem;
 }
 

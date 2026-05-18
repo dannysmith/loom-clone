@@ -203,16 +203,15 @@ Material findings from the audit; these will inform Phase 2 / 3 / 5.
 
 ### Primary Colours
 
-- Brand Accent - red-500-standard (#FF7369)
-- Brand BG Dark - bg-light-700 (#2F3437)
-- Brand BG Darker - bg-light-800 (#191919)
-- Brand BG Light - TBD
-- Brand BG Lighter - TBD
-- Brand White - #fff
-- Brand Black - #191919
-- Brand Highlight 1 (Pink) - red-400
-- Brand Highlight 2 (Orange) - orange-400
-- Brand Highlight 1 (Pink) - red-400
+- Brand Accent — red-500-standard (`#FF7369`)
+- Brand BG Dark — bg-light-700 (`#2F3437`)
+- Brand BG Darker — bg-light-800 (`#191919`)
+- Brand BG Light — Brand White (`#FFFFFF`)
+- Brand BG Lighter — `#FAFAFA` (off-white; one step below White for surfaces)
+- Brand White — `#FFFFFF`
+- Brand Black — `#191919`
+- Brand Highlight 1 (Pink) — red-400 (`#FFD4D4`)
+- Brand Highlight 2 (Orange) — orange-400 (`#FED9B7`)
 
 ### Full Palette
 
@@ -304,82 +303,229 @@ Each hue runs from 800 (darkest) → 300 (lightest). The `-500-standard` shade i
 - bg/light/bg-light-700 — `#2F3437`
 - bg/light/bg-light-800 — `#191919`
 
+## Design Decisions
+
+Outcome of the Phase 1 audit + collaborative decision pass. All hex values will be expressed as `oklch(...)` in `tokens.css` so they compose cleanly with `color-mix()`, `light-dark()`, and runtime modifiers. Brand palette colours are the *source* — only invent new tokens when the palette doesn't cover a role.
+
+### Core principles
+
+- **Source from the brand palette.** Only mint new colours when the palette doesn't cover a role.
+- **Express everything in OKLCH.** Hex inputs convert to OKLCH on the way in; downstream tokens use `oklch(...)` so we can use `color-mix()` and `from <color>` modifications safely.
+- **Pure neutrals.** Background/surface/border greys stay achromatic (or near-achromatic) — they don't tint warm to harmonise with the coral. The coral will pop more against neutral surfaces; we can revisit if it feels off in practice.
+- **Tag palette ≠ icon palette.** User-pickable tag colours and system-assigned icon colours are *separate* concerns even when they happen to draw from the same brand hues.
+- **Editors and admin share tokens; viewer is fully separate.** Admin + both editors consume the same token file but the editors stay dark-only (light-mode rules ignored). Public viewer pages get their own lean CSS bundle that does NOT include `admin.css` or its dependencies (see Phase 4).
+
+### Semantic colour tokens
+
+#### Surfaces, text, borders
+
+| Token | Light | Dark | Brand origin |
+| --- | --- | --- | --- |
+| `--color-bg` | `#FFFFFF` | `#191919` | Brand White / Brand Black (bg-light-800) |
+| `--color-surface` | `#FAFAFA` | `#2F3437` | new off-white / bg-light-700 |
+| `--color-surface-hover` | derived (~`#F0F0F1`) | derived (~`#3A4044`) | one-step elevation on surface; new — replaces ~15 hand-rolled `light-dark(neutral-100, neutral-800)` patterns |
+| `--color-surface-active` | derived (~`#E8E8E9`) | derived (~`#454B4E`) | two-step elevation, also = grey-800 brand |
+| `--color-border` | grey-400 (`#EBECED`) | derived (~`#3A4044`) | brand grey-400 light / one step lighter than surface dark |
+| `--color-fg` | Brand Black (`#191919`) | `#E8E8E8` | brand black light / soft white in dark (matches cover editor `--text`) |
+| `--color-fg-muted` | grey-700 (`#596063`) | grey-600 (`#9B9A97`) | brand greys |
+| `--color-accent` | red-500 (`#FF7369`) | red-500 | brand coral, both modes |
+| `--color-accent-hover` | red-600 (`#E03E3E`) | red-600 | brand red-600 |
+| `--color-accent-fg` | Brand White | Brand Black | text on filled accent buttons |
+
+#### Semantic state (light + dark)
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `--color-danger` | red-600 (`#E03E3E`) | red-500 (`#FF7369`) | Errors, destructive button outlines, danger fill background |
+| `--color-danger-bg` | red-400 (`#FFD4D4`) | red-800 (`#594141`) | Error backgrounds, danger pill backgrounds |
+| `--color-danger-border` | red-500 | red-700 | Error / danger outlines |
+| `--color-warning` | orange-600 (`#D9730D`) | orange-500 (`#FFA344`) | Warning text + foreground |
+| `--color-warning-bg` | orange-400 (`#FED9B7`) | orange-800 (`#594A3A`) | Warning pill backgrounds |
+| `--color-warning-border` | orange-500 | orange-700 | (new — matches danger/success having borders) |
+| `--color-success` | green-600 (`#0F7B6C`) | green-500 (`#4DAB9A`) | Success states |
+| `--color-success-bg` | green-400 (`#C8EAE3`) | green-800 (`#354C4B`) | Success pill backgrounds |
+| `--color-success-border` | green-500 | green-700 | Success outlines |
+| `--color-info` | blue-600 (`#0B6E99`) | blue-500 (`#529CCA`) | Info / neutral-positive |
+| `--color-info-bg` | blue-400 (`#C4E4F2`) | blue-800 (`#364954`) | Info pill backgrounds |
+| `--color-info-border` | blue-500 | blue-700 | Info outlines (new) |
+| `--color-overlay` | `oklch(0% 0 0 / 0.5)` | `oklch(0% 0 0 / 0.6)` | Dialog backdrops, video letterbox, embed pre-play scrim — replaces hardcoded blacks |
+
+### Role assignments
+
+#### Primary / secondary / danger actions
+
+- **Primary CTA** — `.btn--primary` = filled `--color-accent` (coral), text `--color-accent-fg`.
+- **Secondary CTA** — default `.btn` = outline 1px `--color-border`, surface background, fg text. Drop the orphan `.btn--secondary` name (rename usages to `.btn`).
+- **Ghost** — new `.btn--ghost` = no border, transparent background, hover → `--color-surface-hover`. Replaces the ~5 hand-rolled patterns (sidebar nav, sort-dir, view-toggle, color-picker option, tag-chip-remove).
+- **Danger outline** — `.btn--danger` = outline `--color-danger-border`, text `--color-danger`, hover bg `--color-danger-bg`.
+- **Danger filled** — `.btn--danger-solid` = bg `--color-danger`, text white.
+
+#### Visibility (badge + filter pill colour)
+
+- **public** — `--color-info` (blue) — confirmed unchanged from current.
+- **unlisted** — neutral surface/fg-muted — confirmed unchanged.
+- **private** — `red-700` (`#B84848`, muted "restricted" red). **Recommended over orange/amber** to keep visual separation from background-processing statuses below; subject to your confirmation.
+
+#### Video status (badges + filter pills)
+
+- **recording** — `red-600` (`#E03E3E`, vibrant red — reads as "live"). Differs from accent so it doesn't blur into primary CTAs.
+- **healing** — `orange-500` (`#FFA344`).
+- **processing** — `orange-500`.
+- **deleting** — `orange-500`. (Confirmed in `db/schema.ts:21`.)
+- **complete** — no explicit badge styling (renders neutral / hidden). Boring = success.
+- **failed** — `red-700` (`#B84848`, muted alarm — distinct from "recording" red).
+
+#### Selected vs hover
+
+- **Selected / active** (sidebar nav active, active filter pill, promoted thumbnail, "current tab"): `--color-accent` tinted background using `color-mix(in oklch, var(--color-accent) 12%, var(--color-surface))` + 1px `--color-accent` border.
+- **Hover** on cards/buttons/rows: `--color-surface-hover` (subtle neutral lift). Distinct from selected.
+
+#### Editor: trim / cut / chapter
+
+- **chapter** — `orange-500` (`#FFA344`) — already in use as `oklch(0.78 0.18 60)`, swap to brand orange.
+- **cut** — `red-700` (`#B84848`) — already a destructive red, swap to brand red-700.
+- **trim** — `blue-700` (`#254E66`) — non-destructive, muted blue band. Distinct from chapter and cut.
+
+#### "Edited" indicator
+
+- `--color-info` (blue) — reuse the info colour. (Currently uses `--tag-blue`; switching it removes one of the icon/tag colour collisions.)
+
+### File-browser icon colours (semantic, brand-sourced)
+
+A separate semantic ramp — independent of `--tag-*`. Names describe the *role*, values come from the brand palette.
+
+| Role | Token | Brand source | Used for |
+| --- | --- | --- | --- |
+| Folder | `--icon-folder` | blue-500 (`#529CCA`) | Directory rows |
+| Video media | `--icon-video` | purple-500 (`#9A6DD7`) | `.mp4`, `.mov` |
+| Segment | `--icon-segment` | purple-700 (`#6F6695`) | `.m4s` (deeper purple to distinguish from full video) |
+| Playlist | `--icon-playlist` | green-500 (`#4DAB9A`) | `.m3u8` |
+| Config / data | `--icon-config` | orange-500 (`#FFA344`) | `recording.json` |
+| Structured data | `--icon-data` | yellow-500 (`#FFDC49`) | other `.json` |
+| Image | `--icon-image` | pink-500 (`#E255A1`) | `.jpg`, `.png`, `.webp` |
+| Audio | `--icon-audio` | brown-500 (`#937264`) | `.mp3`, `.aac`, `.wav` |
+| Text / log | `--icon-text` | `--color-fg-muted` | `.txt`, `.md`, `.log`, `init.mp4` |
+
+### Tag palette (user-pickable, brand-sourced)
+
+Replaces the current 10-option OKLCH set with the brand's 8 hues + grey = 9 options. Aligns with brand standard tones.
+
+Available: `pink`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `brown`, `grey`.
+
+**Chip rendering — recommended (subject to confirmation):**
+
+- **Light mode** — background `<hue>-400` + text `<hue>-800` (e.g. pink-400 `#FAC8E4` background + pink-800 `#533B4C` text). Soft pastel reads as a tag, not a pill.
+- **Dark mode** — background `<hue>-600` + text `<hue>-400` (e.g. pink-600 `#AD1A72` + pink-400 `#FAC8E4`). Deeper hue on dark surface, light tinted text.
+
+Pills and badges use `-500` (standard tone) so tags read visually softer than pills, addressing the "tags should look different from other pills" goal.
+
+Plus a tag *icon* (Lucide `tag`) prefix on every tag chip — present even in dense table rows — to make them distinguishable from filter pills and status badges at a glance.
+
+### Typography
+
+- **Font scope.** Sans for everything except: video slugs (admin only), the video UUID, file paths, log timestamps, key/token values, inline `<code>` in markdown, slug input fields. Sans for titles, descriptions, button labels, badges.
+- **Heading hierarchy.**
+  - `h1` — page title — `xl` bold (kept).
+  - `h2` — major section — `lg` bold.
+  - `h3` — inline sub-section ("Description", "Tags", "Notes") — `sm` medium `--color-fg-muted`. Standardises across video detail + settings.
+- **Form labels — single treatment.** `xs`, medium weight, `--color-fg-muted`, no uppercase, no letter-spacing. Removes the uppercase `.tag-edit-label` variant.
+- **Editable fields.** Keep the "click to edit" pattern (hover reveals Edit trigger), but the trigger uses the new `.btn--ghost` variant instead of `.btn--sm` to avoid the heavy border on a quiet affordance.
+
+### Iconography
+
+- **Library** — Lucide, inlined as SVG (current pattern).
+- **Sizes — tokenised.** `--icon-xs` 12, `--icon-sm` 14, `--icon-md` 16, `--icon-lg` 20, `--icon-xl` 24. Use named sizes in JSX.
+- **Visibility icons** — globe / link / eye-off (kept).
+- **Tag icon** — Lucide `tag` rendered inside every tag chip (admin + viewer).
+
+### CSS architecture
+
+- **`tokens.css`** — single source of truth for primitives and semantic mappings. Consumed by admin, editor, cover editor.
+- **`admin.css`** — admin-only layer (currently structured well; will gain `.btn--ghost`, `--color-surface-hover`/`-active`, missing badge variants).
+- **Editors** — keep their own component CSS in `server/editor/src/...`, but their root variables become a thin "dark-only override" of the shared tokens (e.g. force `color-scheme: dark` and pin dark mappings).
+- **Viewer pages** — get their own root layout (`ViewerLayout` already exists but currently composes `RootLayout` which serves `app.css`). Phase 4 will split this so the viewer links only `viewer-app.css` (reset + base typography + viewer tokens + page CSS) — admin CSS never reaches public visitors.
+
+### Cleanup / bug fixes folded into Phase 2
+
+- Define `.btn--secondary` (or rename usages to `.btn`).
+- Define `.badge--complete` (or stop emitting it).
+- Remove references to undefined `var(--space-0)`, `var(--transition-fast)`, `var(--line-height-relaxed)`, `var(--font-family-mono)`.
+- Replace ~15 `light-dark(var(--neutral-100), var(--neutral-800))` hovers with `--color-surface-hover`.
+- Replace hardcoded blacks (`oklch(0% 0 0 / …)`) with `--color-overlay` in dialog backdrop, video-player background, embed overlay, tag-video-duration.
+- Add `--color-warning-border` and `--color-info-border`.
+
+### Open follow-ups (recommendations marked, awaiting confirmation)
+
+- **A.** Private visibility colour. Recommended: `red-700` (muted red) so it doesn't blur with the amber processing statuses. (See "Role assignments → Visibility".)
+- **B.** Tag chip rendering. Recommended: 400 bg + 800 text in light; 600 bg + 400 text in dark. (See "Tag palette".)
+- **C.** Viewer CSS split — defer the `RootLayout` / `ViewerLayout` refactor to the start of Phase 4 rather than Phase 2.
+
 ## Implementation Plan
 
 The server is running on http://127.0.0.1:3000/admin - use the Playwright CLI and skill if you need to look at pages or take screenshots etc.
 
-### Phase 1 - Audit & Planning
+### Phase 1 - Audit & Planning ✅
 
-- Audit the current hono app's CSS and update the "current state" part of this document with the current colours and where they're used (dark and light mode), text treatments, "UI components", spacing, iconography etc.
-- Identify inconsistencies and opportunities to rationalise or consolidate styles while we go.
-- Decide on what colours to use for what things and update this doc (collaboratively with the user). We'll need to decide on things like:
-  - Basic colours for stuff like BG/FG/secondary/surface/subdued/border etc in light and dark modes.
-  - Colour semantics for:
-    - Primary actions
-    - Secondary actions
-    - Visibility (private/unlisted/public)
-    - Video Status
-    - Dangerous actions (delete/trash etc)
-    - Warning/Error/Succes etc
-    - "Selected" state
-    - In the Video editor: "trim", "cut" and "chapter marker"
-  - Colours for icon types in the file browser
-  - A suitable list of colour options for tags
-- Ensure we're clear on typography. eg stuff like:
-  - When do we use a monospace font
-  - How to form fields/labels/edit in place things look
-  - etc
-- Ensure we're clear on iconography and their semantics.
-
-
-Having decided on this we can update this document and then update the phases below as well as  deciding on any other redesign/refactoring work we want to do.
+- ✅ Audit the current Hono app's CSS — captured in "Current State" above.
+- ✅ Identify inconsistencies and opportunities — captured in "Current State → Inconsistencies & opportunities" above.
+- ✅ Decide on colour semantics, tokens, role assignments, typography, iconography, CSS architecture — captured in "Design Decisions" above.
+- ⏳ Resolve open follow-ups A / B / C (see end of Design Decisions).
 
 ### Phase 2 - Colours, Design Tokens & Base styles
 
-- Create CSS variables for the colours we need and create/update any other design tokens.
-- Look over our CSS reset/base styles to ensure we have the best "base to build on".
-- Ensure our tokens are being used appropriatley everywhere.
-- Tweak as needed from user feedback until the colours look great in the admin interface in both light and dark mode.
+Express the Design Decisions in code. No visual redesigns beyond colour and token consolidation.
+
+- Rewrite `tokens.css` to source from the brand palette in OKLCH (primitives + semantic mappings + new tokens `--color-surface-hover`, `--color-surface-active`, `--color-overlay`, `--color-warning-border`, `--color-info-border`, `--icon-*` ramp, `--icon-xs/sm/md/lg/xl`).
+- Replace the old `--neutral-*` / `--accent-*` / `--tag-*` shapes (in-place since this is single-user code — no backwards-compat).
+- Fix the silent-bug references: `var(--space-0)`, `var(--transition-fast)`, `var(--line-height-relaxed)`, `var(--font-family-mono)`.
+- Review `reset.css` and `base.css`; keep current bones (they're solid), only adjust where the new tokens require it.
+- Update editors (`server/editor/src/styles/editor.css`, `server/editor/src/cover/styles.css`) to consume shared tokens. Force `color-scheme: dark` in both so they ignore light-mode mappings.
+- Visually verify both light + dark in the admin (Playwright screenshots OK). Iterate with the user on feel.
 
 ### Phase 3 - Consistency & UI Elements/Components
 
-Ensure we are applying styles consistently in the admin interface, and that they look good. This should probably include:
+Apply the new tokens consistently and add the missing component pieces. Admin only — viewer is Phase 4.
 
-- Text (incl Headings, URLs etc)
-- Inputs & Text areas
-- Buttons and their variants
-- Dropdowns & menus
-- Border radii
-- "Selected" or highlighted things
-- Tabs, tables etc
-- Pills
-- Tags (we should add a tag icon everywhere they're shown and differentiate them from other sorts of pills)
-- Our use of icons (are they consistent)
-- Spacings
-- Anything else
+- **Buttons** — add `.btn--ghost`, drop or define `.btn--secondary`, refactor sidebar-nav / sort-dir / view-toggle / color-picker-option / tag-chip-remove to use `.btn--ghost`. Replace ~15 hand-rolled hover bgs with `--color-surface-hover`.
+- **Badges** — define `.badge--complete` (or stop emitting it), wire up the new visibility/status colour assignments.
+- **Filter pills** — re-wire `--pill-active-*` to the new badge colours; update tag-filter pills to match the new tag chip rendering.
+- **Tag chips** — add the tag icon prefix to every chip (admin + viewer). Pick chip rendering per follow-up B. Converge on one colour-application pattern (inline style OR `--chip-color`).
+- **Inputs / textareas / selects** — verify against new tokens; tighten focus ring to use new accent.
+- **Tabs / tables / popovers / dialog** — verify against tokens.
+- **Selected vs hover** — implement the accent-tinted "selected" state on sidebar nav active, active filter pill, active settings tab, active video tab, promoted thumbnail.
+- **Section headings** — apply the new hierarchy (h1/h2/h3) consistently across video detail and settings.
+- **Form labels** — kill the uppercase variant; converge on the single label treatment.
+- **Icon sizes** — replace ad-hoc `size={…}` props with `--icon-*` tokens (or named constants in JSX).
+- **File-type icons** — switch from `--tag-*` to the new `--icon-*` ramp.
+- **Spacings** — sweep for ad-hoc px/rem values; consolidate to `--space-*`.
+- **Card menu trigger** — keep hidden until card hover (confirmed).
 
 ### Phase 4 - Public Facing Pages
 
-Work on the public-facing pages to improve their styling. These are always dark mode so we should make use of our colour palette here for backgrounds etc.
+Make the public surface feel on-brand and ship it on a separate CSS bundle.
 
-#### /:slug
+#### 4a — Architecture split (do first)
 
-- Update colours
-- Update typography for title/description etc
-- Tweak layout as needed, perhaps moving title to the top
-- Add my avatar somewhere
-- Add a proper footer which looks really nice with my socials, website, maybe some metadata about the video etc?
-- Style the video player so it looks loveley and is on-brand.
+- Restructure layouts so `ViewerLayout` no longer composes `RootLayout` for CSS purposes. The viewer needs its own root layout that links only `viewer-app.css` (reset + base typography + shared viewer-relevant tokens + `viewer.css`/`embed.css`/`player.css`). Admin CSS must not be served to public visitors.
+- `viewer-app.css` is its own entry point — same `@layer` discipline, but its tokens layer is the dark-only subset of the shared tokens. (Implementation choice: dedicated viewer tokens file that imports the brand primitives + locks semantic mappings to the dark side. Avoid duplicating values.)
 
-#### /:slug/embed
+#### 4b — `/:slug`
 
-- Style this video player appropriatley
-- Check the overlay still looks good when embedding now that we have poster images
+- Apply new colours + typography.
+- Move the title above the player (per task scope).
+- Add Danny's avatar.
+- Build a real footer: socials, website, video metadata. On-brand, dark, generous.
+- Style the Vidstack player (`player.css` is currently empty). Customise the controls colour, scrubber, time display, fullscreen/pip buttons. Reference Vidstack docs via Context7 when implementing.
 
-#### /:tagslug
+#### 4c — `/:slug/embed`
 
-- Similar style changes to the video page (footer etc)
-- Etc
+- Style the embedded player to match the main page's player styling.
+- Re-verify the pre-play overlay against the new poster images.
+
+#### 4d — `/:tagslug`
+
+- Match the new viewer styling (footer, typography, colours).
+- Tag swatch in the header uses the new tag rendering.
 
 ### Phase 5 - CSS Review, "Component" Review & Cleanup
 

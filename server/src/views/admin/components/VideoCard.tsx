@@ -78,7 +78,7 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
             {tags?.map((t) => (
               <span
                 class="tag-chip tag-chip--sm"
-                style={`background-color: var(--tag-${t.color}); color: #fff`}
+                style={`background-color: var(--tag-${t.color}-bg); color: var(--tag-${t.color}-fg)`}
               >
                 {t.name}
               </span>

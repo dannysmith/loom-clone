@@ -1,18 +1,26 @@
-/* Editor — full-viewport dark editing interface */
+/* Editor — full-viewport dark editing interface.
+   Consumes the shared brand tokens from /static/styles/app.css (loaded by
+   the admin route). The local --bg/--panel-bg/--text/--accent names are
+   kept as aliases so existing component rules don't need to change.
+   color-scheme: dark forces light-dark() to resolve to dark-mode values. */
 
 :root {
   color-scheme: dark;
 
-  /* Shared with the cover editor — keep these in sync. */
-  --bg: #1a1a1a;
-  --panel-bg: #232527;
-  --panel-bg-input: #1a1c1e;
-  --panel-border: #34373a;
-  --text: #e8e8e8;
-  --text-dim: #9aa0a6;
-  --accent: #ff7369;
-  --accent-fg: #1a1a1a;
+  /* Aliases onto the shared brand palette. */
+  --bg: var(--brand-bg-darker);
+  --panel-bg: var(--brand-bg-dark);
+  --panel-bg-input: var(--brand-bg-darker);
+  --panel-border: var(--color-border);
+  --text: var(--color-fg);
+  --text-dim: var(--color-fg-muted);
+  --accent: var(--color-accent);
+  --accent-fg: var(--color-accent-fg);
 
+  /* Editor-local radius scale — tighter than the admin's defaults.
+     Overrides the shared --radius-* in this document scope so existing
+     editor layout (rounded corners on toolbar, panels, controls) doesn't
+     shift. */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;

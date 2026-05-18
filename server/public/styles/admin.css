@@ -59,12 +59,12 @@ body.admin--login {
 
 .admin-nav-link:hover {
 	color: var(--color-fg);
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 }
 
 .admin-nav-link[aria-current="page"] {
 	color: var(--color-fg);
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 }
 
 /* ------- Main content ------- */
@@ -145,7 +145,7 @@ body.admin--login {
 
 	&:hover {
 		color: var(--color-fg);
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -166,12 +166,12 @@ body.admin--login {
 
 	&:hover {
 		color: var(--color-fg);
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 
 	&.active {
 		color: var(--color-fg);
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -234,13 +234,16 @@ body.admin--login {
 	}
 
 	&:hover .filter-pill-label {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 
+	/* Default "selected" state — accent-tinted background + accent border.
+	   Pills with semantic modifiers (--public, --private, etc.) override via
+	   --pill-active-*. */
 	& input:checked + .filter-pill-label {
-		color: var(--pill-active-color, var(--color-fg));
-		background-color: var(--pill-active-bg, light-dark(var(--neutral-100), var(--neutral-800)));
-		border-color: var(--pill-active-border, var(--color-border));
+		color: var(--pill-active-color, var(--color-accent));
+		background-color: var(--pill-active-bg, var(--color-accent-bg));
+		border-color: var(--pill-active-border, var(--color-accent));
 	}
 }
 
@@ -252,24 +255,27 @@ body.admin--login {
 }
 
 .filter-pill--unlisted {
-	--pill-active-bg: light-dark(var(--neutral-100), var(--neutral-800));
+	--pill-active-color: var(--color-fg);
+	--pill-active-bg: var(--color-surface-hover);
 	--pill-active-border: var(--color-border);
 }
 
 .filter-pill--private {
+	--pill-active-color: var(--color-restricted);
+	--pill-active-bg: var(--color-restricted-bg);
+	--pill-active-border: var(--color-restricted-border);
+}
+
+/* Status pill colors */
+.filter-pill--recording {
 	--pill-active-color: var(--color-danger);
 	--pill-active-bg: var(--color-danger-bg);
 	--pill-active-border: transparent;
 }
 
-/* Status pill colors */
-.filter-pill--recording {
-	--pill-active-color: var(--color-info);
-	--pill-active-bg: var(--color-info-bg);
-	--pill-active-border: transparent;
-}
-
-.filter-pill--healing {
+.filter-pill--healing,
+.filter-pill--processing,
+.filter-pill--deleting {
 	--pill-active-color: var(--color-warning);
 	--pill-active-bg: var(--color-warning-bg);
 	--pill-active-border: transparent;
@@ -281,16 +287,10 @@ body.admin--login {
 	--pill-active-border: transparent;
 }
 
-.filter-pill--processing {
-	--pill-active-color: var(--color-warning);
-	--pill-active-bg: var(--color-warning-bg);
-	--pill-active-border: transparent;
-}
-
 .filter-pill--failed {
-	--pill-active-color: var(--color-danger);
-	--pill-active-bg: var(--color-danger-bg);
-	--pill-active-border: transparent;
+	--pill-active-color: var(--color-restricted);
+	--pill-active-bg: var(--color-restricted-bg);
+	--pill-active-border: var(--color-restricted-border);
 }
 
 /* Tag filter pills — reuse tag-picker-toggle + tag-chip pattern */
@@ -307,15 +307,17 @@ body.admin--login {
 	}
 
 	& .tag-chip {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 		color: var(--color-fg-muted);
 		transition: background-color var(--duration-fast) var(--ease-out),
 			color var(--duration-fast) var(--ease-out);
 	}
 
+	/* When checked, the tag chip reveals its hue. JSX sets --chip-bg/--chip-fg
+	   inline per tag colour; fallback is the soft surface treatment. */
 	& input:checked + .tag-chip {
-		background-color: var(--chip-color, var(--neutral-400));
-		color: #fff;
+		background-color: var(--chip-bg, var(--color-surface-hover));
+		color: var(--chip-fg, var(--color-fg));
 	}
 }
 
@@ -349,7 +351,7 @@ body.admin--login {
 [data-view="grid"] .video-card-thumb {
 	position: relative;
 	aspect-ratio: 16 / 9;
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 	display: grid;
 	place-items: center;
 	overflow: hidden;
@@ -392,7 +394,7 @@ body.admin--login {
 }
 
 [data-view="grid"] .video-card-slug {
-	font-family: var(--font-family-mono, ui-monospace, monospace);
+	font-family: var(--font-mono);
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
 	overflow: hidden;
@@ -446,7 +448,7 @@ body.admin--login {
 	}
 
 	&:hover {
-		background-color: light-dark(var(--neutral-50), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -466,7 +468,7 @@ body.admin--login {
 	position: relative;
 	inline-size: 3rem;
 	aspect-ratio: 16 / 9;
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 	border-radius: var(--radius-sm);
 	display: grid;
 	place-items: center;
@@ -506,7 +508,7 @@ body.admin--login {
 }
 
 [data-view="table"] .video-card-slug {
-	font-family: var(--font-family-mono, ui-monospace, monospace);
+	font-family: var(--font-mono);
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
 	min-inline-size: 0;
@@ -568,7 +570,7 @@ body.admin--login {
 	block-size: 1.75rem;
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-md);
-	background-color: light-dark(var(--neutral-0), var(--neutral-800));
+	background-color: var(--color-bg);
 	color: var(--color-fg-muted);
 	cursor: pointer;
 	font-size: var(--font-size-sm);
@@ -618,7 +620,7 @@ body.admin--login {
 	cursor: pointer;
 
 	&:hover {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -720,7 +722,7 @@ body.admin--login {
 	transition: background-color var(--duration-fast) var(--ease-out);
 
 	&:hover {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -746,7 +748,7 @@ body.admin--login {
 	font-size: var(--font-size-xs);
 	font-weight: var(--font-weight-medium);
 	line-height: 1;
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 	color: var(--color-fg-muted);
 }
 
@@ -757,42 +759,41 @@ body.admin--login {
 
 .badge--unlisted {
 	color: var(--color-fg-muted);
-	background-color: light-dark(var(--neutral-100), var(--neutral-800));
+	background-color: var(--color-surface-hover);
 }
 
 .badge--private {
+	color: var(--color-restricted);
+	background-color: var(--color-restricted-bg);
+}
+
+/* Recording: vibrant red — reads as "live". Distinct from --color-restricted
+   (muted) used for private/failed, and from --color-accent (interaction). */
+.badge--recording {
 	color: var(--color-danger);
 	background-color: var(--color-danger-bg);
 }
 
-.badge--recording {
-	color: var(--color-info);
-	background-color: var(--color-info-bg);
-}
-
-.badge--healing {
+.badge--healing,
+.badge--processing,
+.badge--deleting {
 	color: var(--color-warning);
 	background-color: var(--color-warning-bg);
 }
 
 .badge--failed {
-	color: var(--color-danger);
-	background-color: var(--color-danger-bg);
-}
-
-.badge--processing {
-	color: var(--color-warning);
-	background-color: var(--color-warning-bg);
+	color: var(--color-restricted);
+	background-color: var(--color-restricted-bg);
 }
 
 .badge--edited {
-	color: var(--tag-blue);
-	background-color: oklch(from var(--tag-blue) l c h / 0.1);
+	color: var(--color-info);
+	background-color: var(--color-info-bg);
 	text-decoration: none;
 }
 
 .badge--edited:hover {
-	background-color: oklch(from var(--tag-blue) l c h / 0.2);
+	background-color: color-mix(in oklch, var(--color-info) 25%, transparent);
 }
 
 /* ------- Form elements ------- */
@@ -869,7 +870,7 @@ select.input {
 	}
 
 	select.input option:hover {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 
 	select.input option:checked {
@@ -1234,6 +1235,7 @@ select.input {
 	margin-block-end: var(--space-5);
 	border-radius: var(--radius-md);
 	overflow: hidden;
+	/* Pure black for video letterbox — distinct from --color-overlay (semi-transparent). */
 	background-color: oklch(0% 0 0);
 	max-inline-size: 56rem;
 }
@@ -1264,7 +1266,7 @@ select.input {
 }
 
 .meta-pill--warning {
-	color: var(--tag-orange);
+	color: var(--color-warning);
 }
 
 .meta-pill--id {
@@ -1567,15 +1569,15 @@ select.input {
 	}
 
 	& .tag-chip {
-		background-color: light-dark(var(--neutral-100), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 		color: var(--color-fg-muted);
 		transition: background-color var(--duration-fast) var(--ease-out),
 			color var(--duration-fast) var(--ease-out);
 	}
 
 	& input:checked + .tag-chip {
-		background-color: var(--chip-color, var(--neutral-400));
-		color: #fff;
+		background-color: var(--chip-bg, var(--color-surface-hover));
+		color: var(--chip-fg, var(--color-fg));
 	}
 }
 
@@ -1689,7 +1691,7 @@ select.input {
 	cursor: pointer;
 
 	&:hover {
-		background-color: light-dark(var(--neutral-50), var(--neutral-800));
+		background-color: var(--color-surface-hover);
 	}
 }
 
@@ -1711,7 +1713,7 @@ select.input {
 	color: var(--color-fg);
 
 	&::backdrop {
-		background-color: oklch(0% 0 0 / 0.4);
+		background-color: var(--color-overlay);
 	}
 }
 

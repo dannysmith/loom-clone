@@ -89,17 +89,20 @@ export const slugRedirects = sqliteTable(
 // so they're meaningful in queries and event logs. CSS maps these to actual
 // OKLCH values via custom properties. The constraint is application-side
 // (same pattern as status/visibility enums).
+//
+// Aligned with the brand palette (docs/tasks-todo/task-1-admin-styling.md).
+// Legacy values "gray", "teal", "indigo" stored on existing rows still
+// render via CSS aliases in tokens.css but can no longer be picked.
 export const TAG_COLORS = [
-  "gray",
+  "pink",
   "red",
   "orange",
   "yellow",
   "green",
-  "teal",
   "blue",
-  "indigo",
   "purple",
-  "pink",
+  "brown",
+  "grey",
 ] as const;
 export type TagColor = (typeof TAG_COLORS)[number];
 
@@ -113,7 +116,7 @@ export type TagVideoSort = (typeof TAG_VIDEO_SORTS)[number];
 export const tags = sqliteTable("tags", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
-  color: text("color").notNull().default("gray"),
+  color: text("color").notNull().default("grey"),
   // Same semantics as videos: private (default) means no public page;
   // public/unlisted require a slug. unlisted = X-Robots-Tag noindex but
   // reachable by URL.

@@ -340,7 +340,10 @@ export function VideoTagsControl({
   return (
     <div id="field-tags" class="tag-picker">
       {videoTags.map((t) => (
-        <span class="tag-chip" style={`background-color: var(--tag-${t.color}); color: #fff`}>
+        <span
+          class="tag-chip"
+          style={`background-color: var(--tag-${t.color}-bg); color: var(--tag-${t.color}-fg)`}
+        >
           {t.name}
           <button
             type="button"

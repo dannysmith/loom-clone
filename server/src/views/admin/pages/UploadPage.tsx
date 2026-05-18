@@ -68,7 +68,10 @@ export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
               {tags.map((t) => (
                 <label class="tag-picker-toggle">
                   <input type="checkbox" name="tags" value={String(t.id)} />
-                  <span class="tag-chip" style={`--chip-color: var(--tag-${t.color})`}>
+                  <span
+                    class="tag-chip"
+                    style={`--chip-bg: var(--tag-${t.color}-bg); --chip-fg: var(--tag-${t.color}-fg)`}
+                  >
                     {t.name}
                   </span>
                 </label>

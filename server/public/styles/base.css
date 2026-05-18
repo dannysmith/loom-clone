@@ -6,7 +6,7 @@ html {
   font-weight: var(--font-weight-normal, 400);
   font-variant-ligatures: common-ligatures;
   hanging-punctuation: first allow-end last;
-  accent-color: var(--color-accent, #06f);
+  accent-color: var(--color-accent, #ff7369);
   color: var(--color-fg, #111);
   background-color: var(--color-bg, #fff);
 }
@@ -37,7 +37,7 @@ a:not(:hover, :focus-visible) {
 }
 
 a:hover {
-  color: var(--color-accent-hover, #04d);
+  color: var(--color-accent-hover, #e03e3e);
 }
 
 code, kbd, samp, pre {

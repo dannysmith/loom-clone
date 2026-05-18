@@ -32,7 +32,7 @@ settings.get("/tags", async (c) => {
 settings.post("/tags", async (c) => {
   const body = await c.req.parseBody();
   const name = String(body.name ?? "").trim();
-  const color = String(body.color ?? "gray");
+  const color = String(body.color ?? "grey");
   if (name) {
     await createTag(name, color as Parameters<typeof createTag>[1]);
   }

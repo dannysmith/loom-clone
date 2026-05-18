@@ -71,6 +71,13 @@
       "when": 1778848487622,
       "tag": "0009_dusty_hellion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779079149193,
+      "tag": "0010_dazzling_ravenous",
+      "breakpoints": true
     }
   ]
 }

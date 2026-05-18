@@ -43,7 +43,7 @@ describe("createTag", () => {
     const tag = await createTag("tutorial");
     expect(tag.id).toBeGreaterThan(0);
     expect(tag.name).toBe("tutorial");
-    expect(tag.color).toBe("gray");
+    expect(tag.color).toBe("grey");
     expect(() => new Date(tag.createdAt)).not.toThrow();
   });
 
@@ -53,9 +53,9 @@ describe("createTag", () => {
     expect(tag.color).toBe("red");
   });
 
-  test("defaults color to gray when omitted", async () => {
+  test("defaults color to grey when omitted", async () => {
     const tag = await createTag("plain");
-    expect(tag.color).toBe("gray");
+    expect(tag.color).toBe("grey");
   });
 
   test("rejects invalid color", async () => {

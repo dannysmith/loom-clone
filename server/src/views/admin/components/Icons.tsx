@@ -456,44 +456,44 @@ export function IconScissors(props: IconProps) {
   );
 }
 
-// Map filenames/extensions to icon + color
+// Map filenames/extensions to icon + color. Colours come from the --icon-*
+// semantic ramp (declared in tokens.css), not the user-pickable tag palette.
 export function FileTypeIcon({ path, isDirectory }: { path: string; isDirectory: boolean }) {
-  if (isDirectory) return <IconFolder size={16} style="color: var(--tag-blue)" />;
+  if (isDirectory) return <IconFolder size={16} style="color: var(--icon-folder)" />;
 
   const name = path.split("/").pop() ?? path;
   const ext = name.substring(name.lastIndexOf(".")).toLowerCase();
 
   // Specific filenames first
-  if (name === "recording.json") return <IconFileCog size={16} style="color: var(--tag-orange)" />;
-  if (name === "init.mp4")
-    return <IconFileSegment size={16} style="color: var(--color-fg-muted)" />;
+  if (name === "recording.json") return <IconFileCog size={16} style="color: var(--icon-config)" />;
+  if (name === "init.mp4") return <IconFileSegment size={16} style="color: var(--icon-text)" />;
 
   // By extension
   switch (ext) {
     case ".mp4":
     case ".mov":
-      return <IconFileVideo size={16} style="color: var(--tag-indigo)" />;
+      return <IconFileVideo size={16} style="color: var(--icon-video)" />;
     case ".m4s":
-      return <IconFileSegment size={16} style="color: var(--tag-purple)" />;
+      return <IconFileSegment size={16} style="color: var(--icon-segment)" />;
     case ".m3u8":
-      return <IconFileText size={16} style="color: var(--tag-green)" />;
+      return <IconFileText size={16} style="color: var(--icon-playlist)" />;
     case ".json":
-      return <IconFileCode size={16} style="color: var(--tag-yellow)" />;
+      return <IconFileCode size={16} style="color: var(--icon-data)" />;
     case ".jpg":
     case ".jpeg":
     case ".png":
     case ".webp":
-      return <IconFileImage size={16} style="color: var(--tag-teal)" />;
+      return <IconFileImage size={16} style="color: var(--icon-image)" />;
     case ".mp3":
     case ".aac":
     case ".wav":
-      return <IconFileAudio size={16} style="color: var(--tag-pink)" />;
+      return <IconFileAudio size={16} style="color: var(--icon-audio)" />;
     case ".txt":
     case ".md":
     case ".log":
-      return <IconFileText size={16} style="color: var(--color-fg-muted)" />;
+      return <IconFileText size={16} style="color: var(--icon-text)" />;
     default:
-      return <IconFile size={16} style="color: var(--color-fg-muted)" />;
+      return <IconFile size={16} style="color: var(--icon-text)" />;
   }
 }
 

@@ -92,7 +92,7 @@ The menubar app is deliveratley very simple. Three drop-downs allow me to select
 
 If a camera source is selected, sliders to adjust white balance and brightness are shown and changes are reflected in the preview.
 
-Below these there are selectors for **stream quality** and **starting mode**. Stream quality allows the user to choose between 720p, 1080p and 1440p for the uploaded stream. If no screen source is selected and the selected camera source is at 1080p, 1440p will not be available.
+Below these there are selectors for **stream quality** and **starting mode**. Stream quality allows the user to choose between 720p, 1080p and 1440p for the uploaded stream. If no screen source is selected and the selected camera source is at 1080p, 1440p will not be available. Framerate can be selected in a similar way (30fps or 60fps).
 
 When screen and camera feeds have been selected, there are three modes available while recording:
 
@@ -109,7 +109,7 @@ Expanding the *Hide from recording* section allows us to hide stuff from the scr
 
 ## The Recording UI
 
-While recording is in progress a toolbar is shown at the bottom of the screen with controls for ending, pausing and cancelling the recording, and for switching between modes. The mode switcher is only visible when both camera and screen feeds are available.
+While recording is in progress a toolbar is shown at the bottom of the screen with controls for ending, pausing and cancelling the recording, and for switching between modes. The mode switcher is only visible when both camera and screen feeds are available. I can set a chapter marker by hitting a button in the toolbar.
 
 When not in screen-only mode, a draggable preview of the camera feed is also shown. This is circular when in screen-and-camera and rectangular when in camera-only.
 
@@ -231,7 +231,7 @@ Whenever a video completes, the macOS app kicks off a task to transcribe the loc
 
 If transcription completes successfully, the first ~500 words are fed to Apple Intelligence’s local Foundation Models along with a system prompt generated using data from `recordings.json` which is tasked with returning a suggested title for the video. The suggestion is checked against some simple *is-this-insane* rules and then sent to the server where it updates the video’s title (unless the user has already added a title).
 
-Suggested descriptions are generated in a similar way.
+A suggested description is generated in a similar way, and if any chapter markers were set suggested titles for them are also generated.
 
 ## End State
 
@@ -311,6 +311,9 @@ Our mac will have a directory in `~/Application Support/LoomClone/recordings/[UU
 └── .transcribed                      # Sentinel: transcription complete
 ```
 
+## Managing Local Recordings
+
+The macOS app settings has a pane which allows me to manage local recordings. I can see any which failed, errored or were orphaned. I can save space by deleting the local backups (`camera.m4a`, `screen.mov` and `audio.m4`) or the local HLS segments, or I can delete the whole local video.
 
 ## The Admin Interface
 
@@ -322,7 +325,7 @@ The admin interface lives at http://v.danny.is/admin and allows me to log in and
 - The video player
 - Video Actions: Open, Copy, Embed, Edit, Download, Duplicate, Trash
 - Video meta-information
-- Description and tags
+- Description, tags and notes
 - Thumbnail Picker
 
 #### The Event Log & File Browser
@@ -340,13 +343,24 @@ Intro
 - Comitting & Regen
 - Undo
 - Suggested Clips
+- Chapter markers
+
+### The Thumbnail Editor
+
+- Generating a cover image
+- Generating an image for external use
 
 ### The Dashboard
 
 - Filters, Search & Sorting
 - Vdieo Options
 
-### Settings & Trash Bin
+### Trashing & Deleting Videos
+
+### Tags
+
+- Tag management
+- Tag slugs and visibility
 
 ## Viewer-Facing Features
 
@@ -368,10 +382,15 @@ Intro
 - `/:slug/embed` 
 - The `/oembed` URL
 
+### Tag Pages
+
+
+
 ### Public Feeds
 
 - `/feed.xml` (and `/rss`)
 - `/feed.json`
+- `/:tag/feed.xml` and `/:tag/feed.json`
 - `/llms.txt`
 - `/` hints for LLMs and machines etc
 

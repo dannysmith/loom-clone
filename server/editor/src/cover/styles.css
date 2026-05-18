@@ -1,10 +1,16 @@
+/* Cover editor. Consumes shared brand tokens from /static/styles/app.css.
+   color-scheme: dark forces light-dark() to resolve to dark-mode values.
+   Token names kept as local aliases so component rules don't need to change. */
+
 :root {
-  --bg: #1a1a1a;
-  --panel-bg: #232527;
-  --panel-border: #34373a;
-  --text: #e8e8e8;
-  --text-dim: #9aa0a6;
-  --accent: #ff7369;
+  color-scheme: dark;
+
+  --bg: var(--brand-bg-darker);
+  --panel-bg: var(--brand-bg-dark);
+  --panel-border: var(--color-border);
+  --text: var(--color-fg);
+  --text-dim: var(--color-fg-muted);
+  --accent: var(--color-accent);
 }
 
 * {

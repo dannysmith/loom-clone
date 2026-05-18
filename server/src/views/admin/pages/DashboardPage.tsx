@@ -205,7 +205,10 @@ export function DashboardPage({
                     checked={filters.tagIds?.includes(t.id) ?? false}
                     onchange="updateTagFilter()"
                   />
-                  <span class="tag-chip" style={`--chip-color: var(--tag-${t.color})`}>
+                  <span
+                    class="tag-chip"
+                    style={`--chip-bg: var(--tag-${t.color}-bg); --chip-fg: var(--tag-${t.color}-fg)`}
+                  >
                     {t.name}
                   </span>
                 </label>

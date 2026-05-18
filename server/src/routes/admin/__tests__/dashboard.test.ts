@@ -30,7 +30,7 @@ describe("dashboard tag display", () => {
     expect(html).toContain("video-card-tags");
     expect(html).toContain("tag-chip");
     expect(html).toContain(">tutorial<");
-    expect(html).toContain("var(--tag-blue)");
+    expect(html).toContain("var(--tag-blue-bg)");
   });
 
   test("renders an empty tags container for untagged videos (keeps grid alignment)", async () => {

@@ -40,6 +40,7 @@ cover.get("/:id/cover", async (c) => {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400&family=Inter:wght@200;300;700;800;900&display=swap">
+  <link rel="stylesheet" href="/static/styles/app.css">
   ${scripts}
 </head>
 <body>

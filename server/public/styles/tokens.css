@@ -1,10 +1,14 @@
 /* Design tokens. Change values here; everything downstream consumes var(--…).
-   Two tiers: primitive scales then semantic mappings via light-dark(). */
+   Brand palette → semantic mappings via light-dark(). All colours in OKLCH.
+   Sourced from docs/tasks-todo/task-1-admin-styling.md → Design Decisions. */
 
 :root {
   color-scheme: light dark;
 
-  /* Type — system stack, swap --font-sans later if you want a custom face. */
+  /* ====================================================================
+     Typography
+     ==================================================================== */
+
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
@@ -12,7 +16,6 @@
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
 
-  /* Type scale — modest 1.2 ratio, 5 steps + base. */
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -26,8 +29,13 @@
 
   --line-height-tight: 1.15;
   --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
 
-  /* Spacing — 4px base, doubled-ish scale. */
+  /* ====================================================================
+     Spacing, radii, motion, shadows, layout
+     ==================================================================== */
+
+  --space-0: 0;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -37,81 +45,275 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
-  /* Radii. */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 1rem;
   --radius-full: 9999px;
 
-  /* Transitions. */
   --duration-fast: 120ms;
   --duration-normal: 200ms;
+  --transition-fast: var(--duration-fast) var(--ease-out);
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  /* Layout. */
-  --content-max: 72rem;
-
-  /* Shadows. */
   --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.12);
 
-  /* Primitive colours — neutrals + one accent. OKLCH for perceptual evenness.
-     Tweak the accent's hue (third arg, 250 ≈ blue) to rebrand. */
-  --neutral-0: oklch(99% 0.005 250);
-  --neutral-50: oklch(96% 0.008 250);
-  --neutral-100: oklch(92% 0.01 250);
-  --neutral-200: oklch(85% 0.012 250);
-  --neutral-400: oklch(60% 0.018 250);
-  --neutral-600: oklch(42% 0.02 250);
-  --neutral-800: oklch(22% 0.018 250);
-  --neutral-900: oklch(15% 0.015 250);
+  --content-max: 72rem;
 
-  --accent-500: oklch(60% 0.18 250);
-  --accent-600: oklch(52% 0.18 250);
-  --accent-fg: oklch(99% 0.005 250);
+  --icon-xs: 12px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-xl: 24px;
 
-  /* Tag palette — constrained colour set for labelling. */
-  --tag-gray: oklch(65% 0 0);
-  --tag-red: oklch(60% 0.2 25);
-  --tag-orange: oklch(65% 0.18 55);
-  --tag-yellow: oklch(75% 0.16 85);
-  --tag-green: oklch(60% 0.17 145);
-  --tag-teal: oklch(60% 0.12 185);
-  --tag-blue: oklch(55% 0.18 250);
-  --tag-indigo: oklch(50% 0.18 280);
-  --tag-purple: oklch(55% 0.2 300);
-  --tag-pink: oklch(60% 0.2 350);
+  /* ====================================================================
+     Brand palette — primitives.
+     Hex sources from the user's brand palette (docs/tasks-todo/task-1-admin-styling.md).
+     Converted to OKLCH via the relative-colour syntax so downstream
+     color-mix() / oklch(from …) calls compose cleanly.
+     ==================================================================== */
 
-  /* Semantic mappings — auto light/dark via prefers-color-scheme. */
-  --color-bg: light-dark(var(--neutral-0), var(--neutral-900));
-  --color-surface: light-dark(var(--neutral-50), var(--neutral-800));
-  --color-fg: light-dark(var(--neutral-900), var(--neutral-50));
-  --color-fg-muted: light-dark(var(--neutral-600), var(--neutral-400));
-  --color-border: light-dark(var(--neutral-200), var(--neutral-800));
-  --color-accent: var(--accent-500);
-  --color-accent-hover: var(--accent-600);
-  --color-accent-fg: var(--accent-fg);
+  /* Backgrounds & monochrome */
+  --brand-white: oklch(from #ffffff l c h);
+  --brand-black: oklch(from #191919 l c h);
+  --brand-bg-light: oklch(from #ffffff l c h);   /* light-mode page bg */
+  --brand-bg-lighter: oklch(from #fafafa l c h); /* light-mode surface */
+  --brand-bg-dark: oklch(from #2f3437 l c h);    /* dark-mode surface (bg-light-700) */
+  --brand-bg-darker: oklch(from #191919 l c h);  /* dark-mode page bg (bg-light-800) */
 
-  /* State colours — danger, success, warning, info. */
-  --color-danger: light-dark(oklch(55% 0.18 25), oklch(75% 0.14 25));
-  --color-danger-bg: light-dark(oklch(95% 0.04 25), oklch(20% 0.04 25));
-  --color-danger-border: light-dark(oklch(80% 0.06 25), oklch(35% 0.06 25));
-  --color-success: light-dark(oklch(45% 0.15 145), oklch(75% 0.12 145));
-  --color-success-bg: light-dark(oklch(95% 0.04 145), oklch(25% 0.04 145));
-  --color-success-border: light-dark(oklch(75% 0.12 145), oklch(35% 0.06 145));
-  --color-warning: light-dark(oklch(50% 0.12 60), oklch(75% 0.1 60));
-  --color-warning-bg: light-dark(oklch(95% 0.03 60), oklch(25% 0.03 60));
-  --color-info: light-dark(oklch(50% 0.15 250), oklch(75% 0.12 250));
-  --color-info-bg: light-dark(oklch(95% 0.03 250), oklch(25% 0.03 250));
+  /* Pink */
+  --brand-pink-800: oklch(from #533b4c l c h);
+  --brand-pink-700: oklch(from #602d51 l c h);
+  --brand-pink-600: oklch(from #ad1a72 l c h);
+  --brand-pink-500: oklch(from #e255a1 l c h);
+  --brand-pink-400: oklch(from #fac8e4 l c h);
+  --brand-pink-300: oklch(from #f4dfeb l c h);
 
-  /* Viewer page — always dark regardless of system theme. Centralised here
-     so the viewer palette moves with the neutral scale's hue. */
-  --viewer-bg: oklch(8% 0.005 250);
-  --viewer-fg: oklch(85% 0.01 250);
-  --viewer-title: oklch(95% 0.005 250);
-  --viewer-details: oklch(55% 0.015 250);
-  --viewer-description: oklch(75% 0.01 250);
-  --viewer-muted: oklch(40% 0.01 250);
-  --viewer-border: oklch(20% 0.01 250);
-  --viewer-link: oklch(50% 0.015 250);
-  --viewer-link-hover: oklch(65% 0.015 250);
+  /* Red — 500 is the brand accent (coral) */
+  --brand-red-800: oklch(from #594141 l c h);
+  --brand-red-700: oklch(from #b84848 l c h);
+  --brand-red-600: oklch(from #e03e3e l c h);
+  --brand-red-500: oklch(from #ff7369 l c h);
+  --brand-red-400: oklch(from #ffd4d4 l c h);
+  --brand-red-300: oklch(from #fbe4e4 l c h);
+
+  /* Orange */
+  --brand-orange-800: oklch(from #594a3a l c h);
+  --brand-orange-700: oklch(from #765839 l c h);
+  --brand-orange-600: oklch(from #d9730d l c h);
+  --brand-orange-500: oklch(from #ffa344 l c h);
+  --brand-orange-400: oklch(from #fed9b7 l c h);
+  --brand-orange-300: oklch(from #faebdd l c h);
+
+  /* Yellow */
+  --brand-yellow-800: oklch(from #59563b l c h);
+  --brand-yellow-700: oklch(from #645e26 l c h);
+  --brand-yellow-600: oklch(from #dfab01 l c h);
+  --brand-yellow-500: oklch(from #ffdc49 l c h);
+  --brand-yellow-400: oklch(from #feeebe l c h);
+  --brand-yellow-300: oklch(from #fbf3db l c h);
+
+  /* Green */
+  --brand-green-800: oklch(from #354c4b l c h);
+  --brand-green-700: oklch(from #2c5c5a l c h);
+  --brand-green-600: oklch(from #0f7b6c l c h);
+  --brand-green-500: oklch(from #4dab9a l c h);
+  --brand-green-400: oklch(from #c8eae3 l c h);
+  --brand-green-300: oklch(from #ddedea l c h);
+
+  /* Blue */
+  --brand-blue-800: oklch(from #364954 l c h);
+  --brand-blue-700: oklch(from #254e66 l c h);
+  --brand-blue-600: oklch(from #0b6e99 l c h);
+  --brand-blue-500: oklch(from #529cca l c h);
+  --brand-blue-400: oklch(from #c4e4f2 l c h);
+  --brand-blue-300: oklch(from #ddebf1 l c h);
+
+  /* Purple */
+  --brand-purple-800: oklch(from #443f57 l c h);
+  --brand-purple-700: oklch(from #6f6695 l c h);
+  --brand-purple-600: oklch(from #6940a5 l c h);
+  --brand-purple-500: oklch(from #9a6dd7 l c h);
+  --brand-purple-400: oklch(from #e6d7f9 l c h);
+  --brand-purple-300: oklch(from #eae4f2 l c h);
+
+  /* Brown */
+  --brand-brown-800: oklch(from #434040 l c h);
+  --brand-brown-700: oklch(from #534343 l c h);
+  --brand-brown-600: oklch(from #64473a l c h);
+  --brand-brown-500: oklch(from #937264 l c h);
+  --brand-brown-400: oklch(from #f1e0d8 l c h);
+  --brand-brown-300: oklch(from #e9e5e3 l c h);
+
+  /* Grey */
+  --brand-grey-800: oklch(from #454b4e l c h);
+  --brand-grey-700: oklch(from #596063 l c h);
+  --brand-grey-600: oklch(from #9b9a97 l c h);
+  --brand-grey-500: oklch(from #979a9b l c h);
+  --brand-grey-400: oklch(from #ebeced l c h);
+  --brand-grey-300: oklch(from #ebeced l c h);
+
+  /* ====================================================================
+     Semantic mappings — light + dark via light-dark().
+     Per "Design Decisions" in docs/tasks-todo/task-1-admin-styling.md.
+     ==================================================================== */
+
+  /* Surfaces / text / borders */
+  --color-bg: light-dark(var(--brand-bg-light), var(--brand-bg-darker));
+  --color-surface: light-dark(var(--brand-bg-lighter), var(--brand-bg-dark));
+
+  /* Subtle elevation — replaces the hand-rolled light-dark(neutral-100, neutral-800)
+     pattern that appeared on every hover/active surface. */
+  --color-surface-hover: light-dark(
+    oklch(from #f0f0f1 l c h),
+    oklch(from #3a4044 l c h)
+  );
+  --color-surface-active: light-dark(
+    oklch(from #e8e8e9 l c h),
+    var(--brand-grey-800)
+  );
+
+  --color-border: light-dark(
+    var(--brand-grey-400),
+    oklch(from #3a4044 l c h)
+  );
+
+  --color-fg: light-dark(var(--brand-black), oklch(from #e8e8e8 l c h));
+  --color-fg-muted: light-dark(var(--brand-grey-700), var(--brand-grey-600));
+
+  /* Accent — coral in both modes */
+  --color-accent: var(--brand-red-500);
+  --color-accent-hover: var(--brand-red-600);
+  --color-accent-fg: light-dark(var(--brand-white), var(--brand-black));
+  /* Pre-mixed accent surfaces for "selected/active" states. */
+  --color-accent-bg: color-mix(in oklch, var(--color-accent) 12%, transparent);
+  --color-accent-bg-strong: color-mix(in oklch, var(--color-accent) 22%, transparent);
+
+  /* Danger — red family */
+  --color-danger: light-dark(var(--brand-red-600), var(--brand-red-500));
+  --color-danger-bg: light-dark(var(--brand-red-400), var(--brand-red-800));
+  --color-danger-border: light-dark(var(--brand-red-500), var(--brand-red-700));
+
+  /* Warning — orange family */
+  --color-warning: light-dark(var(--brand-orange-600), var(--brand-orange-500));
+  --color-warning-bg: light-dark(var(--brand-orange-400), var(--brand-orange-800));
+  --color-warning-border: light-dark(var(--brand-orange-500), var(--brand-orange-700));
+
+  /* Success — green family */
+  --color-success: light-dark(var(--brand-green-600), var(--brand-green-500));
+  --color-success-bg: light-dark(var(--brand-green-400), var(--brand-green-800));
+  --color-success-border: light-dark(var(--brand-green-500), var(--brand-green-700));
+
+  /* Info — blue family */
+  --color-info: light-dark(var(--brand-blue-600), var(--brand-blue-500));
+  --color-info-bg: light-dark(var(--brand-blue-400), var(--brand-blue-800));
+  --color-info-border: light-dark(var(--brand-blue-500), var(--brand-blue-700));
+
+  /* Restricted (private visibility) — muted red.
+     Distinct from --color-danger (vivid red, used for destructive actions)
+     and from --color-warning (orange, used for in-progress statuses). */
+  --color-restricted: var(--brand-red-700);
+  --color-restricted-bg: light-dark(
+    color-mix(in oklch, var(--brand-red-700) 14%, transparent),
+    color-mix(in oklch, var(--brand-red-700) 30%, transparent)
+  );
+  --color-restricted-border: light-dark(
+    color-mix(in oklch, var(--brand-red-700) 35%, transparent),
+    color-mix(in oklch, var(--brand-red-700) 55%, transparent)
+  );
+
+  /* Overlay / scrim — for dialog backdrops, embed pre-play, video letterbox. */
+  --color-overlay: oklch(0% 0 0 / 0.5);
+  --color-overlay-strong: oklch(0% 0 0 / 0.75);
+
+  /* ====================================================================
+     Icon ramp — file-browser semantic colours.
+     Names describe role; values draw from the brand palette.
+     ==================================================================== */
+
+  --icon-folder: var(--brand-blue-500);
+  --icon-video: var(--brand-purple-500);
+  --icon-segment: var(--brand-purple-700);
+  --icon-playlist: var(--brand-green-500);
+  --icon-config: var(--brand-orange-500);
+  --icon-data: var(--brand-yellow-600);
+  --icon-image: var(--brand-pink-500);
+  --icon-audio: var(--brand-brown-500);
+  --icon-text: var(--color-fg-muted);
+
+  /* ====================================================================
+     Tag palette — 9 brand hues for user-pickable tag chips.
+     For each hue:
+       --tag-X       : standalone swatch colour (= brand 500)
+       --tag-X-bg    : chip background (light: 400 / dark: 600)
+       --tag-X-fg    : chip text       (light: 800 / dark: 400)
+     ==================================================================== */
+
+  --tag-pink: var(--brand-pink-500);
+  --tag-pink-bg: light-dark(var(--brand-pink-400), var(--brand-pink-600));
+  --tag-pink-fg: light-dark(var(--brand-pink-800), var(--brand-pink-400));
+
+  --tag-red: var(--brand-red-500);
+  --tag-red-bg: light-dark(var(--brand-red-400), var(--brand-red-600));
+  --tag-red-fg: light-dark(var(--brand-red-800), var(--brand-red-400));
+
+  --tag-orange: var(--brand-orange-500);
+  --tag-orange-bg: light-dark(var(--brand-orange-400), var(--brand-orange-600));
+  --tag-orange-fg: light-dark(var(--brand-orange-800), var(--brand-orange-400));
+
+  --tag-yellow: var(--brand-yellow-500);
+  --tag-yellow-bg: light-dark(var(--brand-yellow-400), var(--brand-yellow-600));
+  --tag-yellow-fg: light-dark(var(--brand-yellow-800), var(--brand-yellow-400));
+
+  --tag-green: var(--brand-green-500);
+  --tag-green-bg: light-dark(var(--brand-green-400), var(--brand-green-600));
+  --tag-green-fg: light-dark(var(--brand-green-800), var(--brand-green-400));
+
+  --tag-blue: var(--brand-blue-500);
+  --tag-blue-bg: light-dark(var(--brand-blue-400), var(--brand-blue-600));
+  --tag-blue-fg: light-dark(var(--brand-blue-800), var(--brand-blue-400));
+
+  --tag-purple: var(--brand-purple-500);
+  --tag-purple-bg: light-dark(var(--brand-purple-400), var(--brand-purple-600));
+  --tag-purple-fg: light-dark(var(--brand-purple-800), var(--brand-purple-400));
+
+  --tag-brown: var(--brand-brown-500);
+  --tag-brown-bg: light-dark(var(--brand-brown-400), var(--brand-brown-600));
+  --tag-brown-fg: light-dark(var(--brand-brown-800), var(--brand-brown-400));
+
+  --tag-grey: var(--brand-grey-600);
+  --tag-grey-bg: light-dark(var(--brand-grey-400), var(--brand-grey-700));
+  --tag-grey-fg: light-dark(var(--brand-grey-800), var(--brand-grey-400));
+
+  /* Legacy aliases — preserve rendering for existing tag rows that may
+     hold the old palette names. New tags can only pick the 9 brand hues
+     (see TAG_COLORS in src/db/schema.ts), but anything already stored as
+     "gray"/"teal"/"indigo" still resolves to a sensible nearest hue. */
+  --tag-gray: var(--tag-grey);
+  --tag-gray-bg: var(--tag-grey-bg);
+  --tag-gray-fg: var(--tag-grey-fg);
+
+  --tag-teal: var(--tag-green);
+  --tag-teal-bg: var(--tag-green-bg);
+  --tag-teal-fg: var(--tag-green-fg);
+
+  --tag-indigo: var(--tag-purple);
+  --tag-indigo-bg: var(--tag-purple-bg);
+  --tag-indigo-fg: var(--tag-purple-fg);
+
+  /* ====================================================================
+     Viewer-page palette — public surfaces, dark-only.
+     Will move to its own CSS bundle in Phase 4 (see follow-up C in the
+     task doc). For now lives here but consumes shared brand tokens.
+     ==================================================================== */
+
+  --viewer-bg: var(--brand-bg-darker);
+  --viewer-fg: oklch(from #e8e8e8 l c h);
+  --viewer-title: var(--brand-white);
+  --viewer-details: var(--brand-grey-600);
+  --viewer-description: oklch(from #d0d0d0 l c h);
+  --viewer-muted: var(--brand-grey-700);
+  --viewer-border: var(--brand-bg-dark);
+  /* Coral-tinted link colour so links read as links, not body text. */
+  --viewer-link: color-mix(in oklch, var(--brand-red-500) 70%, var(--brand-white));
+  --viewer-link-hover: var(--brand-red-500);
 }

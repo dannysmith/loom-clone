@@ -482,7 +482,7 @@ Express the Design Decisions in code. No visual redesigns beyond colour and toke
 - Update editors (`server/editor/src/styles/editor.css`, `server/editor/src/cover/styles.css`) to consume shared tokens. Force `color-scheme: dark` in both so they ignore light-mode mappings.
 - Visually verify both light + dark in the admin (Playwright screenshots OK). Iterate with the user on feel.
 
-### Phase 3 - Consistency & UI Elements/Components
+### Phase 3 - Consistency & UI Elements/Components ✅
 
 Apply the new tokens consistently and add the missing component pieces. Admin only — viewer is Phase 4.
 
@@ -500,7 +500,7 @@ Apply the new tokens consistently and add the missing component pieces. Admin on
 - **Spacings** — sweep for ad-hoc px/rem values; consolidate to `--space-*`.
 - **Card menu trigger** — keep hidden until card hover (confirmed).
 
-### Phase 4 - Public Facing Pages
+### Phase 4 - Public Facing Pages ✅
 
 Make the public surface feel on-brand and ship it on a separate CSS bundle.
 
@@ -527,11 +527,11 @@ Make the public surface feel on-brand and ship it on a separate CSS bundle.
 - Match the new viewer styling (footer, typography, colours).
 - Tag swatch in the header uses the new tag rendering.
 
-### Phase 5 - CSS Review, "Component" Review & Cleanup
+### Phase 5 - CSS Review, "Component" Review & Cleanup ✅
 
 Review ALL CSS for inconsistencies, opportunities to clean up etc.
 
-### Phase 6 - Documentation
+### Phase 6 - Documentation ✅
 
 - Add a `design.md` to `docs/developer` explaining the design system, colours, tokens etc.
 - Add any notes/rules to `server/CLAUDE.md` to help keep our design consistent when adding new features.

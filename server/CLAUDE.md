@@ -65,8 +65,9 @@ Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + cust
 ```
 src/views/
   layouts/   RootLayout, ViewerLayout, AdminLayout — shared <html>/<head>/body shells
-  viewer/    public-facing pages (VideoPage today; embed/etc. later)
+  viewer/    public viewer pages (VideoPage, EmbedPage, TagPage), SiteFooter, icons.tsx
   admin/     admin UI components (dashboard, video detail, settings, upload, trash)
+             plus components/Icons.tsx (Lucide set), components/VideoCard
 public/
   styles/    CSS — see below
 ```
@@ -76,13 +77,17 @@ public/
 - **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
 - **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module.
 
-**CSS**:
+**CSS**: full reference in [`docs/developer/design.md`](../docs/developer/design.md). Read it before touching the admin or viewer UI.
 
-- Single entry point `public/styles/app.css` declares `@layer reset, tokens, base, components, utilities;` then `@import`s modular files into named layers.
-- `tokens.css` holds all design tokens (colours in OKLCH, type/spacing scales, radii, transitions). Change values here; everything downstream uses `var(--…)`.
-- `player.css` holds shared Vidstack player overrides for both the video page and embed page. Per-page layout tweaks stay in `viewer.css`/`embed.css`.
-- Page-/section-specific styles (`viewer.css`, `embed.css`, `admin.css`) get linked via the `head` slot of their respective layout, not from `app.css`. Keeps page payloads small.
-- Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`. All Baseline.
+- Three entry points, one per surface, so admin styles never reach public visitors:
+  - `public/styles/app.css` — admin (linked by `RootLayout` by default). Imports reset + tokens + base + components.
+  - `public/styles/viewer-app.css` — public viewer/tag pages (linked by `ViewerLayout`). Imports reset + tokens + base + viewer + player.
+  - `public/styles/embed-app.css` — embed page. Imports reset + tokens + base + embed + player.
+  - `RootLayout` accepts a `stylesheet` prop; `ViewerLayout` and `EmbedPage` set it.
+- `public/styles/admin.css` is linked separately by `AdminLayout`'s head slot — it ships only on admin pages.
+- `tokens.css` is the single source of truth for design tokens (OKLCH brand palette, semantic mappings via `light-dark()`, type/spacing scales, motion). Change values here; everything downstream uses `var(--…)`.
+- Editor pages (`server/editor/`) consume the same tokens — their `:root` sets `color-scheme: dark` and aliases shared vars onto the local `--bg`/`--panel-bg`/`--text`/`--accent` names.
+- Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`, `color-mix(in oklch, …)`, `oklch(from <c> …)`, native `<dialog>`/`popover`. All Baseline.
 
 ## Testing
 

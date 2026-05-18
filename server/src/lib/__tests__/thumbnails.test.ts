@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, readdir } from "fs/promises";
+import { mkdir, readdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { createVideo, DATA_DIR } from "../store";
 import {
   buildCandidateTimestamps,
+  candidatesDir,
+  deleteCandidate,
   extractAndPromoteThumbnails,
   listThumbnailCandidates,
   promoteCandidate,
@@ -241,6 +243,79 @@ describe("promoteCandidate", () => {
     const video = await createVideo();
     const ok = await promoteCandidate(video.id, "nonexistent");
     expect(ok).toBe(false);
+  });
+});
+
+describe("deleteCandidate", () => {
+  // Seed N fake candidates on disk and (optionally) promote one by writing
+  // its bytes to thumbnail.jpg. Avoids ffmpeg for fast unit tests.
+  async function seedCandidates(
+    videoId: string,
+    ids: string[],
+    promotedId: string | null,
+  ): Promise<void> {
+    const derivDir = join(DATA_DIR, videoId, "derivatives");
+    const candDir = candidatesDir(videoId);
+    await mkdir(candDir, { recursive: true });
+    for (const id of ids) {
+      // Distinct bytes per candidate so the size+content match in
+      // listThumbnailCandidates picks exactly one.
+      await writeFile(join(candDir, `${id}.jpg`), `fake-${id}`);
+    }
+    if (promotedId) {
+      await writeFile(join(derivDir, "thumbnail.jpg"), `fake-${promotedId}`);
+    }
+  }
+
+  test("deletes a non-promoted candidate", async () => {
+    const video = await createVideo();
+    await seedCandidates(video.id, ["auto-00", "auto-01", "auto-02"], "auto-00");
+
+    const result = await deleteCandidate(video.id, "auto-02");
+    expect(result).toBe("ok");
+
+    const remaining = await listThumbnailCandidates(video.id);
+    expect(remaining.map((c) => c.id).sort()).toEqual(["auto-00", "auto-01"]);
+  });
+
+  test("refuses to delete the currently promoted candidate", async () => {
+    const video = await createVideo();
+    await seedCandidates(video.id, ["auto-00", "auto-01"], "auto-00");
+
+    const result = await deleteCandidate(video.id, "auto-00");
+    expect(result).toBe("is-promoted");
+
+    const remaining = await listThumbnailCandidates(video.id);
+    expect(remaining.length).toBe(2);
+  });
+
+  test("refuses to delete the last remaining candidate", async () => {
+    const video = await createVideo();
+    await seedCandidates(video.id, ["auto-00"], "auto-00");
+
+    const result = await deleteCandidate(video.id, "auto-00");
+    expect(result).toBe("last-candidate");
+
+    const remaining = await listThumbnailCandidates(video.id);
+    expect(remaining.length).toBe(1);
+  });
+
+  test("returns not-found for an unknown candidate id", async () => {
+    const video = await createVideo();
+    await seedCandidates(video.id, ["auto-00", "auto-01"], "auto-00");
+
+    const result = await deleteCandidate(video.id, "auto-99");
+    expect(result).toBe("not-found");
+  });
+
+  test("rejects path-traversal-shaped candidate ids", async () => {
+    const video = await createVideo();
+    await seedCandidates(video.id, ["auto-00", "auto-01"], "auto-00");
+
+    for (const bad of ["../../../etc/passwd", "auto-00/../../etc", "auto-0", "auto-001"]) {
+      const result = await deleteCandidate(video.id, bad);
+      expect(result).toBe("invalid-id");
+    }
   });
 });
 

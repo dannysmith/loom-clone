@@ -322,6 +322,37 @@ function buffersEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+// Candidate id format: "auto-NN" or "custom-YYYYMMDDTHHMMSSmmmZ". Used as the
+// path-traversal defense for routes that accept a candidate id from the URL.
+export const CANDIDATE_ID_PATTERN = /^(auto-\d{2}|custom-\d{8}T\d{9}Z)$/;
+
+export type DeleteCandidateResult =
+  | "ok"
+  | "invalid-id"
+  | "not-found"
+  | "is-promoted"
+  | "last-candidate";
+
+// Delete a thumbnail candidate from disk. Refuses to delete the currently
+// promoted candidate or the last remaining candidate — both guards are
+// enforced in the UI, but the backend defends them too.
+export async function deleteCandidate(
+  videoId: string,
+  candidateId: string,
+): Promise<DeleteCandidateResult> {
+  if (!CANDIDATE_ID_PATTERN.test(candidateId)) return "invalid-id";
+
+  const candidates = await listThumbnailCandidates(videoId);
+  if (candidates.length <= 1) return "last-candidate";
+
+  const target = candidates.find((c) => c.id === candidateId);
+  if (!target) return "not-found";
+  if (target.promoted) return "is-promoted";
+
+  await rm(join(candidatesDir(videoId), target.filename), { force: true });
+  return "ok";
+}
+
 // Promote a specific candidate to thumbnail.jpg. Atomic copy.
 export async function promoteCandidate(videoId: string, candidateId: string): Promise<boolean> {
   const derivDir = join(DATA_DIR, videoId, "derivatives");

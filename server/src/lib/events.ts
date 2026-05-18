@@ -22,6 +22,7 @@ export type EventType =
   | "uploaded"
   | "thumbnail_promoted"
   | "thumbnail_uploaded"
+  | "thumbnail_deleted"
   | "derivatives_ready"
   | "transcript_uploaded"
   | "words_uploaded"

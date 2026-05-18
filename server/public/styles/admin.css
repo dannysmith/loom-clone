@@ -1794,17 +1794,27 @@ select.input {
 
 .thumbnail-candidate {
 	position: relative;
-	padding: 0;
 	border: 2px solid var(--color-border);
 	border-radius: var(--radius-lg);
 	background: var(--color-surface);
-	cursor: pointer;
 	overflow: hidden;
 	transition: border-color var(--transition-fast);
 
 	&:hover {
 		border-color: var(--color-fg-muted);
 	}
+}
+
+.thumbnail-candidate__promote {
+	display: block;
+	inline-size: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: inherit;
+	cursor: pointer;
 
 	& img {
 		display: block;
@@ -1812,6 +1822,36 @@ select.input {
 		aspect-ratio: 16 / 9;
 		object-fit: cover;
 	}
+}
+
+.thumbnail-candidate__delete {
+	position: absolute;
+	inset-block-start: var(--space-2);
+	inset-inline-end: var(--space-2);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 28px;
+	block-size: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background-color: var(--color-danger);
+	color: #fff;
+	opacity: 0;
+	cursor: pointer;
+	transition:
+		opacity var(--transition-fast),
+		background-color var(--transition-fast);
+
+	&:hover {
+		background-color: oklch(from var(--color-danger) calc(l - 0.05) c h);
+	}
+}
+
+.thumbnail-candidate:hover .thumbnail-candidate__delete,
+.thumbnail-candidate__delete:focus-visible {
+	opacity: 1;
 }
 
 .thumbnail-candidate--promoted {

@@ -20,6 +20,7 @@ import {
 } from "../../lib/store";
 import { addTagToVideo, getVideoTags, listTags, removeTagFromVideo } from "../../lib/tags";
 import {
+  deleteCandidate,
   listThumbnailCandidates,
   promoteCandidate,
   saveCustomThumbnail,
@@ -332,6 +333,26 @@ videoRoutes.post("/:id/thumbnail/promote", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   purgeVideo(result.slug);
+
+  c.header("HX-Trigger", "video-updated");
+  const candidates = await listThumbnailCandidates(id);
+  return c.html(<ThumbnailPicker video={result} candidates={candidates} />);
+});
+
+videoRoutes.delete("/:id/thumbnail/candidates/:candidateId", async (c) => {
+  const id = c.req.param("id");
+  const candidateId = c.req.param("candidateId");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+
+  const outcome = await deleteCandidate(id, candidateId);
+  if (outcome === "invalid-id") return c.text("Invalid candidate id", 400);
+  if (outcome === "not-found") return c.text("Candidate not found", 404);
+  if (outcome === "is-promoted") return c.text("Cannot delete the active thumbnail", 409);
+  if (outcome === "last-candidate")
+    return c.text("Cannot delete the last thumbnail candidate", 409);
+
+  await logEvent(id, "thumbnail_deleted", { candidateId });
 
   c.header("HX-Trigger", "video-updated");
   const candidates = await listThumbnailCandidates(id);

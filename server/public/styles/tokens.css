@@ -284,22 +284,6 @@
   --tag-grey-bg: light-dark(var(--brand-grey-400), var(--brand-grey-700));
   --tag-grey-fg: light-dark(var(--brand-grey-800), var(--brand-grey-400));
 
-  /* Legacy aliases — preserve rendering for existing tag rows that may
-     hold the old palette names. New tags can only pick the 9 brand hues
-     (see TAG_COLORS in src/db/schema.ts), but anything already stored as
-     "gray"/"teal"/"indigo" still resolves to a sensible nearest hue. */
-  --tag-gray: var(--tag-grey);
-  --tag-gray-bg: var(--tag-grey-bg);
-  --tag-gray-fg: var(--tag-grey-fg);
-
-  --tag-teal: var(--tag-green);
-  --tag-teal-bg: var(--tag-green-bg);
-  --tag-teal-fg: var(--tag-green-fg);
-
-  --tag-indigo: var(--tag-purple);
-  --tag-indigo-bg: var(--tag-purple-bg);
-  --tag-indigo-fg: var(--tag-purple-fg);
-
   /* ====================================================================
      Viewer-page palette — public surfaces, dark-only.
      Will move to its own CSS bundle in Phase 4 (see follow-up C in the

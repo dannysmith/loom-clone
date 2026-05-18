@@ -175,25 +175,25 @@ body {
 
 /* Add cut — destructive warm tint */
 .editor-btn-cut {
-  color: oklch(0.85 0.1 25);
-  border-color: oklch(0.45 0.13 25);
+  color: var(--brand-red-400);
+  border-color: var(--brand-red-700);
 }
 
 .editor-btn-cut:hover:not(:disabled) {
-  color: oklch(0.92 0.12 25);
-  border-color: oklch(0.6 0.18 25);
-  background: oklch(0.3 0.08 25 / 0.5);
+  color: var(--brand-red-400);
+  border-color: var(--brand-red-600);
+  background: color-mix(in oklch, var(--brand-red-800) 60%, transparent);
 }
 
 .editor-btn-delete-cut {
-  color: oklch(0.8 0.1 25);
-  border-color: oklch(0.38 0.08 25);
+  color: var(--brand-red-400);
+  border-color: var(--brand-red-700);
 }
 
 .editor-btn-delete-cut:hover:not(:disabled) {
-  color: oklch(0.92 0.12 25);
-  border-color: oklch(0.55 0.16 25);
-  background: oklch(0.28 0.06 25 / 0.5);
+  color: var(--brand-red-400);
+  border-color: var(--brand-red-600);
+  background: color-mix(in oklch, var(--brand-red-800) 60%, transparent);
 }
 
 /* Commit — the one filled-accent primary in the editor */
@@ -204,26 +204,26 @@ body {
 }
 
 .editor-btn-commit:hover:not(:disabled) {
-  background: oklch(from var(--accent) calc(l + 0.04) c h);
-  border-color: oklch(from var(--accent) calc(l + 0.04) c h);
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
   color: var(--accent-fg);
 }
 
 /* Accept-all — amber, consistent with suggestion-band semantics */
 .editor-btn-accept-all {
-  color: oklch(0.85 0.12 75);
-  border-color: oklch(0.5 0.15 75);
+  color: var(--brand-yellow-400);
+  border-color: var(--brand-yellow-700);
 }
 
 .editor-btn-accept-all:hover:not(:disabled) {
-  color: oklch(0.95 0.1 75);
-  border-color: oklch(0.62 0.18 75);
-  background: oklch(0.4 0.13 75 / 0.4);
+  color: var(--brand-yellow-400);
+  border-color: var(--brand-yellow-600);
+  background: color-mix(in oklch, var(--brand-yellow-800) 60%, transparent);
 }
 
 .editor-suggestion-count {
   font-size: 0.75rem;
-  color: oklch(0.78 0.12 75);
+  color: var(--brand-yellow-500);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -322,8 +322,8 @@ body {
   top: -1.5rem;
   left: 50%;
   transform: translateX(-50%);
-  background: oklch(0.78 0.18 60);
-  color: #111;
+  background: var(--brand-orange-500);
+  color: var(--brand-black);
   font-size: 0.7rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
@@ -342,8 +342,8 @@ body {
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 7px solid oklch(0.78 0.18 60); /* amber, distinct from playhead */
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+  border-top: 7px solid var(--brand-orange-500); /* amber, distinct from playhead */
+  filter: drop-shadow(0 1px 1px var(--color-overlay-strong));
 }
 
 .editor-timeline-chapter::after {
@@ -353,13 +353,13 @@ body {
   bottom: 0;
   left: 50%;
   width: 1px;
-  background: oklch(0.78 0.18 60 / 0.55);
+  background: color-mix(in oklch, var(--brand-orange-500) 55%, transparent);
   transform: translateX(-0.5px);
   pointer-events: none;
 }
 
 .editor-timeline-chapter:hover .editor-timeline-chapter-flag {
-  border-top-color: oklch(0.88 0.2 60);
+  border-top-color: color-mix(in oklch, var(--brand-orange-500) 85%, var(--brand-white));
 }
 
 /* Waveform */

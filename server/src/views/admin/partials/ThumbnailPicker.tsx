@@ -46,7 +46,7 @@ export function ThumbnailPicker({ video, candidates }: Props) {
             {!c.promoted && candidates.length > 1 && (
               <button
                 type="button"
-                class="thumbnail-candidate__delete"
+                class="btn-icon-delete"
                 hx-delete={`/admin/videos/${video.id}/thumbnail/candidates/${c.id}`}
                 hx-target="#thumbnail-picker"
                 hx-swap="outerHTML"

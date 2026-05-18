@@ -78,10 +78,10 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
           <div class="video-card-tags">
             {tags?.map((t) => (
               <span
-                class="tag-chip tag-chip--sm"
+                class="tag-chip"
                 style={`background-color: var(--tag-${t.color}-bg); color: var(--tag-${t.color}-fg)`}
               >
-                <IconTag size={10} />
+                <IconTag size={12} />
                 {t.name}
               </span>
             ))}
@@ -103,8 +103,13 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
             action={`/admin/videos/${video.id}/delete-permanently`}
             hx-confirm={`Permanently delete "${title}"? This cannot be undone.`}
           >
-            <button type="submit" class="btn btn--sm btn--danger-solid">
-              Delete
+            <button
+              type="submit"
+              class="btn-icon-delete"
+              aria-label="Delete permanently"
+              title="Delete permanently"
+            >
+              <IconTrash size={14} />
             </button>
           </form>
         </div>

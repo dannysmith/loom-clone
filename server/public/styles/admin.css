@@ -162,6 +162,9 @@ body.admin--login {
 	overflow: hidden;
 }
 
+/* Same hover pattern as .btn--ghost; lives in a bordered container so
+   no border on the buttons themselves. Active = coral-tinted (per the
+   "selected" treatment). */
 .view-toggle-btn {
 	padding: var(--space-2) var(--space-3);
 	font-size: var(--font-size-sm);
@@ -176,8 +179,8 @@ body.admin--login {
 	}
 
 	&.active {
-		color: var(--color-fg);
-		background-color: var(--color-surface-hover);
+		color: var(--color-accent);
+		background-color: var(--color-accent-bg);
 	}
 }
 
@@ -203,10 +206,12 @@ body.admin--login {
 	}
 }
 
+/* Micro section label — shared with form labels (.label, .tag-edit-label)
+   and the table column header (.keys-header). */
 .filter-group-label {
 	font-size: var(--font-size-xs);
-	color: var(--color-fg);
-	font-weight: var(--font-weight-bold);
+	color: var(--color-fg-muted);
+	font-weight: var(--font-weight-medium);
 	white-space: nowrap;
 	padding-inline-end: var(--space-1);
 }
@@ -930,7 +935,7 @@ select.input {
 }
 
 .btn--danger-solid {
-	color: #fff;
+	color: var(--brand-white);
 	background-color: var(--color-danger);
 	border-color: var(--color-danger);
 
@@ -1048,10 +1053,6 @@ select.input {
 		color: var(--color-accent);
 		text-decoration: underline;
 	}
-}
-
-.tag-edit-name {
-	flex: 1;
 }
 
 /* Expanded vertical edit form */
@@ -1183,7 +1184,7 @@ select.input {
 	gap: var(--space-3);
 	padding: var(--space-2) var(--space-3);
 	font-size: var(--font-size-xs);
-	font-weight: var(--font-weight-bold);
+	font-weight: var(--font-weight-medium);
 	color: var(--color-fg-muted);
 	border-block-end: 1px solid var(--color-border);
 	background-color: var(--color-surface);
@@ -1525,21 +1526,18 @@ select.input {
 	}
 }
 
+/* Tag chips share badge proportions so they line up next to visibility /
+   status badges (same padding, font, line-height). The radius is slightly
+   tighter than .badge's full pill so tags read as a distinct shape. */
 .tag-chip {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-1);
 	padding: var(--space-1) var(--space-2);
-	border-radius: var(--radius-full);
+	border-radius: var(--radius-md);
 	font-size: var(--font-size-xs);
 	font-weight: var(--font-weight-medium);
 	line-height: 1;
-}
-
-/* Compact chip variant used in dense lists (e.g. dashboard cards). */
-.tag-chip--sm {
-	padding: 1px var(--space-2);
-	font-size: 0.7rem;
 }
 
 .tag-chip-remove {
@@ -1591,10 +1589,6 @@ select.input {
 	align-items: center;
 	gap: var(--space-2);
 	margin-block-end: var(--space-4);
-}
-
-.video-card-actions {
-	margin-block-start: var(--space-2);
 }
 
 .video-tabs {
@@ -1769,7 +1763,7 @@ select.input {
 
 .upload-progress-bar {
 	flex: 1;
-	block-size: 0.5rem;
+	block-size: var(--space-2);
 	border-radius: var(--radius-full);
 }
 
@@ -1831,10 +1825,9 @@ select.input {
 	}
 }
 
-.thumbnail-candidate__delete {
-	position: absolute;
-	inset-block-start: var(--space-2);
-	inset-inline-end: var(--space-2);
+/* Square icon-only "delete" affordance — filled danger fill, white icon.
+   Used by the trash dashboard card and the thumbnail picker. */
+.btn-icon-delete {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -1844,20 +1837,30 @@ select.input {
 	border: 0;
 	border-radius: var(--radius-sm);
 	background-color: var(--color-danger);
-	color: #fff;
-	opacity: 0;
+	color: var(--brand-white);
 	cursor: pointer;
-	transition:
-		opacity var(--transition-fast),
-		background-color var(--transition-fast);
+	transition: background-color var(--transition-fast);
 
 	&:hover {
 		background-color: oklch(from var(--color-danger) calc(l - 0.05) c h);
 	}
 }
 
-.thumbnail-candidate:hover .thumbnail-candidate__delete,
-.thumbnail-candidate__delete:focus-visible {
+/* Inside the thumbnail picker the icon-delete is an absolute-positioned
+   overlay revealed on card hover/focus. The trash card uses the bare
+   .btn-icon-delete (always visible). */
+.thumbnail-candidate .btn-icon-delete {
+	position: absolute;
+	inset-block-start: var(--space-2);
+	inset-inline-end: var(--space-2);
+	opacity: 0;
+	transition:
+		opacity var(--transition-fast),
+		background-color var(--transition-fast);
+}
+
+.thumbnail-candidate:hover .btn-icon-delete,
+.thumbnail-candidate .btn-icon-delete:focus-visible {
 	opacity: 1;
 }
 

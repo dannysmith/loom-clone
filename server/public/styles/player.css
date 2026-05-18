@@ -1,4 +1,71 @@
 /* Shared Vidstack player overrides. Applied to both the video page and the
-   embed page. Per-page player tweaks (border-radius, sizing) stay in
-   viewer.css / embed.css — this file is for customising the player chrome
-   itself (controls, colours, hover states) consistently across both. */
+   embed page via their respective entry stylesheets. Vidstack ships its
+   default theme.css + video.css from CDN; this file remaps the
+   --media-* / --video-* CSS variables onto the brand tokens. */
+
+media-player {
+  /* Brand colour drives the scrubber fill, the centre big-play button,
+     buffering ring fill. */
+  --media-brand: var(--color-accent);
+  --media-controls-color: var(--brand-white);
+  --media-font-family: var(--font-sans);
+
+  /* Buttons — coral-tinted hover on the chrome controls. */
+  --media-button-color: var(--brand-white);
+  --media-button-hover-bg: color-mix(in oklch, var(--color-accent) 28%, transparent);
+  --media-button-touch-hover-bg: color-mix(in oklch, var(--color-accent) 28%, transparent);
+  --media-button-border-radius: var(--radius-sm);
+  --media-button-hover-transform: scale(1.05);
+
+  /* Tooltips on top of controls (volume, fullscreen, etc.) */
+  --media-tooltip-bg-color: var(--brand-bg-darker);
+  --media-tooltip-color: var(--brand-white);
+  --media-tooltip-border: 1px solid var(--brand-bg-dark);
+  --media-tooltip-border-radius: var(--radius-sm);
+  --media-tooltip-font-size: var(--font-size-xs);
+  --media-tooltip-font-weight: var(--font-weight-medium);
+
+  /* Slider (scrubber) */
+  --media-slider-track-bg: color-mix(in oklch, var(--brand-white) 18%, transparent);
+  --media-slider-track-progress-bg: color-mix(in oklch, var(--brand-white) 40%, transparent);
+  --media-slider-track-fill-bg: var(--color-accent);
+  --media-slider-thumb-bg: var(--brand-white);
+  --media-slider-thumb-border: 2px solid var(--color-accent);
+  --media-slider-focused-thumb-shadow: 0 0 0 4px
+    color-mix(in oklch, var(--color-accent) 45%, transparent);
+
+  /* Time readout */
+  --media-time-color: var(--brand-white);
+  --media-time-divider-color: color-mix(in oklch, var(--brand-white) 60%, transparent);
+  --media-time-font-size: var(--font-size-xs);
+  --media-time-font-weight: var(--font-weight-medium);
+  --media-time-letter-spacing: 0;
+
+  /* Chapter title strip — softer than default. */
+  --media-chapter-title-color: color-mix(in oklch, var(--brand-white) 70%, transparent);
+  --media-chapter-title-font-size: var(--font-size-xs);
+  --media-chapter-title-font-weight: var(--font-weight-medium);
+
+  /* Captions */
+  --media-cue-color: var(--brand-white);
+  --media-cue-bg: var(--color-overlay-strong);
+  --media-cue-border-radius: var(--radius-sm);
+
+  /* Wrap */
+  --video-bg: var(--brand-black);
+  --video-border: 1px solid color-mix(in oklch, var(--brand-white) 8%, transparent);
+  --video-focus-ring: 0 0 0 3px color-mix(in oklch, var(--color-accent) 55%, transparent);
+
+  /* Big load (initial play) button — coral fill that lifts. */
+  --video-load-button-bg: var(--color-accent);
+  --video-load-button-size: 64px;
+}
+
+/* The "play" triangle stays coral whenever it's visible (paused state) —
+   in the controls bar AND in any pre-play / load overlay the host renders.
+   The pause icon keeps the default control colour (white). */
+media-player .vds-play-button .play-icon,
+media-player .vds-load-button .play-icon,
+.vds-button .play-icon {
+  color: var(--color-accent);
+}

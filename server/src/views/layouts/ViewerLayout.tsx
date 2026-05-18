@@ -7,10 +7,10 @@ type Props = PropsWithChildren<{
 }>;
 
 // Public viewer shell. Centred, content-first, no chrome.
-// Page-specific styles can come in via the `head` slot.
+// Loads the lean public-viewer stylesheet (no admin styles).
 export function ViewerLayout({ title, head, children }: Props) {
   return (
-    <RootLayout title={title} head={head} bodyClass="viewer">
+    <RootLayout title={title} head={head} bodyClass="viewer" stylesheet="styles/viewer-app.css">
       <main class="viewer-main">{children}</main>
     </RootLayout>
   );

@@ -49,20 +49,24 @@ media-player[data-started] .embed-overlay {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
-  border: 2px solid rgba(255 255 255 / 0.9);
-  background: rgba(255 255 255 / 0.15);
-  color: #fff;
+  border: 2px solid color-mix(in oklch, var(--brand-white) 90%, transparent);
+  background: color-mix(in oklch, var(--brand-white) 18%, transparent);
+  /* Triangle is always coral — SVG inside uses fill="currentColor". */
+  color: var(--color-accent);
   cursor: pointer;
   backdrop-filter: blur(4px);
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
   padding-left: 7px;
 }
 
 .embed-play-btn:hover {
-  background: rgba(255 255 255 / 0.25);
+  background: color-mix(in oklch, var(--brand-white) 30%, transparent);
+  border-color: var(--brand-white);
   transform: scale(1.06);
 }
 
@@ -77,9 +81,9 @@ media-player[data-started] .embed-overlay {
 
 .embed-title {
   color: var(--brand-white);
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.3;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
   text-shadow: 0 1px 4px var(--color-overlay);
 }
 
@@ -87,9 +91,9 @@ media-player[data-started] .embed-overlay {
   display: inline-flex;
   align-items: center;
   gap: 0.25em;
-  color: color-mix(in oklch, var(--brand-white) 70%, transparent);
-  font-size: 0.8rem;
-  font-weight: 500;
+  color: color-mix(in oklch, var(--brand-white) 75%, transparent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   text-shadow: 0 1px 4px var(--color-overlay);
 }
 

@@ -3,9 +3,10 @@ import { marked } from "marked";
 import type { Tag, Video } from "../../db/schema";
 import { formatDate, formatDurationShort } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
-import { staticUrl } from "../../lib/static-assets";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
+import { RssIcon } from "./icons";
+import { SiteFooter } from "./SiteFooter";
 
 marked.setOptions({ breaks: true });
 
@@ -29,8 +30,6 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
       title={pageTitle}
       head={
         <>
-          <link rel="stylesheet" href={staticUrl("styles/viewer.css")} />
-
           <link rel="canonical" href={canonicalUrl} />
           {noindex && <meta name="robots" content="noindex" />}
           {description && <meta name="description" content={description} />}
@@ -85,6 +84,16 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
           />
           {tag.name}
         </h1>
+        <div class="tag-meta">
+          <span>
+            {videos.length} {videos.length === 1 ? "video" : "videos"}
+          </span>
+          <span class="tag-meta-separator">·</span>
+          <a class="tag-meta-rss" href={feedXmlUrl}>
+            <RssIcon size={14} />
+            Subscribe via RSS
+          </a>
+        </div>
         {tag.description && (
           <div class="tag-description">{raw(marked.parse(tag.description) as string)}</div>
         )}
@@ -100,11 +109,7 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
         </ul>
       )}
 
-      <p class="viewer-attribution">
-        <a href={siteConfig.authorUrl} rel="noopener noreferrer" target="_blank">
-          {siteConfig.authorUrl.replace(/^https?:\/\//, "")}
-        </a>
-      </p>
+      <SiteFooter />
     </ViewerLayout>
   );
 }

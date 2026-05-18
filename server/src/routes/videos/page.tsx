@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { hasAdminHint } from "../../lib/admin-auth";
+import { getVideoTags } from "../../lib/tags";
 import { absoluteUrl } from "../../lib/url";
 import { VideoPage } from "../../views/viewer/VideoPage";
 import { resolveForViewer } from "./resolve";
@@ -18,6 +19,11 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   const embedAbsolute = absoluteUrl(`/${video.slug}/embed`);
   const adminUrl = hasAdminHint(c) ? `/admin/videos/${video.id}` : null;
 
+  // Only surface tags that have a public surface — private tags shouldn't
+  // leak from a video's public page.
+  const allTags = await getVideoTags(video.id);
+  const visibleTags = allTags.filter((t) => t.visibility !== "private");
+
   if (video.visibility !== "public") {
     c.header("X-Robots-Tag", "noindex");
   }
@@ -31,6 +37,7 @@ export async function handleSlugPage(c: Context, slug: string): Promise<Response
   return c.html(
     <VideoPage
       video={video}
+      tags={visibleTags}
       src={src}
       sources={sources}
       poster={poster}

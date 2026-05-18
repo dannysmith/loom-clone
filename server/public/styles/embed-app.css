@@ -1,0 +1,11 @@
+/* Embed entry point. Linked by EmbedPage. Chromeless player + minimal
+   overlay; no shared viewer chrome. Player overrides are styled to match
+   the viewer so an embedded iframe feels on-brand. */
+
+@layer reset, tokens, base, embed, player;
+
+@import url("./reset.css") layer(reset);
+@import url("./tokens.css") layer(tokens);
+@import url("./base.css") layer(base);
+@import url("./embed.css") layer(embed);
+@import url("./player.css") layer(player);

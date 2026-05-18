@@ -8,9 +8,19 @@ type Props = PropsWithChildren<{
   head?: Child;
   // Class name on <body>, lets layouts theme themselves without separate <html> trees.
   bodyClass?: string;
+  // Path under /static/. Default ships the admin bundle; public viewer/embed
+  // layouts override with their own lean entry points so admin CSS never
+  // reaches public visitors.
+  stylesheet?: string;
 }>;
 
-export function RootLayout({ title, head, bodyClass, children }: Props) {
+export function RootLayout({
+  title,
+  head,
+  bodyClass,
+  stylesheet = "styles/app.css",
+  children,
+}: Props) {
   return (
     <>
       {raw("<!DOCTYPE html>")}
@@ -19,7 +29,7 @@ export function RootLayout({ title, head, bodyClass, children }: Props) {
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>{title}</title>
-          <link rel="stylesheet" href={staticUrl("styles/app.css")} />
+          <link rel="stylesheet" href={staticUrl(stylesheet)} />
           {head}
         </head>
         <body class={bodyClass}>{children}</body>

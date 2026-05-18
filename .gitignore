@@ -9,8 +9,6 @@ server/.env
 server/.env.*
 !server/.env.example
 
-# Bun
-
 # Build output
 server/dist/
 server/public/editor/
@@ -26,3 +24,5 @@ buildServer.json
 
 # macOS
 .DS_Store
+
+.playwright-cli

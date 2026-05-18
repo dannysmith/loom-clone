@@ -75,7 +75,7 @@ function ThumbnailActions({ videoId }: { videoId: string }) {
         hx-swap="outerHTML"
         hx-encoding="multipart/form-data"
       >
-        <label class="btn btn--sm btn--secondary">
+        <label class="btn btn--sm">
           <IconUpload size={14} />
           Upload custom thumbnail
           <input
@@ -87,7 +87,7 @@ function ThumbnailActions({ videoId }: { videoId: string }) {
           />
         </label>
       </form>
-      <a href={`/admin/videos/${videoId}/cover`} class="btn btn--sm btn--secondary">
+      <a href={`/admin/videos/${videoId}/cover`} class="btn btn--sm">
         <IconFileImage size={14} />
         Open cover editor
       </a>

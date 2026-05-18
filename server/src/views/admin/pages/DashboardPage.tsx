@@ -9,6 +9,7 @@ import {
   IconGrid,
   IconLink,
   IconList,
+  IconTag,
   IconUpload,
 } from "../components/Icons";
 import { VideoList } from "../partials/VideoList";
@@ -209,6 +210,7 @@ export function DashboardPage({
                     class="tag-chip"
                     style={`--chip-bg: var(--tag-${t.color}-bg); --chip-fg: var(--tag-${t.color}-fg)`}
                   >
+                    <IconTag size={12} />
                     {t.name}
                   </span>
                 </label>

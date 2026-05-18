@@ -12,6 +12,7 @@ import {
   IconFileImage,
   IconFolder,
   IconScissors,
+  IconTag,
   IconTrash,
   VisibilityBadge,
 } from "./Icons";
@@ -80,6 +81,7 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
                 class="tag-chip tag-chip--sm"
                 style={`background-color: var(--tag-${t.color}-bg); color: var(--tag-${t.color}-fg)`}
               >
+                <IconTag size={10} />
                 {t.name}
               </span>
             ))}

@@ -1,7 +1,7 @@
 import { raw } from "hono/html";
 import { marked } from "marked";
 import type { Tag, Video } from "../../../db/schema";
-import { IconCalendar, IconShuffle, IconWand, VisibilityBadge } from "../components/Icons";
+import { IconCalendar, IconShuffle, IconTag, IconWand, VisibilityBadge } from "../components/Icons";
 
 marked.setOptions({ breaks: true });
 
@@ -14,7 +14,7 @@ export function TitleDisplay({ video }: { video: Video }) {
       <h1 class="editable-value">{title}</h1>
       <button
         type="button"
-        class="btn btn--sm editable-trigger"
+        class="btn btn--sm btn--ghost editable-trigger"
         hx-get={`/admin/videos/${video.id}/partials/title/edit`}
         hx-target="#field-title"
         hx-swap="outerHTML"
@@ -65,7 +65,7 @@ export function SlugDisplay({ video }: { video: Video }) {
       <span class="video-slug">/{video.slug}</span>
       <button
         type="button"
-        class="btn btn--sm editable-trigger"
+        class="btn btn--sm btn--ghost editable-trigger"
         hx-get={`/admin/videos/${video.id}/partials/slug/edit`}
         hx-target="#field-slug"
         hx-swap="outerHTML"
@@ -168,7 +168,7 @@ export function DescriptionDisplay({ video }: { video: Video }) {
       )}
       <button
         type="button"
-        class="btn btn--sm editable-trigger"
+        class="btn btn--sm btn--ghost editable-trigger"
         hx-get={`/admin/videos/${video.id}/partials/description/edit`}
         hx-target="#field-description"
         hx-swap="outerHTML"
@@ -226,7 +226,7 @@ export function NotesDisplay({ video }: { video: Video }) {
       )}
       <button
         type="button"
-        class="btn btn--sm editable-trigger"
+        class="btn btn--sm btn--ghost editable-trigger"
         hx-get={`/admin/videos/${video.id}/partials/notes/edit`}
         hx-target="#field-notes"
         hx-swap="outerHTML"
@@ -280,7 +280,7 @@ export function VisibilityDisplay({ video }: { video: Video }) {
       <VisibilityBadge visibility={video.visibility} />
       <button
         type="button"
-        class="btn btn--sm editable-trigger"
+        class="btn btn--sm btn--ghost editable-trigger"
         hx-get={`/admin/videos/${video.id}/partials/visibility/edit`}
         hx-target="#field-visibility"
         hx-swap="outerHTML"
@@ -344,6 +344,7 @@ export function VideoTagsControl({
           class="tag-chip"
           style={`background-color: var(--tag-${t.color}-bg); color: var(--tag-${t.color}-fg)`}
         >
+          <IconTag size={12} />
           {t.name}
           <button
             type="button"

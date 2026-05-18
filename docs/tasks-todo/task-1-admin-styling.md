@@ -471,7 +471,7 @@ The server is running on http://127.0.0.1:3000/admin - use the Playwright CLI an
 - ✅ Decide on colour semantics, tokens, role assignments, typography, iconography, CSS architecture — captured in "Design Decisions" above.
 - ⏳ Resolve open follow-ups A / B / C (see end of Design Decisions).
 
-### Phase 2 - Colours, Design Tokens & Base styles
+### Phase 2 - Colours, Design Tokens & Base styles  ✅
 
 Express the Design Decisions in code. No visual redesigns beyond colour and token consolidation.
 

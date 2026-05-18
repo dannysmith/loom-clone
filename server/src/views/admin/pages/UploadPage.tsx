@@ -1,5 +1,6 @@
 import type { Tag } from "../../../db/schema";
 import { AdminLayout } from "../../layouts/AdminLayout";
+import { IconTag } from "../components/Icons";
 
 export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
   return (
@@ -72,6 +73,7 @@ export function UploadPage({ tags, error }: { tags: Tag[]; error?: string }) {
                     class="tag-chip"
                     style={`--chip-bg: var(--tag-${t.color}-bg); --chip-fg: var(--tag-${t.color}-fg)`}
                   >
+                    <IconTag size={12} />
                     {t.name}
                   </span>
                 </label>

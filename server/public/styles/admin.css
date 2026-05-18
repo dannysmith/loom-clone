@@ -62,9 +62,15 @@ body.admin--login {
 	background-color: var(--color-surface-hover);
 }
 
+/* Selected nav item — coral-tinted background + coral icon. */
 .admin-nav-link[aria-current="page"] {
-	color: var(--color-fg);
-	background-color: var(--color-surface-hover);
+	color: var(--color-accent);
+	background-color: var(--color-accent-bg);
+}
+
+.admin-nav-link[aria-current="page"]:hover {
+	color: var(--color-accent);
+	background-color: var(--color-accent-bg-strong);
 }
 
 /* ------- Main content ------- */
@@ -737,6 +743,21 @@ body.admin--login {
 	}
 }
 
+/* Ghost — no border, no background until hover. Use for quiet affordances
+   (Edit pencils, sidebar nav links, secondary toolbar actions). Pairs with
+   --sm / --icon when needed. */
+.btn--ghost {
+	background-color: transparent;
+	border-color: transparent;
+	color: var(--color-fg-muted);
+
+	&:hover {
+		color: var(--color-fg);
+		background-color: var(--color-surface-hover);
+		border-color: transparent;
+	}
+}
+
 /* ------- Badges ------- */
 
 .badge {
@@ -882,10 +903,13 @@ select.input {
 	}
 }
 
-.label {
+/* Single form-label treatment: xs, medium, muted. Shared with .tag-edit-label. */
+.label,
+.tag-edit-label {
 	display: block;
-	font-size: var(--font-size-sm);
+	font-size: var(--font-size-xs);
 	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
 	margin-block-end: var(--space-1);
 }
 
@@ -1043,14 +1067,6 @@ select.input {
 	gap: var(--space-1);
 }
 
-.tag-edit-label {
-	font-size: var(--font-size-xs);
-	font-weight: var(--font-weight-medium);
-	color: var(--color-fg-muted);
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
-}
-
 .tag-edit-help {
 	font-size: var(--font-size-xs);
 	color: var(--color-fg-muted);
@@ -1107,9 +1123,11 @@ select.input {
 	margin-block-end: var(--space-6);
 }
 
+/* Inline sub-section heading — same treatment as the h3s in video detail. */
 .keys-section-title {
-	font-size: var(--font-size-lg);
-	font-weight: var(--font-weight-bold);
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
 	margin-block-end: var(--space-1);
 }
 
@@ -1276,46 +1294,30 @@ select.input {
 	opacity: 0.5;
 }
 
-.video-description {
-	margin-block-end: var(--space-4);
-
-	& h3 {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-bold);
-		margin-block-end: var(--space-1);
-	}
-
-	& p {
-		font-size: var(--font-size-sm);
-		color: var(--color-fg-muted);
-		white-space: pre-wrap;
-	}
-}
-
-.video-tags-section {
-	margin-block-end: var(--space-4);
-
-	& h3 {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-bold);
-		margin-block-end: var(--space-2);
-	}
-}
-
+/* Inline sub-section heading — sm, medium, fg-muted. Shared treatment with
+   .keys-section-title and .thumbnail-picker h3. */
+.video-description,
+.video-tags-section,
 .video-notes {
 	margin-block-end: var(--space-4);
 
 	& h3 {
 		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-bold);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-fg-muted);
 		margin-block-end: var(--space-1);
 	}
+}
 
-	& p {
-		font-size: var(--font-size-sm);
-		color: var(--color-fg-muted);
-		white-space: pre-wrap;
-	}
+.video-tags-section h3 {
+	margin-block-end: var(--space-2);
+}
+
+.video-description p,
+.video-notes p {
+	font-size: var(--font-size-sm);
+	color: var(--color-fg-muted);
+	white-space: pre-wrap;
 }
 
 /* ------- Editable fields ------- */
@@ -1784,6 +1786,9 @@ select.input {
 }
 
 .thumbnail-picker h3 {
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
 	margin-block-end: var(--space-3);
 }
 

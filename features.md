@@ -4,60 +4,49 @@
 
 ## Why I built this
 
-TBD
+
 
 ## Initial Requirements in a Nutshell
 
-### Recording
+For this project to be worthwhile I need to be very clear about my fundamental requirements, and particularly those which differentiate it from existing tools like Loom, Cap or Supercut. So in a nutshell...
 
-TBD - bullet list of my specific requirements for recording.
+### 1. Mac app for recording
 
-- Three modes, instant cuts bwteeen them.
-- No chrome in screen recordings
-- High-quality cam-only when talking head
-- Pre-recording tweaks to white balance etc
-- Local copies of all input streams saved to disk seperatley for final cut Pro etc if needed
+I want a native macOS menubar app which lets me record a video with as little friction as possible. It should...
 
-### Sharing
+- Let me record a screen: with or without a Loom-esque curcular camera feed in the corner.
+- Let me switch instatly between the above and a high-quality **full-screen** camera feed for talking-head parts of the recording.
+- Before recording, show enough information that I can be sure my audio, camera and screen are going to record properly.
+- Let me pause and restart recording at will – I often do this in longer videos while I switch spaces, change slides or get ready for the next part of the recording.
+- Make it easy to tweak the white balance and brightness of the camera feed before recording without having to mess with my actual camera settings.
+- Save high-quality local copies of the screen, camera and microphone recordings so I can use Final Cut Pro to compose them into more complex videos if needed.
+- Work reliably with the cameras and microphones I use to record videos.
+- Put very little pressure on my CPU, GPU & RAM when not actually in use, and be performan when recording.
 
-TBD - bullet list of my specific requirements for sharing.
+### 2. Viewing Videos
 
+The macOS app should stream a *composited* video to a webserver **during recording**, so when I finish it's **instantly** available at a friendly URL I own (eg. https://v.danny.is/my-video). Any post-processing on the server acts to *entrich* that in the background.
 
-- Videos on https://v.danny.is/my-video can easily customise slug.
-- Instant sharing of URL when recording is done.
-- Full control over public-facing video endpoints and what's returned.
-- Viewers always get the best UX possible.
+### 3. Administering Videos
 
-### Admin
+A Loom-like web app lets me edit, manage & organise my recordings, and upload videos recorded elsewhere. The admin app is optimised to reduce friction for my specific video-related workflows.
 
-TBD - bullet list of my specific requirements for admin.
+### 4. Other Requirements
 
-- Loom-like admin interface for me to manage my videos.
-- Can upload mp4 videos exported from loom/youtube etc.
-- Three modes of visibility:
-  - **Unlisted** vidoes are the default. They are publically available but are not easily *discoverable* unless you know their URL. The vast majority of my videos will be of this type.
-  - **Public** videos are discoveravle via RSS & JSON feed and can be indexed by search engines.
-  - **Private** vidoes are not available anywhere except via the admin interface and cannot be shared. These are intended for personal notes and videos I want to keep private until I’m ready to share them.
-
-### Other Requirements
-
-TBD - bullet list of my other specific requirements.
-
-- Deployed to my own server, ideally one where I can also run other services on it.
-- Cheap.
-- Not complex to manage or keep current with security patches etc.
+- The backend can be easily deployed to a **cheap** European VPS, which ideally can be shared with other services I might want to run.
+- The system is simple, resiliant and easy to manage and support long-term.
 
 ## Core Principles
 
-Before I started work on this I wanted to nail down some **super fundamental** principles which weren't gonna change even if my initial requirements (inevitably) evolved. Here they are:
+Given how vage some of these requirements are, it seems sensible to also establish a few **fundamental principles** which are unlikeley to changes as my requirements evolve during the build.
 
 ### 1. Instant Shareability
 
-The moment I stop recording, I need a working URL which I can paste into Slack and the other person can watch immediately (or within a few seconds). It's what makes async video a viable replacement for a quick call or a long message. "Processing, check back in 2 minutes" is not okay.
+The moment I stop recording, I need a **working** URL which I can share immediatly. This is what makes async video a viable replacement for quick video calls and long written messages. It's what differentiates tools like this from platforms like YouTube. "Processing, check back in 2 minutes" is not acceptable.
 
 ### 2. Never Lose Footage
 
-Recording a 20-minute tutorial and losing it to an upload glitch or encoding failure is unacceptable. The system must guarantee that footage is recoverable. In practice this means: the desktop app keeps a full local copy of everything it records; we design the system to be fault-tolerant and recover wherever possible; if the network drops mid-recording, we can usually recover even without the local raw backups. Etc. This principle also extends to the server side: processed videos should be backed up to durable storage.
+Recording a 20-minute tutorial and losing it to an upload glitch or encoding failure is unacceptable. The system **must** guarantee that footage is recoverable. In practice this probably means: the desktop app keeps a full local copy of everything it records; we design the system to be fault-tolerant and recover wherever possible; if the network drops mid-recording, we can recover even without the local raw backups. Etc. This principle should extend to the server side: processed videos should be backed up to durable storage etc.
 
 ### 3. I Own My URLs
 
@@ -67,26 +56,47 @@ Every video lives on `v.danny.is`, a domain I control – the public-facing URL 
 
 A video URL works forever. If I change a video's slug, the old URL becomes a 301 redirect to the new one. Videos embedded in Notion pages, Google Docs, and knowledge bases years from now must still work.
 
-### 5. Reliability & Good UX for Viewers
+### 5. Reliability for Viewers
 
 When someone clicks a video link, it works. The video loads fast, buffers quickly, and plays smoothly — regardless of where the viewer is, what device they're on, or whether my server happens to be creaking at that moment. Viewer-facing video delivery must be first-class.
 
-### 6. Simplicity
 
-This tool does one thing: record, host, and share video. Every feature in it must be in service of doing those things **really well**. I'll never add features like comments, likes, reactions etc.
+### 6. Discoverability & Viewer UX
 
-### 7. I'm the Only Creator Here
+We're a good *web citizen*. Our public-facing endpoints serve semantic content which works in a variety of contexts. Public videos are SEO-friendly and are discoverable via RSS feeds, LLM-facing endpoints and the like.
 
-This product is **only for me**: nobody else will use the mac app or admin app. Nobody else will record videos. The only parts where other people matter are the public bits folks use to find and watch my videos. 
+<Callout title="Recording Visibility">
+- **Unlisted** vidoes are the default. They are publically available but are not easily *discoverable* unless you know their URL. The vast majority of my videos will be of this type.
+- **Public** videos are discoveravle via RSS & JSON feed and can be indexed by search engines.
+- **Private** vidoes are not available anywhere except via the admin interface and cannot be shared. These are intended for personal notes and videos I want to keep private until I’m ready to share them.
+</Calout>
 
-## Overview: The Fundamentals
+### 7. Simplicity
 
-1. macOS app – The recorder. A Swift/SwiftUI menubar app.
-2. Backend API – Backend for the macOS app. Receives streamed HLS segments, runs post-processing, stores vide files. Hono & Bun deployed to a Hetzner VPS.
-3. Admin Web App – Interface for managing my recordings. Part of the same Hono app but with it’s own auth and seperate admin API.
-4. Viewer-facing surface - The public-facing pages, feeds etc. Part of the Hono app behind BunnyCDN.
+The whole system is designed with one goal in mind: **allowing me to record, host, and share videos**. Every feature must be in service of doing those things **really well**. I'm unlikeley to ever add features like comments, likes, reactions etc because they do not serve this end.
+
+Similarly, the codebase and technology stack should be as simple as possible.
+
+### 8. I'm the Only Creator Here
+
+This product is **only for me**. Nobody else will use the mac app or admin app. Nobody else will record videos. The only parts where other people matter are the public-facing bits where folks find and watch my videos. 
+
+## The System
+
+All this led me to start thinking about the system as having four main components.
+
+1. **macOS Menubar App** – The recorder. A simple native Swift/SwiftUI menubar app which uses Apple APIs to record and stream as efficiently as possible.
+2. **Backend API** – Backend for the macOS app. Receives streamed HLS segments, runs post-processing, stores video files.
+3. **Admin Web App** – Web interface for managing my recordings with it’s own auth and admin API.
+4. **Viewer-facing Surface** - The public-facing pages, feeds etc.
+
+In an effort to keep things simple, the Backend API, Admin Web App and Viewer-facing Surface are all served by the same Hono app, deployed to a Hertzner VPS. The viewer-facing endpoints are behind BunnyCDN.
+
+Let's look at each of these components in turn...
 
 ## The Menubar UI
+
+[VIDEO Menubar app]
 
 The menubar app is deliveratley very simple. Three drop-downs allow me to select a screen, camera and audio source and see a preview below. If both camera and video sources are set to “None” recording is disabled, and if only one is set the preview and UI adapts appropriately. If an audio source is selected sound meter is shown below the video preview.
 
@@ -102,14 +112,18 @@ When screen and camera feeds have been selected, there are three modes available
 
 Switching between theese in the menubar panel updates the preview appropriately and also dictates which mode the recording will *start* in. The mode can still be changed during recording.
 
-Expanding the *Hide from recording* section allows us to hide stuff from the screen recorder:
+Expanding the *Hide from recording* section allows us to hide stuff from the screen recorder.
 
 1. **Desktop icons** - When checked, finder’s desktop icons will be hidden in the screen recording.
 2. **App Windows** - Any ckecked apps will have their windows hidden in the screen recording. Currently running apps are shown alongside the five most-recently selected apps (whether they’re running or not).
 
 ## The Recording UI
 
-While recording is in progress a toolbar is shown at the bottom of the screen with controls for ending, pausing and cancelling the recording, and for switching between modes. The mode switcher is only visible when both camera and screen feeds are available. I can set a chapter marker by hitting a button in the toolbar.
+[IMAGE Recording UI]
+
+When recording is in progress a toolbar is shown at the bottom of the screen with controls for ending, pausing and cancelling the recording, and for switching between modes. The mode switcher is only visible when both camera and screen feeds are available. I can set a chapter marker by hitting a button in the toolbar.
+
+[IMAGE Annotated toolbar with 4 chapter markers set]
 
 When not in screen-only mode, a draggable preview of the camera feed is also shown. This is circular when in screen-and-camera and rectangular when in camera-only.
 
@@ -117,15 +131,15 @@ Neither the camera preview or toolbar are captured in the actual screen recordin
 
 ## The Basic Recording Lifecycle
 
-I think the best way to explain how this all works is to walk through the process of recording a video together...
+The best way to explain the finer details is for us to walk through the recording process together...
 
-### 1. Open the Menubar App
+### 1. We Open the Menubar App
 
 When I open the menubar popover, lightweight preview sessions start for the camera and audio devices and the app begins polling for new devices and capturing screenshots for previewing the selected display. It also checks the server is reachable and the local data directory is writable. All this is torn down once the menubar popover is closed.
 
 I select my input devices, check they look & sound okay in the preview and…
 
-### 2. Hit Record
+### 2. We Hit Record
 
 The recording toolbar shows a short countdown to me while in the background:
 
@@ -143,75 +157,75 @@ We use two capture sessions: one for the screen and another for the camera+audio
 - `camera.mp4` - The “raw” output of the H.264 camera capture session, ignoring any adjustments to white balance & brightness. It includes an audio track.
 - `audio.m4a` - The “raw” audio from the mic.
 
-<Callout>
 These are never sent to the server, but having the raw recordings localy means I can always pull them into Final Cut Pro if I need to do some proper editing. They also act as a reliable backup if composition fails.
+
+The video we send to the server is *composited* from the capture streams using the upload resolution and framerate selected before recording.
+
+- Camera adjustments for white balance & brightness are applied to the camera feed.
+- The camera and screen feeds are downscaled and/or cropped to an appropriate size and aspect ratio for the recording, taking into account the selected stream quality.
+
+<Callout title="User Actions While Recording">
+The following user actions will affect the composited recording.
+
+- Pressing **pause** in the toolbar will temporarily pause all recording streams until **unpause** is pressed.
+- Pressing **chapter marker** in the toolbar will add an anonymous marker to the recording timeline which can later be edited in the admin app to create viewer-facing chapter markers. If pressed while paused it will be added at the next unpause timestamp.
+- Changing the **mode** in the toolbar will cause the composited recording to show the relevant feed (screen or camera). In screen & camera mode the camera feed is rendered as a small circular overlay in a corner of the screen.
+- Moving the camera preview from one quadrant to another (eg. from bottom-right to top-left) will cause it to be shown in that corner in the composited output when in screen & camera mode.
 </Callout>
 
-The video we send to the server is *composited* from the capture streams, taking into account the users choices pre-recorging and any mode changes during recording:
+The composited video is then encoded at an appropriate bitrate and written to disk as series of ~4s  `.m4s` segments abefore being streamed to the server via a queue of simple `PUT` requests. Failed `PUT`s are retried sensibly: even a ~10min connection loss will just cause the queued egments to strem up on reconnection. These `PUT`s are idempotent on the server.
 
-- Camera adjustments like white balance are applied to the camera feed.
-- The camera and screen feeds are downscaled and/or cropped to an appropriate size and aspect ratio for the recording, taking into account the selected stream quality.
-- In screen+camera mode, the camera feed is rendered on top of the screen as a circle in the appropriate corner.
-- The composited video reflects user changes to mode or overlay position.
+A recording timeline is periodically written to a temporary file on disk to facilitate recovery if anything goes wrong.
 
-The composited video is then written to disk as series of ~4s  `.m4s` segments and streamed up to the server via simple `PUT` requests via a queue. Failed `PUT`s are retried sensibly: even a ~10min connection loss will just cause the queued egments to strem up on reconnection. These `PUT`s are idempotent on the server.
+### 4. We Hit Stop
 
-A timeline of events is kept during recording which we’ll use later…
+When we hit stop, the capture sessions are terminated and the writer processes are terinated after their next write job finishes. If the `UploadActor` queue isn’t empty it’s given ten seconds to finish uploading before any remaining are marked as *failed* locally.
 
-### 4. Hit Stop
+The recording timeline is used to write a `recording.json` to disk which includes:
 
-When I hit stop on a recording the capture sessions are stopped immediatly and the writers stop as they finish their last job. If the `UploadActor` queue isn’t empty it’s given ten seconds to drain.
-
-A `recording.json` is written to disk which includes:
-
-- Basics like UUID, timestamps, duration etc.
-- Details of how the composited video was encoded, input sources and raw writers used.
-- A log of events during recording, each of which includes:
-	- `kind` - type of event (eg `segment.uploaded` or `modeChange.CamOnly`)
-	- `t` - time of event as seonds since metronome `T0`
-	- `wallClock` - datetime of event per OS clock as UTC
+- Basic info like UUID, start/end timestamps, duration etc.
+- Details of the input source hardware and raw writers used.
+- Details of the composited writer including the encoder and streaming settings.
+- A log of timeline events during recording, each of which includes:
+	- `kind` - type of event (eg `segment.uploaded` or `modeChange.CamOnly`).
+	- `t` - time of event as seonds since metronome `T0`.
+	- `wallClock` - datetime of event per OS clock as UTC.
 	- `data` - Other stuff as object. Depends on the kind of event.
-- A log of segments, each of which includes:
-	- `bytes` - size of the segment
-  - `durationSeconds` - segment duration rounded to the nearest second
+- A log of segments written, each of which includes:
+	- `bytes` - size of the segment.
+  - `durationSeconds` - segment duration.
   - `emittedAt` - Metronome time the segment was emitted.
-  - `filename` - Filename on local filesystem (eg `seg_000.m4s`)
+  - `filename` - Filename on local filesystem (eg `seg_000.m4s`).
   - `index` - Order of segments chronologically (as recorded).
   - `uploaded` - True if any `PUT` for the segment returned OK, false if not.
 
-The data above is also `POST`ed to `/:id/complete` which tells the server our client is done recodring. This kicks off the async post-processing pipeline below.
+The data above is then `POST`ed to `/:id/complete` which tells the server our client is done recodring. This kicks off the async post-processing pipeline below.
 
-### 5. And As a User…
+### 5. We share the video
 
-With the HLS segments on the server already, the public URL is instantly shareable (and on my clipboard) even though the post-processing tasks have barely started. 
-
-If I want to quickly edit the title, slug or visibility of the video we just finished I can do so directly in the menubar app, or use it to open the video in the admin web app. 
+With the HLS segments on the server already, the public URL is instantly shareable (and now on our clipboard), even before any post-processing tasks are started. If we want to quickly edit the title, slug or visibility we can do so directly in the menubar app, or use it to open the video in the admin web app.
 
 ## Post-Processing
 
-When the sever recieves a `POST` to `/:id/complete` already have all the segments on disk and is serving them as a HLS playlist on the public URL. So the *complete* message just needs to write the recording data to a server-side `recording.json` and kick off a series of post-processing jobs…
+When the sever recieves a `POST` to `/:id/complete` it already has all the segments on disk and is serving them as an HLS playlist on the public URL. So the *complete* signal just causes the data in `recording.json` to be written server-side and kicks off a series of post-processing jobs.
 
 ### 1. Healing
 
-Healing is the recovery mechanism for HLS segments that didn't make it during the live recording. The server know what segments it has on disk and now it has the client’s segments log it can compare the two and ask the client to resend any segments it’s missing or thinks are corrupted. Whenever the client resends segments for a video it will finish by re-triggering the *complete* process and sending a new `recording.json`.
+Healing is the recovery mechanism for HLS segments that didn't make it during live recording. The server knows what segments it has on disk and now it has the client’s segments log it can compare the two and ask the client to resend any segments it’s missing or thinks are corrupted. Whenever the client finishes resending segments for a video it will finish by re-triggering the *complete* process and sending a new `recording.json`.
 
 <Clallout>
-The *heal loop* runs after every recording, but it also runs against all videos recorded in the last three days whenever the mcOS app reconnects to the server. It walks the local recording folder for any session within the last 3 days where `recording.json` shows segments with `uploaded: false` and resends them. This catches any recordings where the app quit before healing finished, or where the network dropped and never came back.
+The *heal loop* runs after every recording, but it also runs against all videos recorded in the last three days whenever the mcOS app reconnects to the server. It walks the local recordings folder for any video within the last 3 days where `recording.json` shows segments with `uploaded: false` and resends them. This catches any recordings where the app quit before healing finished, or where the network dropped and never came back.
 </Callout>
 
 ### 2. Restitching
 
-The first and simplest post-processing task is stitching the `m4s` segments into a single `source.mp4` file using `ffmpeg`.
-
-As soon as we have a valid `source.mp4` available, we serve that to viewers instead of the HLS playlist.
+The first and simplest post-processing task is stitching the `m4s` segments into a single `source.mp4` file using `ffmpeg`. As soon as we have a valid `source.mp4` available, we serve that to viewers instead of the HLS playlist.
 
 ### 3. Audio Enhancement
 
-We run the audio through a high-pass filter at 80Hz and then the `cb.rnnn` model from [richardpl/arnndn-models](https://github.com/richardpl/arnndn-models). We do two-pass EBU R128 loudness normalisation with loudnorm.
+We run the audio through a high-pass filter at 80Hz to remove rumble and then the `cb.rnnn` model from [richardpl/arnndn-models](https://github.com/richardpl/arnndn-models) to denoise the speech. This is followed by stationary-noise cleanup with `afftdn` and a pass through `agate` to identify the speech parts of the cleaned audio. `dynaudnorm` then operates on the gated regions to normalise speech volume before we do two-pass EBU R128 loudness normalisation with loudnorm.
 
-The first pass runs the full chain (`highpass → arnndn → loudnorm`) with `print_format=json` and outputs a JSON file reflecting the post-denoised signal. The second pass uses the measurements from that to do the actual cleanup.
-
-The result is written to the audio track of `source.mp4`.
+The result is written to the audio track of `source.mp4`. We also generate a `peaks.json` which is used in the *Video Editor* to render a waveform and suggest areas to trim or cut.
 
 ### 4. Generating Derivitives
 
@@ -220,18 +234,18 @@ Now we have a clean `source.mp4` we can use it to generate some derivitive files
 - **Thumbnail candidates** — Multiple frames are extracted and scored by luminance variance. The “best” one is written to disk as `thumbnail.jpg` and used as the thumbnail in the admin interface and public-facing pages. The other candidates are also saved to disk so I can manually chose one in the admin app.
 - **Metadata extraction** — We use ffprobe on `source.mp4` to grab useful metadata and (along with data from `recording.json`) write it to the database.
 - **Video variants** — Downsampled variants are created and served to viewers alongside `source.mp4`. If our source is in 1080p we will only create a `720p.mp4`; if it’s 1440p we’ll create both `720p.mp4` and `1080p.mp4` derivitives.
-- **Storyboard** - For videos longer than 60s we generate a `storyboard.jpg` and `storyboard.vtt` to provide previews when scrubbing in the player.
+- **Storyboard** - For videos longer than 60s we generate a `storyboard.jpg` and `storyboard.vtt` to provide previews when scrubbing in the player. We also generate more deailed versions for use in the admin app's video editor.
 
 
 ### 5. Transcription, Subtitles & Title Generation
 
-While the post-processing above is best done server-side, doing any **AI stuff** on the server would mean paying for tokens on an external service or beefing up the server enough to run models on it. Since I have a pretty powerful laptop it makes more sense to do this stuff locally instead. So the macOS app includes WhisperKit for transcription.
+While the post-processing above is best done server-side, doing any **AI stuff** on the server would mean paying for tokens on an external service or beefing up the server enough to run models on it. Since I have a pretty powerful laptop it makes more sense to do this stuff locally instead. So the macOS app includes WhisperKit for transcription and makes use of Apple's built-in foundation models.
 
-Whenever a video completes, the macOS app kicks off a task to transcribe the local `audio.m4a` and then use it and the  timing data from `recording.json` to generate a `captions.srt`.  Both sre stored locally on disk and also sent to the server – the transcript is written to the database and the `captions.src` is used to provide close captions in the web players.
+When a video completes, the macOS app kicks off a task to transcribe the local `audio.m4a` and then use it and the timing data from `recording.json` to generate a `captions.srt`. Both are stored locally on disk and also sent to the server: the transcript is written to the database and the `captions.src` is used to provide closed captions in the video players.
 
-If transcription completes successfully, the first ~500 words are fed to Apple Intelligence’s local Foundation Models along with a system prompt generated using data from `recordings.json` which is tasked with returning a suggested title for the video. The suggestion is checked against some simple *is-this-insane* rules and then sent to the server where it updates the video’s title (unless the user has already added a title).
+If transcription completes successfully, the first ~500 words are fed to Apple's local Foundation Model along with a system prompt and some data from `recordings.json` which is tasked with returning a suggested title for the video. The suggestion is checked against some simple *is-this-insane* rules and then sent to the server where it updates the video’s title (unless the user has already added a title).
 
-A suggested description is generated in a similar way, and if any chapter markers were set suggested titles for them are also generated.
+We use the same process to generate a suggested description and – if chapter markers exist – to suggest titles for each of them.
 
 ## End State
 
@@ -313,30 +327,73 @@ Our mac will have a directory in `~/Application Support/LoomClone/recordings/[UU
 
 ## Managing Local Recordings
 
-The macOS app settings has a pane which allows me to manage local recordings. I can see any which failed, errored or were orphaned. I can save space by deleting the local backups (`camera.m4a`, `screen.mov` and `audio.m4`) or the local HLS segments, or I can delete the whole local video.
+The macOS app has a settings pane which allows us to manage local recordings. We can see any which failed, errored or were orphaned. We can save space by deleting the local backups (`camera.m4a`, `screen.mov` and `audio.m4`) or the local HLS segments, or delete the whole thing.
+
+[IMAGE Settings Pane]
 
 ## The Admin Interface
 
-The admin interface lives at http://v.danny.is/admin and allows me to log in and manage my videos.
+The admin interface lives at http://v.danny.is/admin and is a web interface for managing my videos. The dashboard has grid and table views with controls for sorting and filtering videos. Searching will show all videos whose title, description, slug or transcript match.
+
+[VIDEO Dashboard demo]
+
+*Trashing* a video will move it to the **trash bin**, disable its public endpoints and remove it from any public feeds. Trashed videos can be restored or permenantly deleted from the trash bin.
+
+[IMAGE Trash bin]
+
+I can also upload an `mp4` video directly via the web interface, and the server will run as much of the post-processing pipeline as it can.
+
+[IMAGE Upload screen]
 
 ### The Video Page
 
-- Changing the title, slug and visibility
-- The video player
-- Video Actions: Open, Copy, Embed, Edit, Download, Duplicate, Trash
-- Video meta-information
-- Description, tags and notes
-- Thumbnail Picker
+The video page lets me watch the video and edit various 
 
-#### The Event Log & File Browser
+[VIDEO Video Page Walkthrough]
 
-- Event Log
-- File Browser
-- Transcription
+- Basic Actions:
+  - Open Public URL
+  - Copy Public URL
+  - Copy Public URL at Current time
+  - copy embed HTML
+  - Edit Video
+  - Download
+  - Duplicate
+  - Trash
+- Edit Video Data:
+  - Title
+  - Visibility
+  - Description
+  - Edit Slug
+    - Prepend date
+    - Append string
+    - Generate from title
+  - Tags
+  - Private Notes
+- Video meta-information:
+  - Status & "Edited" marker
+  - Date
+  - Resolution
+  - Size on Disk
+  - Camera
+  - Mic
+  - UUID
+- Thumbnails
+  - Selecting
+  - Deleting
+  - Uploading
+  - Editor
+- Details
+  - Event Log
+  - File Browser
+  - Transcription
 
 ### The Video Editor
 
-Intro
+The 
+
+[VIDEO Video Editor Demo]
+
 
 - Trimming
 - Clipping
@@ -347,24 +404,23 @@ Intro
 
 ### The Thumbnail Editor
 
+[VIDEO Cover Editor Demo]
+
 - Generating a cover image
 - Generating an image for external use
 
-### The Dashboard
-
-- Filters, Search & Sorting
-- Vdieo Options
-
-### Trashing & Deleting Videos
-
 ### Tags
 
+[IMAGE Tag Settings Page]
+
 - Tag management
-- Tag slugs and visibility
+- Tag slugs & visibility
 
 ## Viewer-Facing Features
 
 ### The Video Page (/:slug)
+
+[IMAGE Video Page]
 
 - Basic info shown
 - The Player: versions, poster, subtitles, storyboard, transcriptions etc.
@@ -378,13 +434,15 @@ Intro
 
 ### Embedding
 
+[IMAGE Video Embed Page]
+
 - Poster Frame etc from vidstack.
 - `/:slug/embed` 
 - The `/oembed` URL
 
 ### Tag Pages
 
-
+[IMAGE Tag Page]
 
 ### Public Feeds
 

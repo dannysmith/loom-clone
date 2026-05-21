@@ -1,4 +1,4 @@
-# Features
+# Introducing my very own Loom
 
 This is part of a series on TK
 
@@ -258,27 +258,29 @@ For a video with all input sources, we’ll end up with the following once all p
 
 The *videos* table in our SQL database will have a record something like this…
 
-| Field            | Value                                  |
-| ---------------- | -------------------------------------- |
-| id               | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
-| slug             | `how-to-use-the-new-dashboard`         |
-| status           | `complete`                             |
-| visibility       | `unlisted`                             |
-| title            | `How to Use the New Dashboard`         |
-| description      | `null`                                 |
-| duration_seconds | `187.4`                                |
-| width            | `2560`                                 |
-| height           | `1440`                                 |
-| aspect_ratio     | `1.778`                                |
-| file_bytes       | `48291840`                             |
-| camera_name      | `FaceTime HD Camera`                   |
-| microphone_name  | `MacBook Pro Microphone`               |
-| recording_health | `null`                                 |
-| source           | `recorded`                             |
-| created_at       | `2026-04-30T14:22:03.841Z`             |
-| updated_at       | `2026-04-30T14:29:17.205Z`             |
-| completed_at     | `2026-04-30T14:25:44.012Z`             |
-| trashed_at       | `null`                                 |
+| Field            | Description                                                                       | Example Value                          |
+| ---------------- | --------------------------------------------------------------------------------- | -------------------------------------- |
+| id               | UUID, primary key.                                                                | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| slug             | Current URL slug. Unique. Old slugs live in `slug_redirects` for 301s.            | `how-to-use-the-new-dashboard`         |
+| status           | `recording`, `healing`, `processing`, `complete`, `failed` or `deleting`.         | `complete`                             |
+| visibility       | `public`, `unlisted` or `private`.                                                | `unlisted`                             |
+| title            | Display title. Null until set by the user or the AI suggestion step.              | `How to Use the New Dashboard`         |
+| description      | Public-facing description. Null until set.                                        | `null`                                 |
+| notes            | Private notes — admin-only, never exposed publicly.                               | `null`                                 |
+| duration_seconds | Cached at completion so list views don't need to sum segment durations.           | `187.4`                                |
+| width            | Pixel width of `source.mp4`, from ffprobe.                                        | `2560`                                 |
+| height           | Pixel height of `source.mp4`, from ffprobe.                                       | `1440`                                 |
+| aspect_ratio     | Width / height, cached for layout work.                                           | `1.778`                                |
+| file_bytes       | Size of `source.mp4` in bytes.                                                    | `48291840`                             |
+| camera_name      | Camera device name captured from `recording.json`.                                | `FaceTime HD Camera`                   |
+| microphone_name  | Mic device name captured from `recording.json`.                                   | `MacBook Pro Microphone`               |
+| recording_health | Summary of any recording issues (dropped frames, failed segments). Null if clean. | `null`                                 |
+| source           | `recorded` (from the macOS app) or `uploaded` (via the admin web upload).         | `recorded`                             |
+| created_at       | Row creation timestamp (ISO-8601).                                                | `2026-04-30T14:22:03.841Z`             |
+| updated_at       | Last update timestamp (ISO-8601).                                                 | `2026-04-30T14:29:17.205Z`             |
+| completed_at     | Set on first transition to `complete`; never overwritten on re-complete.          | `2026-04-30T14:25:44.012Z`             |
+| trashed_at       | Set when the video is moved to the trash bin; null otherwise.                     | `null`                                 |
+| last_edited_at   | Set when edits are committed via the video editor; null if never edited.          | `null`                                 |
 
 The `video_transcripts` table will also have a row for this video, holding the plain text of the transcript, a word count, and the format (`srt`). The actual subtitle file lives on disk as `captions.srt` — the database stores the parsed plain text for display and search.
 
@@ -295,6 +297,7 @@ data/a1b2c3d4-e5f6-7890-abcd-ef1234567890/
 ├── seg_046.m4s
 ├── stream.m3u8                       # HLS playlist referencing init.mp4 + segments
 ├── recording.json                    # Timeline, events and segment log from the client
+├── chapters.json                     # Chapter markers (extracted from recording.json, user-editable)
 └── derivatives/
     ├── source.mp4                    # Stitched single-file MP4 with enhanced audio
     ├── 1080p.mp4                     # Downsampled variant (source is 1440p)
@@ -305,8 +308,13 @@ data/a1b2c3d4-e5f6-7890-abcd-ef1234567890/
     │   ├── auto-02.jpg
     │   └── auto-03.jpg
     ├── captions.srt                  # Subtitles uploaded by the macOS app
+    ├── words.json                    # Per-word transcript timings (used by the editor)
+    ├── peaks.json                    # Audio waveform peaks for the editor
+    ├── suggested-edits.json          # AI-suggested silence/filler cuts for the editor
     ├── storyboard.jpg                # Sprite sheet of preview frames (videos ≥ 60s)
-    └── storyboard.vtt                # Maps time ranges to sprite regions
+    ├── storyboard.vtt                # Maps time ranges to sprite regions
+    ├── editor-storyboard.jpg         # Higher-density sprite sheet for the editor
+    └── editor-storyboard.vtt         # Maps time ranges to editor sprite regions
 ```
 
 ### On Disk (Local)
@@ -324,7 +332,9 @@ Our mac will have a directory in `~/Application Support/LoomClone/recordings/[UU
 ├── camera.mp4                        # Raw H.264 camera + audio
 ├── audio.m4a                         # Raw AAC mic audio
 ├── recording.json                    # Timeline, events and segment log
+├── diagnostics.json                  # Recording-time diagnostic snapshot
 ├── captions.srt                      # Local backup of generated subtitles
+├── words.json                        # Local backup of per-word transcript timings
 └── .transcribed                      # Sentinel: transcription complete
 ```
 

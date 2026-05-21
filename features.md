@@ -1,10 +1,13 @@
 # Features
 
-> Note: This is a working doc on the features of this project, which will probs eventually be used as the basis of a blog article.
+This is part of a series on TK
+
+1. Part 1 - Introducing LC
+2. Part 2 - Building LC as a "Technical Product Manager"
 
 ## Why I built this
 
-
+[VIDEO - 30s Talking Head where I explain why and then basically say "And you're watching a video made with it right now"]
 
 ## Initial Requirements in a Nutshell
 
@@ -424,13 +427,8 @@ The
 
 - Basic info shown
 - The Player: versions, poster, subtitles, storyboard, transcriptions etc.
-- SEO & Metadata etc
-
-### Other Formats
-
-- `/:slug.json`
-- `/:slug.md`
-- `/:slug.mp4`
+- SEO, Metadata, JSONL, Microformats etc
+- Preload, HTTP Headers etc
 
 ### Embedding
 
@@ -440,27 +438,37 @@ The
 - `/:slug/embed` 
 - The `/oembed` URL
 
+<Callout title="Embedding on this site">
+I don't use these endpoints to embed videos on this site...
+</Callout>
+
+### Other Formats
+
+- `/:slug.json`
+- `/:slug.md`
+- `/:slug.mp4`
+
 ### Tag Pages
 
 [IMAGE Tag Page]
 
-### Public Feeds
+### Discoverability
+
+#### RSS Feeds
 
 - `/feed.xml` (and `/rss`)
 - `/feed.json`
 - `/:tag/feed.xml` and `/:tag/feed.json`
+
+#### AI-Facing Features
+
 - `/llms.txt`
 - `/` hints for LLMs and machines etc
 
-### Slug Redirects
+## Infrastructure
 
-
-### Performance
-
-- BunnyCDN
-- Serving the right headers
-- HTML stuff like preload etc
-
-## Deployment & Backup
-
-Just a quick note on deployment, archiving and backup, future plans etc.
+- The Server
+- Docker & Volumes
+- Deployment
+- BunnyCDN & Cache Busting
+- Backups

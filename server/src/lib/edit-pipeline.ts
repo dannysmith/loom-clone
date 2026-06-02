@@ -17,6 +17,7 @@ import {
   type Word,
 } from "./edit-transcript";
 import { logEvent } from "./events";
+import { spawnFfmpeg } from "./ffmpeg";
 import { nowIso } from "./format";
 import { DATA_DIR, getVideo, upsertTranscript } from "./store";
 import { generateStoryboard } from "./storyboard";
@@ -297,11 +298,13 @@ async function runFfmpeg(args: string[]): Promise<void> {
   }
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
-  const proc = Bun.spawn([ffmpegPath, "-y", "-hide_banner", "-loglevel", "error", ...args], {
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...args,
+  ]);
   if (exitCode !== 0) {
     throw new Error(`ffmpeg exited ${exitCode}: ${stderr.trim()}`);
   }

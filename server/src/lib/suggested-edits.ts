@@ -14,6 +14,7 @@
 
 import { rename } from "fs/promises";
 import { join } from "path";
+import { spawnFfmpeg } from "./ffmpeg";
 
 // Silences shorter than this don't pre-populate the editor.
 const SILENCE_MIN_SECONDS = 3;
@@ -145,27 +146,26 @@ export async function runSilenceDetect(sourcePath: string, duration: number): Pr
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
-  const proc = Bun.spawn(
-    [
-      ffmpegPath,
-      "-y",
-      "-hide_banner",
-      "-nostats",
-      // silencedetect logs at "info" — keep stderr verbose enough to capture it.
-      "-loglevel",
-      "info",
-      "-i",
-      sourcePath,
-      "-af",
-      `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_SECONDS}`,
-      "-vn",
-      "-f",
-      "null",
-      "-",
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  // Full-decode pass over the whole source. silencedetect logs at "info"
+  // (keep the level) and -nostats drops the progress line; spawnFfmpeg's tail
+  // bounds capture. Silence lines appear throughout the decode, but their
+  // volume is bounded by the silence count — well under the 64 KB tail for any
+  // real recording.
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    "-y",
+    "-hide_banner",
+    "-nostats",
+    "-loglevel",
+    "info",
+    "-i",
+    sourcePath,
+    "-af",
+    `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_SECONDS}`,
+    "-vn",
+    "-f",
+    "null",
+    "-",
+  ]);
   if (exitCode !== 0) {
     throw new Error(`silencedetect failed (exit ${exitCode}): ${stderr.trim()}`);
   }

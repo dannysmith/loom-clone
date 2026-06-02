@@ -4,6 +4,7 @@ import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
 import { logEvent } from "./events";
+import { spawnFfmpeg } from "./ffmpeg";
 import { generatePeaks } from "./peaks";
 import { DATA_DIR, getVideo } from "./store";
 import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
@@ -42,11 +43,13 @@ async function runFfmpeg(args: string[]): Promise<void> {
     throw new Error("ffmpeg not found on PATH");
   }
 
-  const proc = Bun.spawn([ffmpegPath, "-y", "-hide_banner", "-loglevel", "error", ...args], {
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...args,
+  ]);
   if (exitCode !== 0) {
     throw new Error(`ffmpeg exited ${exitCode}: ${stderr.trim()}`);
   }
@@ -109,11 +112,18 @@ const inFlight = new Map<string, Promise<void>>();
 // Fire-and-forget. Repeated calls while a generation is in flight collapse to
 // the same promise, preventing two ffmpegs from racing on the same video.
 export function scheduleDerivatives(videoId: string): void {
-  if (inFlight.has(videoId)) return;
+  if (inFlight.has(videoId)) {
+    console.log(
+      `[derivatives] ${videoId} schedule skipped — already in flight (inFlight=${inFlight.size})`,
+    );
+    return;
+  }
   const p = generateDerivatives(videoId).finally(() => {
     inFlight.delete(videoId);
+    console.log(`[derivatives] ${videoId} inFlight cleared (inFlight=${inFlight.size})`);
   });
   inFlight.set(videoId, p);
+  console.log(`[derivatives] ${videoId} scheduled (inFlight=${inFlight.size})`);
   p.catch((err) => {
     console.error(`[derivatives] ${videoId} unexpected failure:`, err);
   });
@@ -127,11 +137,18 @@ export function _inFlightPromise(videoId: string): Promise<void> | undefined {
 
 // Fire-and-forget for uploaded videos. Uses uploadRecipes (no HLS → MP4 step).
 export function scheduleUploadDerivatives(videoId: string): void {
-  if (inFlight.has(videoId)) return;
+  if (inFlight.has(videoId)) {
+    console.log(
+      `[derivatives] ${videoId} upload schedule skipped — already in flight (inFlight=${inFlight.size})`,
+    );
+    return;
+  }
   const p = generateFromRecipes(videoId, uploadRecipes).finally(() => {
     inFlight.delete(videoId);
+    console.log(`[derivatives] ${videoId} inFlight cleared (inFlight=${inFlight.size})`);
   });
   inFlight.set(videoId, p);
+  console.log(`[derivatives] ${videoId} upload scheduled (inFlight=${inFlight.size})`);
   p.catch((err) => {
     console.error(`[derivatives] ${videoId} upload derivatives failed:`, err);
   });
@@ -369,30 +386,27 @@ async function profileNoiseFloor(
   const sampleLength = Math.min(2.0, longestLen);
 
   try {
-    const proc = Bun.spawn(
-      [
-        fp,
-        "-y",
-        "-hide_banner",
-        "-nostats",
-        "-loglevel",
-        "info",
-        "-ss",
-        String(longest.start),
-        "-t",
-        String(sampleLength),
-        "-i",
-        sourcePath,
-        "-af",
-        "volumedetect",
-        "-vn",
-        "-f",
-        "null",
-        "-",
-      ],
-      { stderr: "pipe", stdout: "pipe" },
-    );
-    const [stderr, exit] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    // info level + -nostats: volumedetect logs `mean_volume:` at info; the
+    // 2 s sample keeps the output tiny regardless.
+    const { exitCode: exit, stderr } = await spawnFfmpeg(fp, [
+      "-y",
+      "-hide_banner",
+      "-nostats",
+      "-loglevel",
+      "info",
+      "-ss",
+      String(longest.start),
+      "-t",
+      String(sampleLength),
+      "-i",
+      sourcePath,
+      "-af",
+      "volumedetect",
+      "-vn",
+      "-f",
+      "null",
+      "-",
+    ]);
     if (exit !== 0) return DEFAULT_NOISE_FLOOR_DB;
 
     const match = /mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/.exec(stderr);
@@ -481,24 +495,26 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
   const noiseFloorDb = await profileNoiseFloor(sourcePath, silences);
 
   // Pass 1: measure loudness through the full denoise chain.
-  const pass1 = Bun.spawn(
-    [
-      fp,
-      "-y",
-      "-hide_banner",
-      "-i",
-      sourcePath,
-      "-af",
-      loudnormPass1Filter(noiseFloorDb),
-      "-f",
-      "null",
-      "-",
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [pass1Stderr, pass1Exit] = await Promise.all([
-    new Response(pass1.stderr).text(),
-    pass1.exited,
+  //
+  // MUST stay at `-loglevel info`: loudnorm's `print_format=json` measurement
+  // block is logged at info level and is suppressed at `error`/`warning`
+  // (verified on ffmpeg 8.1.1) — dropping the level would make parseLoudnormJson
+  // throw and skip normalisation entirely. `-nostats` removes the per-second
+  // progress line (the only unbounded-growth component); spawnFfmpeg's tail
+  // bounds whatever remains.
+  const { exitCode: pass1Exit, stderr: pass1Stderr } = await spawnFfmpeg(fp, [
+    "-y",
+    "-hide_banner",
+    "-nostats",
+    "-loglevel",
+    "info",
+    "-i",
+    sourcePath,
+    "-af",
+    loudnormPass1Filter(noiseFloorDb),
+    "-f",
+    "null",
+    "-",
   ]);
   if (pass1Exit !== 0) {
     throw new Error(`audio pass 1 failed (exit ${pass1Exit}): ${pass1Stderr.trim()}`);
@@ -508,36 +524,28 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
 
   // Pass 2: apply the measured values, encode audio as AAC 160 kbps.
   const tmpOut = `${sourcePath}.audio-tmp`;
-  const pass2 = Bun.spawn(
-    [
-      fp,
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      sourcePath,
-      "-af",
-      loudnormPass2Filter(noiseFloorDb, measurement),
-      "-c:v",
-      "copy",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "160k",
-      "-ar",
-      "48000",
-      "-movflags",
-      "+faststart",
-      "-f",
-      "mp4",
-      tmpOut,
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [pass2Stderr, pass2Exit] = await Promise.all([
-    new Response(pass2.stderr).text(),
-    pass2.exited,
+  const { exitCode: pass2Exit, stderr: pass2Stderr } = await spawnFfmpeg(fp, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    sourcePath,
+    "-af",
+    loudnormPass2Filter(noiseFloorDb, measurement),
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "160k",
+    "-ar",
+    "48000",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+    tmpOut,
   ]);
   if (pass2Exit !== 0) {
     await rm(tmpOut, { force: true }).catch(() => {});
@@ -581,38 +589,33 @@ export async function generateVariants(dir: string, inputPath?: string): Promise
     const finalPath = join(dir, outFile);
     const started = Date.now();
 
-    const proc = Bun.spawn(
-      [
-        fp,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        sourcePath,
-        "-vf",
-        `scale=-2:${variant.height}`,
-        "-pix_fmt",
-        "yuv420p",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        String(variant.crf),
-        "-profile:v",
-        "high",
-        "-c:a",
-        "copy",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-        tmpPath,
-      ],
-      { stderr: "pipe", stdout: "pipe" },
-    );
-    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    const { exitCode, stderr } = await spawnFfmpeg(fp, [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      sourcePath,
+      "-vf",
+      `scale=-2:${variant.height}`,
+      "-pix_fmt",
+      "yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      String(variant.crf),
+      "-profile:v",
+      "high",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      tmpPath,
+    ]);
     if (exitCode !== 0) {
       await rm(tmpPath, { force: true }).catch(() => {});
       throw new Error(`variant ${outFile} failed (exit ${exitCode}): ${stderr.trim()}`);
@@ -636,6 +639,7 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
   await mkdir(dir, { recursive: true });
   const pipelineStarted = Date.now();
   const steps: string[] = [];
+  console.log(`[derivatives] ${videoId} pipeline start`);
 
   for (const recipe of recipeList) {
     const tmp = join(dir, `${recipe.filename}.tmp`);
@@ -830,10 +834,12 @@ async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promi
     }
   }
 
+  const totalMs = Date.now() - pipelineStarted;
+  console.log(`[derivatives] ${videoId} pipeline done (${totalMs}ms, steps=[${steps.join(", ")}])`);
+
   // Log a single summary event so the admin activity feed shows when
   // post-processing finished and what was produced.
   if (steps.length > 0) {
-    const totalMs = Date.now() - pipelineStarted;
     try {
       await logEvent(videoId, "derivatives_ready", { steps, durationMs: totalMs });
     } catch {

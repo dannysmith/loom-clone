@@ -1,5 +1,6 @@
 import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
+import { spawnFfmpeg } from "./ffmpeg";
 
 // Storyboard sprite sheet + WebVTT generation for scrubber thumbnail previews.
 // Produces a single JPEG sprite and an accompanying VTT so Vidstack's
@@ -85,28 +86,23 @@ export async function generateStoryboard(
   await mkdir(derivDir, { recursive: true });
 
   // Generate sprite sheet via ffmpeg tile filter.
-  const proc = Bun.spawn(
-    [
-      ffmpegPath,
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      sourcePath,
-      "-vf",
-      `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
-      "-qscale:v",
-      "5",
-      "-frames:v",
-      "1",
-      "-f",
-      "image2",
-      spriteTmp,
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    sourcePath,
+    "-vf",
+    `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
+    "-qscale:v",
+    "5",
+    "-frames:v",
+    "1",
+    "-f",
+    "image2",
+    spriteTmp,
+  ]);
   if (exitCode !== 0) {
     await rm(spriteTmp, { force: true }).catch(() => {});
     throw new Error(`storyboard generation failed (exit ${exitCode}): ${stderr.trim()}`);
@@ -192,28 +188,23 @@ export async function generateEditorStoryboard(
 
   await mkdir(derivDir, { recursive: true });
 
-  const proc = Bun.spawn(
-    [
-      ffmpegPath,
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      sourcePath,
-      "-vf",
-      `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
-      "-qscale:v",
-      "5",
-      "-frames:v",
-      "1",
-      "-f",
-      "image2",
-      spriteTmp,
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    sourcePath,
+    "-vf",
+    `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
+    "-qscale:v",
+    "5",
+    "-frames:v",
+    "1",
+    "-f",
+    "image2",
+    spriteTmp,
+  ]);
   if (exitCode !== 0) {
     await rm(spriteTmp, { force: true }).catch(() => {});
     throw new Error(`editor storyboard generation failed (exit ${exitCode}): ${stderr.trim()}`);

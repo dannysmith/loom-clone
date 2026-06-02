@@ -1,5 +1,25 @@
 # Task 2 — Derivatives Pipeline Memory Hardening
 
+> **Status: complete (2026-06-02).** Shipped fixes 1, 2, 4, 5. Fix 3 (thumbnail
+> coalescing) was deliberately descoped — see that section for why. Summary of
+> what landed:
+>
+> - New `server/src/lib/ffmpeg.ts` `spawnFfmpeg()` helper: rolling last-64 KB
+>   stderr tail, log level left caller-controlled. All long-running spawns now
+>   route through it (audio pass 1+2, variant encodes, `runSilenceDetect`,
+>   storyboard sprites, and the duplicate `runFfmpeg` in `edit-pipeline.ts`).
+> - Loudnorm pass 1 fixed with `-nostats` at `-loglevel info` (NOT
+>   `error`/`warning`, which suppress the `print_format=json` block — verified).
+> - `peaks.ts` streams the raw PCM and folds incrementally; output byte-identical
+>   (`samplesPerPeak` derived from file size).
+> - Operational logging: pipeline start/done + `inFlight` insert/clear.
+>
+> Verification: the live `processAudio` end-to-end test (asserts output LUFS)
+> and a new `peaks.test.ts` byte-identity test both pass; `ffmpeg.test.ts`
+> covers the tail helper. Measured pass-1 stderr at KB-scale on a real arnndn
+> run, confirming cause 1 (the double pipeline, → Task 4) was the OOM driver,
+> not this string. Full suite green, typecheck + biome clean.
+
 ## Background
 
 On 2026-06-01 a ~23-minute recording OOM-killed the `bun` process in `loom-clone-server` mid-post-processing (6.7 GiB RSS on a 7.6 GiB host, no swap, no container limit). Full forensics are in [issue #40](https://github.com/dannysmith/loom-clone/issues/40). Two compounding causes:

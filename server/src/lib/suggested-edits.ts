@@ -14,6 +14,7 @@
 
 import { rename } from "fs/promises";
 import { join } from "path";
+import { spawnFfmpeg } from "./ffmpeg";
 
 // Silences shorter than this don't pre-populate the editor.
 const SILENCE_MIN_SECONDS = 3;
@@ -145,13 +146,17 @@ export async function runSilenceDetect(sourcePath: string, duration: number): Pr
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
-  const proc = Bun.spawn(
+  // Full-decode pass over the whole source. silencedetect logs at "info"
+  // (keep the level) and -nostats drops the progress line. The silence markers
+  // are spread across the whole decode, so keepStderrLines collects just those
+  // lines as they arrive — memory is bounded by the silence count with no risk
+  // of a rolling tail dropping the early ones.
+  const { exitCode, stderr } = await spawnFfmpeg(
+    ffmpegPath,
     [
-      ffmpegPath,
       "-y",
       "-hide_banner",
       "-nostats",
-      // silencedetect logs at "info" — keep stderr verbose enough to capture it.
       "-loglevel",
       "info",
       "-i",
@@ -163,11 +168,10 @@ export async function runSilenceDetect(sourcePath: string, duration: number): Pr
       "null",
       "-",
     ],
-    { stderr: "pipe", stdout: "pipe" },
+    { keepStderrLines: /silence_(start|end):/ },
   );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (exitCode !== 0) {
-    throw new Error(`silencedetect failed (exit ${exitCode}): ${stderr.trim()}`);
+    throw new Error(`silencedetect failed (exit ${exitCode})`);
   }
   return parseSilenceDetectOutput(stderr, duration);
 }

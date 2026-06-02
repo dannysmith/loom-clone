@@ -2,6 +2,14 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 services:
   loom-clone-server:
+    # Resource limits — a runaway in post-processing OOMs inside this
+    # container's own cgroup instead of starving the whole host. See #39
+    # and docs/tasks-todo/task-1-container-memory-limits.md. Host swap and
+    # the rest of the budget are handled in danny-vps-infra.
+    mem_limit: 5g # cgroup OOM at 5 GiB (host budget leaves ~2.6 GiB overhead)
+    memswap_limit: 6g # 1 GiB of swap before the kill (host swapfile exists)
+    mem_reservation: 1g # soft floor; reclaimed from over-reserved cgroups first
+    pids_limit: 500 # belt-and-braces against fork-storm runaways
     volumes:
       - /mnt/data/loom-clone:/app/data
     environment:

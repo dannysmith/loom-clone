@@ -41,3 +41,15 @@ Then confirm:
 - `docker inspect loom-clone-server --format '{{.HostConfig.MemorySwap}}'` → `6442450944`
 - `docker inspect loom-clone-server --format '{{.HostConfig.PidsLimit}}'` → `500`
 - (Optional) force a leak in a throwaway branch (`while(true) buf.push(Buffer.alloc(1<<20))`) and confirm: the container OOMs and restarts, while SSH, Caddy, and `server.danny.is` stay responsive throughout.
+
+## Outcome (deployed 2026-06-02)
+
+Shipped in `cebff2f` and deployed to the VPS. Verified on the box:
+
+- `HostConfig.Memory` → `5368709120` (5 GiB) ✓
+- `HostConfig.MemorySwap` → `6442450944` (6 GiB) ✓
+- `HostConfig.PidsLimit` → `500` ✓
+- Container recreated (not just restarted, so the limits actually apply); `/api/health` returned `{"ok":true}` ✓
+- `free -h` confirms the host swapfile is present (`Swap: 2.0Gi total, 0B used`), so the `memswap_limit` headroom has real backing.
+
+The deliberate-leak blast-radius test was not run — judged unnecessary given the host hardening (already shipped in `danny-vps-infra`) plus the verified cgroup limit. The optional leak test remains documented above if ever wanted.

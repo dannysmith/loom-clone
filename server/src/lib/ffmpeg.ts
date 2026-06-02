@@ -11,9 +11,13 @@
 // Why a tail (not a head, not the whole thing): every consumer that parses
 // stderr wants content that lives at or near the *end* — the loudnorm
 // `print_format=json` block, volumedetect's `mean_volume:` line, and ffmpeg's
-// error message on failure. silencedetect emits lines throughout the decode,
-// but its total volume is bounded by the number of detected silences (well
-// under the 64 KB tail for any real recording).
+// error message on failure.
+//
+// The exception is silencedetect, whose `silence_start`/`silence_end` markers
+// are spread across the whole decode — a tail could drop the early ones. For
+// that case pass `keepStderrLines`: stderr is read line-by-line and only
+// matching lines are retained, so memory is bounded by the match count (not
+// the stream length) with no risk of truncating early markers.
 //
 // CRITICAL: this helper never sets `-loglevel`. Several callers depend on
 // info-level output (loudnorm JSON, volumedetect, silencedetect) and would
@@ -36,6 +40,11 @@ export interface SpawnFfmpegOptions {
   captureStdout?: boolean;
   // Override the stderr tail size in bytes.
   tailBytes?: number;
+  // Retain only stderr lines matching this pattern (read line-by-line), instead
+  // of a rolling tail. For parsers needing every matching line across a long
+  // stream (e.g. silencedetect markers). Pass a non-global RegExp. Memory is
+  // bounded by the number of matching lines.
+  keepStderrLines?: RegExp;
 }
 
 // Spawn `bin` with `args` and return the exit code plus a bounded stderr tail.
@@ -53,8 +62,11 @@ export async function spawnFfmpeg(
     stdout: opts.captureStdout ? "pipe" : "ignore",
   });
 
+  const stderrStream = proc.stderr as ReadableStream<Uint8Array>;
   const [stderr, stdout, exitCode] = await Promise.all([
-    readStreamTail(proc.stderr as ReadableStream<Uint8Array>, tailBytes),
+    opts.keepStderrLines
+      ? collectMatchingLines(stderrStream, opts.keepStderrLines)
+      : readStreamTail(stderrStream, tailBytes),
     opts.captureStdout
       ? new Response(proc.stdout as ReadableStream<Uint8Array>).text()
       : Promise.resolve(""),
@@ -96,4 +108,37 @@ async function readStreamTail(
   // ASCII-only for our parse targets; a split multibyte char at the tail
   // boundary just yields a replacement char, which never affects parsing.
   return new TextDecoder().decode(buf);
+}
+
+// Drain a byte stream line-by-line, retaining only lines matching `pattern`,
+// joined by "\n". Retained memory is bounded by the matching lines, not the
+// total stream length — so early matches are never lost to truncation.
+async function collectMatchingLines(
+  stream: ReadableStream<Uint8Array>,
+  pattern: RegExp,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const kept: string[] = [];
+  let partial = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      partial += decoder.decode(value, { stream: true });
+      let nl = partial.indexOf("\n");
+      while (nl !== -1) {
+        const line = partial.slice(0, nl);
+        if (pattern.test(line)) kept.push(line);
+        partial = partial.slice(nl + 1);
+        nl = partial.indexOf("\n");
+      }
+    }
+    partial += decoder.decode();
+    if (partial && pattern.test(partial)) kept.push(partial);
+  } finally {
+    reader.releaseLock();
+  }
+  return kept.join("\n");
 }

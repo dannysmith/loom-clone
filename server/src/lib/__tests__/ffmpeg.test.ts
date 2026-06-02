@@ -40,6 +40,25 @@ describe("spawnFfmpeg bounded stderr capture", () => {
     expect(parsed.input_i).toBe("-21.75");
   });
 
+  test("keepStderrLines retains every matching line, including early ones", async () => {
+    // 5000 markers interleaved with filler that far exceeds the 64 KB tail —
+    // a rolling tail would drop the early markers; the line collector must not.
+    const script = [
+      "for (let i = 0; i < 5000; i++) {",
+      `  process.stderr.write("filler ".repeat(20) + "\\n");`,
+      `  process.stderr.write("[silencedetect] silence_start: " + i + "\\n");`,
+      "}",
+    ].join("\n");
+    const { stderr } = await spawnFfmpeg(BUN, ["-e", script], {
+      keepStderrLines: /silence_(start|end):/,
+    });
+    const lines = stderr.split("\n").filter(Boolean);
+    expect(lines.length).toBe(5000);
+    expect(lines[0]).toContain("silence_start: 0"); // earliest survived
+    expect(lines.at(-1)).toContain("silence_start: 4999"); // latest too
+    expect(lines.every((l) => l.includes("silence_"))).toBe(true); // only matches kept
+  });
+
   test("stdout is ignored unless captureStdout is set", async () => {
     const without = await emit(`process.stdout.write("data on stdout")`);
     expect(without.stdout).toBe("");

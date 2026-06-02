@@ -147,27 +147,31 @@ export async function runSilenceDetect(sourcePath: string, duration: number): Pr
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
   // Full-decode pass over the whole source. silencedetect logs at "info"
-  // (keep the level) and -nostats drops the progress line; spawnFfmpeg's tail
-  // bounds capture. Silence lines appear throughout the decode, but their
-  // volume is bounded by the silence count — well under the 64 KB tail for any
-  // real recording.
-  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
-    "-y",
-    "-hide_banner",
-    "-nostats",
-    "-loglevel",
-    "info",
-    "-i",
-    sourcePath,
-    "-af",
-    `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_SECONDS}`,
-    "-vn",
-    "-f",
-    "null",
-    "-",
-  ]);
+  // (keep the level) and -nostats drops the progress line. The silence markers
+  // are spread across the whole decode, so keepStderrLines collects just those
+  // lines as they arrive — memory is bounded by the silence count with no risk
+  // of a rolling tail dropping the early ones.
+  const { exitCode, stderr } = await spawnFfmpeg(
+    ffmpegPath,
+    [
+      "-y",
+      "-hide_banner",
+      "-nostats",
+      "-loglevel",
+      "info",
+      "-i",
+      sourcePath,
+      "-af",
+      `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_SECONDS}`,
+      "-vn",
+      "-f",
+      "null",
+      "-",
+    ],
+    { keepStderrLines: /silence_(start|end):/ },
+  );
   if (exitCode !== 0) {
-    throw new Error(`silencedetect failed (exit ${exitCode}): ${stderr.trim()}`);
+    throw new Error(`silencedetect failed (exit ${exitCode})`);
   }
   return parseSilenceDetectOutput(stderr, duration);
 }

@@ -16,13 +16,15 @@ nb_frames     : 73082 over 1381.275 s = 52.91 fps actual
 
 ### Consequences
 
-- **Variant re-encode produces broken output.** `derivatives.ts:593` runs `-vf scale=-2:H` → `libx264` with **no** `-r`/`-fps_mode`/`-vsync`, so it inherits the declared 30 fps. A full decode of the bad source yields **32,803 "non monotonically increasing dts to muxer"** errors — frames collide on the 30 fps timeline. The 720p/1080p variants would stutter or drop frames.
-- **Storyboard cue times land on the wrong frames.** Storyboard frame *selection* indexes by frame number so extracts correct frames, but the WebVTT time mapping is computed from the declared rate, so cues are mistimed in playback.
+- **Variant re-encode produces broken output.** `generateVariants` (`derivatives.ts`, the `scale=-2:${height}` → `libx264` spawn, ~`:600`) runs with **no** `-r`/`-fps_mode`/`-vsync`, so it inherits the declared 30 fps. A full decode of the bad source yields **32,803 "non monotonically increasing dts to muxer"** errors — frames collide on the 30 fps timeline while the real PTS are ~60-fps-spaced. The 720p/1080p variants would stutter or drop frames. **This is the real, confirmed bug.**
+- **Storyboard cue times — claim NOT verified; the code says it's probably fine.** The doc previously asserted "frame selection indexes by frame number, cue mapping uses the declared rate." Neither is true in the current code: `storyboard.ts` selects frames with `fps=1/${interval}` (a PTS/time-based filter, `:97`) and maps cues with `startTime = i * interval` seconds (`generateVtt`, `:51`) — both derived from wall-clock seconds (`interval`, `duration`), never from `r_frame_rate` or a frame index. Since `-c copy` preserves the correct PTS (the same reason browsers play `source.mp4` fine) and the incident's 73082 frames ÷ 1381 s ≈ 52.9 fps shows the PTS are correctly ~60-spaced, the `fps` filter and `-show_format` duration both see correct timing → storyboard cues should already be correct. **Action: reproduce on the retained `8c755ccf` source before touching storyboard. Expect no bug.** Do not "fix" storyboard timing on the strength of this doc alone.
 - **Not a "won't play" bug.** Browsers and Vidstack are VFR-tolerant and use PTS directly, so `source.mp4` itself plays fine. The incident's "doesn't play" symptom was the OOM (no derivatives written), not this. This is a **derivative-quality** bug — it silently degrades every server-produced output.
 
 ### Correcting #40's diagnosis (important)
 
-The issue comment proposes a "one-line fix — `AVVideoExpectedSourceFrameRateKey` set to 30 or unset." **That is wrong.** `H264Settings.swift:21` already sets `AVVideoExpectedSourceFrameRateKey: fps` with `fps` = the real target (60), and that key is only a *rate-control hint* to the encoder — it does **not** write the SPS/VUI timing that ffmpeg reads back as `r_frame_rate`. So the real cause lives elsewhere in how the writer computes frame timing/timescale (AVAssetWriter media timescale, the frame durations the writer presents, or the compositor metronome's PTS cadence), and it is **not** a one-liner. Treat the root cause as genuinely open.
+The issue comment proposes a "one-line fix — `AVVideoExpectedSourceFrameRateKey` set to 30 or unset." **That is wrong.** `H264Settings.swift:22` already sets `AVVideoExpectedSourceFrameRateKey: fps` with `fps` = the real target (60), and that key is only a *rate-control hint* to the encoder — it does **not** write the SPS/VUI timing that ffmpeg reads back as `r_frame_rate`. So the real cause lives elsewhere, and it is **not** a one-liner. Treat the root cause as genuinely open.
+
+**Where to look — and where NOT to.** The incident numbers narrow this: 73082 frames ÷ 1381 s ≈ 52.9 fps means the **PTS cadence is already correct (~60)** — only the *declared* `r_frame_rate` is wrong. So the **metronome PTS is NOT the culprit** (`RecordingActor+Metronome.swift:100` builds PTS as `CMTime(value: tickIdx, timescale: targetFrameRate)`, which is correct at 60). The wrong declaration is written downstream of correct PTS — look at **`WriterActor`'s `AVAssetWriterInput` settings and the fMP4 track/media timescale**, i.e. the track's nominal frame-rate / timing the muxer records, not the frame timestamps themselves.
 
 ## Why this is its own task
 
@@ -35,9 +37,9 @@ So the writer can legitimately be producing content whose true cadence differs f
 
 ## Investigation phase (run when this task starts)
 
-- Read the prior cadence/fps work: `tasks-done/task-2026-05-11-21-output-frame-cadence-rework.md` and `task-2026-05-14-20-60fps-recording.md`, plus the compositor metronome and `RecordingActor` timing.
+- Read the prior cadence/fps work: `tasks-done/task-2026-05-11-21-output-frame-cadence-rework.md` and `task-2026-05-14-20-60fps-recording.md`, plus the `RecordingActor` timing. **Note:** `app/LoomClone/CLAUDE.md` still describes the metronome as a "30fps emit loop" — that's **stale** since the 60fps work; the rate is configurable via the `FrameRate` enum (`targetFrameRate`, default 30, set in `RecordingActor+Prepare.swift`). Don't be misled by it.
 - Reproduce and survey: `ffprobe init.mp4` on recent recordings at both 30 and 60 target FPS; grep existing recordings on the server for the `r_frame_rate` vs `targetFPS` mismatch (the #40 comment expects it even on short, successfully-processed recordings).
-- Pin down **where** the wrong declaration is written — AVAssetWriter media timescale, the presented frame durations, or the metronome PTS cadence — and **how** `chosen-FPS × source-capable-FPS` should map to the declared rate (fixed CFR matching target? honest VFR signalling? clamp to source capability?).
+- Pin down **where** the wrong declaration is written. Start at `WriterActor`'s `AVAssetWriterInput` configuration and the fMP4 media/track timescale (the metronome PTS is already correct — see above, don't re-litigate it). Then decide **how** `chosen-FPS × source-capable-FPS` should map to the declared rate (fixed CFR matching target? honest VFR signalling? clamp to source capability?).
 - Decide the correct fix in light of the source-capability complexity before writing code.
 
 ## The two-sided fix
@@ -50,8 +52,8 @@ Based on the investigation, configure the HLS writer so the fMP4 segments (and t
 
 Independent of (a), and the **only** way to get correct derivatives from existing recordings whose bad metadata is already baked into their on-disk HLS/`source.mp4`:
 
-- **Variant encode** (`derivatives.ts:593`): add explicit `-fps_mode`/`-r`/`-vsync` handling so libx264 doesn't collide DTS on a mis-declared or VFR input.
-- **Storyboard** (`storyboard.ts`): ensure cue-time mapping derives from actual PTS / measured fps, not the declared rate.
+- **Variant encode** (`generateVariants` in `derivatives.ts`, ~`:600`): add explicit frame-mode handling so libx264 doesn't collide DTS on a mis-declared or VFR input. **Default to `-fps_mode passthrough`** (honour the source PTS, let the muxer use them) — do **not** blindly force `-r 60`, which would duplicate frames on a genuinely-30fps recording. Only force a CFR `-r` if the investigation establishes the file should be CFR at a known rate.
+- **Storyboard** (`storyboard.ts`): **verify there's actually a problem first** (see the corrected Consequences note — current cue mapping is time/PTS-based and the incident PTS are correct, so this is probably already fine). If reproduction shows a real mistiming, fix the cue mapping to derive from measured PTS; otherwise leave it and record that it was checked.
 
 This makes the server produce correct derivatives **regardless of input metadata** — corrective for the existing library and defensive going forward.
 
@@ -62,6 +64,6 @@ This makes the server produce correct derivatives **regardless of input metadata
 
 ## Verification
 
-- New recordings at 30 and 60 target FPS declare a correct `r_frame_rate`; `ffmpeg -i source.mp4 -c copy -f null -` stays clean **and** a full `-f null -` decode no longer spams non-monotonic-DTS errors.
+- New recordings at 30 and 60 target FPS declare a correct `r_frame_rate`. Verify with a **full decode**: `ffmpeg -i source.mp4 -f null -` no longer spams non-monotonic-DTS errors. (Note: `-c copy -f null -` does **not** decode and so won't surface DTS problems — use the full-decode form.)
 - Variants re-encoded from a known-bad-metadata source (e.g. the retained `8c755ccf` `source.mp4`) decode cleanly and play without stutter.
-- Storyboard cue times align with the correct frames on a 60 fps recording.
+- Storyboard: confirmed correct on a 60 fps recording — either because reproduction showed it was never broken (expected), or after the cue-mapping fix if one proved necessary.

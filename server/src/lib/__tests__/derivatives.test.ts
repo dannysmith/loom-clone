@@ -14,7 +14,9 @@ import {
 } from "../derivatives";
 import { createVideo, DATA_DIR } from "../store";
 
-const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+// Every ffmpeg-gated test in this file also shells out to ffprobe (directly or
+// via probeMetadata/extractMetadata), so require both tools to be present.
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 
 let env: TestEnv;
 
@@ -291,6 +293,7 @@ describe("generateVariants frame-rate handling", () => {
     const args = _variantFfmpegArgs("/in/source.mp4", 720, 23, "/out/720p.mp4.tmp");
     const i = args.indexOf("-fps_mode");
     expect(i).toBeGreaterThanOrEqual(0);
+    expect(i + 1).toBeLessThan(args.length);
     expect(args[i + 1]).toBe("passthrough");
     // Must NOT force a constant rate — that would drop or duplicate frames.
     expect(args).not.toContain("-r");

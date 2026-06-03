@@ -9,6 +9,7 @@ describe("buildFfmpegEditArgs frame-rate handling", () => {
   function assertPassthrough(args: string[]) {
     const i = args.indexOf("-fps_mode");
     expect(i).toBeGreaterThanOrEqual(0);
+    expect(i + 1).toBeLessThan(args.length);
     expect(args[i + 1]).toBe("passthrough");
     // Must not force a constant rate.
     expect(args).not.toContain("-r");

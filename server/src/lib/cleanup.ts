@@ -3,14 +3,18 @@ import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
+import { getStep } from "./processing/steps-store";
 import { DATA_DIR } from "./store";
 
 const STALE_DAYS = 10;
 
 // Deletes HLS segments and thumbnail candidates for videos that have been
-// complete for longer than STALE_DAYS and have a valid source.mp4 on disk.
-// Safe to run frequently — the query and filesystem checks prevent premature
-// deletion. Called daily by the timer in index.ts.
+// `ready` for longer than STALE_DAYS and have a VALIDATED source.mp4. Once the
+// HLS segments are gone the MP4 is the only copy, so this gates on the `source`
+// step being `ready` (isProbablyPlayable passed at generation) AND the file
+// being present — never on bare existence. This is the change that stops a
+// temporarily-broken MP4 from turning a video permanently unplayable.
+// Called daily by the timer in index.ts.
 export async function cleanupStaleFiles(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
@@ -19,7 +23,7 @@ export async function cleanupStaleFiles(): Promise<void> {
     .from(videos)
     .where(
       and(
-        eq(videos.status, "complete"),
+        eq(videos.status, "ready"),
         isNull(videos.trashedAt),
         lte(videos.completedAt, cutoff),
         gt(videos.fileBytes, 0),
@@ -32,8 +36,10 @@ export async function cleanupStaleFiles(): Promise<void> {
     const videoDir = join(DATA_DIR, id);
     const sourcePath = join(videoDir, "derivatives", "source.mp4");
 
-    // Belt-and-suspenders: verify source.mp4 exists on disk before removing
-    // the HLS segments it was built from.
+    // Require the source step validated good AND the file still present before
+    // removing the HLS segments it was built from. Either missing → skip.
+    const sourceStep = await getStep(id, "source");
+    if (sourceStep?.state !== "ready") continue;
     if (!(await Bun.file(sourcePath).exists())) continue;
 
     let filesRemoved = 0;

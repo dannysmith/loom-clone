@@ -23,7 +23,9 @@ export type EventType =
   | "thumbnail_promoted"
   | "thumbnail_uploaded"
   | "thumbnail_deleted"
-  | "derivatives_ready"
+  | "derivatives_ready" // legacy summary event — superseded by processing_step + processing_complete
+  | "processing_step" // one per post-processing step outcome (kind + state)
+  | "processing_complete" // post-processing run finished (summary for the activity feed)
   | "transcript_uploaded"
   | "words_uploaded"
   | "title_suggested"

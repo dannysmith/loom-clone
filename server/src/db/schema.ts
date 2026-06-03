@@ -12,16 +12,39 @@ const nowIso = (): string => new Date().toISOString();
 // responsible for only writing valid values. Good enough for a single-user
 // personal tool.
 
+// Video lifecycle / orchestration states. Single-valued and behaviour-driving
+// (see task-4): the "how far through post-processing" granularity lives in the
+// derived readiness badge computed from video_processing_steps, not here.
+//
+//   recording        — capturing / uploading segments (serves live HLS)
+//   healing          — segments missing, being backfilled (serves HLS)
+//   processing       — core pipeline running; no stable validated MP4 yet (HLS)
+//   ready            — stable validated source.mp4 exists (serves MP4)
+//   reprocessing     — manual or post-edit regeneration in progress (last-good)
+//   processing_failed— HLS plays, but core post-processing failed (needs attention)
+//   incomplete       — never /completed; serves whatever partial HLS exists
+//   deleting         — being permanently deleted
+//
+// Replaces the old `complete`/`failed` pair: `complete` → `ready`, and the
+// dead `failed` value is split into `incomplete` / `processing_failed`.
+export const VIDEO_STATUSES = [
+  "recording",
+  "healing",
+  "processing",
+  "ready",
+  "reprocessing",
+  "processing_failed",
+  "incomplete",
+  "deleting",
+] as const;
+export type VideoStatus = (typeof VIDEO_STATUSES)[number];
+
 export const videos = sqliteTable(
   "videos",
   {
     id: text("id").primaryKey(),
     slug: text("slug").notNull().unique(),
-    status: text("status", {
-      enum: ["recording", "healing", "complete", "processing", "failed", "deleting"],
-    })
-      .notNull()
-      .default("recording"),
+    status: text("status", { enum: VIDEO_STATUSES }).notNull().default("recording"),
     visibility: text("visibility", { enum: ["public", "unlisted", "private"] })
       .notNull()
       .default("unlisted"),
@@ -43,7 +66,9 @@ export const videos = sqliteTable(
       .default("recorded"),
     createdAt: text("created_at").notNull().$defaultFn(nowIso),
     updatedAt: text("updated_at").notNull().$defaultFn(nowIso),
-    // Set on first transition to `complete` and not overwritten on re-complete.
+    // Set on first transition to `ready` (first time a stable validated MP4
+    // exists) and not overwritten thereafter. Drives the stale-file cleanup
+    // cutoff and feed pubDate.
     completedAt: text("completed_at"),
     trashedAt: text("trashed_at"),
     lastEditedAt: text("last_edited_at"),
@@ -68,6 +93,54 @@ export const videoSegments = sqliteTable(
     uploadedAt: text("uploaded_at").notNull().$defaultFn(nowIso),
   },
   (t) => [primaryKey({ columns: [t.videoId, t.filename] })],
+);
+
+// Post-processing checklist (see task-4). One row per (videoId, kind) recording
+// the OUTCOME of each post-processing step — whether we produced or received it
+// and how that attempt went. This is a generation/receipt ledger, NOT a live
+// inventory of what's on disk: a derivative deleted by hand does not update this
+// table. Anything asking "is this servable right now?" checks the row state
+// (`ready`) AND a cheap disk `stat`, so the table stays honest without ever
+// serving a phantom file.
+//
+// `kind` is a stable key (see PROCESSING_STEP_KINDS). `attempts` is purely
+// informational — a manual reprocess increments it; there is no auto-retry.
+export const PROCESSING_STEP_KINDS = [
+  "source",
+  "audio",
+  "metadata",
+  "thumbnail",
+  "variant_720",
+  "variant_1080",
+  "storyboard",
+  "peaks",
+  "suggested_edits",
+  "transcript",
+  "words",
+  "title_suggestion",
+  "description_suggestion",
+  "chapter_titles",
+] as const;
+export type ProcessingStepKind = (typeof PROCESSING_STEP_KINDS)[number];
+
+export const PROCESSING_STEP_STATES = ["pending", "ready", "failed", "skipped"] as const;
+export type ProcessingStepState = (typeof PROCESSING_STEP_STATES)[number];
+
+export const videoProcessingSteps = sqliteTable(
+  "video_processing_steps",
+  {
+    videoId: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: PROCESSING_STEP_KINDS }).notNull(),
+    state: text("state", { enum: PROCESSING_STEP_STATES }).notNull().default("pending"),
+    producedAt: text("produced_at"),
+    sizeBytes: integer("size_bytes"),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    updatedAt: text("updated_at").notNull().$defaultFn(nowIso),
+  },
+  (t) => [primaryKey({ columns: [t.videoId, t.kind] })],
 );
 
 // Permanent-URL requirement: renaming a slug inserts the old slug here.
@@ -225,6 +298,8 @@ export const videoTranscripts = sqliteTable("video_transcripts", {
 export type Video = typeof videos.$inferSelect;
 export type VideoInsert = typeof videos.$inferInsert;
 export type VideoSegment = typeof videoSegments.$inferSelect;
+export type VideoProcessingStep = typeof videoProcessingSteps.$inferSelect;
+export type VideoProcessingStepInsert = typeof videoProcessingSteps.$inferInsert;
 export type SlugRedirect = typeof slugRedirects.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
 export type TagSlugRedirect = typeof tagSlugRedirects.$inferSelect;

@@ -1,0 +1,152 @@
+// Infer video_processing_steps rows from what's on disk (task-4 Migration &
+// backfill). Used by the one-time backfill script for existing videos and by
+// duplicateVideo (which copies files but not step rows, so the copy would
+// otherwise have derivatives yet fail the table-gated serving check).
+//
+// This validates video artifacts with the same isProbablyPlayable helper used
+// at generation time, so a backfilled video serves exactly what it should:
+// cleaned-up videos (no HLS) keep their `source` step `ready` and simply lack
+// the segment-derived steps — they are never flagged as needing repair.
+
+import { join } from "path";
+import type { ProcessingStepKind, Video } from "../../db/schema";
+import { derivativesDir, probeMetadata } from "../derivatives";
+import { DATA_DIR, getTranscript, getVideo } from "../store";
+import { isProbablyPlayable } from "./playable";
+import { PROCESSING_STEPS, type StepContext } from "./registry";
+import { markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
+
+async function exists(path: string): Promise<boolean> {
+  return Bun.file(path).exists();
+}
+
+async function hasAudio(path: string): Promise<boolean> {
+  const ffprobePath = Bun.which("ffprobe");
+  if (!ffprobePath) return false;
+  try {
+    const proc = Bun.spawn(
+      [
+        ffprobePath,
+        "-v",
+        "quiet",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        path,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return code === 0 && out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Builds a minimal StepContext for applicability checks (height/duration come
+// from the stored metadata; source type from the row).
+function inferContext(video: Video): StepContext {
+  return {
+    videoId: video.id,
+    video,
+    source: video.source,
+    dir: derivativesDir(video.id),
+    duration: video.durationSeconds ?? 0,
+    height: video.height ?? 0,
+    force: false,
+    scratch: { silencesComputed: true },
+  };
+}
+
+// Infer and persist step rows for one video from on-disk presence. Idempotent.
+export async function inferStepsFromDisk(videoId: string): Promise<void> {
+  const video = await getVideo(videoId, { includeTrashed: true });
+  if (!video) return;
+  const ctx = inferContext(video);
+  const sourceFile = join(ctx.dir, "source.mp4");
+
+  for (const step of PROCESSING_STEPS) {
+    if (!step.appliesTo(ctx)) continue;
+    await inferStep(step.kind, ctx, sourceFile);
+  }
+}
+
+async function inferStep(
+  kind: ProcessingStepKind,
+  ctx: StepContext,
+  sourceFile: string,
+): Promise<void> {
+  const { videoId, dir } = ctx;
+
+  switch (kind) {
+    case "source": {
+      if (!(await exists(sourceFile))) return; // no row — nothing to serve
+      const ok = await isProbablyPlayable(sourceFile, { expectedDuration: ctx.duration });
+      if (ok) await markStepReady(videoId, "source", { sizeBytes: sizeOf(sourceFile) });
+      else await markStepFailed(videoId, "source", "backfill: source.mp4 failed playability check");
+      return;
+    }
+    case "metadata": {
+      // Stored dimensions imply metadata extraction succeeded previously.
+      if (ctx.video.width && ctx.video.height) await markStepReady(videoId, "metadata");
+      else if (await exists(sourceFile)) {
+        const meta = await probeMetadata(sourceFile);
+        if (meta) await markStepReady(videoId, "metadata");
+      }
+      return;
+    }
+    case "audio": {
+      // No standalone artifact — assume processed if the source carries audio.
+      if (!(await exists(sourceFile))) return;
+      if (await hasAudio(sourceFile)) await markStepReady(videoId, "audio");
+      else await markStepSkipped(videoId, "audio");
+      return;
+    }
+    case "variant_1080":
+    case "variant_720": {
+      const file = join(dir, `${kind === "variant_1080" ? 1080 : 720}p.mp4`);
+      if (!(await exists(file))) return;
+      const ok = await isProbablyPlayable(file);
+      if (ok) await markStepReady(videoId, kind, { sizeBytes: sizeOf(file) });
+      else await markStepFailed(videoId, kind, "backfill: variant failed playability check");
+      return;
+    }
+    case "thumbnail":
+      if (await exists(join(dir, "thumbnail.jpg"))) await markStepReady(videoId, "thumbnail");
+      return;
+    case "storyboard":
+      if (await exists(join(dir, "storyboard.vtt"))) await markStepReady(videoId, "storyboard");
+      return;
+    case "peaks":
+      if (await exists(join(dir, "peaks.json"))) await markStepReady(videoId, "peaks");
+      return;
+    case "suggested_edits":
+      if (await exists(join(dir, "suggested-edits.json")))
+        await markStepReady(videoId, "suggested_edits");
+      return;
+    case "transcript":
+      if (await getTranscript(videoId)) await markStepReady(videoId, "transcript");
+      return;
+    case "words":
+      if (await exists(join(dir, "words.json"))) await markStepReady(videoId, "words");
+      return;
+    // The remaining external suggestion items (title/description/chapter_titles)
+    // leave no inferable on-disk trace — leave them absent ("—").
+    default:
+      return;
+  }
+}
+
+function sizeOf(path: string): number | null {
+  try {
+    const s = Bun.file(path).size;
+    return Number.isFinite(s) ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+export { DATA_DIR };

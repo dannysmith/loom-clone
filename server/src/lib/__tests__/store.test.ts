@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { mkdir } from "fs/promises";
+import { join } from "path";
 import { getDb } from "../../db/client";
 import {
   slugRedirects as slugRedirectsTable,
@@ -8,11 +10,13 @@ import {
 } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { listEvents } from "../events";
+import { getStepStates } from "../processing/steps-store";
 import {
   addSegment,
   ConflictError,
   completeVideo,
   createVideo,
+  DATA_DIR,
   deleteVideo,
   duplicateVideo,
   getSegmentDurations,
@@ -134,13 +138,13 @@ describe("setVideoStatus / completeVideo", () => {
     expect(updated.updatedAt >= video.updatedAt).toBe(true);
   });
 
-  test("completeVideo sets status to complete, populates completedAt and durationSeconds", async () => {
+  test("completeVideo sets status to ready, populates completedAt and durationSeconds", async () => {
     const video = await createVideo();
     await addSegment(video.id, "seg_000.m4s", 4.0);
     await addSegment(video.id, "seg_001.m4s", 3.5);
 
     const updated = await completeVideo(video.id);
-    expect(updated.status).toBe("complete");
+    expect(updated.status).toBe("ready");
     expect(updated.completedAt).not.toBeNull();
     expect(updated.durationSeconds).toBeCloseTo(7.5, 5);
   });
@@ -183,7 +187,7 @@ describe("setVideoStatus / completeVideo", () => {
   });
 
   test("throws for unknown id", async () => {
-    expect(setVideoStatus("nope", "complete")).rejects.toThrow("Video nope not found");
+    expect(setVideoStatus("nope", "ready")).rejects.toThrow("Video nope not found");
   });
 });
 
@@ -628,6 +632,27 @@ describe("duplicateVideo", () => {
     expect(dup.id).not.toBe(original.id);
     expect(dup.slug).not.toBe(original.slug);
     expect(dup.slug).toContain(original.slug); // slug-1 pattern
+  });
+
+  test("re-derives processing-step rows for the copy from its files", async () => {
+    const original = await createVideo();
+    await setVideoStatus(original.id, "ready");
+    await getDb()
+      .update(videosTable)
+      .set({ width: 1280, height: 720, durationSeconds: 90 })
+      .where(eq(videosTable.id, original.id));
+    // Put a couple of derivative files on disk for the original.
+    const dir = join(DATA_DIR, original.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "peaks.json"), "[]");
+
+    const dup = await duplicateVideo(original.id);
+
+    // The copy gets its own step rows inferred from the copied files — not the
+    // original's rows — so it serves correctly under table-gated logic.
+    const steps = await getStepStates(dup.id);
+    expect(steps.get("peaks")?.state).toBe("ready");
+    expect(steps.get("metadata")?.state).toBe("ready");
   });
 
   test("appends (1) to title, increments existing suffix", async () => {

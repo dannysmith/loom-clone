@@ -106,7 +106,7 @@ export function VideoDetailPage({
       {/* --- Metadata --- */}
       <div class="video-meta">
         <div class="video-meta-grid">
-          {video.status !== "complete" && (
+          {video.status !== "ready" && (
             <span class={`badge badge--${video.status}`}>{video.status}</span>
           )}
           {video.lastEditedAt && (

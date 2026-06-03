@@ -42,9 +42,11 @@ const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "recording", label: "Recording" },
   { value: "healing", label: "Healing" },
-  { value: "complete", label: "Complete" },
   { value: "processing", label: "Processing" },
-  { value: "failed", label: "Failed" },
+  { value: "ready", label: "Ready" },
+  { value: "reprocessing", label: "Reprocessing" },
+  { value: "processing_failed", label: "Processing failed" },
+  { value: "incomplete", label: "Incomplete" },
 ] as const;
 
 // HTMX attributes shared by all filter/sort controls

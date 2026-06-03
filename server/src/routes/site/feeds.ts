@@ -15,13 +15,14 @@ import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
 // Public feeds: RSS, JSON Feed, llms.txt. No auth.
 const feeds = new Hono();
 
-// Shared query: public, complete, non-trashed videos, newest first.
+// Shared query: public, ready, non-trashed videos, newest first. Feeds publish
+// only once a stable validated MP4 exists (status `ready`).
 async function listPublicVideos(): Promise<Video[]> {
   return getDb()
     .select()
     .from(videos)
     .where(
-      and(eq(videos.visibility, "public"), eq(videos.status, "complete"), isNull(videos.trashedAt)),
+      and(eq(videos.visibility, "public"), eq(videos.status, "ready"), isNull(videos.trashedAt)),
     )
     .orderBy(desc(videos.createdAt));
 }

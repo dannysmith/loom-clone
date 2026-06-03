@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
+import { _inFlightPromise } from "../../../lib/processing/pipeline";
 import {
   DATA_DIR,
   getSegmentDurations,
@@ -9,6 +10,14 @@ import {
 } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
+
+// After /complete the footage-whole path schedules the (re-entrant) pipeline.
+// With only stub segment files on disk the source stitch can't succeed, so the
+// settled status is processing_failed. Await the pipeline to keep tests
+// deterministic and avoid a dangling ffmpeg outliving the temp dir.
+async function settlePipeline(id: string): Promise<void> {
+  await _inFlightPromise(id);
+}
 
 let env: TestEnv;
 
@@ -280,10 +289,13 @@ describe("POST /:id/complete", () => {
     expect(body.missing).toEqual([]);
     expect(body.title).toBeNull();
     expect(body.visibility).toBe("unlisted");
-    expect((await getVideo(id))?.status).toBe("complete");
+    // Footage whole → enters post-processing and schedules the pipeline; with
+    // no real HLS the source stitch fails and it settles to processing_failed.
+    await settlePipeline(id);
+    expect((await getVideo(id))?.status).toBe("processing_failed");
   });
 
-  test("with timeline body and all segments present: status complete", async () => {
+  test("with timeline body and all segments present: enters processing", async () => {
     const { id } = await createVideoViaApi();
     // Pretend init.mp4 and seg_000.m4s were uploaded.
     await Bun.write(join(DATA_DIR, id, "init.mp4"), new Uint8Array([0]));
@@ -298,7 +310,10 @@ describe("POST /:id/complete", () => {
     expect(body.missing).toEqual([]);
     expect(body.title).toBeNull();
     expect(body.visibility).toBe("unlisted");
-    expect((await getVideo(id))?.status).toBe("complete");
+    await settlePipeline(id);
+    // Footage whole → left `recording` and entered the post-processing lifecycle.
+    expect((await getVideo(id))?.status).not.toBe("recording");
+    expect((await getVideo(id))?.status).not.toBe("healing");
     // recording.json is persisted
     expect(await Bun.file(join(DATA_DIR, id, "recording.json")).exists()).toBe(true);
   });
@@ -321,6 +336,7 @@ describe("POST /:id/complete", () => {
         },
       }),
     });
+    await settlePipeline(id);
 
     const chaptersFile = Bun.file(join(DATA_DIR, id, "chapters.json"));
     expect(await chaptersFile.exists()).toBe(true);
@@ -350,6 +366,7 @@ describe("POST /:id/complete", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ timeline }),
     });
+    await settlePipeline(id);
     // Simulate a user rename via admin: title is no longer null.
     const chaptersPath = join(DATA_DIR, id, "chapters.json");
     const after = (await Bun.file(chaptersPath).json()) as {
@@ -365,6 +382,7 @@ describe("POST /:id/complete", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ timeline }),
     });
+    await settlePipeline(id);
     const final = (await Bun.file(chaptersPath).json()) as {
       chapters: { title: string | null }[];
     };
@@ -543,9 +561,9 @@ describe("DELETE /:id", () => {
     expect(res.status).toBe(200);
   });
 
-  test("returns 409 VIDEO_ALREADY_COMPLETE for complete videos", async () => {
+  test("returns 409 VIDEO_ALREADY_COMPLETE for ready videos", async () => {
     const { id } = await createVideoViaApi();
-    await setVideoStatus(id, "complete");
+    await setVideoStatus(id, "ready");
     const res = await videos.request(`/${id}`, { method: "DELETE" });
     expect(res.status).toBe(409);
     const body = await res.json();

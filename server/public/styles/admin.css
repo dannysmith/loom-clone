@@ -802,11 +802,16 @@ body.admin--login {
 
 .badge--healing,
 .badge--processing,
+.badge--reprocessing,
 .badge--deleting {
 	color: var(--color-warning);
 	background-color: var(--color-warning-bg);
 }
 
+/* processing_failed: HLS plays but post-processing failed — needs attention.
+   incomplete: never completed, partial footage. Both read as a problem. */
+.badge--processing_failed,
+.badge--incomplete,
 .badge--failed {
 	color: var(--color-restricted);
 	background-color: var(--color-restricted-bg);

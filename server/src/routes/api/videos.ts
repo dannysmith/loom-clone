@@ -6,10 +6,11 @@ import { join, resolve } from "path";
 import { z } from "zod";
 import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../lib/chapters";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
-import { scheduleDerivatives } from "../../lib/derivatives";
 import { apiError, ErrorCode } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
+import { scheduleDerivatives } from "../../lib/processing/pipeline";
+import { markStepReady } from "../../lib/processing/steps-store";
 import { parseSrtToPlainText } from "../../lib/srt";
 import {
   addSegment,
@@ -19,6 +20,7 @@ import {
   deleteVideo,
   getVideo,
   listVideosPaginated,
+  markFootageComplete,
   setVideoStatus,
   updateSlug,
   updateVideo,
@@ -254,23 +256,25 @@ videos.post("/:id/complete", async (c) => {
     missing = expected.filter((f) => !present.has(f)).sort();
   }
 
-  const nextStatus: "healing" | "complete" = missing.length === 0 ? "complete" : "healing";
-  const video = await setVideoStatus(id, nextStatus);
+  // Footage whole → enter the post-processing lifecycle as `processing` and
+  // kick off the pipeline; reconcile() takes it to `ready` once derivatives
+  // validate. Footage still missing → `healing` (the Mac re-uploads and
+  // re-`/complete`s). The pipeline is re-entrant, so a heal re-hitting
+  // /complete resumes from where it left off.
+  const footageWhole = missing.length === 0;
+  const video = footageWhole ? await markFootageComplete(id) : await setVideoStatus(id, "healing");
 
   const playlist = await buildPlaylist(video);
   await writePlaylist(id, playlist);
 
-  // Kick off derivative generation (source.mp4, thumbnail.jpg) in the
-  // background. Fire-and-forget — the client's stop flow never waits on
-  // ffmpeg. A healed recording re-hitting /complete regenerates atomically.
-  if (nextStatus === "complete") {
+  if (footageWhole) {
     scheduleDerivatives(id);
   }
 
   const path = `/${video.slug}`;
   const url = absoluteUrl(path);
   console.log(
-    `[complete] ${video.slug} -> ${path} (status=${nextStatus}, missing=${missing.length})`,
+    `[complete] ${video.slug} -> ${path} (status=${video.status}, missing=${missing.length})`,
   );
   return c.json({
     path,
@@ -315,6 +319,7 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   // Parse to plain text and upsert into DB + FTS.
   const plainText = parseSrtToPlainText(body);
   await upsertTranscript(id, format, plainText);
+  await markStepReady(id, "transcript", { sizeBytes: body.length });
   await logEvent(id, "transcript_uploaded", {
     format,
     wordCount: plainText.split(/\s+/).filter(Boolean).length,
@@ -359,6 +364,7 @@ videos.put("/:id/words", bodyLimit({ maxSize: 10 * 1024 * 1024 }), async (c) => 
   await Bun.write(tmpPath, JSON.stringify(words));
   await fsRename(tmpPath, finalPath);
 
+  await markStepReady(id, "words");
   await logEvent(id, "words_uploaded", { wordCount: (words as unknown[]).length });
 
   console.log(`[words] ${id} (${(words as unknown[]).length} words)`);
@@ -393,6 +399,7 @@ videos.put(
     }
 
     await updateVideo(id, { title });
+    await markStepReady(id, "title_suggestion");
     await logEvent(id, "title_suggested", { title, applied: true });
     console.log(`[suggest-title] ${id}: "${title}"`);
     return c.json({ applied: true });
@@ -427,6 +434,7 @@ videos.put(
     }
 
     await updateVideo(id, { description });
+    await markStepReady(id, "description_suggestion");
     await logEvent(id, "description_suggested", { description, applied: true });
     console.log(`[suggest-description] ${id}: "${description}"`);
     return c.json({ applied: true });
@@ -488,6 +496,7 @@ videos.put(
     const nextChapters = [...data.chapters];
     nextChapters[idx] = { ...chapter, title };
     await writeChapters(id, nextChapters);
+    await markStepReady(id, "chapter_titles");
     await logEvent(id, "chapter_title_suggested", { chapterId, title, applied: true });
     console.log(`[chapter-suggest] ${id}/${chapterId}: "${title}"`);
     return c.json({ applied: true });
@@ -500,8 +509,21 @@ videos.delete("/:id", async (c) => {
   const { id } = c.req.param();
   const existing = await getVideo(id);
   if (!existing) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
-  if (existing.status === "complete") {
-    return apiError(c, 409, "Cannot delete a completed video", ErrorCode.VIDEO_ALREADY_COMPLETE);
+  // Refuse to tear out a video that's serving or mid-pipeline. `ready` is a
+  // finished video; `processing`/`reprocessing` would pull files out from
+  // under ffmpeg. (This is the API-level recording cleanup endpoint; trashing
+  // a finished video goes through the admin trash flow.)
+  if (
+    existing.status === "ready" ||
+    existing.status === "processing" ||
+    existing.status === "reprocessing"
+  ) {
+    return apiError(
+      c,
+      409,
+      "Cannot delete a video that is processing or ready",
+      ErrorCode.VIDEO_ALREADY_COMPLETE,
+    );
   }
 
   await deleteVideo(id);

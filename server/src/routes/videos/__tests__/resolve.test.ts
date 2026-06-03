@@ -3,7 +3,9 @@ import { eq } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../../../db/client";
+import type { ProcessingStepKind } from "../../../db/schema";
 import { videos as videosTable } from "../../../db/schema";
+import { markStepReady } from "../../../lib/processing/steps-store";
 import { createVideo, DATA_DIR, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { resolveForViewer, type ViewerVideo } from "../resolve";
@@ -18,10 +20,21 @@ afterEach(async () => {
   await teardownTestEnv(env);
 });
 
+// Maps a derivative filename to the step kind that gates its serving. Serving
+// is now table-gated (state `ready` + file present), so writing the file alone
+// isn't enough — the step row must say ready too.
+const STEP_FOR_FILE: Record<string, ProcessingStepKind> = {
+  "source.mp4": "source",
+  "1080p.mp4": "variant_1080",
+  "720p.mp4": "variant_720",
+};
+
 async function writeDerivative(video: Video, filename: string): Promise<void> {
   const dir = join(DATA_DIR, video.id, "derivatives");
   await mkdir(dir, { recursive: true });
   await Bun.write(join(dir, filename), "stub");
+  const kind = STEP_FOR_FILE[filename];
+  if (kind) await markStepReady(video.id, kind);
 }
 
 // Width/height/aspect are written by the metadata extraction step in

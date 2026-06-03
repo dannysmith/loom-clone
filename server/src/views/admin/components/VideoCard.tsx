@@ -67,7 +67,7 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
             ) : (
               <>
                 <VisibilityBadge visibility={video.visibility} />
-                {video.status !== "complete" && (
+                {video.status !== "ready" && (
                   <span class={`badge badge--${video.status}`}>{video.status}</span>
                 )}
               </>

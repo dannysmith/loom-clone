@@ -53,20 +53,22 @@ async function runEditPipeline(videoId: string): Promise<void> {
   const started = Date.now();
   const derivDir = join(DATA_DIR, videoId, "derivatives");
 
-  // Mark the video as processing so the UI shows the right state and
-  // prevents concurrent edits.
+  // Mark the video as reprocessing so the UI shows the right state and
+  // prevents concurrent edits. Post-edit regeneration must land as an atomic
+  // set, which is why it gets its own status rather than reusing `processing`.
   await getDb()
     .update(videos)
-    .set({ status: "processing", updatedAt: nowIso() })
+    .set({ status: "reprocessing", updatedAt: nowIso() })
     .where(eq(videos.id, videoId));
 
   try {
     await _runEditPipelineInner(videoId, derivDir, started);
   } catch (err) {
-    // Restore to complete on failure so the video isn't stuck in processing.
+    // Restore to ready on failure so the video isn't stuck in reprocessing
+    // (the pre-edit source.mp4 is untouched and still serves).
     await getDb()
       .update(videos)
-      .set({ status: "complete", updatedAt: nowIso() })
+      .set({ status: "ready", updatedAt: nowIso() })
       .where(eq(videos.id, videoId));
     throw err;
   }
@@ -155,7 +157,7 @@ async function _runEditPipelineInner(
   await getDb()
     .update(videos)
     .set({
-      status: "complete",
+      status: "ready",
       durationSeconds: editedMeta ? finalDuration : undefined,
       fileBytes: editedMeta?.fileBytes,
       lastEditedAt: nowIso(),

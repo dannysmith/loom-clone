@@ -1,39 +1,50 @@
 import { join } from "path";
+import type { ProcessingStepKind } from "../../db/schema";
 import { chaptersExist } from "../../lib/chapters";
+import { getStepStates } from "../../lib/processing/steps-store";
 import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
-import { urlsForVideo, type VideoUrls } from "../../lib/url";
+import { activeRawFilename, urlsForVideo, type VideoUrls } from "../../lib/url";
 
-// Variant heights we ever generate, in highest-first order. Matches the
-// VARIANTS list in lib/derivatives.ts. Order here is the order the player
-// sees them in <source> children, which biases its initial pick.
-const VARIANT_HEIGHTS = [1080, 720] as const;
+// Variant heights we ever generate, in highest-first order, paired with their
+// step kind. Matches the VARIANTS list in lib/derivatives.ts. Order here is the
+// order the player sees them in <source> children, which biases its initial pick.
+const VARIANTS: ReadonlyArray<{ height: number; kind: ProcessingStepKind }> = [
+  { height: 1080, kind: "variant_1080" },
+  { height: 720, kind: "variant_720" },
+];
 
-// Checks which derivative files exist on disk. The MP4 set drives whether
-// we serve the multi-source quality menu or fall back to live HLS.
-async function derivativeFlags(videoId: string): Promise<{
+// Decides whether to serve MP4 or fall back to live HLS — and which variants
+// to offer. Gated on the video_processing_steps table (state `ready`) AND the
+// file still being present on disk, NOT bare file presence: a byte-complete but
+// semantically-broken or hand-deleted MP4 is never served, so the viewer falls
+// back to HLS automatically. The primary check follows the ACTIVE raw file
+// (source.mp4 for unedited videos, {height}p.mp4 for edited ones) but keys
+// readiness off the validated `source` step that produced it.
+async function derivativeFlags(video: Video): Promise<{
   hasSource: boolean;
   variantHeights: number[];
   hasThumb: boolean;
   hasCaptions: boolean;
 }> {
-  const dir = join(DATA_DIR, videoId, "derivatives");
-  const sourcePath = join(dir, "source.mp4");
-  const thumbPath = join(dir, "thumbnail.jpg");
-  const captionsSrtPath = join(dir, "captions.srt");
-  const captionsVttPath = join(dir, "captions.vtt");
-  const variantPaths = VARIANT_HEIGHTS.map((h) => join(dir, `${h}p.mp4`));
-  const [hasSource, hasThumb, hasCaptionsSrt, hasCaptionsVtt, ...variantExists] = await Promise.all(
-    [
-      Bun.file(sourcePath).exists(),
-      Bun.file(thumbPath).exists(),
-      Bun.file(captionsSrtPath).exists(),
-      Bun.file(captionsVttPath).exists(),
-      ...variantPaths.map((p) => Bun.file(p).exists()),
-    ],
-  );
-  const hasCaptions = hasCaptionsSrt || hasCaptionsVtt;
-  const variantHeights = VARIANT_HEIGHTS.filter((_, i) => variantExists[i]);
-  return { hasSource, variantHeights, hasThumb, hasCaptions };
+  const dir = join(DATA_DIR, video.id, "derivatives");
+  const steps = await getStepStates(video.id);
+
+  const sourceReady = steps.get("source")?.state === "ready";
+  const activePresent = await Bun.file(join(dir, activeRawFilename(video))).exists();
+  const hasSource = sourceReady && activePresent;
+
+  const variantHeights: number[] = [];
+  for (const { height, kind } of VARIANTS) {
+    if (steps.get(kind)?.state !== "ready") continue;
+    if (await Bun.file(join(dir, `${height}p.mp4`)).exists()) variantHeights.push(height);
+  }
+
+  const [hasThumb, hasCaptionsSrt, hasCaptionsVtt] = await Promise.all([
+    Bun.file(join(dir, "thumbnail.jpg")).exists(),
+    Bun.file(join(dir, "captions.srt")).exists(),
+    Bun.file(join(dir, "captions.vtt")).exists(),
+  ]);
+  return { hasSource, variantHeights, hasThumb, hasCaptions: hasCaptionsSrt || hasCaptionsVtt };
 }
 
 // One entry in the player's `<source>` list. `width`/`height` populate
@@ -85,7 +96,7 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
 
   const { video } = resolved;
   const [{ hasSource, variantHeights, hasThumb, hasCaptions }, hasChapters] = await Promise.all([
-    derivativeFlags(video.id),
+    derivativeFlags(video),
     chaptersExist(video.id),
   ]);
   const urls = urlsForVideo(video);

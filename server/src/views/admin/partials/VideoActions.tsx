@@ -47,7 +47,7 @@ export function VideoActions({ video }: { video: Video }) {
         </>
       )}
 
-      {video.status === "complete" && (
+      {video.status === "ready" && (
         <a href={`/admin/videos/${video.id}/editor`} class="btn btn--sm">
           <IconScissors size={14} /> Edit video
         </a>

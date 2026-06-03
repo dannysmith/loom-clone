@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import type { ProcessingStepKind } from "../../../db/schema";
+import { markStepReady } from "../../../lib/processing/steps-store";
 import { createVideo, DATA_DIR, updateSlug, updateVideo, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
@@ -15,10 +17,20 @@ afterEach(async () => {
   await teardownTestEnv(env);
 });
 
+// Serving is table-gated (state `ready` + file present), so writing the file
+// must be paired with marking the gating step ready.
+const STEP_FOR_FILE: Record<string, ProcessingStepKind> = {
+  "source.mp4": "source",
+  "1080p.mp4": "variant_1080",
+  "720p.mp4": "variant_720",
+};
+
 async function writeDerivative(video: Video, filename: string): Promise<void> {
   const dir = join(DATA_DIR, video.id, "derivatives");
   await mkdir(dir, { recursive: true });
   await Bun.write(join(dir, filename), "stub");
+  const kind = STEP_FOR_FILE[filename];
+  if (kind) await markStepReady(video.id, kind);
 }
 
 describe("GET /v/:slug (back-compat redirect)", () => {

@@ -19,7 +19,15 @@ const VALID_SORTS = new Set<DashboardSort>([
 ]);
 
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
-const VALID_STATUS = new Set(["recording", "healing", "complete", "processing", "failed"]);
+const VALID_STATUS = new Set([
+  "recording",
+  "healing",
+  "processing",
+  "ready",
+  "reprocessing",
+  "processing_failed",
+  "incomplete",
+]);
 
 /** Parses DashboardFilters from URL query params. */
 export function parseFilters(c: Context): DashboardFilters {

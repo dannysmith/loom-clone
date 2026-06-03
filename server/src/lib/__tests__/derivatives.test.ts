@@ -5,10 +5,18 @@ import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { _inFlightPromise, scheduleDerivatives, scheduleUploadDerivatives } from "../derivatives";
+import {
+  _inFlightPromise,
+  _variantFfmpegArgs,
+  generateVariants,
+  scheduleDerivatives,
+  scheduleUploadDerivatives,
+} from "../derivatives";
 import { createVideo, DATA_DIR } from "../store";
 
-const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+// Every ffmpeg-gated test in this file also shells out to ffprobe (directly or
+// via probeMetadata/extractMetadata), so require both tools to be present.
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 
 let env: TestEnv;
 
@@ -209,6 +217,111 @@ describe("scheduleUploadDerivatives (upload path)", () => {
       expect(await variant.exists()).toBe(true);
     },
     120_000,
+  );
+});
+
+// Count decoded video frames in a file (robust for VFR — nb_frames is often
+// absent on fragmented/stitched mp4, so we actually count).
+async function countVideoFrames(path: string): Promise<number> {
+  const proc = Bun.spawn(
+    [
+      "ffprobe",
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-count_frames",
+      "-show_entries",
+      "stream=nb_read_frames",
+      "-of",
+      "csv=p=0",
+      path,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  return Number.parseInt(stdout.trim(), 10);
+}
+
+// Generate a 1080p variable-frame-rate mp4 with deliberately irregular,
+// non-grid PTS at the recorder's 600 timescale — the closest synthetic
+// analogue of a real HLS-origin source.mp4 (genuinely VFR, no SPS VUI timing).
+async function generateVfrSource(outPath: string): Promise<void> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=duration=4:size=1920x1080:rate=60",
+      // Irregular inter-frame deltas (~20-30 ticks @ ts600 ≈ 20-30fps), VFR.
+      "-vf",
+      "setpts='(N*22 + mod(N\\,3)*5 + mod(N\\,7)*3)/600/TB'",
+      "-fps_mode",
+      "passthrough",
+      "-enc_time_base",
+      "1/600",
+      "-video_track_timescale",
+      "600",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      outPath,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (exitCode !== 0) throw new Error(`VFR fixture generation failed: ${stderr}`);
+}
+
+describe("generateVariants frame-rate handling", () => {
+  // Deterministic guard for the fix: the variant encode must pass
+  // `-fps_mode passthrough` so VFR / mis-declared-r_frame_rate sources don't
+  // get their surplus frames silently dropped onto a bogus constant grid.
+  // See task 3 (frame-rate metadata correctness) and the comment on
+  // _variantFfmpegArgs.
+  test("variant ffmpeg args request passthrough frame mode (no forced -r)", () => {
+    const args = _variantFfmpegArgs("/in/source.mp4", 720, 23, "/out/720p.mp4.tmp");
+    const i = args.indexOf("-fps_mode");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(i + 1).toBeLessThan(args.length);
+    expect(args[i + 1]).toBe("passthrough");
+    // Must NOT force a constant rate — that would drop or duplicate frames.
+    expect(args).not.toContain("-r");
+  });
+
+  test.skipIf(!ffmpegAvailable)(
+    "preserves every source frame from a VFR source (no silent frame drop)",
+    async () => {
+      const dir = join(DATA_DIR, "vfr-variant-test");
+      await mkdir(dir, { recursive: true });
+      const sourcePath = join(dir, "source.mp4");
+      await generateVfrSource(sourcePath);
+
+      const sourceFrames = await countVideoFrames(sourcePath);
+      expect(sourceFrames).toBeGreaterThan(0);
+
+      await generateVariants(dir);
+
+      // 1080p source → 720p variant is produced.
+      const variantPath = join(dir, "720p.mp4");
+      expect(await Bun.file(variantPath).exists()).toBe(true);
+
+      // Passthrough preserves all source frames. The pre-fix default
+      // (CFR onto the guessed r_frame_rate) dropped frames here.
+      const variantFrames = await countVideoFrames(variantPath);
+      expect(variantFrames).toBe(sourceFrames);
+    },
+    60_000,
   );
 });
 

@@ -220,6 +220,12 @@ function buildFfmpegEditArgs(sourcePath: string, outputPath: string, kept: Segme
       String(seg.start),
       "-to",
       String(seg.end),
+      // Honour the source PTS verbatim. source.mp4 is genuinely VFR with an
+      // unreliable declared r_frame_rate (see _variantFfmpegArgs in
+      // derivatives.ts); without passthrough, libx264 re-times frames onto the
+      // bogus constant grid and silently drops the surplus.
+      "-fps_mode",
+      "passthrough",
       "-c:v",
       "libx264",
       "-preset",
@@ -270,6 +276,10 @@ function buildFfmpegEditArgs(sourcePath: string, outputPath: string, kept: Segme
     "[vout]",
     "-map",
     "[aout]",
+    // VFR-safe: pass the concatenated filtergraph PTS straight through rather
+    // than forcing a constant rate (see the simple-trim branch above).
+    "-fps_mode",
+    "passthrough",
     "-c:v",
     "libx264",
     "-preset",

@@ -570,6 +570,61 @@ function variantsForHeight(sourceHeight: number): Array<{ height: number; crf: n
   return VARIANTS.filter((v) => sourceHeight > v.height);
 }
 
+// Build the ffmpeg argument list for a single variant encode.
+//
+// `-fps_mode passthrough` is load-bearing. Our HLS-origin source.mp4 is
+// genuinely variable-frame-rate (the recorder's metronome emits at the
+// sources' real delivery cadence, not a fixed grid — see the cadence rework
+// in task 21) and carries no SPS VUI timing, so ffmpeg can only *guess* an
+// `r_frame_rate` for it. That guess is frequently wrong and frequently *below*
+// the real frame density (e.g. the HLS demuxer's 25 fps fallback on a 27 fps
+// recording, or 30 declared on a ~53 fps recording). Without passthrough,
+// libx264 re-times every frame onto that bogus constant grid and silently
+// *drops* the surplus frames — a 27 fps source loses ~1 frame in 13, a 53 fps
+// source loses nearly half — degrading the variant with judder. Passthrough
+// honours the source PTS verbatim, so every real frame survives regardless of
+// what r_frame_rate the container declares. We deliberately do NOT force a
+// CFR `-r`: the input is honestly VFR and forcing a rate would either drop
+// frames (rate too low) or duplicate them (rate too high). ffmpeg nudges any
+// equal-DTS collisions by a tick during muxing, so the output container stays
+// monotonic and plays cleanly.
+export function _variantFfmpegArgs(
+  sourcePath: string,
+  height: number,
+  crf: number,
+  outPath: string,
+): string[] {
+  return [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    sourcePath,
+    "-fps_mode",
+    "passthrough",
+    "-vf",
+    `scale=-2:${height}`,
+    "-pix_fmt",
+    "yuv420p",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    String(crf),
+    "-profile:v",
+    "high",
+    "-c:a",
+    "copy",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+    outPath,
+  ];
+}
+
 // Generate downsampled MP4 variants. When inputPath is provided (e.g. an
 // edited output), variants are generated from that file instead of source.mp4.
 export async function generateVariants(dir: string, inputPath?: string): Promise<void> {
@@ -589,33 +644,10 @@ export async function generateVariants(dir: string, inputPath?: string): Promise
     const finalPath = join(dir, outFile);
     const started = Date.now();
 
-    const { exitCode, stderr } = await spawnFfmpeg(fp, [
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      sourcePath,
-      "-vf",
-      `scale=-2:${variant.height}`,
-      "-pix_fmt",
-      "yuv420p",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "fast",
-      "-crf",
-      String(variant.crf),
-      "-profile:v",
-      "high",
-      "-c:a",
-      "copy",
-      "-movflags",
-      "+faststart",
-      "-f",
-      "mp4",
-      tmpPath,
-    ]);
+    const { exitCode, stderr } = await spawnFfmpeg(
+      fp,
+      _variantFfmpegArgs(sourcePath, variant.height, variant.crf, tmpPath),
+    );
     if (exitCode !== 0) {
       await rm(tmpPath, { force: true }).catch(() => {});
       throw new Error(`variant ${outFile} failed (exit ${exitCode}): ${stderr.trim()}`);

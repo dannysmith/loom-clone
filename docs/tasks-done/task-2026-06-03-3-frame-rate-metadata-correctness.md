@@ -1,5 +1,46 @@
 # Task 3 — Frame-Rate Metadata Correctness
 
+## Resolution (2026-06-03)
+
+**Done.** The original two-sided framing was partly wrong; the investigation resolved it as a one-sided (server) fix plus a documented "no-op" on the macOS side. Summary of what was found and shipped:
+
+### Root cause — the macOS premise was incorrect
+
+The task assumed the *writer declares a wrong frame rate*. It doesn't. Tracing the actual bitstream of real recordings (`ffprobe` + `trace_headers`):
+
+- The H.264 stream carries **no VUI timing** (`timing_info_present_flag = 0`) — the encoder declares no nominal rate at all.
+- The fMP4 media timescale is a generic **600** (from `preferredTimescale`), not a rate declaration.
+- The PTS cadence is correct, honest **VFR** — the task-21 cadence rework deliberately makes output track real source delivery, which is genuinely variable.
+- The "wrong `r_frame_rate`" (25 on a ~27 fps recording, 30 on the incident's ~53 fps recording) is purely **ffmpeg's heuristic guess** — the HLS demuxer's 25 fps fallback. It is cosmetic and unreliable for VFR content; the writer never wrote it.
+
+**Decision (confirmed with user): no macOS change.** The writer is already honest. Forcing CFR to get a "real" declared rate would undo the task-21 VFR design and either drop or duplicate frames. See memory `project_vfr_rframerate_truth`.
+
+### What shipped (server — the complete, robust fix)
+
+- **`generateVariants` (`derivatives.ts`): `-fps_mode passthrough`** (arg construction extracted to `_variantFfmpegArgs`). Confirmed on a real bad-metadata source: the old default re-timed the VFR source onto ffmpeg's guessed CFR grid and **silently dropped 211 / 3226 frames** (~27 fps case); the incident's 53-vs-30 case drops nearly half. Passthrough honours the source PTS verbatim → every frame survives. ffmpeg nudges any equal-DTS collisions during mux, so the output container stays monotonic and plays cleanly.
+- **`edit-pipeline.ts`: same `-fps_mode passthrough`** on both the simple-trim and the multi-segment concat re-encodes (the edited output reads the same VFR `source.mp4`, so it had the same latent frame-drop). Boil-the-lake call confirmed with user.
+- **Tests:** deterministic unit tests (args contain `passthrough`, no forced `-r`) for both modules + a behavioral VFR frame-preservation test. Full server suite + lint + typecheck green.
+
+### Storyboard — verified correct, no change (as the corrected note predicted)
+
+`fps=1/interval` selects frames at exact wall-clock times (0, 5, 10 … 115 on a 120 s VFR source) and cues map `i × interval` seconds. Both are PTS/time-based and correct on VFR. No bug, no change.
+
+### fps-sanity heuristic for Task 4 — recommend AGAINST
+
+A "declared `r_frame_rate` vs `avg_frame_rate` mismatch" flag would **false-positive on every healthy VFR recording** (declared ≠ avg is normal for honest VFR). Don't adopt it.
+
+### Verification status
+
+- Variant fix: empirically confirmed on a real known-bad-metadata source (frame-count preserved; clean decode).
+- 30 fps path: confirmed.
+- **60 fps path: not captured as a clean real recording** — the only 60-capable easy source is screen on a 60 Hz display; the attempted camera session was ZV-1 (720p30-only) and hit a CMIO meltdown. The fix is rate-agnostic by construction, so this is a nice-to-have, not a blocker. A 10 s screen-only clip on a 60 Hz display would close it if desired.
+
+### Side finding (out of scope)
+
+The attempted verification recording surfaced a separate **macOS recording-pipeline** problem (raw camera writer failure + `monoRejects` regression driven by a ZV-1 CMIO `-12743` meltdown). New diagnostic data logged to [#30](https://github.com/dannysmith/loom-clone/issues/30). Not part of this task.
+
+---
+
 ## Background
 
 The forensic dig in [issue #40](https://github.com/dannysmith/loom-clone/issues/40) surfaced a bug **independent of the OOM**: recorded video declares the wrong frame rate in its container/stream metadata.

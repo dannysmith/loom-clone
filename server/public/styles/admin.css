@@ -820,6 +820,13 @@ body.admin--login {
 	background-color: var(--color-restricted-bg);
 }
 
+/* ready: the derived readiness badge ("ready · complete ✓" etc.) on the video
+   detail page. Success-tinted to match .filter-pill--ready. */
+.badge--ready {
+	color: var(--color-success);
+	background-color: var(--color-success-bg);
+}
+
 .badge--edited {
 	color: var(--color-info);
 	background-color: var(--color-info-bg);

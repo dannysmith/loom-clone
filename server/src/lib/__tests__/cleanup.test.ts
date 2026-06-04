@@ -85,6 +85,37 @@ describe("cleanupStaleFiles", () => {
 
     for (const f of hls) expect(await Bun.file(f).exists()).toBe(true);
   });
+
+  test("does NOT remove HLS for an edited video whose active {H}p.mp4 is missing", async () => {
+    // Edited video: served file is 1080p.mp4, not source.mp4. source.mp4 is
+    // valid and present, but the edited output is gone — the HLS fallback must
+    // survive (resolve.ts would otherwise have nothing to serve).
+    const { id, hls } = await makeStaleReadyVideo();
+    await markStepReady(id, "source");
+    await getDb()
+      .update(videos)
+      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
+      .where(eq(videos.id, id));
+    // No 1080p.mp4 on disk → active file missing.
+
+    await cleanupStaleFiles();
+
+    for (const f of hls) expect(await Bun.file(f).exists()).toBe(true);
+  });
+
+  test("removes HLS for an edited video when its active {H}p.mp4 is present", async () => {
+    const { id, hls } = await makeStaleReadyVideo();
+    await markStepReady(id, "source");
+    await getDb()
+      .update(videos)
+      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
+      .where(eq(videos.id, id));
+    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // active file present
+
+    await cleanupStaleFiles();
+
+    for (const f of hls) expect(await Bun.file(f).exists()).toBe(false);
+  });
 });
 
 const FIVE_HOURS_AGO = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();

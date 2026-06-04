@@ -6,6 +6,7 @@ import { videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
 import { getStep } from "./processing/steps-store";
 import { DATA_DIR } from "./store";
+import { activeRawFilename } from "./url";
 
 const STALE_DAYS = 10;
 
@@ -26,7 +27,11 @@ export async function cleanupStaleFiles(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   const candidates = await getDb()
-    .select({ id: videos.id })
+    .select({
+      id: videos.id,
+      lastEditedAt: videos.lastEditedAt,
+      height: videos.height,
+    })
     .from(videos)
     .where(
       and(
@@ -39,15 +44,23 @@ export async function cleanupStaleFiles(): Promise<void> {
 
   let cleaned = 0;
 
-  for (const { id } of candidates) {
+  for (const video of candidates) {
+    const { id } = video;
     const videoDir = join(DATA_DIR, id);
-    const sourcePath = join(videoDir, "derivatives", "source.mp4");
+    const derivDir = join(videoDir, "derivatives");
+    const sourcePath = join(derivDir, "source.mp4");
 
     // Require the source step validated good AND the file still present before
     // removing the HLS segments it was built from. Either missing → skip.
     const sourceStep = await getStep(id, "source");
     if (sourceStep?.state !== "ready") continue;
     if (!(await Bun.file(sourcePath).exists())) continue;
+
+    // Also require the file the viewer is ACTUALLY served — for an edited video
+    // that's the {H}p.mp4 cut, not source.mp4. If it's gone we must keep the HLS
+    // fallback (resolve.ts would otherwise have nothing to serve).
+    const activePath = join(derivDir, activeRawFilename(video));
+    if (!(await Bun.file(activePath).exists())) continue;
 
     let filesRemoved = 0;
 

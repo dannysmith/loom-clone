@@ -121,8 +121,21 @@ type RunOpts = {
 };
 
 export async function runPipeline(videoId: string, opts: RunOpts): Promise<void> {
-  const video = await getVideo(videoId, { includeTrashed: true });
+  let video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
+
+  // Reprocess chokepoint: the main pipeline is edit-unaware, so before it runs
+  // on an edited video (any full reprocess — manual or heal force re-run) wash
+  // the edit away and rebuild a consistent UNEDITED video from source.mp4.
+  // Per-artifact `only` regens are rejected for edited videos at the route, so
+  // they never reach here. (Dynamic import avoids an import cycle with
+  // edit-pipeline, which pulls in derivatives/storyboard.)
+  if (!opts.only && video.lastEditedAt) {
+    const { resetAllEdits } = await import("../edit-pipeline");
+    await resetAllEdits(videoId);
+    const reloaded = await getVideo(videoId, { includeTrashed: true });
+    if (reloaded) video = reloaded;
+  }
 
   const dir = derivativesDir(videoId);
   await mkdir(dir, { recursive: true });

@@ -104,6 +104,8 @@ Independent, low-risk; can land in any order after Phase 1.
 
 ### 3.2 Dead thumbnail-candidates cleanup (item H, pre-existing)
 
+IMPORTANT: Discuss this with the user before implementing. Since the original cleanup was written, we have added features to allow the user to generate and add thumbnails to the candidates manually. This means that we should not really be cleaning them up. So I actually think instead of fixing this, we should simply remove anything to do with thumbnail candidates from the cleanup process. There is also now a way for users to manually remove thumbnails. Which there wasn't when the the cleanup process was originally developed. 
+
 `cleanup.ts` guards the `thumbnail-candidates` removal with `await Bun.file(candidatesDir).exists()`, but `Bun.file(dir).exists()` returns **`false` for a directory** (verified on Bun 1.3.14) — so that branch never runs and candidate frames accumulate forever. Pre-existing on `main`, but it lives in the cleanup function this task rewrote, so fix here: use `fs/promises` `stat`/`readdir` (or `existsSync`) for the directory check.
 
 ### 3.3 Purge feeds on demotion out of `ready` (item I)

@@ -130,6 +130,21 @@ describe("POST /admin/videos/:id/reprocess/:kind", () => {
     const res = await app.request(`/admin/videos/${video.id}/reprocess/thumbnail`, POST);
     expect(res.status).toBe(400);
   });
+
+  test("refused for an edited video (per-artifact regen is edit-unaware)", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    await completeVideo(video.id); // → ready
+    await makeReadySource(video.id);
+    await getDb()
+      .update(videos)
+      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
+      .where(eq(videos.id, video.id));
+
+    const res = await app.request(`/admin/videos/${video.id}/reprocess/thumbnail`, POST);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("edited video");
+  });
 });
 
 // Give a ready video a validated source.mp4 (so it isn't read as data-loss).

@@ -1,11 +1,13 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import type { ProcessingStepKind } from "../../db/schema";
 import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
-import { scheduleDerivatives, scheduleUploadDerivatives } from "../../lib/processing/pipeline";
-import { canReprocess, computeReadiness } from "../../lib/processing/readiness";
+import { scheduleReprocess } from "../../lib/processing/pipeline";
+import { canReprocess, computeReadiness, reprocessability } from "../../lib/processing/readiness";
+import { REGENERABLE_KINDS } from "../../lib/processing/registry";
 import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
@@ -492,9 +494,10 @@ videoRoutes.post("/:id/duplicate", async (c) => {
   return c.redirect(`/admin/videos/${duplicate.id}`);
 });
 
-// Re-run the (resumable) post-processing pipeline for the whole video. Steps
-// that already succeeded are skipped, so this resumes an interrupted/failed
-// run or fills in missing expected derivatives. reconcile() drives the status.
+// Re-run the post-processing pipeline for the whole video. Default is the
+// resumable run (steps that already succeeded are skipped). With `rebuild=hls`
+// it forces a full from-HLS rebuild (re-stitch source + everything), only
+// possible while the source is rebuildable. reconcile() drives the status.
 videoRoutes.post("/:id/reprocess", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
@@ -503,9 +506,42 @@ videoRoutes.post("/:id/reprocess", async (c) => {
     return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
   }
 
-  await logEvent(result.id, "reprocess_requested");
-  if (result.source === "uploaded") scheduleUploadDerivatives(result.id);
-  else scheduleDerivatives(result.id);
+  const body = await c.req.parseBody();
+  const force = body.rebuild === "hls";
+  if (force) {
+    const { canRebuildSource } = await reprocessability(result);
+    if (!canRebuildSource) {
+      return c.text("Cannot rebuild — the source's HLS segments are gone", 400);
+    }
+  }
+
+  await logEvent(result.id, "reprocess_requested", force ? { rebuild: "hls" } : undefined);
+  scheduleReprocess(result.id, { source: result.source, force });
+
+  return c.redirect(`/admin/videos/${result.id}`);
+});
+
+// Regenerate a single derivative from the existing source.mp4 (dependency-aware:
+// only the steps that read source.mp4 non-destructively, and only when source
+// is valid). The per-file tmp→rename makes a single-artifact regenerate atomic.
+videoRoutes.post("/:id/reprocess/:kind", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const kind = c.req.param("kind") as ProcessingStepKind;
+
+  if (!canReprocess(result)) {
+    return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
+  }
+  if (!REGENERABLE_KINDS.has(kind)) {
+    return c.text(`"${kind}" cannot be regenerated standalone`, 400);
+  }
+  const { sourceValid } = await reprocessability(result);
+  if (!sourceValid) {
+    return c.text("Cannot regenerate — source.mp4 is missing or invalid", 400);
+  }
+
+  await logEvent(result.id, "reprocess_requested", { only: kind });
+  scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
 
   return c.redirect(`/admin/videos/${result.id}`);
 });

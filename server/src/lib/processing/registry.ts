@@ -229,6 +229,23 @@ export const REQUIRED_KINDS: ProcessingStepKind[] = PROCESSING_STEPS.filter(
   (s) => s.tier === "required",
 ).map((s) => s.kind);
 
+// Steps that can be regenerated standalone from a valid source.mp4 — they read
+// source.mp4 and write their own file via tmp→rename, so a single-artifact
+// regenerate is inherently atomic. Deliberately EXCLUDES:
+//   - `source`: re-stitching needs the HLS segments (or upload.mp4), so it's a
+//     full from-HLS rebuild, not an in-place regenerate.
+//   - `audio`: loudnorm replaces source.mp4 in place, so re-running it would
+//     double-process; to redo audio you re-stitch source from HLS (full rebuild).
+export const REGENERABLE_KINDS = new Set<ProcessingStepKind>([
+  "metadata",
+  "thumbnail",
+  "variant_1080",
+  "variant_720",
+  "storyboard",
+  "peaks",
+  "suggested_edits",
+]);
+
 export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined {
   return PROCESSING_STEPS.find((s) => s.kind === kind);
 }

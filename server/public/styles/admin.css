@@ -940,6 +940,12 @@ select.input {
 	font-size: var(--font-size-xs);
 }
 
+.btn--xs {
+	padding: 0 var(--space-1);
+	font-size: var(--font-size-xs);
+	line-height: 1.4;
+}
+
 .btn--danger {
 	color: var(--color-danger);
 	border-color: var(--color-danger-border);
@@ -1325,8 +1331,35 @@ select.input {
 	text-align: center;
 }
 
-.readiness-reprocess {
+.readiness-subhead {
+	margin-block: var(--space-4) var(--space-2);
+	font-size: var(--font-size-xs);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* Per-artifact regenerate button — pushed to the row's trailing edge. */
+.readiness-regen {
+	margin-inline-start: auto;
+}
+
+.readiness-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
 	margin-block-start: var(--space-4);
+}
+
+.readiness-dataloss {
+	margin: 0;
+	color: var(--color-restricted);
+	font-size: var(--font-size-sm);
+}
+
+.readiness-dataloss code {
+	font-size: 0.9em;
 }
 
 .video-meta-grid {

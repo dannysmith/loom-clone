@@ -139,4 +139,30 @@ describe("post-processing pipeline (end-to-end)", () => {
     },
     30_000,
   );
+
+  test.skipIf(!ffmpegAvailable)(
+    "single-step regenerate (only + force) redoes just that artifact, not source",
+    async () => {
+      const video = await createVideo();
+      const videoDir = join(DATA_DIR, video.id);
+      await generateTestHls(videoDir);
+      await markFootageComplete(video.id);
+      await runPipeline(video.id, { source: "recorded" });
+
+      const before = await getStepStates(video.id);
+      const sourceAt = before.get("source")?.producedAt;
+      const thumbPath = join(videoDir, "derivatives", "thumbnail.jpg");
+      expect(await Bun.file(thumbPath).exists()).toBe(true);
+
+      // Regenerate only the thumbnail (forced). source is left untouched.
+      await Bun.write(thumbPath, ""); // clobber so we can prove it's rewritten
+      await runPipeline(video.id, { source: "recorded", force: true, only: "thumbnail" });
+
+      const after = await getStepStates(video.id);
+      expect(after.get("source")?.producedAt).toBe(sourceAt ?? null); // source not re-stitched
+      expect(after.get("thumbnail")?.state).toBe("ready");
+      expect(Bun.file(thumbPath).size).toBeGreaterThan(0); // thumbnail actually regenerated
+    },
+    30_000,
+  );
 });

@@ -3,8 +3,16 @@
 // and the coarse rollup badge shown next to a `ready` video. Computed on the
 // fly — never stored — so it can't drift from the ledger.
 
+import { join } from "path";
 import type { ProcessingStepKind, Video } from "../../db/schema";
-import { applicabilityContext, PROCESSING_STEPS, type StepTier } from "./registry";
+import { DATA_DIR } from "../store";
+import {
+  applicabilityContext,
+  derivativesDir,
+  PROCESSING_STEPS,
+  REGENERABLE_KINDS,
+  type StepTier,
+} from "./registry";
 import { getStepStates } from "./steps-store";
 
 // ✅ have it · ❌ don't · ⏳ actively generating · — not applicable
@@ -15,13 +23,43 @@ export type ReadinessItem = {
   label: string;
   tier: StepTier;
   icon: ReadinessIcon;
+  // Whether a per-artifact "regenerate this" button should be offered: the
+  // step is independently regenerable AND its source.mp4 input is valid.
+  regenerable: boolean;
+};
+
+// What kinds of server-side rebuild a video supports right now.
+export type Reprocessability = {
+  // Source can be re-stitched: recorded → HLS present; uploaded → upload.mp4 present.
+  canRebuildSource: boolean;
+  // source.mp4 is validated good and on disk (downstream regen is possible).
+  sourceValid: boolean;
+  // Neither — the video can't be rebuilt from the server (data-loss territory).
+  dataLoss: boolean;
 };
 
 export type Readiness = {
   items: ReadinessItem[];
   // Short rollup label shown beside a `ready` status (null otherwise).
   badge: string | null;
+  reprocess: Reprocessability;
 };
+
+export async function reprocessability(video: Video): Promise<Reprocessability> {
+  const dir = derivativesDir(video.id);
+  const videoDir = join(DATA_DIR, video.id);
+
+  const [steps, sourcePresent, hlsPresent, uploadPresent] = await Promise.all([
+    getStepStates(video.id),
+    Bun.file(join(dir, "source.mp4")).exists(),
+    Bun.file(join(videoDir, "stream.m3u8")).exists(),
+    Bun.file(join(videoDir, "upload.mp4")).exists(),
+  ]);
+
+  const sourceValid = steps.get("source")?.state === "ready" && sourcePresent;
+  const canRebuildSource = video.source === "uploaded" ? uploadPresent : hlsPresent;
+  return { canRebuildSource, sourceValid, dataLoss: !canRebuildSource && !sourceValid };
+}
 
 // Statuses where re-running the (resumable) pipeline makes sense. Not while
 // recording/healing (footage still arriving), mid-reprocess, or deleting.
@@ -60,13 +98,17 @@ function couldStillProduce(status: Video["status"], tier: StepTier): boolean {
 
 export async function computeReadiness(video: Video): Promise<Readiness> {
   const ctx = applicabilityContext(video);
-  const steps = await getStepStates(video.id);
+  const [steps, reprocess] = await Promise.all([getStepStates(video.id), reprocessability(video)]);
 
   const items: ReadinessItem[] = [];
   for (const step of PROCESSING_STEPS) {
     const label = LABELS[step.kind];
+    // A per-artifact regenerate is offered only when the step is independently
+    // regenerable AND its source.mp4 input is valid.
+    const regenerable = REGENERABLE_KINDS.has(step.kind) && reprocess.sourceValid;
+
     if (!step.appliesTo(ctx)) {
-      items.push({ kind: step.kind, label, tier: step.tier, icon: "na" });
+      items.push({ kind: step.kind, label, tier: step.tier, icon: "na", regenerable: false });
       continue;
     }
 
@@ -86,10 +128,10 @@ export async function computeReadiness(video: Video): Promise<Readiness> {
       icon = couldStillProduce(video.status, step.tier) ? "pending" : "missing";
     }
 
-    items.push({ kind: step.kind, label, tier: step.tier, icon });
+    items.push({ kind: step.kind, label, tier: step.tier, icon, regenerable });
   }
 
-  return { items, badge: computeBadge(video, items) };
+  return { items, badge: computeBadge(video, items), reprocess };
 }
 
 // The rollup badge only means something for a `ready` video — for every other

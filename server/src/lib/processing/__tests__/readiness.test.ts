@@ -7,7 +7,7 @@ import type { ProcessingStepKind } from "../../../db/schema";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { createVideo, DATA_DIR, getVideo } from "../../store";
-import { canReprocess, computeReadiness, type ReadinessItem } from "../readiness";
+import { canReprocess, computeReadiness, type ReadinessItem, reprocessability } from "../readiness";
 import { markStepReady } from "../steps-store";
 
 let env: TestEnv;
@@ -183,5 +183,64 @@ describe("canReprocess", () => {
     expect(canReprocess(withStatus("recording"))).toBe(false);
     expect(canReprocess(withStatus("reprocessing"))).toBe(false);
     expect(canReprocess({ ...video, status: "ready", trashedAt: "x" } as never)).toBe(false);
+  });
+});
+
+describe("reprocessability", () => {
+  test("valid source + HLS present → rebuildable both ways, no data loss", async () => {
+    const video = await readyVideo({ width: 1280, height: 720, duration: 30 }); // writes source.mp4 + source step
+    await Bun.write(join(DATA_DIR, video.id, "stream.m3u8"), "#EXTM3U");
+
+    const r = await reprocessability((await getVideo(video.id))!);
+    expect(r).toEqual({ canRebuildSource: true, sourceValid: true, dataLoss: false });
+  });
+
+  test("cleaned-up video (valid source, no HLS) can't rebuild source but isn't data-loss", async () => {
+    const video = await readyVideo({ width: 1280, height: 720, duration: 30 });
+    const r = await reprocessability(video);
+    expect(r.sourceValid).toBe(true);
+    expect(r.canRebuildSource).toBe(false);
+    expect(r.dataLoss).toBe(false);
+  });
+
+  test("no source and no HLS → data loss", async () => {
+    const video = await createVideo();
+    await getDb().update(videos).set({ status: "ready" }).where(eq(videos.id, video.id));
+    const r = await reprocessability((await getVideo(video.id))!);
+    expect(r.dataLoss).toBe(true);
+  });
+
+  test("uploaded video with upload.mp4 present can rebuild source", async () => {
+    const video = await createVideo();
+    await getDb()
+      .update(videos)
+      .set({ status: "ready", source: "uploaded" })
+      .where(eq(videos.id, video.id));
+    await Bun.write(join(DATA_DIR, video.id, "upload.mp4"), "stub");
+    const r = await reprocessability((await getVideo(video.id))!);
+    expect(r.canRebuildSource).toBe(true);
+  });
+});
+
+describe("computeReadiness — regenerable flag", () => {
+  test("downstream items are regenerable when source is valid; required source is not", async () => {
+    const video = await readyVideo({ width: 1920, height: 1080, duration: 120 });
+    const { items } = await computeReadiness(video);
+    expect(items.find((i) => i.kind === "thumbnail")?.regenerable).toBe(true);
+    expect(items.find((i) => i.kind === "peaks")?.regenerable).toBe(true);
+    // source/audio are not standalone-regenerable; external items aren't either.
+    expect(items.find((i) => i.kind === "source")?.regenerable).toBe(false);
+    expect(items.find((i) => i.kind === "audio")?.regenerable).toBe(false);
+    expect(items.find((i) => i.kind === "transcript")?.regenerable).toBe(false);
+  });
+
+  test("nothing is regenerable when source is invalid", async () => {
+    const video = await createVideo();
+    await getDb()
+      .update(videos)
+      .set({ status: "ready", width: 1280, height: 720, durationSeconds: 30 })
+      .where(eq(videos.id, video.id));
+    const { items } = await computeReadiness((await getVideo(video.id))!);
+    expect(items.every((i) => !i.regenerable)).toBe(true);
   });
 });

@@ -12,6 +12,7 @@
 
 import { mkdir, rm } from "fs/promises";
 import { join } from "path";
+import type { ProcessingStepKind } from "../../db/schema";
 import { derivativesDir, probeMetadata } from "../derivatives";
 import { logEvent } from "../events";
 import { DATA_DIR, getVideo } from "../store";
@@ -27,23 +28,34 @@ import { getStep, markStepFailed, markStepReady, markStepSkipped } from "./steps
 const inFlight = new Map<string, Promise<void>>();
 
 export function scheduleDerivatives(videoId: string): void {
-  schedule(videoId, "recorded");
+  schedule(videoId, { source: "recorded" });
 }
 
 export function scheduleUploadDerivatives(videoId: string): void {
-  schedule(videoId, "uploaded");
+  schedule(videoId, { source: "uploaded" });
 }
 
-function schedule(videoId: string, source: "recorded" | "uploaded"): void {
+// Fire-and-forget a manual reprocess: a forced full rebuild (force, no `only`)
+// or a single-artifact regenerate (`only`). Collapses with any in-flight run.
+export function scheduleReprocess(
+  videoId: string,
+  opts: { source: "recorded" | "uploaded"; force?: boolean; only?: ProcessingStepKind },
+): void {
+  schedule(videoId, opts);
+}
+
+function schedule(videoId: string, opts: RunOpts): void {
   if (inFlight.has(videoId)) {
     console.log(`[pipeline] ${videoId} schedule skipped — already in flight (n=${inFlight.size})`);
     return;
   }
-  const p = runPipeline(videoId, { source }).finally(() => {
+  const p = runPipeline(videoId, opts).finally(() => {
     inFlight.delete(videoId);
   });
   inFlight.set(videoId, p);
-  console.log(`[pipeline] ${videoId} scheduled (source=${source}, n=${inFlight.size})`);
+  console.log(
+    `[pipeline] ${videoId} scheduled (source=${opts.source}, force=${opts.force ?? false}, only=${opts.only ?? "—"}, n=${inFlight.size})`,
+  );
   p.catch((err) => console.error(`[pipeline] ${videoId} unexpected failure:`, err));
 }
 
@@ -59,7 +71,13 @@ export async function _drainInFlight(): Promise<void> {
   await Promise.allSettled([...inFlight.values()]);
 }
 
-type RunOpts = { source: "recorded" | "uploaded"; force?: boolean };
+// `only` restricts the run to a single step (a per-artifact regenerate);
+// `force` re-runs steps even when already ready (manual reprocess).
+type RunOpts = {
+  source: "recorded" | "uploaded";
+  force?: boolean;
+  only?: ProcessingStepKind;
+};
 
 export async function runPipeline(videoId: string, opts: RunOpts): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
@@ -84,6 +102,8 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   const heightState = { probed: false };
 
   for (const step of RUNNABLE_STEPS) {
+    if (opts.only && step.kind !== opts.only) continue;
+
     // Probe source height once it exists, so resolution-gated steps (variants)
     // see the real value even on a fresh run where video.height was still null.
     if (!heightState.probed && ctx.height === 0) {
@@ -108,23 +128,27 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     await reconcile(videoId, { running: true });
   }
 
-  // Editor storyboard: dense frames for the editing timeline. Not part of the
-  // public checklist (no step row), regenerated only from the original source.
-  if (ctx.duration >= 5) {
-    try {
-      await generateEditorStoryboard(dir, ctx.duration);
-    } catch (err) {
-      console.error(
-        `[pipeline] ${videoId} editor storyboard failed:`,
-        err instanceof Error ? err.message : err,
-      );
+  // Single-artifact regenerate (`only`) touches just that step — skip the
+  // whole-run side effects (editor storyboard, upload cleanup).
+  if (!opts.only) {
+    // Editor storyboard: dense frames for the editing timeline. Not part of the
+    // public checklist (no step row), regenerated only from the original source.
+    if (ctx.duration >= 5) {
+      try {
+        await generateEditorStoryboard(dir, ctx.duration);
+      } catch (err) {
+        console.error(
+          `[pipeline] ${videoId} editor storyboard failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
-  }
 
-  // For uploads, upload.mp4 produced source.mp4 — drop it once source +
-  // metadata are confirmed so we never keep two copies (and never delete the
-  // only copy of a still-unprocessed upload).
-  if (opts.source === "uploaded") await maybeDeleteUpload(videoId);
+    // For uploads, upload.mp4 produced source.mp4 — drop it once source +
+    // metadata are confirmed so we never keep two copies (and never delete the
+    // only copy of a still-unprocessed upload).
+    if (opts.source === "uploaded") await maybeDeleteUpload(videoId);
+  }
 
   await reconcile(videoId, { running: false });
 

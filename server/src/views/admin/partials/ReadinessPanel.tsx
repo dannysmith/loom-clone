@@ -36,7 +36,7 @@ export function ReadinessPanel({ video, readiness }: { video: Video; readiness: 
                 Re-run post-processing
               </button>
             </form>
-            {canRebuildSource && (
+            {canRebuildSource && video.source === "recorded" && (
               <form
                 method="post"
                 action={`/admin/videos/${video.id}/reprocess`}

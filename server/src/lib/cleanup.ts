@@ -5,7 +5,7 @@ import { getDb } from "../db/client";
 import { videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
 import { getStep } from "./processing/steps-store";
-import { DATA_DIR, setVideoStatus } from "./store";
+import { DATA_DIR } from "./store";
 
 const STALE_DAYS = 10;
 
@@ -118,7 +118,16 @@ export async function markStalledRecordingsIncomplete(): Promise<void> {
       row.lastSegmentAt && row.lastSegmentAt > row.createdAt ? row.lastSegmentAt : row.createdAt;
     if (lastActivity >= cutoff) continue; // still within the window
 
-    await setVideoStatus(row.id, "incomplete");
+    // Guard on status === "recording": a /complete may have arrived between the
+    // scan and now, so only mark videos still recording (and never clobber a
+    // concurrent transition).
+    const [updated] = await getDb()
+      .update(videos)
+      .set({ status: "incomplete", updatedAt: new Date().toISOString() })
+      .where(and(eq(videos.id, row.id), eq(videos.status, "recording")))
+      .returning({ id: videos.id });
+    if (!updated) continue;
+
     await logEvent(row.id, "marked_incomplete", { lastActivity });
     marked++;
     console.log(`[cleanup] ${row.id}: marked incomplete (last activity ${lastActivity})`);

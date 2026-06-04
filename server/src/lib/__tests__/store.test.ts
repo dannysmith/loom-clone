@@ -778,6 +778,33 @@ describe("listVideosFiltered", () => {
     expect(result.items.map((v) => v.id)).not.toContain(untagged.id);
   });
 
+  test("needsAttention surfaces failed/incomplete/stalled-processing, not healthy videos", async () => {
+    const failed = await createVideo();
+    await setVideoStatus(failed.id, "processing_failed");
+    const incomplete = await createVideo();
+    await setVideoStatus(incomplete.id, "incomplete");
+
+    const stalled = await createVideo();
+    await setVideoStatus(stalled.id, "processing");
+    await getDb()
+      .update(videosTable)
+      .set({ updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }) // 1h ago
+      .where(eq(videosTable.id, stalled.id));
+
+    const freshProcessing = await createVideo();
+    await setVideoStatus(freshProcessing.id, "processing"); // updatedAt = now
+    const ready = await createVideo();
+    await completeVideo(ready.id);
+
+    const result = await listVideosFiltered({ needsAttention: true });
+    const ids = result.items.map((v) => v.id);
+    expect(ids).toContain(failed.id);
+    expect(ids).toContain(incomplete.id);
+    expect(ids).toContain(stalled.id);
+    expect(ids).not.toContain(freshProcessing.id);
+    expect(ids).not.toContain(ready.id);
+  });
+
   test("FTS search filters results", async () => {
     const v1 = await createVideo();
     await updateVideo(v1.id, { title: "Alpha Video" });

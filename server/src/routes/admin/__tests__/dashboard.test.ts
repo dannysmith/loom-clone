@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createApp } from "../../../app";
-import { completeVideo, createVideo, updateVideo } from "../../../lib/store";
+import { completeVideo, createVideo, setVideoStatus, updateVideo } from "../../../lib/store";
 import { addTagToVideo, createTag } from "../../../lib/tags";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 
@@ -45,5 +45,25 @@ describe("dashboard tag display", () => {
     // But the video has no chip referencing it.
     expect(html).not.toContain(">untagged-tag<");
     expect(html).toContain(video.slug);
+  });
+});
+
+describe("dashboard needs-attention filter", () => {
+  test("renders the filter pill", async () => {
+    const app = createApp();
+    const res = await app.request("/admin");
+    expect(await res.text()).toContain("Needs attention");
+  });
+
+  test("?attention=1 shows failed videos and hides ready ones", async () => {
+    const app = createApp();
+    const failed = await createVideo();
+    await setVideoStatus(failed.id, "processing_failed");
+    const ready = await createVideo();
+    await completeVideo(ready.id);
+
+    const html = await (await app.request("/admin?attention=1")).text();
+    expect(html).toContain(failed.slug);
+    expect(html).not.toContain(ready.slug);
   });
 });

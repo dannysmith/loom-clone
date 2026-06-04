@@ -300,7 +300,8 @@ body.admin--login {
 }
 
 .filter-pill--processing_failed,
-.filter-pill--incomplete {
+.filter-pill--incomplete,
+.filter-pill--attention {
 	--pill-active-color: var(--color-restricted);
 	--pill-active-bg: var(--color-restricted-bg);
 	--pill-active-border: var(--color-restricted-border);

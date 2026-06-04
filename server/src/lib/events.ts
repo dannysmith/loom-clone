@@ -27,6 +27,7 @@ export type EventType =
   | "processing_step" // one per post-processing step outcome (kind + state)
   | "processing_complete" // post-processing run finished (summary for the activity feed)
   | "reprocess_requested" // admin manually re-ran the post-processing pipeline
+  | "marked_incomplete" // a recording with no segment activity for hours was given up on
   | "transcript_uploaded"
   | "words_uploaded"
   | "title_suggested"

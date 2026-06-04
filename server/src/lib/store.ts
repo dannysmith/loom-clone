@@ -363,7 +363,12 @@ export type DashboardFilters = {
   cursor?: string; // video ID of last item from previous page
   limit?: number;
   trashedOnly?: boolean; // true for the Trash Bin page
+  needsAttention?: boolean; // failed / incomplete / stalled-processing videos
 };
+
+// A `processing` video older than this is treated as stalled (the pipeline
+// died mid-run — see task-4 Part 4) and surfaced by the "needs attention" filter.
+const STALLED_PROCESSING_MINUTES = 30;
 
 export async function listVideosFiltered(filters: DashboardFilters = {}): Promise<{
   items: Video[];
@@ -392,6 +397,21 @@ export async function listVideosFiltered(filters: DashboardFilters = {}): Promis
   // Filters
   if (filters.visibility) conditions.push(eq(videos.visibility, filters.visibility));
   if (filters.status) conditions.push(eq(videos.status, filters.status));
+
+  // "Needs attention": unrecoverable post-processing failures, abandoned
+  // recordings, and videos stuck in `processing` long past their last update
+  // (a pipeline that died mid-run, never reconciled).
+  if (filters.needsAttention) {
+    const stalledCutoff = new Date(
+      Date.now() - STALLED_PROCESSING_MINUTES * 60 * 1000,
+    ).toISOString();
+    conditions.push(
+      or(
+        inArray(videos.status, ["processing_failed", "incomplete"]),
+        and(eq(videos.status, "processing"), lt(videos.updatedAt, stalledCutoff)),
+      )!,
+    );
+  }
   if (filters.dateFrom) conditions.push(gte(videos.createdAt, filters.dateFrom));
   if (filters.dateTo) conditions.push(lte(videos.createdAt, filters.dateTo));
   if (filters.durationMin != null)

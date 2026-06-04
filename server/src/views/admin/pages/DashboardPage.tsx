@@ -196,6 +196,23 @@ export function DashboardPage({
             ))}
           </div>
 
+          {/* Needs attention (failed / incomplete / stalled processing) */}
+          <div class="filter-group">
+            <span class="filter-group-label">Attention</span>
+            <label class="filter-pill filter-pill--attention">
+              <input
+                type="checkbox"
+                name="attention"
+                value="1"
+                checked={filters.needsAttention ?? false}
+                data-filter
+                hx-trigger="change"
+                {...HX}
+              />
+              <span class="filter-pill-label">&#9888; Needs attention</span>
+            </label>
+          </div>
+
           {/* Tags (multi-select) */}
           {tags.length > 0 && (
             <div class="filter-group">

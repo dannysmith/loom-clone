@@ -44,6 +44,8 @@ export function parseFilters(c: Context): DashboardFilters {
   const status = q("status");
   if (status && VALID_STATUS.has(status)) filters.status = status as DashboardFilters["status"];
 
+  if (q("attention") === "1") filters.needsAttention = true;
+
   const tag = q("tag");
   if (tag) {
     const ids = tag.split(",").map(Number).filter(Number.isFinite);
@@ -81,6 +83,7 @@ export function filtersToParams(f: DashboardFilters): Record<string, string> {
   if (f.search) p.q = f.search;
   if (f.visibility) p.visibility = f.visibility;
   if (f.status) p.status = f.status;
+  if (f.needsAttention) p.attention = "1";
   if (f.tagIds?.length) p.tag = f.tagIds.join(",");
   if (f.dateFrom) p.from = f.dateFrom;
   if (f.dateTo) p.to = f.dateTo;

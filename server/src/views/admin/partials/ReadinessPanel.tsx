@@ -17,12 +17,21 @@ const GLYPH: Record<ReadinessIcon, string> = {
 // rebuild / data-loss notice) on top, then a per-artifact status table — rows
 // in pipeline order, each with its status icon and a dependency-aware "↻"
 // regenerate button.
-export function ReadinessPanel({ video, readiness }: { video: Video; readiness: Readiness }) {
+export function ReadinessPanel({
+  video,
+  readiness,
+  notice,
+}: {
+  video: Video;
+  readiness: Readiness;
+  notice?: string;
+}) {
   const reprocessable = canReprocess(video);
   const { dataLoss, canRebuildSource } = readiness.reprocess;
 
   return (
     <div class="readiness" id="readiness-panel">
+      {notice && <p class="readiness-notice">{notice}</p>}
       {reprocessable &&
         (dataLoss ? (
           <p class="readiness-dataloss">

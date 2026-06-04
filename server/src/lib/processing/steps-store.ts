@@ -126,3 +126,11 @@ export function fileSizeBytes(path: string): number | null {
 export async function markStepSkipped(videoId: string, kind: ProcessingStepKind): Promise<void> {
   await upsertStep(videoId, kind, { state: "skipped", error: null });
 }
+
+// Reset a step back to `pending`. Used at the start of a forced full rebuild so
+// the serving gate (resolve.ts) stops offering a soon-to-be-stale artifact
+// until the run regenerates it. The artifact file is left untouched on disk —
+// only the ledger row is reset — and `force` re-runs the step regardless.
+export async function markStepPending(videoId: string, kind: ProcessingStepKind): Promise<void> {
+  await upsertStep(videoId, kind, { state: "pending", error: null });
+}

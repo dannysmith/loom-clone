@@ -17,6 +17,7 @@
  */
 import { initDb } from "../src/db/client";
 import { inferStepsFromDisk } from "../src/lib/processing/backfill";
+import { recoverStrandedReprocessing } from "../src/lib/processing/reconcile";
 import { getStepStates } from "../src/lib/processing/steps-store";
 import { listVideos } from "../src/lib/store";
 
@@ -44,6 +45,10 @@ async function main(): Promise<number> {
       failed++;
     }
   }
+
+  // Now that step rows exist, settle any video the 0012 migration parked in
+  // `reprocessing` (a mid-edit video at migration time) back to `ready`.
+  await recoverStrandedReprocessing();
 
   console.log(`\nDone: ${processed} processed, ${failed} failed.`);
   return failed > 0 ? 1 : 0;

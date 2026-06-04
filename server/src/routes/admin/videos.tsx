@@ -63,6 +63,12 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = parseTab(c.req.query("tab"));
+  // Surface that a reprocess was queued behind an in-flight run (rather than
+  // started immediately) so the redirect after the POST isn't a silent no-op.
+  const reprocessNotice =
+    c.req.query("reprocessed") === "queued"
+      ? "A run is already in progress — your re-run is queued and will start when it finishes."
+      : undefined;
   const [
     videoTags,
     allTags,
@@ -95,6 +101,7 @@ videoRoutes.get("/:id", async (c) => {
       activeTab={activeTab}
       hasChapters={hasChapters}
       readiness={readiness}
+      reprocessNotice={reprocessNotice}
     />,
   );
 });
@@ -519,9 +526,9 @@ videoRoutes.post("/:id/reprocess", async (c) => {
   }
 
   await logEvent(result.id, "reprocess_requested", force ? { rebuild: "hls" } : undefined);
-  scheduleReprocess(result.id, { source: result.source, force });
+  const outcome = scheduleReprocess(result.id, { source: result.source, force });
 
-  return c.redirect(`/admin/videos/${result.id}?tab=processing`);
+  return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
 });
 
 // Regenerate a single derivative from the existing source.mp4 (dependency-aware:
@@ -544,9 +551,9 @@ videoRoutes.post("/:id/reprocess/:kind", async (c) => {
   }
 
   await logEvent(result.id, "reprocess_requested", { only: kind });
-  scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
+  const outcome = scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
 
-  return c.redirect(`/admin/videos/${result.id}?tab=processing`);
+  return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
 });
 
 export default videoRoutes;

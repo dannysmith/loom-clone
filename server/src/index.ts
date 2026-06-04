@@ -2,9 +2,18 @@ import { createApp } from "./app";
 import { initDb } from "./db/client";
 import { getAdminConfig } from "./lib/admin-auth";
 import { cleanupStaleFiles, markStalledRecordingsIncomplete } from "./lib/cleanup";
+import { recoverStrandedReprocessing } from "./lib/processing/reconcile";
 
 await initDb();
 console.log("[db] ready at data/app.db");
+
+// A server restart kills any in-flight edit/reprocess, leaving its video stuck
+// in `reprocessing` (reconcile doesn't own that status). Settle any such video
+// whose mandatory steps validated back to `ready` on boot — also catches the
+// 0012 migration's processing→reprocessing remap of a mid-edit video.
+await recoverStrandedReprocessing().catch((err) =>
+  console.error("[reconcile] stranded-reprocessing recovery failed:", err),
+);
 
 // Validate admin config eagerly so a misconfigured production deployment
 // fails at startup rather than silently leaving /admin/* unprotected.

@@ -1303,6 +1303,16 @@ select.input {
 	font-size: var(--font-size-sm);
 }
 
+/* "Your re-run is queued" info notice, above the reprocess controls. */
+.readiness-notice {
+	margin-block: 0 var(--space-4);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-sunken);
+	color: var(--color-text-muted);
+	font-size: var(--font-size-sm);
+}
+
 .readiness-dataloss code {
 	font-size: 0.9em;
 }

@@ -53,8 +53,11 @@ describe("POST /admin/videos/:id/reprocess", () => {
 
     const res = await app.request(`/admin/videos/${video.id}/reprocess`, POST);
     expect(res.status).toBe(302);
-    // Redirects back to the Processing tab so the user sees the result.
-    expect(res.headers.get("location")).toBe(`/admin/videos/${video.id}?tab=processing`);
+    // Redirects back to the Processing tab so the user sees the result; the run
+    // started immediately (nothing was in flight).
+    expect(res.headers.get("location")).toBe(
+      `/admin/videos/${video.id}?tab=processing&reprocessed=started`,
+    );
 
     const events = await listEvents(video.id);
     expect(events.map((e) => e.type)).toContain("reprocess_requested");

@@ -7,6 +7,7 @@ import { join } from "path";
 import type { ProcessingStepKind, Video } from "../../db/schema";
 import { derivativesDir } from "../derivatives";
 import { DATA_DIR } from "../store";
+import { RECONCILE_OWNED } from "./reconcile";
 import {
   applicabilityContext,
   PROCESSING_STEPS,
@@ -61,12 +62,14 @@ export async function reprocessability(video: Video): Promise<Reprocessability> 
   return { canRebuildSource, sourceValid, dataLoss: !canRebuildSource && !sourceValid };
 }
 
-// Statuses where re-running the (resumable) pipeline makes sense. Not while
+// Statuses where re-running the (resumable) pipeline makes sense. This is
+// exactly the reconcile-owned set (a reprocess must have an owner that can
+// settle it back to `ready`/`processing_failed`), so the two share one
+// constant rather than two hand-synced lists that could contradict — which is
+// what previously stranded reprocessed `incomplete` videos. Not while
 // recording/healing (footage still arriving), mid-reprocess, or deleting.
-const REPROCESSABLE = new Set(["processing", "processing_failed", "ready", "incomplete"]);
-
 export function canReprocess(video: Video): boolean {
-  return !video.trashedAt && REPROCESSABLE.has(video.status);
+  return !video.trashedAt && RECONCILE_OWNED.has(video.status);
 }
 
 const LABELS: Record<ProcessingStepKind, string> = {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { createVideo, getVideo, setVideoStatus } from "../../store";
-import { reconcile } from "../reconcile";
+import { reconcile, recoverStrandedReprocessing } from "../reconcile";
 import { markStepFailed, markStepReady } from "../steps-store";
 
 let env: TestEnv;
@@ -83,6 +83,70 @@ describe("reconcile", () => {
     await setVideoStatus(video.id, "reprocessing");
 
     await reconcile(video.id, { running: false });
+
+    expect((await getVideo(video.id))?.status).toBe("reprocessing");
+  });
+
+  test("incomplete recovers to ready when mandatory steps validate", async () => {
+    const video = await createVideo();
+    await setVideoStatus(video.id, "incomplete");
+    await markStepReady(video.id, "source");
+    await markStepReady(video.id, "metadata");
+
+    await reconcile(video.id, { running: false });
+
+    const updated = await getVideo(video.id);
+    expect(updated?.status).toBe("ready");
+    expect(updated?.completedAt).not.toBeNull();
+  });
+
+  test("incomplete stays incomplete while a recovery run is unfinished (never demoted)", async () => {
+    const video = await createVideo();
+    await setVideoStatus(video.id, "incomplete");
+    await markStepReady(video.id, "source"); // metadata still pending
+
+    await reconcile(video.id, { running: true });
+    expect((await getVideo(video.id))?.status).toBe("incomplete");
+
+    // A failed mandatory step must NOT relabel it processing_failed either —
+    // its footage was never whole.
+    await markStepFailed(video.id, "metadata", "partial HLS can't stitch");
+    await reconcile(video.id, { running: false });
+    expect((await getVideo(video.id))?.status).toBe("incomplete");
+  });
+
+  test("hold keeps a forced rebuild out of ready until the run settles", async () => {
+    const video = await processingVideo();
+    await setVideoStatus(video.id, "ready");
+    await markStepReady(video.id, "source");
+    await markStepReady(video.id, "metadata");
+
+    // Mid-run reconcile with hold: mandatory steps are ready but the forced set
+    // is still regenerating — don't publish ready yet (demote to processing).
+    await reconcile(video.id, { running: true, hold: true });
+    expect((await getVideo(video.id))?.status).toBe("processing");
+
+    // Run settles → publishes ready.
+    await reconcile(video.id, { running: false });
+    expect((await getVideo(video.id))?.status).toBe("ready");
+  });
+
+  test("recoverStrandedReprocessing settles a validated reprocessing video to ready", async () => {
+    const video = await createVideo();
+    await setVideoStatus(video.id, "reprocessing");
+    await markStepReady(video.id, "source");
+    await markStepReady(video.id, "metadata");
+
+    await recoverStrandedReprocessing();
+
+    expect((await getVideo(video.id))?.status).toBe("ready");
+  });
+
+  test("recoverStrandedReprocessing leaves a reprocessing video with no valid source alone", async () => {
+    const video = await createVideo();
+    await setVideoStatus(video.id, "reprocessing"); // no step rows
+
+    await recoverStrandedReprocessing();
 
     expect((await getVideo(video.id))?.status).toBe("reprocessing");
   });

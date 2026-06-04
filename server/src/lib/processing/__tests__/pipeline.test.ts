@@ -4,7 +4,13 @@ import { join } from "path";
 import { resolveForViewer } from "../../../routes/videos/resolve";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { createVideo, DATA_DIR, getVideo, markFootageComplete } from "../../store";
-import { _inFlightPromise, runPipeline, scheduleDerivatives } from "../pipeline";
+import {
+  _drainInFlight,
+  _inFlightPromise,
+  runPipeline,
+  scheduleDerivatives,
+  scheduleReprocess,
+} from "../pipeline";
 import { getStepStates } from "../steps-store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
@@ -165,4 +171,36 @@ describe("post-processing pipeline (end-to-end)", () => {
     },
     30_000,
   );
+});
+
+describe("scheduleReprocess in-flight coalescing", () => {
+  // The two calls are synchronous (no await between them), so the first run's
+  // promise is still pending when the second is requested — deterministically
+  // exercising the queue path without needing a slow ffmpeg run.
+  test("a forced run requested while one is in flight is queued, not dropped", async () => {
+    const video = await createVideo();
+
+    const first = scheduleReprocess(video.id, { source: "recorded", force: true });
+    const second = scheduleReprocess(video.id, { source: "recorded", force: true });
+
+    expect(first).toBe("started");
+    expect(second).toBe("queued");
+
+    // _drainInFlight loops, so the coalesced rerun that starts as the first
+    // settles is also awaited (both fail to stitch — no HLS — but complete).
+    await _drainInFlight();
+    expect(_inFlightPromise(video.id)).toBeUndefined();
+  });
+
+  test("a plain resumable re-schedule while in flight is skipped (already covered)", async () => {
+    const video = await createVideo();
+
+    const first = scheduleReprocess(video.id, { source: "recorded" });
+    const second = scheduleReprocess(video.id, { source: "recorded" });
+
+    expect(first).toBe("started");
+    expect(second).toBe("skipped");
+
+    await _drainInFlight();
+  });
 });

@@ -40,6 +40,7 @@ type Props = {
   activeTab: "events" | "files" | "transcript" | "processing";
   hasChapters: boolean;
   readiness: Readiness;
+  reprocessNotice?: string;
 };
 
 export function VideoDetailPage({
@@ -53,6 +54,7 @@ export function VideoDetailPage({
   activeTab,
   hasChapters,
   readiness,
+  reprocessNotice,
 }: Props) {
   const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
@@ -208,6 +210,7 @@ export function VideoDetailPage({
         transcript={transcript}
         readiness={readiness}
         activeTab={activeTab}
+        reprocessNotice={reprocessNotice}
       />
 
       <dialog id="file-preview-dialog" class="file-preview-dialog">
@@ -224,6 +227,7 @@ export function VideoTabsSection({
   transcript,
   readiness,
   activeTab,
+  reprocessNotice,
 }: {
   video: Video;
   events: VideoEvent[];
@@ -231,6 +235,7 @@ export function VideoTabsSection({
   transcript: VideoTranscript | undefined;
   readiness: Readiness;
   activeTab: "events" | "files" | "transcript" | "processing";
+  reprocessNotice?: string;
 }) {
   const tabLink = (tab: string, label: string) => (
     <a
@@ -264,7 +269,7 @@ export function VideoTabsSection({
         {tabLink("transcript", `Transcript${transcript ? ` (${transcript.wordCount} words)` : ""}`)}
       </div>
       {activeTab === "processing" ? (
-        <ReadinessPanel video={video} readiness={readiness} />
+        <ReadinessPanel video={video} readiness={readiness} notice={reprocessNotice} />
       ) : activeTab === "transcript" ? (
         <TranscriptView transcript={transcript} />
       ) : activeTab === "files" ? (

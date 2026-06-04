@@ -33,7 +33,7 @@ Error codes:
 | `INVALID_API_KEY`          | 401    | Token unknown or revoked                   |
 | `VIDEO_NOT_FOUND`          | 404    | Unknown or trashed video                   |
 | `INVALID_SEGMENT_FILENAME` | 400    | Filename doesn't match the allowlist       |
-| `VIDEO_ALREADY_COMPLETE`   | 409    | DELETE attempted on a completed video      |
+| `VIDEO_ALREADY_COMPLETE`   | 409    | DELETE attempted on a ready / processing / reprocessing video |
 | `VALIDATION_ERROR`         | 400    | Request body fails zod schema validation   |
 | `SLUG_CONFLICT`            | 409    | Slug already in use by another video/redirect |
 | `CONFLICT`                 | 409    | Store-level conflict (generic)             |
@@ -101,7 +101,7 @@ Single video by id.
 {
   "id": "uuid",
   "slug": "a1b2c3d4",
-  "status": "recording | healing | complete | processing | failed | deleting",
+  "status": "recording | healing | processing | ready | reprocessing | processing_failed | incomplete | deleting",
   "visibility": "public | unlisted | private",
   "title": "string | null",
   "description": "string | null",
@@ -181,6 +181,8 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 
 `url` is the absolute URL for the clipboard. `path` is the path-only form. `title` and `visibility` reflect the video's current metadata (used by the macOS app's post-recording editor). `missing` is empty when the server has all segments.
 
+When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate); otherwise it moves to `"healing"`. There is no `"complete"` status.
+
 **Error** `404`: `VIDEO_NOT_FOUND`
 
 ### `PUT /api/videos/:id/transcript`
@@ -245,7 +247,7 @@ Accept an AI-suggested title for a single chapter marker. Mirrors `/suggest-titl
 
 ### `DELETE /api/videos/:id`
 
-Cancel/delete a recording. Only works for non-complete videos.
+Cancel/delete a recording. Refused for videos that are `ready`, `processing`, or `reprocessing` (a finished video, or one mid-pipeline that would be torn out from under ffmpeg).
 
 **Response** `200`: `{ "ok": true }`
 
@@ -257,7 +259,7 @@ All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonica
 
 ### `/:slug`
 
-HTML video page. Prefers the MP4 derivative (`/:slug/raw/source.mp4`) when present; falls back to HLS (`/:slug/stream/stream.m3u8`). Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses Vidstack player (CDN-hosted via jsDelivr).
+HTML video page. Prefers the MP4 derivative (`/:slug/raw/<active file>`) when the `source` (or active-file) processing step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted MP4 never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses Vidstack player (CDN-hosted via jsDelivr).
 
 Includes below the player: title (if set), formatted duration + date, description, and attribution link.
 
@@ -342,13 +344,13 @@ Markdown metadata. Includes heading (title or slug), description, formatted dura
 | Path           | Response                                                                             |
 | -------------- | ------------------------------------------------------------------------------------ |
 | `/`            | 302 redirect to `https://danny.is`. HTML body contains feed/llms.txt hints for curl and AI agents. `Link` header for RSS autodiscovery. |
-| `/feed.xml`    | RSS 2.0 + Media RSS feed of all public, complete, non-trashed videos. Includes `<enclosure>`, `<media:content>`, `<media:thumbnail>` per item. |
+| `/feed.xml`    | RSS 2.0 + Media RSS feed of all public, `ready`, non-trashed videos. Includes `<enclosure>`, `<media:content>`, `<media:thumbnail>` per item. |
 | `/rss`         | 301 redirect to `/feed.xml`                                                          |
 | `/feed.json`   | JSON Feed 1.1. Includes `info_for_llms` top-level key, truncated transcript excerpts (~200 words), per-video `_urls` map, media attachments. Served as `application/feed+json`. |
 | `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, and links to feeds/sitemap/author website. |
 | `/robots.txt`  | Disallows `/admin` and `/api`                                                        |
 | `/favicon.ico` | 204 No Content (placeholder)                                                         |
-| `/sitemap.xml` | Video sitemap (public + complete + non-trashed only, with `<video:video>` extension) |
+| `/sitemap.xml` | Video sitemap (public + `ready` + non-trashed only, with `<video:video>` extension) |
 
 ### `GET /oembed`
 

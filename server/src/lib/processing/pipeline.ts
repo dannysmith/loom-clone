@@ -52,6 +52,13 @@ export function _inFlightPromise(videoId: string): Promise<void> | undefined {
   return inFlight.get(videoId);
 }
 
+// Test-only: await every in-flight pipeline. Called from teardownTestEnv so a
+// fire-and-forget run scheduled by a test (e.g. via /complete) can't outlive
+// the test and race its DB/temp-dir teardown.
+export async function _drainInFlight(): Promise<void> {
+  await Promise.allSettled([...inFlight.values()]);
+}
+
 type RunOpts = { source: "recorded" | "uploaded"; force?: boolean };
 
 export async function runPipeline(videoId: string, opts: RunOpts): Promise<void> {

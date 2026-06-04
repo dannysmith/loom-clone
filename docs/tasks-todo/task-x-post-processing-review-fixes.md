@@ -70,4 +70,6 @@ In `ReadinessPanel.tsx`:
 
 ## Additional findings
 
-_(Append code-review findings below as we go.)_
+### A. Dashboard filter serialization is duplicated
+
+`DashboardFilters` → query-string serialization now lives in two hand-synced places: `filtersToParams` (`routes/admin/helpers.ts`) and `viewToggleUrl` (`views/admin/pages/DashboardPage.tsx`). They drifted once already (`viewToggleUrl` silently dropped the `attention`, date, and duration filters when toggling grid/list view — now fixed). Consolidate into a single shared serializer (and have `parseFilters` round-trip against it) so a new filter can't be added to one without the other. Minor, but it's a recurring footgun.

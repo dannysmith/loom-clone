@@ -1270,6 +1270,57 @@ select.input {
 	margin-block-end: var(--space-5);
 }
 
+/* --- Post-processing readiness checklist --- */
+.readiness {
+	margin-block-end: var(--space-5);
+	padding: var(--space-4);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background-color: var(--color-surface);
+}
+
+.readiness-header {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin-block-end: var(--space-3);
+}
+
+.readiness-header h3 {
+	margin: 0;
+}
+
+.readiness-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: var(--space-2) var(--space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.readiness-item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--font-size-sm);
+}
+
+/* Not-applicable rows are muted — present for inventory, not a problem. */
+.readiness-item--na {
+	color: var(--color-fg-muted);
+}
+
+.readiness-glyph {
+	flex: none;
+	width: 1.2em;
+	text-align: center;
+}
+
+.readiness-reprocess {
+	margin-block-start: var(--space-4);
+}
+
 .video-meta-grid {
 	display: flex;
 	flex-wrap: wrap;

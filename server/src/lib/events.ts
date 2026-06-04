@@ -26,6 +26,7 @@ export type EventType =
   | "derivatives_ready" // legacy summary event — superseded by processing_step + processing_complete
   | "processing_step" // one per post-processing step outcome (kind + state)
   | "processing_complete" // post-processing run finished (summary for the activity feed)
+  | "reprocess_requested" // admin manually re-ran the post-processing pipeline
   | "transcript_uploaded"
   | "words_uploaded"
   | "title_suggested"

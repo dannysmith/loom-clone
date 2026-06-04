@@ -2,6 +2,7 @@ import type { Tag, Video, VideoEvent, VideoTranscript } from "../../../db/schema
 import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
+import type { Readiness } from "../../../lib/processing/readiness";
 import type { ThumbnailCandidate } from "../../../lib/thumbnails";
 import { activeRawFilename } from "../../../lib/url";
 import { AdminLayout } from "../../layouts/AdminLayout";
@@ -16,6 +17,7 @@ import {
   IconRuler,
   IconUploadCloud,
 } from "../components/Icons";
+import { ReadinessChecklist } from "../partials/ReadinessChecklist";
 import { ThumbnailPicker } from "../partials/ThumbnailPicker";
 import { VideoActions } from "../partials/VideoActions";
 import {
@@ -37,6 +39,7 @@ type Props = {
   transcript: VideoTranscript | undefined;
   activeTab: "events" | "files" | "transcript";
   hasChapters: boolean;
+  readiness: Readiness;
 };
 
 export function VideoDetailPage({
@@ -49,6 +52,7 @@ export function VideoDetailPage({
   transcript,
   activeTab,
   hasChapters,
+  readiness,
 }: Props) {
   const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
@@ -106,8 +110,12 @@ export function VideoDetailPage({
       {/* --- Metadata --- */}
       <div class="video-meta">
         <div class="video-meta-grid">
-          {video.status !== "ready" && (
+          {video.status !== "ready" ? (
             <span class={`badge badge--${video.status}`}>{video.status}</span>
+          ) : (
+            readiness.badge && (
+              <span class="badge badge--ready">ready &middot; {readiness.badge}</span>
+            )
           )}
           {video.lastEditedAt && (
             <a
@@ -188,6 +196,9 @@ export function VideoDetailPage({
           <NotesDisplay video={video} />
         </div>
       </div>
+
+      {/* --- Post-processing checklist --- */}
+      <ReadinessChecklist video={video} readiness={readiness} />
 
       {/* --- Thumbnail picker --- */}
       <ThumbnailPicker video={video} candidates={thumbnailCandidates} />

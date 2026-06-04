@@ -4,6 +4,8 @@ import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
+import { scheduleDerivatives, scheduleUploadDerivatives } from "../../lib/processing/pipeline";
+import { canReprocess, computeReadiness } from "../../lib/processing/readiness";
 import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
@@ -58,16 +60,25 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = parseTab(c.req.query("tab"));
-  const [videoTags, allTags, events, files, thumbnailCandidates, transcript, hasChapters] =
-    await Promise.all([
-      getVideoTags(video.id),
-      listTags(),
-      listEvents(video.id),
-      listVideoFiles(video.id),
-      listThumbnailCandidates(video.id),
-      getTranscript(video.id),
-      chaptersExist(video.id),
-    ]);
+  const [
+    videoTags,
+    allTags,
+    events,
+    files,
+    thumbnailCandidates,
+    transcript,
+    hasChapters,
+    readiness,
+  ] = await Promise.all([
+    getVideoTags(video.id),
+    listTags(),
+    listEvents(video.id),
+    listVideoFiles(video.id),
+    listThumbnailCandidates(video.id),
+    getTranscript(video.id),
+    chaptersExist(video.id),
+    computeReadiness(video),
+  ]);
 
   return c.html(
     <VideoDetailPage
@@ -80,6 +91,7 @@ videoRoutes.get("/:id", async (c) => {
       transcript={transcript}
       activeTab={activeTab}
       hasChapters={hasChapters}
+      readiness={readiness}
     />,
   );
 });
@@ -478,6 +490,24 @@ videoRoutes.post("/:id/delete-permanently", async (c) => {
 videoRoutes.post("/:id/duplicate", async (c) => {
   const duplicate = await duplicateVideo(c.req.param("id"));
   return c.redirect(`/admin/videos/${duplicate.id}`);
+});
+
+// Re-run the (resumable) post-processing pipeline for the whole video. Steps
+// that already succeeded are skipped, so this resumes an interrupted/failed
+// run or fills in missing expected derivatives. reconcile() drives the status.
+videoRoutes.post("/:id/reprocess", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+
+  if (!canReprocess(result)) {
+    return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
+  }
+
+  await logEvent(result.id, "reprocess_requested");
+  if (result.source === "uploaded") scheduleUploadDerivatives(result.id);
+  else scheduleDerivatives(result.id);
+
+  return c.redirect(`/admin/videos/${result.id}`);
 });
 
 export default videoRoutes;

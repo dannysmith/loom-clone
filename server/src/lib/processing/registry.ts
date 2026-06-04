@@ -233,4 +233,20 @@ export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined
   return PROCESSING_STEPS.find((s) => s.kind === kind);
 }
 
+// Builds a StepContext from a stored video row, for applicability/artifact
+// checks outside a live pipeline run (readiness UI, backfill). height/duration
+// come from the cached metadata; the run-only fields are inert here.
+export function applicabilityContext(video: Video): StepContext {
+  return {
+    videoId: video.id,
+    video,
+    source: video.source,
+    dir: derivativesDir(video.id),
+    duration: video.durationSeconds ?? 0,
+    height: video.height ?? 0,
+    force: false,
+    scratch: { silencesComputed: true },
+  };
+}
+
 export { derivativesDir };

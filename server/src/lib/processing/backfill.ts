@@ -9,11 +9,11 @@
 // the segment-derived steps — they are never flagged as needing repair.
 
 import { join } from "path";
-import type { ProcessingStepKind, Video } from "../../db/schema";
-import { derivativesDir, probeMetadata } from "../derivatives";
+import type { ProcessingStepKind } from "../../db/schema";
+import { probeMetadata } from "../derivatives";
 import { getTranscript, getVideo } from "../store";
 import { isProbablyPlayable } from "./playable";
-import { PROCESSING_STEPS, type StepContext } from "./registry";
+import { applicabilityContext, PROCESSING_STEPS, type StepContext } from "./registry";
 import { markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
 
 async function exists(path: string): Promise<boolean> {
@@ -46,26 +46,11 @@ async function hasAudio(path: string): Promise<boolean> {
   }
 }
 
-// Builds a minimal StepContext for applicability checks (height/duration come
-// from the stored metadata; source type from the row).
-function inferContext(video: Video): StepContext {
-  return {
-    videoId: video.id,
-    video,
-    source: video.source,
-    dir: derivativesDir(video.id),
-    duration: video.durationSeconds ?? 0,
-    height: video.height ?? 0,
-    force: false,
-    scratch: { silencesComputed: true },
-  };
-}
-
 // Infer and persist step rows for one video from on-disk presence. Idempotent.
 export async function inferStepsFromDisk(videoId: string): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
-  const ctx = inferContext(video);
+  const ctx = applicabilityContext(video);
   const sourceFile = join(ctx.dir, "source.mp4");
 
   for (const step of PROCESSING_STEPS) {

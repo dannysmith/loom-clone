@@ -124,7 +124,11 @@ describe("post-processing pipeline (end-to-end)", () => {
       await runPipeline(video.id, { source: "recorded" });
 
       const firstSteps = await getStepStates(video.id);
+      // Precondition: the first run actually produced a ready source step (so
+      // the producedAt comparison below is meaningful, not vacuously equal).
+      expect(firstSteps.get("source")?.state).toBe("ready");
       const firstSourceAt = firstSteps.get("source")?.producedAt;
+      expect(firstSourceAt).not.toBeNull();
 
       // Second run resumes — source is already ready + present, so it's skipped
       // (producedAt unchanged) rather than re-stitched.

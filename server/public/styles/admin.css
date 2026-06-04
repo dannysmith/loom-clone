@@ -286,19 +286,21 @@ body.admin--login {
 
 .filter-pill--healing,
 .filter-pill--processing,
+.filter-pill--reprocessing,
 .filter-pill--deleting {
 	--pill-active-color: var(--color-warning);
 	--pill-active-bg: var(--color-warning-bg);
 	--pill-active-border: transparent;
 }
 
-.filter-pill--complete {
+.filter-pill--ready {
 	--pill-active-color: var(--color-success);
 	--pill-active-bg: var(--color-success-bg);
 	--pill-active-border: transparent;
 }
 
-.filter-pill--failed {
+.filter-pill--processing_failed,
+.filter-pill--incomplete {
 	--pill-active-color: var(--color-restricted);
 	--pill-active-bg: var(--color-restricted-bg);
 	--pill-active-border: var(--color-restricted-border);

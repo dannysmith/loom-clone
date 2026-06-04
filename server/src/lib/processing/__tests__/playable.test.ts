@@ -1,11 +1,19 @@
-import { describe, expect, test } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
+import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { isProbablyPlayable } from "../playable";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 
-const TMP = join(import.meta.dir, "_playable_tmp");
+let env: TestEnv;
+
+beforeEach(async () => {
+  env = await setupTestEnv();
+});
+
+afterEach(async () => {
+  await teardownTestEnv(env);
+});
 
 async function makeRealMp4(path: string, duration: number): Promise<void> {
   const proc = Bun.spawn(
@@ -40,28 +48,18 @@ describe("isProbablyPlayable", () => {
   });
 
   test("returns false for a file that isn't a video", async () => {
-    await mkdir(TMP, { recursive: true });
-    const path = join(TMP, "garbage.mp4");
+    const path = join(env.tempDir, "garbage.mp4");
     await Bun.write(path, "not a video at all");
-    try {
-      expect(await isProbablyPlayable(path)).toBe(false);
-    } finally {
-      await rm(TMP, { recursive: true, force: true });
-    }
+    expect(await isProbablyPlayable(path)).toBe(false);
   });
 
   test.skipIf(!ffmpegAvailable)("returns true for a real MP4", async () => {
-    await mkdir(TMP, { recursive: true });
-    const path = join(TMP, "real.mp4");
+    const path = join(env.tempDir, "real.mp4");
     await makeRealMp4(path, 2);
-    try {
-      expect(await isProbablyPlayable(path)).toBe(true);
-      // Within tolerance of the expected duration.
-      expect(await isProbablyPlayable(path, { expectedDuration: 2 })).toBe(true);
-      // Wildly wrong expected duration → rejected.
-      expect(await isProbablyPlayable(path, { expectedDuration: 60 })).toBe(false);
-    } finally {
-      await rm(TMP, { recursive: true, force: true });
-    }
+    expect(await isProbablyPlayable(path)).toBe(true);
+    // Within tolerance of the expected duration.
+    expect(await isProbablyPlayable(path, { expectedDuration: 2 })).toBe(true);
+    // Wildly wrong expected duration → rejected.
+    expect(await isProbablyPlayable(path, { expectedDuration: 60 })).toBe(false);
   });
 });

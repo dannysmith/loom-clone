@@ -109,6 +109,12 @@ editor.post("/:id/editor/commit", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
 
+  // requireVideo includes trashed videos; mirror the editor page guard so a
+  // trashed video can't be committed/reprocessed.
+  if (result.trashedAt) {
+    return c.json({ error: "Cannot commit edits for a trashed video" }, 400);
+  }
+
   if (result.status === "reprocessing") {
     return c.json({ error: "Video is already being processed" }, 409);
   }

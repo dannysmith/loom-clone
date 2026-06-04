@@ -11,7 +11,7 @@
 import { join } from "path";
 import type { ProcessingStepKind, Video } from "../../db/schema";
 import { derivativesDir, probeMetadata } from "../derivatives";
-import { DATA_DIR, getTranscript, getVideo } from "../store";
+import { getTranscript, getVideo } from "../store";
 import { isProbablyPlayable } from "./playable";
 import { PROCESSING_STEPS, type StepContext } from "./registry";
 import { markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
@@ -148,5 +148,3 @@ function sizeOf(path: string): number | null {
     return null;
   }
 }
-
-export { DATA_DIR };

@@ -311,9 +311,9 @@ describe("POST /:id/complete", () => {
     expect(body.title).toBeNull();
     expect(body.visibility).toBe("unlisted");
     await settlePipeline(id);
-    // Footage whole → left `recording` and entered the post-processing lifecycle.
-    expect((await getVideo(id))?.status).not.toBe("recording");
-    expect((await getVideo(id))?.status).not.toBe("healing");
+    // Footage whole → entered the post-processing lifecycle; with only stub
+    // segments the source stitch fails, settling to processing_failed.
+    expect((await getVideo(id))?.status).toBe("processing_failed");
     // recording.json is persisted
     expect(await Bun.file(join(DATA_DIR, id, "recording.json")).exists()).toBe(true);
   });

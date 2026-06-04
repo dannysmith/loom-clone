@@ -628,6 +628,18 @@ export async function markFootageComplete(id: string): Promise<Video> {
   const existing = await getVideo(id);
   if (!existing) throw new Error(`Video ${id} not found`);
 
+  // Idempotent: a stray re-`/complete` on a video that's already in (or past)
+  // the post-footage lifecycle must not demote it back to `processing` — that
+  // would un-publish a `ready` video from feeds and, if its HLS was already
+  // cleaned up, could leave the re-run unable to reach `ready` again.
+  if (
+    existing.status === "processing" ||
+    existing.status === "ready" ||
+    existing.status === "reprocessing"
+  ) {
+    return existing;
+  }
+
   const now = nowIso();
   const duration = await sumSegmentDuration(id);
   const [video] = await db

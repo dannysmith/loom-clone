@@ -31,6 +31,8 @@ async function writeDerivative(video: Video, filename: string): Promise<void> {
   await Bun.write(join(dir, filename), "stub");
   const kind = STEP_FOR_FILE[filename];
   if (kind) await markStepReady(video.id, kind);
+  // MP4 serving is gated on the full mandatory set (source AND metadata).
+  if (filename === "source.mp4") await markStepReady(video.id, "metadata");
 }
 
 describe("GET /v/:slug (back-compat redirect)", () => {

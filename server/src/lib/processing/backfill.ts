@@ -92,6 +92,11 @@ async function inferStep(
     }
     case "audio": {
       // No standalone artifact — assume processed if the source carries audio.
+      // This is a deliberate fidelity trade-off: a recorded video whose source
+      // has audio is marked `ready` even though we can't tell whether loudnorm
+      // actually ran (e.g. a pre-task-4 video, or a duplicate). A non-force
+      // reprocess then skips audio; a force from-HLS rebuild is the way to
+      // actually (re-)loudnorm such a video.
       if (!(await exists(sourceFile))) return;
       if (await hasAudio(sourceFile)) await markStepReady(videoId, "audio");
       else await markStepSkipped(videoId, "audio");

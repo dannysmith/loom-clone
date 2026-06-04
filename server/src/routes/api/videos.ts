@@ -331,7 +331,9 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   // Parse to plain text and upsert into DB + FTS.
   const plainText = parseSrtToPlainText(body);
   await upsertTranscript(id, format, plainText);
-  await markStepReady(id, "transcript", { sizeBytes: body.length });
+  // Byte length, not body.length (UTF-16 code-unit count) — matches the size of
+  // the file actually written to disk for multibyte transcripts.
+  await markStepReady(id, "transcript", { sizeBytes: Buffer.byteLength(body) });
   await logEvent(id, "transcript_uploaded", {
     format,
     wordCount: plainText.split(/\s+/).filter(Boolean).length,

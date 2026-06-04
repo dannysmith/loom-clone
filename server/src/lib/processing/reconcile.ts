@@ -13,6 +13,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
+import { purgeGlobalFeeds } from "../cdn";
 import { getVideo, markVideoReady, setVideoStatus } from "../store";
 import { REQUIRED_KINDS } from "./registry";
 import { getStepStates } from "./steps-store";
@@ -42,6 +43,11 @@ export async function reconcile(
   const requiredStates = REQUIRED_KINDS.map((k) => steps.get(k)?.state);
   const allReady = requiredStates.every((s) => s === "ready");
   const anyFailed = requiredStates.some((s) => s === "failed");
+  // Leaving `ready` (a forced rebuild that demoted, or a regressed mandatory
+  // step) must drop the video from the public feeds promptly — the origin query
+  // filters status='ready', but the BunnyCDN-cached feed would otherwise keep
+  // listing it until TTL. markVideoReady re-purges on the way back in.
+  const wasReady = video.status === "ready";
 
   // Promote to `ready` once the mandatory steps validate — unless we're holding
   // for a forced multi-file rebuild that is still regenerating its expected
@@ -62,14 +68,20 @@ export async function reconcile(
   // still produce it) → processing_failed: HLS still plays, but there's no
   // stable validated MP4 and it needs manual attention.
   if (!opts.running && anyFailed) {
-    if (video.status !== "processing_failed") await setVideoStatus(videoId, "processing_failed");
+    if (video.status !== "processing_failed") {
+      await setVideoStatus(videoId, "processing_failed");
+      if (wasReady) purgeGlobalFeeds();
+    }
     return;
   }
 
   // Still working, held for a forced rebuild, or interrupted with mandatory
   // steps pending. Show `processing` (the latter simply sits here until a manual
   // reprocess kicks it).
-  if (video.status !== "processing") await setVideoStatus(videoId, "processing");
+  if (video.status !== "processing") {
+    await setVideoStatus(videoId, "processing");
+    if (wasReady) purgeGlobalFeeds();
+  }
 }
 
 // A `reprocessing` row means an edit/reprocess was in flight when the process

@@ -48,32 +48,56 @@ async function runFfmpeg(args: string[]): Promise<void> {
   }
 }
 
+// Run the stitch ffmpeg, then validate the tmp BEFORE renaming over any
+// existing source.mp4 (mirrors processAudio): a forced re-stitch that produces
+// an unplayable file must not clobber the previous good source, and a failed
+// ffmpeg must not leave an orphan .tmp behind. Structural check only (no
+// expectedDuration) — the registry's `source` step re-checks duration after.
+async function stitchSource(args: string[], tmp: string, final: string): Promise<void> {
+  try {
+    await runFfmpeg(args);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+  if (!(await isProbablyPlayable(tmp))) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw new Error(
+      "stitched source.mp4 failed playability check — keeping the previous source.mp4",
+    );
+  }
+  await rename(tmp, final);
+}
+
 // Stitch the converged HLS segments into derivatives/source.mp4 (recorded
 // videos). Writes source.mp4.tmp then renames atomically.
 export async function generateSourceFromHls(videoId: string, dir: string): Promise<void> {
   const playlist = join(DATA_DIR, videoId, "stream.m3u8");
   const tmp = join(dir, "source.mp4.tmp");
   const final = join(dir, "source.mp4");
-  await runFfmpeg([
-    // m3u8 references init.mp4 and seg_*.m4s — allow all extensions so the
-    // HLS demuxer doesn't reject .m4s sources.
-    "-allowed_extensions",
-    "ALL",
-    "-i",
-    playlist,
-    "-c",
-    "copy",
-    // Put the moov atom at the front so `<video>` can begin playback before
-    // the whole file is downloaded.
-    "-movflags",
-    "+faststart",
-    // Explicit format — the `.tmp` output filename defeats ffmpeg's
-    // extension-based format detection.
-    "-f",
-    "mp4",
+  await stitchSource(
+    [
+      // m3u8 references init.mp4 and seg_*.m4s — allow all extensions so the
+      // HLS demuxer doesn't reject .m4s sources.
+      "-allowed_extensions",
+      "ALL",
+      "-i",
+      playlist,
+      "-c",
+      "copy",
+      // Put the moov atom at the front so `<video>` can begin playback before
+      // the whole file is downloaded.
+      "-movflags",
+      "+faststart",
+      // Explicit format — the `.tmp` output filename defeats ffmpeg's
+      // extension-based format detection.
+      "-f",
+      "mp4",
+      tmp,
+    ],
     tmp,
-  ]);
-  await rename(tmp, final);
+    final,
+  );
 }
 
 // Remux an uploaded upload.mp4 → derivatives/source.mp4 with faststart
@@ -82,8 +106,11 @@ export async function generateSourceFromUpload(videoId: string, dir: string): Pr
   const input = join(DATA_DIR, videoId, "upload.mp4");
   const tmp = join(dir, "source.mp4.tmp");
   const final = join(dir, "source.mp4");
-  await runFfmpeg(["-i", input, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp]);
-  await rename(tmp, final);
+  await stitchSource(
+    ["-i", input, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp],
+    tmp,
+    final,
+  );
 }
 
 // Probe duration of a video file using ffprobe. Returns seconds or null

@@ -8,7 +8,7 @@ import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { createVideo, DATA_DIR, getVideo } from "../../store";
 import { canReprocess, computeReadiness, type ReadinessItem, reprocessability } from "../readiness";
-import { markStepReady } from "../steps-store";
+import { markStepFailed, markStepReady } from "../steps-store";
 
 let env: TestEnv;
 
@@ -170,6 +170,24 @@ describe("computeReadiness — badge", () => {
     }
     const { badge } = await computeReadiness((await getVideo(video.id))!);
     expect(badge).toBe("complete ✓");
+  });
+
+  test("'N failed' (not 'enriching') when an expected step failed", async () => {
+    // Uploaded ready video with everything satisfied except a FAILED expected
+    // step — it won't progress, so the badge must flag it rather than counting
+    // it as forever-enriching.
+    const video = await createVideo();
+    await getDb()
+      .update(videos)
+      .set({ status: "ready", source: "uploaded", width: 1280, height: 720, durationSeconds: 30 })
+      .where(eq(videos.id, video.id));
+    await markReady(video.id, "source");
+    await markReady(video.id, "metadata");
+    for (const k of ["thumbnail", "peaks"] as const) await markReady(video.id, k);
+    await markStepFailed(video.id, "suggested_edits", "boom");
+
+    const { badge } = await computeReadiness((await getVideo(video.id))!);
+    expect(badge).toBe("1 failed");
   });
 });
 

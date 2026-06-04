@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
-import { readdir, rm } from "fs/promises";
+import { readdir, rm, stat } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { videoSegments, videos } from "../db/schema";
@@ -87,8 +87,12 @@ export async function cleanupStaleFiles(): Promise<void> {
     }
 
     // Delete thumbnail candidate images (the promoted thumbnail.jpg is kept).
-    const candidatesDir = join(videoDir, "derivatives", "thumbnail-candidates");
-    if (await Bun.file(candidatesDir).exists()) {
+    // Bun.file(dir).exists() returns false for a directory, so stat it instead.
+    const candidatesDir = join(derivDir, "thumbnail-candidates");
+    const candidatesExist = await stat(candidatesDir)
+      .then((s) => s.isDirectory())
+      .catch(() => false);
+    if (candidatesExist) {
       await rm(candidatesDir, { recursive: true, force: true });
       filesRemoved++;
     }

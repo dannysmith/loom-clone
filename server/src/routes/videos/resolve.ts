@@ -29,9 +29,14 @@ async function derivativeFlags(video: Video): Promise<{
   const dir = join(DATA_DIR, video.id, "derivatives");
   const steps = await getStepStates(video.id);
 
-  const sourceReady = steps.get("source")?.state === "ready";
+  // Gate MP4 serving on the full mandatory set — the same bar reconcile uses to
+  // reach `ready` — plus the active raw file on disk. Checking metadata too (not
+  // just source) means a processing_failed video whose metadata step failed
+  // serves HLS, instead of an MP4 with no dimensions.
+  const mandatoryReady =
+    steps.get("source")?.state === "ready" && steps.get("metadata")?.state === "ready";
   const activePresent = await Bun.file(join(dir, activeRawFilename(video))).exists();
-  const hasSource = sourceReady && activePresent;
+  const hasSource = mandatoryReady && activePresent;
 
   const variantHeights: number[] = [];
   for (const { height, kind } of VARIANTS) {

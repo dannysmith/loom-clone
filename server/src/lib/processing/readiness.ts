@@ -143,9 +143,15 @@ function computeBadge(video: Video, items: ReadinessItem[]): string | null {
   if (video.status !== "ready") return null;
 
   const optional = items.filter((i) => i.tier !== "required" && i.icon !== "na");
-  const enriching = optional.filter((i) => i.tier === "expected" && i.icon !== "ready");
+  // For a `ready` video an expected step is one of: ✅ done, ⏳ still generating
+  // (pending), or ❌ failed (missing). "Enriching" is only the genuinely
+  // in-progress ones — a failed expected step won't progress, so surface it
+  // separately rather than counting it as forever-enriching.
+  const enriching = optional.filter((i) => i.tier === "expected" && i.icon === "pending");
+  const failed = optional.filter((i) => i.tier === "expected" && i.icon === "missing");
   const externalMissing = optional.filter((i) => i.tier === "external" && i.icon !== "ready");
 
+  if (failed.length > 0) return `${failed.length} failed`;
   if (enriching.length === 0 && externalMissing.length === 0) return "complete ✓";
   if (enriching.length > 0) return `enriching (${enriching.length} left)`;
   if (externalMissing.length === 1) return `awaiting ${externalMissing[0]!.label.toLowerCase()}`;

@@ -724,6 +724,29 @@ describe("duplicateVideo", () => {
       .where(eq(slugRedirectsTable.videoId, dup.id));
     expect(redirects).toHaveLength(0);
   });
+
+  test("normalises a post-footage copy with an invalid source to processing_failed", async () => {
+    // A `reprocessing` original copied verbatim would strand the duplicate (no
+    // owner ever settles it); with an unvalidatable (stub) source the inferred
+    // ledger isn't ready, so the copy lands in processing_failed — reprocessable
+    // and honest — rather than stuck reprocessing.
+    const original = await createVideo();
+    await setVideoStatus(original.id, "reprocessing");
+    const dir = join(DATA_DIR, original.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "source.mp4"), "stub"); // not a playable video
+
+    const dup = await duplicateVideo(original.id);
+    expect(dup.status).toBe("processing_failed");
+  });
+
+  test("leaves a footage-state (recording) copy's status untouched", async () => {
+    // recording/healing/incomplete mirror footage, not the derivative ledger —
+    // the rollup must not relabel them.
+    const original = await createVideo(); // status: recording
+    const dup = await duplicateVideo(original.id);
+    expect(dup.status).toBe("recording");
+  });
 });
 
 describe("listVideosFiltered", () => {

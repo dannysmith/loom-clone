@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { mkdir } from "fs/promises";
+import { mkdir, stat } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
@@ -101,6 +101,22 @@ describe("cleanupStaleFiles", () => {
     await cleanupStaleFiles();
 
     for (const f of hls) expect(await Bun.file(f).exists()).toBe(true);
+  });
+
+  test("removes the thumbnail-candidates directory (Bun dir-exists guard)", async () => {
+    const { id } = await makeStaleReadyVideo();
+    await markStepReady(id, "source");
+    const candidatesDir = join(DATA_DIR, id, "derivatives", "thumbnail-candidates");
+    await mkdir(candidatesDir, { recursive: true });
+    await Bun.write(join(candidatesDir, "cand_0.jpg"), "stub");
+
+    await cleanupStaleFiles();
+
+    expect(
+      await stat(candidatesDir)
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false);
   });
 
   test("removes HLS for an edited video when its active {H}p.mp4 is present", async () => {

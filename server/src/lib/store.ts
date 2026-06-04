@@ -986,12 +986,40 @@ export async function duplicateVideo(id: string): Promise<Video> {
   const { inferStepsFromDisk } = await import("./processing/backfill");
   await inferStepsFromDisk(newId);
 
+  // Normalise the copy's status from the inferred ledger rather than trusting
+  // the value copied from the original: a duplicate of a mid-edit
+  // (`reprocessing`) video would otherwise be stranded (no owner ever settles
+  // it), and a copy whose source can't be validated would sit at `ready` while
+  // the serving gate refuses it. Only for post-footage statuses — a
+  // footage-state original (recording/healing/incomplete) mirrors its footage,
+  // not the derivative ledger.
+  if (POST_FOOTAGE_STATUSES.has(original.status)) {
+    const { getStepStates } = await import("./processing/steps-store");
+    const { REQUIRED_KINDS } = await import("./processing/registry");
+    const steps = await getStepStates(newId);
+    const allReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
+    if (allReady) {
+      await markVideoReady(newId); // stamps completedAt (set-once) + publishes feeds
+    } else if (duplicate.status !== "processing_failed") {
+      await setVideoStatus(newId, "processing_failed");
+    }
+  }
+
   // Log events on both videos.
   await logEvent(id, "duplicated", { newId: newId, newSlug });
   await logEvent(newId, "duplicated_from", { originalId: id, originalSlug: original.slug });
 
-  return duplicate;
+  return (await getVideo(newId, { includeTrashed: true })) ?? duplicate;
 }
+
+// Post-footage statuses where a video is expected to have a validated MP4, so a
+// duplicate's status can be derived from the inferred step ledger.
+const POST_FOOTAGE_STATUSES: ReadonlySet<string> = new Set([
+  "ready",
+  "reprocessing",
+  "processing",
+  "processing_failed",
+]);
 
 // Finds an available slug by appending -1, -2, etc.
 async function findAvailableSlug(baseSlug: string): Promise<string> {

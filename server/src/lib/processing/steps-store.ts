@@ -1,6 +1,6 @@
-// DB accessors for video_processing_steps (task-4 Part 2). One row per
-// (videoId, kind) recording the outcome of each post-processing step. This is
-// a generation/receipt ledger, not a live inventory — see the schema comment.
+// DB accessors for video_processing_steps. One row per (videoId, kind)
+// recording the outcome of each post-processing step — a generation/receipt
+// ledger, not a live inventory (see the schema comment).
 //
 // External artifacts (transcript, words, the suggestion items) are Mac-sent;
 // their rows are upserted by the API route handlers that receive them, via the
@@ -113,10 +113,16 @@ export async function markStepFailed(
   await upsertStep(videoId, kind, { state: "failed", error: error.slice(0, 2000) });
 }
 
-export async function markStepSkipped(videoId: string, kind: ProcessingStepKind): Promise<void> {
-  await upsertStep(videoId, kind, { state: "skipped", error: null });
+// Byte size of an artifact for the sizeBytes column, or null if unavailable.
+export function fileSizeBytes(path: string): number | null {
+  try {
+    const size = Bun.file(path).size;
+    return Number.isFinite(size) ? size : null;
+  } catch {
+    return null;
+  }
 }
 
-export async function markStepPending(videoId: string, kind: ProcessingStepKind): Promise<void> {
-  await upsertStep(videoId, kind, { state: "pending", error: null });
+export async function markStepSkipped(videoId: string, kind: ProcessingStepKind): Promise<void> {
+  await upsertStep(videoId, kind, { state: "skipped", error: null });
 }

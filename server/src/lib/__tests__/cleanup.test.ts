@@ -55,8 +55,8 @@ describe("cleanupStaleFiles", () => {
 
   test("does NOT remove HLS when the source step is failed (broken MP4 safety)", async () => {
     const { id, hls } = await makeStaleReadyVideo();
-    // The byte-complete-but-broken-MP4 case from the incident: file present,
-    // but validation marked it failed. HLS must survive.
+    // A byte-complete but broken MP4: file present, but validation marked the
+    // source step failed. The HLS must survive so the video stays playable.
     await markStepFailed(id, "source", "isProbablyPlayable failed");
 
     await cleanupStaleFiles();

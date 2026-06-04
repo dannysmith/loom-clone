@@ -1,14 +1,13 @@
-// The post-processing pipeline orchestrator (task-4 Phase 0). Drives the step
-// registry in order, writing a video_processing_steps row + an event per step
-// and calling reconcile() after each so `ready` is reached the moment the
-// mandatory steps (source + metadata) validate — independent of the slow,
-// fragile audio/variant steps that follow.
+// The post-processing pipeline orchestrator. Drives the step registry in order,
+// writing a video_processing_steps row + an event per step and calling
+// reconcile() after each so `ready` is reached the moment the mandatory steps
+// (source + metadata) validate — independent of the slow, fragile audio/variant
+// steps that follow.
 //
 // Re-entrant by construction: each step is a no-op when its row is already
 // `ready`/`skipped` and (for file-producing steps) the artifact is still on
-// disk — unless `force` is set. So re-running the pipeline IS "resume from
-// where it failed", which is what the manual reprocess button relies on and
-// what makes a re-`/complete` after healing a near-no-op.
+// disk — unless `force` is set. So re-running the pipeline IS "resume from where
+// it failed", which is what the manual reprocess button relies on.
 
 import { mkdir, rm } from "fs/promises";
 import { join } from "path";
@@ -19,7 +18,13 @@ import { DATA_DIR, getVideo } from "../store";
 import { generateEditorStoryboard } from "../storyboard";
 import { reconcile } from "./reconcile";
 import { type ProcessingStep, RUNNABLE_STEPS, type StepContext, stepByKind } from "./registry";
-import { getStep, markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
+import {
+  fileSizeBytes,
+  getStep,
+  markStepFailed,
+  markStepReady,
+  markStepSkipped,
+} from "./steps-store";
 
 // Collapses repeated schedule calls while a generation is in flight to the same
 // promise, preventing two pipelines from racing on one video. The durable
@@ -211,7 +216,7 @@ async function finishReady(
   produced: string[],
 ): Promise<void> {
   const path = step.artifact?.(ctx);
-  const sizeBytes = path ? await fileSize(path) : null;
+  const sizeBytes = path ? fileSizeBytes(path) : null;
   await markStepReady(videoId, step.kind, { sizeBytes });
   await logStep(videoId, step.kind, "ready");
   produced.push(step.kind);
@@ -265,15 +270,6 @@ async function maybeDeleteUpload(videoId: string): Promise<void> {
       `[pipeline] ${videoId} failed to delete upload.mp4:`,
       err instanceof Error ? err.message : err,
     );
-  }
-}
-
-async function fileSize(path: string): Promise<number | null> {
-  try {
-    const size = Bun.file(path).size;
-    return Number.isFinite(size) ? size : null;
-  } catch {
-    return null;
   }
 }
 

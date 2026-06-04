@@ -268,15 +268,13 @@ videos.post("/:id/complete", async (c) => {
   await writePlaylist(id, playlist);
 
   if (footageWhole) {
-    // Healing (or an `incomplete` recovery) *changed the HLS segments*, so a
-    // previously-stitched source.mp4 and its derivatives are stale. The
-    // resumable pipeline's skip-if-ready can't see that the segments changed,
-    // so force a full re-stitch + re-derive from the healed playlist. The
-    // common first-`/complete` (from `recording`) has nothing to skip, so the
-    // plain resumable schedule is correct — and keeps a redundant `/complete`
-    // on an already-processed video a near-no-op. Mac-sent steps
-    // (transcript/words/suggestions) aren't server-run, so force never touches
-    // them.
+    // Healing / incomplete-recovery changed the HLS segments, so the
+    // previously-stitched source.mp4 and its derivatives are stale — but
+    // skip-if-ready can't tell. Force a full re-stitch + re-derive. A first
+    // `/complete` (from `recording`) has nothing to skip, and a redundant one on
+    // an already-processed video should stay a near-no-op, so both use the plain
+    // resumable schedule. (Mac-sent steps aren't server-run, so force never
+    // touches them.)
     const segmentsChanged = existing.status === "healing" || existing.status === "incomplete";
     if (segmentsChanged) {
       scheduleReprocess(id, { source: "recorded", force: true });

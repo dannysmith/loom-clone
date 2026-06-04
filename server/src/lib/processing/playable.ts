@@ -1,13 +1,12 @@
-// Shared "is this file structurally a playable video?" check (task-4 Part 3).
+// Shared "is this file structurally a playable video?" check.
 //
 // One ffprobe reading container + stream headers only — NO decode, so it's
-// fast. It catches the failure mode the OOM incident exposed: a byte-complete
-// source.mp4 that doesn't actually play (e.g. a `-c copy` stitch of a long,
-// mode-switching recording with no decodable video stream or a nonsense
-// duration). It deliberately does NOT catch declared-vs-actual frame-rate
-// mismatches — that needs a full decode, and Task 3 established that declared
-// ≠ avg frame rate is normal for honest VFR content, so a header heuristic
-// there would false-positive on every healthy recording.
+// fast. It catches a byte-complete source.mp4 that doesn't actually play (e.g.
+// a `-c copy` stitch of a long, mode-switching recording with no decodable
+// video stream or a nonsense duration). It deliberately does NOT catch
+// declared-vs-actual frame-rate mismatches — that needs a full decode, and a
+// declared ≠ avg frame rate is normal for honest VFR content, so a header-only
+// heuristic there would false-positive on every healthy recording.
 
 export type PlayableOpts = {
   // When known, the probed duration must land within tolerance of this.
@@ -16,7 +15,6 @@ export type PlayableOpts = {
 };
 
 // Tolerance for the duration sanity check: ±2 s or ±2%, whichever is larger.
-// Starting point — tune later.
 function durationWithinTolerance(actual: number, expected: number): boolean {
   const tolerance = Math.max(2, expected * 0.02);
   return Math.abs(actual - expected) <= tolerance;

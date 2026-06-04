@@ -1,14 +1,14 @@
-// Derived readiness view (task-4 Part 2). Turns the video_processing_steps
-// rows + registry applicability into the admin checklist (per-step ✅/❌/⏳/—)
-// and the coarse rollup badge shown next to a `ready` video. Computed on the
-// fly — never stored — so it can't drift from the ledger.
+// Derived readiness view. Turns the video_processing_steps rows + registry
+// applicability into the admin checklist (per-step ✅/❌/⏳/—) and the coarse
+// rollup badge shown next to a `ready` video. Computed on the fly — never
+// stored — so it can't drift from the ledger.
 
 import { join } from "path";
 import type { ProcessingStepKind, Video } from "../../db/schema";
+import { derivativesDir } from "../derivatives";
 import { DATA_DIR } from "../store";
 import {
   applicabilityContext,
-  derivativesDir,
   PROCESSING_STEPS,
   REGENERABLE_KINDS,
   type StepTier,

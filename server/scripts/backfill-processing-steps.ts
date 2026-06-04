@@ -1,10 +1,9 @@
 #!/usr/bin/env bun
 /**
- * One-time backfill of the video_processing_steps table for existing videos
- * (task-4 Migration & backfill). The 0012 migration renamed `complete` → `ready`
- * but could not create step rows (that needs ffprobe validation), so until this
- * runs, table-gated serving has nothing to gate on. Run it immediately after
- * deploying the migration.
+ * One-time backfill of the video_processing_steps table for existing videos.
+ * The 0012 migration renamed `complete` → `ready` but could not create step
+ * rows (that needs ffprobe validation), so until this runs, table-gated serving
+ * has nothing to gate on. Run it immediately after deploying the migration.
  *
  * It infers each step's state from on-disk presence, validating source.mp4 /
  * variants with the same isProbablyPlayable helper used at generation time.

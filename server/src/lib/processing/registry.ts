@@ -1,11 +1,9 @@
-// The post-processing step registry (task-4 Phase 0). Each step declares what
-// it is (kind/tier), when it applies (appliesTo), what it depends on (inputs),
-// how to produce it (run) and how to validate the result (validate). The
-// pipeline (./pipeline.ts) drives these in order, writing video_processing_steps
-// rows and reconciling status as it goes; reconcile + the admin UI read the
-// same metadata. Keeping it declarative is what makes per-step events,
-// skip-if-ready resumability and dependency-aware regeneration fall out
-// naturally rather than being bolted on.
+// The post-processing step registry. Each step declares what it is (kind/tier),
+// when it applies (appliesTo), what it depends on (inputs), how to produce it
+// (run) and how to validate the result (validate). The pipeline (./pipeline.ts)
+// drives these in order; reconcile and the admin readiness UI read the same
+// metadata. Keeping it declarative is what makes per-step events, skip-if-ready
+// resumability and dependency-aware regeneration fall out naturally.
 
 import { join } from "path";
 import type { ProcessingStepKind, Video } from "../../db/schema";
@@ -265,5 +263,3 @@ export function applicabilityContext(video: Video): StepContext {
     scratch: { silencesComputed: true },
   };
 }
-
-export { derivativesDir };

@@ -366,8 +366,8 @@ export type DashboardFilters = {
   needsAttention?: boolean; // failed / incomplete / stalled-processing videos
 };
 
-// A `processing` video older than this is treated as stalled (the pipeline
-// died mid-run — see task-4 Part 4) and surfaced by the "needs attention" filter.
+// A `processing` video whose updatedAt is older than this is treated as stalled
+// (the pipeline died mid-run) and surfaced by the "needs attention" filter.
 const STALLED_PROCESSING_MINUTES = 30;
 
 export async function listVideosFiltered(filters: DashboardFilters = {}): Promise<{

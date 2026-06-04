@@ -502,7 +502,7 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
   }
 
   // Validate the processed file BEFORE overwriting the good served source —
-  // never replace a known-playable file with an unvalidated one (task-4 Part 3).
+  // never replace a known-playable file with an unvalidated one.
   if (!(await isProbablyPlayable(tmpOut))) {
     await rm(tmpOut, { force: true }).catch(() => {});
     throw new Error("audio output failed playability check — keeping original source.mp4");

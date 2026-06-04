@@ -1,10 +1,10 @@
-// Infer video_processing_steps rows from what's on disk (task-4 Migration &
-// backfill). Used by the one-time backfill script for existing videos and by
-// duplicateVideo (which copies files but not step rows, so the copy would
-// otherwise have derivatives yet fail the table-gated serving check).
+// Infer video_processing_steps rows from what's on disk. Used by the one-time
+// backfill script for existing videos and by duplicateVideo (which copies files
+// but not step rows, so the copy would otherwise have derivatives yet fail the
+// table-gated serving check).
 //
-// This validates video artifacts with the same isProbablyPlayable helper used
-// at generation time, so a backfilled video serves exactly what it should:
+// Validates video artifacts with the same isProbablyPlayable helper used at
+// generation time, so a backfilled video serves exactly what it should:
 // cleaned-up videos (no HLS) keep their `source` step `ready` and simply lack
 // the segment-derived steps — they are never flagged as needing repair.
 
@@ -14,7 +14,7 @@ import { probeMetadata } from "../derivatives";
 import { getTranscript, getVideo } from "../store";
 import { isProbablyPlayable } from "./playable";
 import { applicabilityContext, PROCESSING_STEPS, type StepContext } from "./registry";
-import { markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
+import { fileSizeBytes, markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
 
 async function exists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
@@ -70,7 +70,7 @@ async function inferStep(
     case "source": {
       if (!(await exists(sourceFile))) return; // no row — nothing to serve
       const ok = await isProbablyPlayable(sourceFile, { expectedDuration: ctx.duration });
-      if (ok) await markStepReady(videoId, "source", { sizeBytes: sizeOf(sourceFile) });
+      if (ok) await markStepReady(videoId, "source", { sizeBytes: fileSizeBytes(sourceFile) });
       else await markStepFailed(videoId, "source", "backfill: source.mp4 failed playability check");
       return;
     }
@@ -95,7 +95,7 @@ async function inferStep(
       const file = join(dir, `${kind === "variant_1080" ? 1080 : 720}p.mp4`);
       if (!(await exists(file))) return;
       const ok = await isProbablyPlayable(file);
-      if (ok) await markStepReady(videoId, kind, { sizeBytes: sizeOf(file) });
+      if (ok) await markStepReady(videoId, kind, { sizeBytes: fileSizeBytes(file) });
       else await markStepFailed(videoId, kind, "backfill: variant failed playability check");
       return;
     }
@@ -122,14 +122,5 @@ async function inferStep(
     // leave no inferable on-disk trace — leave them absent ("—").
     default:
       return;
-  }
-}
-
-function sizeOf(path: string): number | null {
-  try {
-    const s = Bun.file(path).size;
-    return Number.isFinite(s) ? s : null;
-  } catch {
-    return null;
   }
 }

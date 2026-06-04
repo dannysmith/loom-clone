@@ -1,13 +1,13 @@
-// reconcile(videoId) — the single function that owns the POST-FOOTAGE status
-// transitions (task-4). It reads the video_processing_steps rows and sets
-// `processing` / `ready` / `processing_failed` accordingly, replacing the
-// scattered setVideoStatus calls the old pipeline used.
+// reconcile(videoId) — the single owner of the POST-FOOTAGE status transitions.
+// It reads the video_processing_steps rows and sets `processing` / `ready` /
+// `processing_failed` from whether the mandatory steps (source + metadata) have
+// validated.
 //
 // It does NOT own the recording↔healing boundary (decided in the /complete
-// handler by diffing the client timeline against on-disk segments) and it does
+// handler by diffing the client timeline against on-disk segments), and it does
 // NOT touch `reprocessing` (owned transiently by the editor / manual reprocess,
-// which must land an atomic set before reconciling). Call it after each
-// pipeline step (running:true) and once when a run settles (running:false).
+// which must land an atomic set before reconciling). Call it after each pipeline
+// step (running:true) and once when a run settles (running:false).
 
 import { getVideo, markVideoReady, setVideoStatus } from "../store";
 import { REQUIRED_KINDS } from "./registry";

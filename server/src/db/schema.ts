@@ -12,9 +12,9 @@ const nowIso = (): string => new Date().toISOString();
 // responsible for only writing valid values. Good enough for a single-user
 // personal tool.
 
-// Video lifecycle / orchestration states. Single-valued and behaviour-driving
-// (see task-4): the "how far through post-processing" granularity lives in the
-// derived readiness badge computed from video_processing_steps, not here.
+// Video lifecycle / orchestration states. Single-valued and behaviour-driving:
+// the "how far through post-processing" granularity lives in the derived
+// readiness badge computed from video_processing_steps, not here.
 //
 //   recording        — capturing / uploading segments (serves live HLS)
 //   healing          — segments missing, being backfilled (serves HLS)
@@ -24,9 +24,6 @@ const nowIso = (): string => new Date().toISOString();
 //   processing_failed— HLS plays, but core post-processing failed (needs attention)
 //   incomplete       — never /completed; serves whatever partial HLS exists
 //   deleting         — being permanently deleted
-//
-// Replaces the old `complete`/`failed` pair: `complete` → `ready`, and the
-// dead `failed` value is split into `incomplete` / `processing_failed`.
 export const VIDEO_STATUSES = [
   "recording",
   "healing",
@@ -95,16 +92,15 @@ export const videoSegments = sqliteTable(
   (t) => [primaryKey({ columns: [t.videoId, t.filename] })],
 );
 
-// Post-processing checklist (see task-4). One row per (videoId, kind) recording
-// the OUTCOME of each post-processing step — whether we produced or received it
-// and how that attempt went. This is a generation/receipt ledger, NOT a live
-// inventory of what's on disk: a derivative deleted by hand does not update this
-// table. Anything asking "is this servable right now?" checks the row state
-// (`ready`) AND a cheap disk `stat`, so the table stays honest without ever
-// serving a phantom file.
+// Post-processing checklist. One row per (videoId, kind) recording the OUTCOME
+// of each post-processing step — whether we produced or received it and how that
+// attempt went. This is a generation/receipt ledger, NOT a live inventory of
+// what's on disk: a derivative deleted by hand does not update this table.
+// Anything asking "is this servable right now?" checks the row state (`ready`)
+// AND a cheap disk `stat`, so the table stays honest without ever serving a
+// phantom file.
 //
-// `kind` is a stable key (see PROCESSING_STEP_KINDS). `attempts` is purely
-// informational — a manual reprocess increments it; there is no auto-retry.
+// `attempts` is an informational reprocess counter; there is no auto-retry.
 export const PROCESSING_STEP_KINDS = [
   "source",
   "audio",

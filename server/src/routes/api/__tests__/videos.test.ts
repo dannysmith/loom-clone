@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir } from "fs/promises";
 import { join } from "path";
 import { _inFlightPromise } from "../../../lib/processing/pipeline";
+import { getStep, markStepReady } from "../../../lib/processing/steps-store";
 import {
   DATA_DIR,
   getSegmentDurations,
@@ -406,6 +408,51 @@ describe("POST /:id/complete", () => {
     const body = await res.json();
     expect(body.missing.sort()).toEqual(["seg_000.m4s", "seg_001.m4s"]);
     expect((await getVideo(id))?.status).toBe("healing");
+  });
+
+  // A heal can change the HLS segments after a video already stitched source.mp4
+  // (reached `ready`). The resumable pipeline would otherwise skip the
+  // already-`ready` source step; the /complete handler forces a full re-run when
+  // the prior status was healing/incomplete so source.mp4 is re-stitched.
+  test("a heal re-complete forces the source step to re-run (not skip-if-ready)", async () => {
+    const { id } = await createVideoViaApi();
+    const dir = join(DATA_DIR, id);
+    // Stub segments on disk + a stale source.mp4 + a `ready` source step,
+    // simulating a once-`ready` video now being healed.
+    await Bun.write(join(dir, "init.mp4"), new Uint8Array([0]));
+    await Bun.write(join(dir, "seg_000.m4s"), new Uint8Array([0]));
+    await mkdir(join(dir, "derivatives"), { recursive: true });
+    await Bun.write(join(dir, "derivatives", "source.mp4"), "STALE");
+    await markStepReady(id, "source");
+    await setVideoStatus(id, "healing");
+
+    await videos.request(`/${id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ timeline: { segments: [{ filename: "seg_000.m4s" }] } }),
+    });
+    await settlePipeline(id);
+
+    // Proof the source step was re-attempted (force) rather than skipped: it
+    // moved off `ready` (it fails here because the stub segments can't stitch).
+    expect((await getStep(id, "source"))?.state).toBe("failed");
+  });
+
+  test("a redundant /complete on a processed video does NOT force a source re-run", async () => {
+    const { id } = await createVideoViaApi();
+    const dir = join(DATA_DIR, id);
+    await mkdir(join(dir, "derivatives"), { recursive: true });
+    await Bun.write(join(dir, "derivatives", "source.mp4"), "STALE");
+    await markStepReady(id, "source");
+    await markStepReady(id, "metadata");
+    await setVideoStatus(id, "ready");
+
+    // No timeline → nothing missing → footage whole, but prior status is ready.
+    await videos.request(`/${id}/complete`, { method: "POST" });
+    await settlePipeline(id);
+
+    // Source step untouched (resumable skip-if-ready), still ready.
+    expect((await getStep(id, "source"))?.state).toBe("ready");
   });
 });
 

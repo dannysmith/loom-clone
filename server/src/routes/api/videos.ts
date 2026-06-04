@@ -9,7 +9,7 @@ import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { apiError, ErrorCode } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
-import { scheduleDerivatives } from "../../lib/processing/pipeline";
+import { scheduleDerivatives, scheduleReprocess } from "../../lib/processing/pipeline";
 import { markStepReady } from "../../lib/processing/steps-store";
 import { parseSrtToPlainText } from "../../lib/srt";
 import {
@@ -268,7 +268,21 @@ videos.post("/:id/complete", async (c) => {
   await writePlaylist(id, playlist);
 
   if (footageWhole) {
-    scheduleDerivatives(id);
+    // Healing (or an `incomplete` recovery) *changed the HLS segments*, so a
+    // previously-stitched source.mp4 and its derivatives are stale. The
+    // resumable pipeline's skip-if-ready can't see that the segments changed,
+    // so force a full re-stitch + re-derive from the healed playlist. The
+    // common first-`/complete` (from `recording`) has nothing to skip, so the
+    // plain resumable schedule is correct — and keeps a redundant `/complete`
+    // on an already-processed video a near-no-op. Mac-sent steps
+    // (transcript/words/suggestions) aren't server-run, so force never touches
+    // them.
+    const segmentsChanged = existing.status === "healing" || existing.status === "incomplete";
+    if (segmentsChanged) {
+      scheduleReprocess(id, { source: "recorded", force: true });
+    } else {
+      scheduleDerivatives(id);
+    }
   }
 
   const path = `/${video.slug}`;

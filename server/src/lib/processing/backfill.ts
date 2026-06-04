@@ -13,7 +13,12 @@ import type { ProcessingStepKind } from "../../db/schema";
 import { probeMetadata } from "../derivatives";
 import { getTranscript, getVideo } from "../store";
 import { isProbablyPlayable } from "./playable";
-import { applicabilityContext, PROCESSING_STEPS, type StepContext } from "./registry";
+import {
+  applicabilityContext,
+  PROCESSING_STEPS,
+  type StepContext,
+  sourceExpectedDuration,
+} from "./registry";
 import { fileSizeBytes, markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
 
 async function exists(path: string): Promise<boolean> {
@@ -69,7 +74,9 @@ async function inferStep(
   switch (kind) {
     case "source": {
       if (!(await exists(sourceFile))) return; // no row — nothing to serve
-      const ok = await isProbablyPlayable(sourceFile, { expectedDuration: ctx.duration });
+      const ok = await isProbablyPlayable(sourceFile, {
+        expectedDuration: sourceExpectedDuration(ctx),
+      });
       if (ok) await markStepReady(videoId, "source", { sizeBytes: fileSizeBytes(sourceFile) });
       else await markStepFailed(videoId, "source", "backfill: source.mp4 failed playability check");
       return;

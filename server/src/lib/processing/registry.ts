@@ -59,6 +59,14 @@ export type ProcessingStep = {
 
 const sourcePath = (ctx: StepContext): string => join(ctx.dir, "source.mp4");
 
+// Expected duration for validating source.mp4 (the ORIGINAL recording).
+// durationSeconds describes the *edited* output for edited videos, not the
+// (longer) source.mp4 — so duration-check only unedited videos; for edited ones
+// a structural check is enough to confirm the original is still playable.
+export function sourceExpectedDuration(ctx: StepContext): number | undefined {
+  return ctx.video.lastEditedAt ? undefined : ctx.duration;
+}
+
 // Silence detection runs once per pipeline, on the RAW source BEFORE loudnorm
 // (post-loudnorm the dynamic range is compressed and silence is
 // indistinguishable from quiet speech). Both the audio step and suggested_edits
@@ -105,7 +113,8 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
       else await generateSourceFromHls(ctx.videoId, ctx.dir);
       return "ready";
     },
-    validate: (ctx) => isProbablyPlayable(sourcePath(ctx), { expectedDuration: ctx.duration }),
+    validate: (ctx) =>
+      isProbablyPlayable(sourcePath(ctx), { expectedDuration: sourceExpectedDuration(ctx) }),
     artifact: (ctx) => sourcePath(ctx),
   },
   {

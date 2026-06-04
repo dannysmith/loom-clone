@@ -10,6 +10,35 @@ import { inferStepsFromDisk } from "../backfill";
 import { getStepStates } from "../steps-store";
 
 const ffprobeAvailable = Bun.which("ffprobe") !== null;
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && ffprobeAvailable;
+
+// A real 2-second MP4 so isProbablyPlayable can actually probe it.
+async function writeRealMp4(path: string): Promise<void> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=duration=2:size=320x240:rate=15",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      path,
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  await proc.exited;
+}
 
 let env: TestEnv;
 
@@ -56,6 +85,48 @@ describe("inferStepsFromDisk", () => {
 
       await inferStepsFromDisk(video.id);
 
+      expect((await getStepStates(video.id)).get("source")?.state).toBe("failed");
+    },
+  );
+
+  // For edited videos durationSeconds is the EDITED length, but source.mp4 is
+  // the longer original. The duration tolerance check must be skipped so the
+  // original isn't wrongly marked failed.
+  test.skipIf(!ffmpegAvailable)(
+    "an edited video's source.mp4 is validated structurally, not against the edited duration",
+    async () => {
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeRealMp4(join(dir, "source.mp4")); // ~2s
+
+      // durationSeconds reflects a trimmed edit (well outside the 2s tolerance);
+      // lastEditedAt marks it as edited.
+      await getDb()
+        .update(videos)
+        .set({ durationSeconds: 10, lastEditedAt: new Date().toISOString(), height: 240 })
+        .where(eq(videos.id, video.id));
+
+      await inferStepsFromDisk(video.id);
+      expect((await getStepStates(video.id)).get("source")?.state).toBe("ready");
+    },
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "an unedited video's source.mp4 IS duration-checked (mismatch → failed)",
+    async () => {
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeRealMp4(join(dir, "source.mp4")); // ~2s
+
+      // Not edited, but durationSeconds is wildly wrong → the check should fail.
+      await getDb()
+        .update(videos)
+        .set({ durationSeconds: 10, height: 240 })
+        .where(eq(videos.id, video.id));
+
+      await inferStepsFromDisk(video.id);
       expect((await getStepStates(video.id)).get("source")?.state).toBe("failed");
     },
   );

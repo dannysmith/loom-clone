@@ -18,12 +18,12 @@ Browser (React editor)              Server (Hono + Bun)
   │  PUT /:id/editor/edl               │  save edit decisions (no processing)
   │  POST /:id/editor/commit           │  trigger ffmpeg processing pipeline
   │                                    │
-  │                                    │  → sets status to "processing"
-  │                                    │  → runs ffmpeg trim/cut/crossfade
-  │                                    │  → regenerates variants, storyboard, captions
-  │                                    │  → updates DB metadata
-  │                                    │  → purges CDN cache
-  │                                    │  → sets status back to "complete"
+  │                                    │  → sets status to "reprocessing"
+  │                                    │  → stages edited output + variants +
+  │                                    │    storyboard + captions, validates,
+  │                                    │    then swaps the set in atomically
+  │                                    │  → updates DB metadata, purges CDN
+  │                                    │  → sets status back to "ready"
 ```
 
 ## Why it's a separate React app
@@ -163,24 +163,23 @@ Small amber flag markers render on the storyboard thumbnail strip at each chapte
 
 ## Processing pipeline
 
-When the user clicks Commit, the server-side edit pipeline (`lib/edit-pipeline.ts`) runs:
+When the user clicks Commit, the server-side edit pipeline (`lib/edit-pipeline.ts`) runs. It regenerates a **multi-file set** (the edited output + variants + storyboard + captions), so it builds the whole set in a staging directory and swaps it in atomically — this is why edits get their own `reprocessing` status (see [Status model](streaming-and-healing.md#status-model)):
 
-1. Sets video status to `"processing"` (prevents concurrent edits)
+1. Sets video status to `"reprocessing"` (prevents concurrent edits)
 2. Reads `edits.json` and probes `source.mp4`
 3. Computes kept segments (the inverse of the cuts/trims)
-4. Runs ffmpeg to produce `{height}p.mp4` (e.g. `1080p.mp4`) from `source.mp4`
-   - Full re-encode with `-preset fast -crf 18`
-   - 30ms audio crossfade at cut join points to prevent clicks
-   - For simple trims: `-ss`/`-to` args
-   - For cuts: `trim`/`atrim` + `concat` filter_complex
-5. Regenerates downscaled variants (720p, etc.) from the edited output
-6. Regenerates viewer-facing storyboard from the edited output
-7. Derives edited captions from `words.json` by dropping words in removed regions and shifting timestamps
-8. Updates DB: `durationSeconds`, `fileBytes`, `lastEditedAt`, `status` → `"complete"`
-9. Purges CDN cache for the slug + global feeds
-10. Logs `edits_committed` event
+4. Builds the full regenerated set into `derivatives/.edit-staging/` (nothing in `derivatives/` is touched yet):
+   - The edited `{height}p.mp4` (e.g. `1080p.mp4`) from `source.mp4` — full re-encode with `-preset fast -crf 18`, `-fps_mode passthrough`, a 30ms audio crossfade at cut joins; `-ss`/`-to` for simple trims, `trim`/`atrim` + `concat` for cuts
+   - Downscaled variants (720p, etc.) cut from the staged edited output
+   - Viewer-facing storyboard (≥60s) from the staged edited output
+   - Edited captions, derived from the unchanged `words.json` by dropping removed words and shifting timestamps
+5. Validates every staged video file with `isProbablyPlayable`
+6. **Swaps** the validated set into `derivatives/` in one fast pass of per-file renames
+7. Updates DB: edited transcript, `durationSeconds`, `fileBytes`, `lastEditedAt`, `status` → `"ready"`
+8. Purges CDN cache for the slug
+9. Logs `edits_committed` event
 
-If the pipeline fails at any point, status is restored to `"complete"` so the video isn't stuck.
+If anything fails before the swap, the staging dir is discarded and status is restored to `"ready"` — the previous outputs are left byte-for-byte untouched, so an interrupted edit never leaves a new `{height}p.mp4` beside a stale variant or half-rewritten VTT. Editor-specific files (`peaks.json`, `editor-storyboard.*`) are NOT regenerated — they always reflect `source.mp4`.
 
 ## File layout after editing
 

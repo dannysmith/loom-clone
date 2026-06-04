@@ -115,6 +115,8 @@ For each video being healed:
 
 `reconcile(videoId)` (`src/lib/processing/reconcile.ts`) owns the post-footage transitions: it reads the step rows and sets `processing` / `ready` / `processing_failed` from whether the **mandatory** steps (`source` + `metadata`) have validated. `ready` is reached the moment those two validate — before the slower audio/variant steps finish. `completedAt` marks the first time a video reached `ready`.
 
+The admin video page renders a **readiness checklist** (✅/❌/⏳/—) and a derived badge (`ready · enriching (N left)` / `awaiting transcript` / `complete ✓`) from `computeReadiness()`, plus a **"Re-run post-processing"** button (`POST /admin/videos/:id/reprocess`) that re-fires the resumable pipeline. A daily sweep (`markStalledRecordingsIncomplete`) marks `recording` videos with no segment activity for >4h as `incomplete`, and the dashboard **"Needs attention"** filter (`?attention=1`) surfaces `processing_failed` / `incomplete` / stalled-`processing` videos.
+
 ## Derivatives
 
 Once footage is whole the video enters `processing` and the server runs a post-processing pipeline (`src/lib/processing/pipeline.ts`) that generates derivative files in `data/<id>/derivatives/`. Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.

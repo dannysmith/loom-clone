@@ -133,6 +133,8 @@ describe("GET /feed.xml", () => {
     await updateVideo(v1.id, { visibility: "public", title: "First" });
     await completeVideo(v1.id);
 
+    // Guarantee a distinct createdAt (the feed orders by ms-precision createdAt).
+    await new Promise((r) => setTimeout(r, 3));
     const v2 = await createVideo();
     await updateVideo(v2.id, { visibility: "public", title: "Second" });
     await completeVideo(v2.id);

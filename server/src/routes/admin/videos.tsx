@@ -50,9 +50,10 @@ const videoRoutes = new Hono<AdminEnv>();
 
 // --- Video detail ---
 
-function parseTab(q: string | undefined): "events" | "files" | "transcript" {
+function parseTab(q: string | undefined): "events" | "files" | "transcript" | "processing" {
   if (q === "files") return "files";
   if (q === "transcript") return "transcript";
+  if (q === "processing") return "processing";
   return "events";
 }
 
@@ -243,10 +244,11 @@ videoRoutes.get("/:id/partials/tabs", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   const activeTab = parseTab(c.req.query("tab"));
-  const [events, files, transcript] = await Promise.all([
+  const [events, files, transcript, readiness] = await Promise.all([
     listEvents(result.id),
     listVideoFiles(result.id),
     getTranscript(result.id),
+    computeReadiness(result),
   ]);
   return c.html(
     <VideoTabsSection
@@ -254,6 +256,7 @@ videoRoutes.get("/:id/partials/tabs", async (c) => {
       events={events}
       files={files}
       transcript={transcript}
+      readiness={readiness}
       activeTab={activeTab}
     />,
   );
@@ -518,7 +521,7 @@ videoRoutes.post("/:id/reprocess", async (c) => {
   await logEvent(result.id, "reprocess_requested", force ? { rebuild: "hls" } : undefined);
   scheduleReprocess(result.id, { source: result.source, force });
 
-  return c.redirect(`/admin/videos/${result.id}`);
+  return c.redirect(`/admin/videos/${result.id}?tab=processing`);
 });
 
 // Regenerate a single derivative from the existing source.mp4 (dependency-aware:
@@ -543,7 +546,7 @@ videoRoutes.post("/:id/reprocess/:kind", async (c) => {
   await logEvent(result.id, "reprocess_requested", { only: kind });
   scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
 
-  return c.redirect(`/admin/videos/${result.id}`);
+  return c.redirect(`/admin/videos/${result.id}?tab=processing`);
 });
 
 export default videoRoutes;

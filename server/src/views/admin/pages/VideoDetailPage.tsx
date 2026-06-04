@@ -17,7 +17,7 @@ import {
   IconRuler,
   IconUploadCloud,
 } from "../components/Icons";
-import { ReadinessChecklist } from "../partials/ReadinessChecklist";
+import { ReadinessPanel } from "../partials/ReadinessPanel";
 import { ThumbnailPicker } from "../partials/ThumbnailPicker";
 import { VideoActions } from "../partials/VideoActions";
 import {
@@ -37,7 +37,7 @@ type Props = {
   files: FileEntry[];
   thumbnailCandidates: ThumbnailCandidate[];
   transcript: VideoTranscript | undefined;
-  activeTab: "events" | "files" | "transcript";
+  activeTab: "events" | "files" | "transcript" | "processing";
   hasChapters: boolean;
   readiness: Readiness;
 };
@@ -197,18 +197,16 @@ export function VideoDetailPage({
         </div>
       </div>
 
-      {/* --- Post-processing checklist --- */}
-      <ReadinessChecklist video={video} readiness={readiness} />
-
       {/* --- Thumbnail picker --- */}
       <ThumbnailPicker video={video} candidates={thumbnailCandidates} />
 
-      {/* --- Tabs --- */}
+      {/* --- Tabs (events / files / transcript / processing) --- */}
       <VideoTabsSection
         video={video}
         events={events}
         files={files}
         transcript={transcript}
+        readiness={readiness}
         activeTab={activeTab}
       />
 
@@ -224,14 +222,29 @@ export function VideoTabsSection({
   events,
   files,
   transcript,
+  readiness,
   activeTab,
 }: {
   video: Video;
   events: VideoEvent[];
   files: FileEntry[];
   transcript: VideoTranscript | undefined;
-  activeTab: "events" | "files" | "transcript";
+  readiness: Readiness;
+  activeTab: "events" | "files" | "transcript" | "processing";
 }) {
+  const tabLink = (tab: string, label: string) => (
+    <a
+      href={`/admin/videos/${video.id}?tab=${tab}`}
+      hx-get={`/admin/videos/${video.id}/partials/tabs?tab=${tab}`}
+      hx-target="#video-tabs-section"
+      hx-swap="outerHTML"
+      hx-push-url="false"
+      class={`settings-tab ${activeTab === tab ? "active" : ""}`}
+    >
+      {label}
+    </a>
+  );
+
   return (
     <div
       id="video-tabs-section"
@@ -240,44 +253,24 @@ export function VideoTabsSection({
       hx-swap="outerHTML"
     >
       <div class="video-tabs">
-        <a
-          href={`/admin/videos/${video.id}?tab=events`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=events`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "events" ? "active" : ""}`}
-        >
-          Events ({events.length})
-        </a>
-        <a
-          href={`/admin/videos/${video.id}?tab=files`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=files`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "files" ? "active" : ""}`}
-        >
-          Files ({files.filter((f) => !f.isDirectory).length} &middot;{" "}
-          {formatFileSize(files.reduce((sum, f) => sum + (f.isDirectory ? 0 : f.size), 0))})
-        </a>
-        <a
-          href={`/admin/videos/${video.id}?tab=transcript`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=transcript`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "transcript" ? "active" : ""}`}
-        >
-          Transcript{transcript ? ` (${transcript.wordCount} words)` : ""}
-        </a>
+        {tabLink("processing", "Processing")}
+        {tabLink("events", `Events (${events.length})`)}
+        {tabLink(
+          "files",
+          `Files (${files.filter((f) => !f.isDirectory).length} · ${formatFileSize(
+            files.reduce((sum, f) => sum + (f.isDirectory ? 0 : f.size), 0),
+          )})`,
+        )}
+        {tabLink("transcript", `Transcript${transcript ? ` (${transcript.wordCount} words)` : ""}`)}
       </div>
-      {activeTab === "events" ? (
-        <EventLog events={events} />
+      {activeTab === "processing" ? (
+        <ReadinessPanel video={video} readiness={readiness} />
       ) : activeTab === "transcript" ? (
         <TranscriptView transcript={transcript} />
-      ) : (
+      ) : activeTab === "files" ? (
         <FileBrowser files={files} videoId={video.id} />
+      ) : (
+        <EventLog events={events} />
       )}
     </div>
   );

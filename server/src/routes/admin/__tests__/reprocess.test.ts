@@ -53,7 +53,8 @@ describe("POST /admin/videos/:id/reprocess", () => {
 
     const res = await app.request(`/admin/videos/${video.id}/reprocess`, POST);
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(`/admin/videos/${video.id}`);
+    // Redirects back to the Processing tab so the user sees the result.
+    expect(res.headers.get("location")).toBe(`/admin/videos/${video.id}?tab=processing`);
 
     const events = await listEvents(video.id);
     expect(events.map((e) => e.type)).toContain("reprocess_requested");
@@ -147,10 +148,11 @@ describe("video detail readiness section", () => {
     await Bun.write(join(DATA_DIR, video.id, "derivatives", "thumbnail.jpg"), "stub");
     await markStepReady(video.id, "thumbnail");
 
-    const res = await app.request(`/admin/videos/${video.id}`);
+    // The Processing tab content renders only under ?tab=processing.
+    const res = await app.request(`/admin/videos/${video.id}?tab=processing`);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("readiness-section");
+    expect(html).toContain("readiness-panel");
     expect(html).toContain("Source video");
     expect(html).toContain("Re-run post-processing");
     // Per-artifact regenerate button appears on the settled thumbnail row.
@@ -162,8 +164,18 @@ describe("video detail readiness section", () => {
     const video = await createVideo();
     await completeVideo(video.id); // ready, but no files / step rows
 
-    const html = await (await app.request(`/admin/videos/${video.id}`)).text();
+    const html = await (await app.request(`/admin/videos/${video.id}?tab=processing`)).text();
     expect(html).toContain("readiness-dataloss");
     expect(html).not.toContain("Re-run post-processing");
+  });
+
+  test("the Processing tab is reachable from the default page", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    await completeVideo(video.id);
+
+    // The tab nav link is present on the default (events) page.
+    const html = await (await app.request(`/admin/videos/${video.id}`)).text();
+    expect(html).toContain(`/admin/videos/${video.id}/partials/tabs?tab=processing`);
   });
 });

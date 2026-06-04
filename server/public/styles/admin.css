@@ -1284,82 +1284,64 @@ select.input {
 	margin-block-end: var(--space-5);
 }
 
-/* --- Post-processing readiness checklist --- */
+/* --- Post-processing tab (readiness table + reprocess controls) --- */
 .readiness {
-	margin-block-end: var(--space-5);
-	padding: var(--space-4);
-	border: 1px solid var(--color-border);
-	border-radius: var(--radius-md);
-	background-color: var(--color-surface);
+	padding-block-start: var(--space-3);
 }
 
-.readiness-header {
-	display: flex;
-	align-items: center;
-	gap: var(--space-3);
-	margin-block-end: var(--space-3);
-}
-
-.readiness-header h3 {
-	margin: 0;
-}
-
-.readiness-list {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-	gap: var(--space-2) var(--space-4);
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.readiness-item {
-	display: flex;
-	align-items: center;
-	gap: var(--space-2);
-	font-size: var(--font-size-sm);
-}
-
-/* Not-applicable rows are muted — present for inventory, not a problem. */
-.readiness-item--na {
-	color: var(--color-fg-muted);
-}
-
-.readiness-glyph {
-	flex: none;
-	width: 1.2em;
-	text-align: center;
-}
-
-.readiness-subhead {
-	margin-block: var(--space-4) var(--space-2);
-	font-size: var(--font-size-xs);
-	font-weight: var(--font-weight-medium);
-	color: var(--color-fg-muted);
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-}
-
-/* Per-artifact regenerate button — pushed to the row's trailing edge. */
-.readiness-regen {
-	margin-inline-start: auto;
-}
-
+/* Reprocess buttons / data-loss notice, above the table. */
 .readiness-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--space-2);
-	margin-block-start: var(--space-4);
+	margin-block-end: var(--space-4);
 }
 
 .readiness-dataloss {
-	margin: 0;
+	margin-block: 0 var(--space-4);
 	color: var(--color-restricted);
 	font-size: var(--font-size-sm);
 }
 
 .readiness-dataloss code {
 	font-size: 0.9em;
+}
+
+.readiness-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--font-size-sm);
+}
+
+.readiness-row {
+	border-block-end: 1px solid var(--color-border);
+}
+
+.readiness-row:last-child {
+	border-block-end: none;
+}
+
+/* Not-applicable rows are muted — present for inventory, not a problem. */
+.readiness-row--na {
+	color: var(--color-fg-muted);
+}
+
+.readiness-cell-glyph {
+	width: 1.5em;
+	padding: var(--space-2) var(--space-2) var(--space-2) 0;
+	text-align: center;
+}
+
+.readiness-cell-label {
+	padding: var(--space-2) 0;
+	width: 100%;
+}
+
+/* Trailing regenerate-button cell. */
+.readiness-cell-action {
+	padding: var(--space-1) 0;
+	text-align: end;
+	white-space: nowrap;
 }
 
 .video-meta-grid {

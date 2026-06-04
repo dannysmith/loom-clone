@@ -253,8 +253,8 @@ export function VideoTabsSection({
       hx-swap="outerHTML"
     >
       <div class="video-tabs">
-        {tabLink("processing", "Processing")}
         {tabLink("events", `Events (${events.length})`)}
+        {tabLink("processing", "Processing")}
         {tabLink(
           "files",
           `Files (${files.filter((f) => !f.isDirectory).length} · ${formatFileSize(

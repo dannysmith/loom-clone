@@ -15,6 +15,7 @@ import {
   generateVariant,
   processAudio,
   refreshFileBytes,
+  VARIANTS,
 } from "../derivatives";
 import { generatePeaks } from "../peaks";
 import { generateStoryboard } from "../storyboard";
@@ -58,6 +59,24 @@ export type ProcessingStep = {
 };
 
 const sourcePath = (ctx: StepContext): string => join(ctx.dir, "source.mp4");
+
+// One downscaled-variant step (e.g. 720p.mp4), built from the canonical
+// VARIANTS entry so the height threshold, filename and kind never drift.
+function variantStep(kind: ProcessingStepKind, height: number): ProcessingStep {
+  const file = `${height}p.mp4`;
+  return {
+    kind,
+    tier: "expected",
+    inputs: ["source"],
+    appliesTo: (ctx) => ctx.height > height,
+    run: async (ctx) => {
+      await generateVariant(ctx.dir, height, sourcePath(ctx));
+      return "ready";
+    },
+    validate: (ctx) => isProbablyPlayable(join(ctx.dir, file)),
+    artifact: (ctx) => join(ctx.dir, file),
+  };
+}
 
 // Expected duration for validating source.mp4 (the ORIGINAL recording).
 // durationSeconds describes the *edited* output for edited videos, not the
@@ -153,30 +172,9 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     validate: (ctx) => Bun.file(join(ctx.dir, "thumbnail.jpg")).exists(),
     artifact: (ctx) => join(ctx.dir, "thumbnail.jpg"),
   },
-  {
-    kind: "variant_1080",
-    tier: "expected",
-    inputs: ["source"],
-    appliesTo: (ctx) => ctx.height > 1080,
-    run: async (ctx) => {
-      await generateVariant(ctx.dir, 1080, sourcePath(ctx));
-      return "ready";
-    },
-    validate: (ctx) => isProbablyPlayable(join(ctx.dir, "1080p.mp4")),
-    artifact: (ctx) => join(ctx.dir, "1080p.mp4"),
-  },
-  {
-    kind: "variant_720",
-    tier: "expected",
-    inputs: ["source"],
-    appliesTo: (ctx) => ctx.height > 720,
-    run: async (ctx) => {
-      await generateVariant(ctx.dir, 720, sourcePath(ctx));
-      return "ready";
-    },
-    validate: (ctx) => isProbablyPlayable(join(ctx.dir, "720p.mp4")),
-    artifact: (ctx) => join(ctx.dir, "720p.mp4"),
-  },
+  // Downscaled variants, generated from the canonical VARIANTS list (highest
+  // first) so heights/kinds stay in sync with derivatives.ts and resolve.ts.
+  ...VARIANTS.map((v) => variantStep(v.kind, v.height)),
   {
     kind: "storyboard",
     tier: "expected",

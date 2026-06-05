@@ -1,17 +1,12 @@
 import { join } from "path";
-import type { ProcessingStepKind } from "../../db/schema";
 import { chaptersExist } from "../../lib/chapters";
+import { VARIANTS } from "../../lib/derivatives";
 import { getStepStates } from "../../lib/processing/steps-store";
 import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
 import { activeRawFilename, urlsForVideo, type VideoUrls } from "../../lib/url";
 
-// Variant heights we ever generate, in highest-first order, paired with their
-// step kind. Matches the VARIANTS list in lib/derivatives.ts. Order here is the
-// order the player sees them in <source> children, which biases its initial pick.
-const VARIANTS: ReadonlyArray<{ height: number; kind: ProcessingStepKind }> = [
-  { height: 1080, kind: "variant_1080" },
-  { height: 720, kind: "variant_720" },
-];
+// VARIANTS (from lib/derivatives) is highest-first, which is the order the
+// player sees them in <source> children — biasing its initial pick.
 
 // Decides whether to serve MP4 or fall back to live HLS — and which variants
 // to offer. Gated on the video_processing_steps table (state `ready`) AND the
@@ -35,20 +30,23 @@ async function derivativeFlags(video: Video): Promise<{
   // serves HLS, instead of an MP4 with no dimensions.
   const mandatoryReady =
     steps.get("source")?.state === "ready" && steps.get("metadata")?.state === "ready";
-  const activePresent = await Bun.file(join(dir, activeRawFilename(video))).exists();
+
+  // This runs on every viewer request, so fan the independent file-existence
+  // checks out in parallel rather than awaiting each in turn. Variant presence
+  // is only checked for variants whose step row is already `ready`.
+  const readyVariants = VARIANTS.filter((v) => steps.get(v.kind)?.state === "ready");
+  const [activePresent, variantPresence, hasThumb, hasCaptionsSrt, hasCaptionsVtt] =
+    await Promise.all([
+      Bun.file(join(dir, activeRawFilename(video))).exists(),
+      Promise.all(readyVariants.map((v) => Bun.file(join(dir, `${v.height}p.mp4`)).exists())),
+      Bun.file(join(dir, "thumbnail.jpg")).exists(),
+      Bun.file(join(dir, "captions.srt")).exists(),
+      Bun.file(join(dir, "captions.vtt")).exists(),
+    ]);
+
   const hasSource = mandatoryReady && activePresent;
+  const variantHeights = readyVariants.filter((_, i) => variantPresence[i]).map((v) => v.height);
 
-  const variantHeights: number[] = [];
-  for (const { height, kind } of VARIANTS) {
-    if (steps.get(kind)?.state !== "ready") continue;
-    if (await Bun.file(join(dir, `${height}p.mp4`)).exists()) variantHeights.push(height);
-  }
-
-  const [hasThumb, hasCaptionsSrt, hasCaptionsVtt] = await Promise.all([
-    Bun.file(join(dir, "thumbnail.jpg")).exists(),
-    Bun.file(join(dir, "captions.srt")).exists(),
-    Bun.file(join(dir, "captions.vtt")).exists(),
-  ]);
   return { hasSource, variantHeights, hasThumb, hasCaptions: hasCaptionsSrt || hasCaptionsVtt };
 }
 

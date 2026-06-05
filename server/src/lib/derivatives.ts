@@ -2,8 +2,9 @@ import { eq } from "drizzle-orm";
 import { rename, rm } from "fs/promises";
 import { join, resolve } from "path";
 import { getDb } from "../db/client";
-import { videos } from "../db/schema";
+import { type ProcessingStepKind, videos } from "../db/schema";
 import { spawnFfmpeg } from "./ffmpeg";
+import { hasAudioStream, probeJson } from "./ffprobe";
 import { isProbablyPlayable } from "./processing/playable";
 import { DATA_DIR } from "./store";
 import type { Silence } from "./suggested-edits";
@@ -116,22 +117,16 @@ export async function generateSourceFromUpload(videoId: string, dir: string): Pr
 // Probe duration of a video file using ffprobe. Returns seconds or null
 // if ffprobe fails or isn't available.
 export async function probeDuration(filePath: string): Promise<number | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
-
-  try {
-    const proc = Bun.spawn(
-      [ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", filePath],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-    const data = JSON.parse(stdout) as { format?: { duration?: string } };
-    const d = Number.parseFloat(data.format?.duration ?? "");
-    return Number.isFinite(d) ? d : null;
-  } catch {
-    return null;
-  }
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_format",
+    filePath,
+  ])) as { format?: { duration?: string } } | null;
+  const d = Number.parseFloat(data?.format?.duration ?? "");
+  return Number.isFinite(d) ? d : null;
 }
 
 // Full video metadata from ffprobe: dimensions and file size.
@@ -142,43 +137,29 @@ export type ProbeMetadata = {
 };
 
 export async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_format",
+    "-show_streams",
+    "-select_streams",
+    "v:0",
+    filePath,
+  ])) as {
+    streams?: Array<{ width?: number; height?: number }>;
+    format?: { size?: string };
+  } | null;
+  if (!data) return null;
 
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        "-select_streams",
-        "v:0",
-        filePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
+  const stream = data.streams?.[0];
+  const w = stream?.width;
+  const h = stream?.height;
+  const size = Number.parseInt(data.format?.size ?? "", 10);
 
-    const data = JSON.parse(stdout) as {
-      streams?: Array<{ width?: number; height?: number }>;
-      format?: { size?: string };
-    };
-
-    const stream = data.streams?.[0];
-    const w = stream?.width;
-    const h = stream?.height;
-    const size = Number.parseInt(data.format?.size ?? "", 10);
-
-    if (!w || !h || !Number.isFinite(size)) return null;
-    return { width: w, height: h, fileBytes: size };
-  } catch {
-    return null;
-  }
+  if (!w || !h || !Number.isFinite(size)) return null;
+  return { width: w, height: h, fileBytes: size };
 }
 
 // Read recording.json sidecar for camera/mic names and recording health.
@@ -426,33 +407,6 @@ async function checkAudioModel(): Promise<boolean> {
   return true;
 }
 
-// Check whether a file contains an audio stream.
-async function hasAudioStream(filePath: string): Promise<boolean> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return false;
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=codec_type",
-        "-of",
-        "csv=p=0",
-        filePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return exitCode === 0 && stdout.trim().includes("audio");
-  } catch {
-    return false;
-  }
-}
-
 // Two-pass audio processing on an existing source.mp4. Replaces it in-place
 // with the processed version (video copied, audio re-encoded). The
 // `silences` argument feeds the afftdn noise-floor profile; if omitted the
@@ -542,11 +496,15 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
 
 // --- Video variant generation ---
 
-// Variant definitions: target height and CRF quality.
-const VARIANTS = [
-  { height: 1080, crf: 20 },
-  { height: 720, crf: 23 },
-] as const;
+// Canonical downscaled-variant definitions, highest-first: the step kind, the
+// target height, and the CRF quality. Single source of truth — the processing
+// registry (which steps apply / how they run) and the viewer's <source> list
+// (resolve.ts) both key off this, so a rendition can't be added to one place
+// and forgotten in another.
+export const VARIANTS: ReadonlyArray<{ kind: ProcessingStepKind; height: number; crf: number }> = [
+  { kind: "variant_1080", height: 1080, crf: 20 },
+  { kind: "variant_720", height: 720, crf: 23 },
+];
 
 // Determine which variants to generate based on source height.
 // ≤720p: nothing. 721–1080p: 720p only. ≥1081p: 1080p and 720p.

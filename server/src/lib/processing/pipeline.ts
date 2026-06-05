@@ -17,7 +17,13 @@ import { logEvent } from "../events";
 import { DATA_DIR, getVideo } from "../store";
 import { generateEditorStoryboard } from "../storyboard";
 import { reconcile } from "./reconcile";
-import { type ProcessingStep, RUNNABLE_STEPS, type StepContext, stepByKind } from "./registry";
+import {
+  type ProcessingStep,
+  REQUIRED_KINDS,
+  RUNNABLE_STEPS,
+  type StepContext,
+  stepByKind,
+} from "./registry";
 import {
   fileSizeBytes,
   getStep,
@@ -181,15 +187,21 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     if (!step.appliesTo(ctx)) continue;
     if (!(await inputsSatisfied(videoId, step, ctx))) continue;
 
+    // reconcile only reads the mandatory (source/metadata) step states, so a
+    // reconcile after a non-mandatory step (audio/variant/…) can't change the
+    // status — run it only after the mandatory ones (reaching `ready` the moment
+    // they validate) plus the final settle below.
+    const reconcileNow = REQUIRED_KINDS.includes(step.kind);
+
     // Skip-if-ready resumability.
     if (!ctx.force && (await isAlreadyDone(videoId, step, ctx))) {
       produced.push(`${step.kind}*`);
-      await reconcile(videoId, { running: true, hold: forcedFullRebuild });
+      if (reconcileNow) await reconcile(videoId, { running: true, hold: forcedFullRebuild });
       continue;
     }
 
     await runStep(videoId, step, ctx, produced);
-    await reconcile(videoId, { running: true, hold: forcedFullRebuild });
+    if (reconcileNow) await reconcile(videoId, { running: true, hold: forcedFullRebuild });
   }
 
   // Single-artifact regenerate (`only`) touches just that step — skip the

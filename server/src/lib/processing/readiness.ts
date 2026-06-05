@@ -4,7 +4,7 @@
 // stored — so it can't drift from the ledger.
 
 import { join } from "path";
-import type { ProcessingStepKind, Video } from "../../db/schema";
+import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
 import { derivativesDir } from "../derivatives";
 import { DATA_DIR } from "../store";
 import { RECONCILE_OWNED } from "./reconcile";
@@ -46,12 +46,17 @@ export type Readiness = {
   reprocess: Reprocessability;
 };
 
-export async function reprocessability(video: Video): Promise<Reprocessability> {
+export async function reprocessability(
+  video: Video,
+  // Reuse an already-loaded step map (computeReadiness passes its own) to avoid
+  // a second full scan of video_processing_steps for the same video.
+  preloadedSteps?: Map<ProcessingStepKind, VideoProcessingStep>,
+): Promise<Reprocessability> {
   const dir = derivativesDir(video.id);
   const videoDir = join(DATA_DIR, video.id);
 
   const [steps, sourcePresent, hlsPresent, uploadPresent] = await Promise.all([
-    getStepStates(video.id),
+    preloadedSteps ?? getStepStates(video.id),
     Bun.file(join(dir, "source.mp4")).exists(),
     Bun.file(join(videoDir, "stream.m3u8")).exists(),
     Bun.file(join(videoDir, "upload.mp4")).exists(),
@@ -101,7 +106,21 @@ function couldStillProduce(status: Video["status"], tier: StepTier): boolean {
 
 export async function computeReadiness(video: Video): Promise<Readiness> {
   const ctx = applicabilityContext(video);
-  const [steps, reprocess] = await Promise.all([getStepStates(video.id), reprocessability(video)]);
+  // Load the step map once and share it with reprocessability (was fetched
+  // twice).
+  const steps = await getStepStates(video.id);
+  const reprocess = await reprocessability(video, steps);
+
+  // Resolve the on-disk presence checks for `ready` file-producing rows in
+  // parallel up front, rather than awaiting each inside the loop.
+  const present = new Map<ProcessingStepKind, boolean>();
+  await Promise.all(
+    PROCESSING_STEPS.filter(
+      (s) => s.appliesTo(ctx) && steps.get(s.kind)?.state === "ready" && s.artifact,
+    ).map(async (s) => {
+      present.set(s.kind, await Bun.file(s.artifact!(ctx)).exists());
+    }),
+  );
 
   const items: ReadinessItem[] = [];
   for (const step of PROCESSING_STEPS) {
@@ -121,8 +140,7 @@ export async function computeReadiness(video: Video): Promise<Readiness> {
       icon = "ready"; // terminal-good: deliberately not produced, nothing missing
     } else if (row?.state === "ready") {
       // Ready in the ledger, but only servable if the file is still on disk.
-      const path = step.artifact?.(ctx);
-      icon = !path || (await Bun.file(path).exists()) ? "ready" : "missing";
+      icon = !step.artifact || present.get(step.kind) ? "ready" : "missing";
     } else if (row?.state === "failed") {
       icon = "missing";
     } else if (step.tier === "external") {

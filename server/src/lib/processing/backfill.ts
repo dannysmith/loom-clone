@@ -11,6 +11,7 @@
 import { join } from "path";
 import type { ProcessingStepKind } from "../../db/schema";
 import { probeMetadata } from "../derivatives";
+import { hasAudioStream } from "../ffprobe";
 import { getTranscript, getVideo } from "../store";
 import { isProbablyPlayable } from "./playable";
 import {
@@ -23,32 +24,6 @@ import { fileSizeBytes, markStepFailed, markStepReady, markStepSkipped } from ".
 
 async function exists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
-}
-
-async function hasAudio(path: string): Promise<boolean> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return false;
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-select_streams",
-        "a",
-        "-show_entries",
-        "stream=index",
-        "-of",
-        "csv=p=0",
-        path,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return code === 0 && out.trim().length > 0;
-  } catch {
-    return false;
-  }
 }
 
 // Infer and persist step rows for one video from on-disk presence. Idempotent.
@@ -98,7 +73,7 @@ async function inferStep(
       // reprocess then skips audio; a force from-HLS rebuild is the way to
       // actually (re-)loudnorm such a video.
       if (!(await exists(sourceFile))) return;
-      if (await hasAudio(sourceFile)) await markStepReady(videoId, "audio");
+      if (await hasAudioStream(sourceFile)) await markStepReady(videoId, "audio");
       else await markStepSkipped(videoId, "audio");
       return;
     }

@@ -1,5 +1,6 @@
 import type { Tag, Video } from "../../../db/schema";
 import type { DashboardFilters } from "../../../lib/store";
+import { serializeFilters } from "../../../routes/admin/helpers";
 import { AdminLayout } from "../../layouts/AdminLayout";
 import {
   IconArrowDown,
@@ -296,20 +297,10 @@ function updateTagFilter() {
   );
 }
 
-// Preserve every active filter when switching view (keep in sync with
-// filtersToParams / parseFilters).
+// Preserve every active filter when switching view. Uses the one shared
+// serializer so it can't drift from filtersToParams / parseFilters.
 function viewToggleUrl(filters: DashboardFilters, view: string): string {
-  const params = new URLSearchParams();
-  if (filters.search) params.set("q", filters.search);
-  if (filters.visibility) params.set("visibility", filters.visibility);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.needsAttention) params.set("attention", "1");
-  if (filters.tagIds?.length) params.set("tag", filters.tagIds.join(","));
-  if (filters.dateFrom) params.set("from", filters.dateFrom);
-  if (filters.dateTo) params.set("to", filters.dateTo);
-  if (filters.durationMin != null) params.set("dmin", String(filters.durationMin));
-  if (filters.durationMax != null) params.set("dmax", String(filters.durationMax));
-  if (filters.sort && filters.sort !== "date-desc") params.set("sort", filters.sort);
+  const params = serializeFilters(filters);
   params.set("view", view);
   const qs = params.toString();
   return `/admin${qs ? `?${qs}` : ""}`;

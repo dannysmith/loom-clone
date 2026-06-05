@@ -8,6 +8,8 @@
 // declared ≠ avg frame rate is normal for honest VFR content, so a header-only
 // heuristic there would false-positive on every healthy recording.
 
+import { probeJson } from "../ffprobe";
+
 export type PlayableOpts = {
   // When known, the probed duration must land within tolerance of this.
   // Recordings: the segment-duration sum. Uploads: probeDuration at intake.
@@ -31,31 +33,26 @@ type ProbeShape = {
 // out-of-tolerance duration. ffprobe missing → returns false (we can't
 // validate, so don't claim it's good).
 export async function isProbablyPlayable(path: string, opts: PlayableOpts = {}): Promise<boolean> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return false;
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_format",
+    "-show_streams",
+    path,
+  ])) as ProbeShape | null;
+  if (!data) return false; // ffprobe missing / failed / unparseable → can't claim it's good
 
-  try {
-    const proc = Bun.spawn(
-      [ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return false;
+  const hasVideo = (data.streams ?? []).some((s) => s.codec_type === "video");
+  if (!hasVideo) return false;
 
-    const data = JSON.parse(stdout) as ProbeShape;
+  const duration = Number.parseFloat(data.format?.duration ?? "");
+  if (!Number.isFinite(duration) || duration <= 0) return false;
 
-    const hasVideo = (data.streams ?? []).some((s) => s.codec_type === "video");
-    if (!hasVideo) return false;
-
-    const duration = Number.parseFloat(data.format?.duration ?? "");
-    if (!Number.isFinite(duration) || duration <= 0) return false;
-
-    if (opts.expectedDuration != null && opts.expectedDuration > 0) {
-      if (!durationWithinTolerance(duration, opts.expectedDuration)) return false;
-    }
-
-    return true;
-  } catch {
-    return false;
+  if (opts.expectedDuration != null && opts.expectedDuration > 0) {
+    if (!durationWithinTolerance(duration, opts.expectedDuration)) return false;
   }
+
+  return true;
 }

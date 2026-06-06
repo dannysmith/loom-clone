@@ -62,11 +62,7 @@ wellKnown.get("/sitemap.xml", async (c) => {
       .select()
       .from(videos)
       .where(
-        and(
-          eq(videos.visibility, "public"),
-          eq(videos.status, "complete"),
-          isNull(videos.trashedAt),
-        ),
+        and(eq(videos.visibility, "public"), eq(videos.status, "ready"), isNull(videos.trashedAt)),
       )
       .orderBy(desc(videos.createdAt)),
     getDb()

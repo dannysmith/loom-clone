@@ -1,10 +1,19 @@
 import { createApp } from "./app";
 import { initDb } from "./db/client";
 import { getAdminConfig } from "./lib/admin-auth";
-import { cleanupStaleFiles } from "./lib/cleanup";
+import { cleanupStaleFiles, markStalledRecordingsIncomplete } from "./lib/cleanup";
+import { recoverStrandedReprocessing } from "./lib/processing/reconcile";
 
 await initDb();
 console.log("[db] ready at data/app.db");
+
+// A server restart kills any in-flight edit/reprocess, leaving its video stuck
+// in `reprocessing` (reconcile doesn't own that status). Settle any such video
+// whose mandatory steps validated back to `ready` on boot — also catches the
+// 0012 migration's processing→reprocessing remap of a mid-edit video.
+await recoverStrandedReprocessing().catch((err) =>
+  console.error("[reconcile] stranded-reprocessing recovery failed:", err),
+);
 
 // Validate admin config eagerly so a misconfigured production deployment
 // fails at startup rather than silently leaving /admin/* unprotected.
@@ -21,14 +30,19 @@ const hostname = Bun.env.HOST ?? "127.0.0.1";
 
 console.log(`[server] listening on http://${hostname}:${port}`);
 
-// Daily stale-file cleanup: removes HLS segments and thumbnail candidates for
-// videos that have been complete for >10 days. First run 60s after startup
-// (avoids competing with in-flight derivative generation), then every 24h.
-const runCleanup = () =>
-  cleanupStaleFiles().catch((err) => console.error("[cleanup] failed:", err));
+// Daily maintenance: remove HLS segments/thumbnail candidates for videos that
+// have been `ready` for >10 days, and mark recordings with no segment activity
+// for >4h as `incomplete`. First run 60s after startup (avoids competing with
+// in-flight derivative generation), then every 24h.
+const runMaintenance = async () => {
+  await cleanupStaleFiles().catch((err) => console.error("[cleanup] failed:", err));
+  await markStalledRecordingsIncomplete().catch((err) =>
+    console.error("[cleanup] incomplete sweep failed:", err),
+  );
+};
 setTimeout(() => {
-  runCleanup();
-  setInterval(runCleanup, 24 * 60 * 60 * 1000);
+  runMaintenance();
+  setInterval(runMaintenance, 24 * 60 * 60 * 1000);
 }, 60_000);
 
 export default {

@@ -245,14 +245,16 @@ export async function createUploadedVideo(opts: UploadVideoOpts): Promise<Video>
     .values({
       id,
       slug,
-      status: "complete",
+      // Same post-processing lifecycle as recordings — reconcile() takes it to
+      // `ready` once the (upload-specific) pipeline validates source.mp4 +
+      // metadata. completedAt is stamped then, not now.
+      status: "processing",
       visibility,
       title: opts.title ?? null,
       description: opts.description ?? null,
       source: "uploaded",
       createdAt: now,
       updatedAt: now,
-      completedAt: now,
     })
     .returning();
   if (!video) throw new Error("Failed to create uploaded video");
@@ -361,7 +363,12 @@ export type DashboardFilters = {
   cursor?: string; // video ID of last item from previous page
   limit?: number;
   trashedOnly?: boolean; // true for the Trash Bin page
+  needsAttention?: boolean; // failed / incomplete / stalled-processing videos
 };
+
+// A `processing` video whose updatedAt is older than this is treated as stalled
+// (the pipeline died mid-run) and surfaced by the "needs attention" filter.
+const STALLED_PROCESSING_MINUTES = 30;
 
 export async function listVideosFiltered(filters: DashboardFilters = {}): Promise<{
   items: Video[];
@@ -390,6 +397,21 @@ export async function listVideosFiltered(filters: DashboardFilters = {}): Promis
   // Filters
   if (filters.visibility) conditions.push(eq(videos.visibility, filters.visibility));
   if (filters.status) conditions.push(eq(videos.status, filters.status));
+
+  // "Needs attention": unrecoverable post-processing failures, abandoned
+  // recordings, and videos stuck in `processing` long past their last update
+  // (a pipeline that died mid-run, never reconciled).
+  if (filters.needsAttention) {
+    const stalledCutoff = new Date(
+      Date.now() - STALLED_PROCESSING_MINUTES * 60 * 1000,
+    ).toISOString();
+    conditions.push(
+      or(
+        inArray(videos.status, ["processing_failed", "incomplete"]),
+        and(eq(videos.status, "processing"), lt(videos.updatedAt, stalledCutoff)),
+      )!,
+    );
+  }
   if (filters.dateFrom) conditions.push(gte(videos.createdAt, filters.dateFrom));
   if (filters.dateTo) conditions.push(lte(videos.createdAt, filters.dateTo));
   if (filters.durationMin != null)
@@ -597,39 +619,95 @@ async function sumSegmentDuration(id: string): Promise<number> {
   return row?.total ?? 0;
 }
 
+// Plain status setter (status + updatedAt). The rich lifecycle transitions
+// live in dedicated functions: footage-complete (markFootageComplete) caches
+// duration + logs the completion event; reaching `ready` (markVideoReady)
+// stamps completedAt + publishes feeds. reconcile() in lib/processing owns the
+// post-footage processing↔ready↔processing_failed moves.
 export async function setVideoStatus(id: string, status: Video["status"]): Promise<Video> {
   const db = getDb();
   const existing = await getVideo(id);
   if (!existing) throw new Error(`Video ${id} not found`);
   if (existing.status === status) return existing;
 
-  const now = nowIso();
-  const updates: Partial<Video> = { status, updatedAt: now };
+  const [video] = await db
+    .update(videos)
+    .set({ status, updatedAt: nowIso() })
+    .where(eq(videos.id, id))
+    .returning();
+  if (!video) throw new Error(`Video ${id} not found`);
+  return video;
+}
 
-  // Cache duration and set completedAt on transition TO complete. completedAt
-  // is set-once so a healing→complete→(something weird)→complete chain keeps
-  // the original timestamp. Duration is always recomputed so segments added
-  // during healing get reflected.
-  if (status === "complete") {
-    updates.durationSeconds = await sumSegmentDuration(id);
-    if (!existing.completedAt) updates.completedAt = now;
+// Footage is fully uploaded (all expected segments present). Caches the
+// duration (summing segments, so a heal that adds segments is reflected) and
+// moves the video into the post-processing lifecycle as `processing`. The
+// derivatives pipeline runs next and reconcile() takes it to `ready`.
+export async function markFootageComplete(id: string): Promise<Video> {
+  const db = getDb();
+  const existing = await getVideo(id);
+  if (!existing) throw new Error(`Video ${id} not found`);
+
+  // Idempotent: a stray re-`/complete` on a video that's already in (or past)
+  // the post-footage lifecycle must not demote it back to `processing` — that
+  // would un-publish a `ready` video from feeds and, if its HLS was already
+  // cleaned up, could leave the re-run unable to reach `ready` again.
+  if (
+    existing.status === "processing" ||
+    existing.status === "ready" ||
+    existing.status === "reprocessing"
+  ) {
+    return existing;
   }
+
+  const now = nowIso();
+  const duration = await sumSegmentDuration(id);
+  const [video] = await db
+    .update(videos)
+    .set({ status: "processing", durationSeconds: duration, updatedAt: now })
+    .where(eq(videos.id, id))
+    .returning();
+  if (!video) throw new Error(`Video ${id} not found`);
+
+  await logEvent(id, existing.status === "healing" ? "healed" : "completed");
+  return video;
+}
+
+// First time a stable validated MP4 exists. Stamps completedAt (set-once, so
+// it keeps the original timestamp across re-derivation) and publishes feeds.
+// Called by reconcile() when the mandatory steps validate.
+export async function markVideoReady(id: string): Promise<Video> {
+  const db = getDb();
+  const existing = await getVideo(id, { includeTrashed: true });
+  if (!existing) throw new Error(`Video ${id} not found`);
+  if (existing.status === "ready") return existing;
+
+  const now = nowIso();
+  const updates: Partial<Video> = { status: "ready", updatedAt: now };
+  if (!existing.completedAt) updates.completedAt = now;
 
   const [video] = await db.update(videos).set(updates).where(eq(videos.id, id)).returning();
   if (!video) throw new Error(`Video ${id} not found`);
 
-  if (status === "complete") {
-    const eventType = existing.status === "healing" ? "healed" : "completed";
-    await logEvent(id, eventType);
-    purgeGlobalFeeds();
-  }
-
+  purgeGlobalFeeds();
   return video;
 }
 
-// Thin shim retained so routes and tests don't all need updating.
+// Convenience used by admin tooling and tests to drive a video straight to
+// `ready` without running the real ffmpeg pipeline: caches duration, stamps
+// completedAt, logs the completion event, and publishes feeds.
 export async function completeVideo(id: string): Promise<Video> {
-  return setVideoStatus(id, "complete");
+  const db = getDb();
+  const existing = await getVideo(id);
+  if (!existing) throw new Error(`Video ${id} not found`);
+
+  const wasHealing = existing.status === "healing";
+  const duration = await sumSegmentDuration(id);
+  await db.update(videos).set({ durationSeconds: duration }).where(eq(videos.id, id));
+
+  const video = await markVideoReady(id);
+  await logEvent(id, wasHealing ? "healed" : "completed");
+  return video;
 }
 
 export async function deleteVideo(id: string): Promise<Video | undefined> {
@@ -901,12 +979,51 @@ export async function duplicateVideo(id: string): Promise<Video> {
     await mkdir(dstDir, { recursive: true });
   }
 
+  // Re-derive video_processing_steps from the copied files rather than cloning
+  // the original's rows — the table is gated for serving, and re-deriving
+  // avoids carrying over stale state. (Dynamic import breaks the store↔backfill
+  // import cycle.)
+  const { inferStepsFromDisk } = await import("./processing/backfill");
+  await inferStepsFromDisk(newId);
+
+  // Normalise the copy's status from the inferred ledger rather than trusting
+  // the value copied from the original: a duplicate of a mid-edit
+  // (`reprocessing`) video would otherwise be stranded (no owner ever settles
+  // it), and a copy whose source can't be validated would sit at `ready` while
+  // the serving gate refuses it. Only for post-footage statuses — a
+  // footage-state original (recording/healing/incomplete) mirrors its footage,
+  // not the derivative ledger.
+  if (POST_FOOTAGE_STATUSES.has(original.status)) {
+    const { getStepStates } = await import("./processing/steps-store");
+    const { REQUIRED_KINDS } = await import("./processing/registry");
+    const steps = await getStepStates(newId);
+    const allReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
+    if (allReady) {
+      await markVideoReady(newId); // stamps completedAt (set-once)
+      // markVideoReady only publishes feeds when it actually transitions; a copy
+      // inserted as `ready` (from a `ready` original) makes it a no-op, so purge
+      // explicitly — the duplicate is a new public-facing video.
+      purgeGlobalFeeds();
+    } else if (duplicate.status !== "processing_failed") {
+      await setVideoStatus(newId, "processing_failed");
+    }
+  }
+
   // Log events on both videos.
   await logEvent(id, "duplicated", { newId: newId, newSlug });
   await logEvent(newId, "duplicated_from", { originalId: id, originalSlug: original.slug });
 
-  return duplicate;
+  return (await getVideo(newId, { includeTrashed: true })) ?? duplicate;
 }
+
+// Post-footage statuses where a video is expected to have a validated MP4, so a
+// duplicate's status can be derived from the inferred step ledger.
+const POST_FOOTAGE_STATUSES: ReadonlySet<string> = new Set([
+  "ready",
+  "reprocessing",
+  "processing",
+  "processing_failed",
+]);
 
 // Finds an available slug by appending -1, -2, etc.
 async function findAvailableSlug(baseSlug: string): Promise<string> {

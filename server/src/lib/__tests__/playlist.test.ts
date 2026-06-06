@@ -79,13 +79,13 @@ describe("buildPlaylist", () => {
     expect(m3u8).toContain("#EXT-X-TARGETDURATION:7");
   });
 
-  test("status=complete appends EXT-X-ENDLIST", async () => {
+  test("footage-final status (ready) appends EXT-X-ENDLIST", async () => {
     const video = await createVideo();
     await writeEmptySegment(video.id, "seg_000.m4s");
     await addSegment(video.id, "seg_000.m4s", 4);
-    const completed = await setVideoStatus(video.id, "complete");
+    const ready = await setVideoStatus(video.id, "ready");
 
-    const m3u8 = await buildPlaylist(completed);
+    const m3u8 = await buildPlaylist(ready);
     expect(m3u8).toContain("#EXT-X-ENDLIST");
   });
 

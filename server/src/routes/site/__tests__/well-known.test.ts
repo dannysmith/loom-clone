@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { siteConfig } from "../../../lib/site-config";
-import { createVideo, setVideoStatus, updateVideo } from "../../../lib/store";
+import { completeVideo, createVideo, updateVideo } from "../../../lib/store";
 import { createTag, updateTag } from "../../../lib/tags";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import wellKnown from "../well-known";
@@ -77,7 +77,7 @@ describe("GET /sitemap.xml", () => {
   test("includes public complete videos with video extension", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public", title: "Public Video" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await wellKnown.request("/sitemap.xml");
     const body = await res.text();
@@ -91,7 +91,7 @@ describe("GET /sitemap.xml", () => {
 
   test("excludes unlisted videos", async () => {
     const video = await createVideo();
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
     // visibility defaults to "unlisted"
 
     const res = await wellKnown.request("/sitemap.xml");

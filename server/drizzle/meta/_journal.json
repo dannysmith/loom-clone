@@ -85,6 +85,13 @@
       "when": 1779465600000,
       "tag": "0011_normalise_legacy_tag_colors",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1780527776275,
+      "tag": "0012_rich_silver_surfer",
+      "breakpoints": true
     }
   ]
 }

@@ -35,13 +35,13 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 
 | File                        | Written when                                     | Purpose / lifecycle                                                                                                                       |
 | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream. **Cleaned up 10 days post-complete** (source.mp4 takes over for playback)           |
+| `init.mp4`, `seg_NNN.m4s`   | On each PUT                                      | Mirror of the client's segments — what viewers stream. **Cleaned up 10 days post-`ready`**, and only once the `source` processing step is validated good (source.mp4 takes over for playback)           |
 | `stream.m3u8`               | After each PUT and after `/complete`             | The HLS playlist — rebuilt from the on-disk segment listing. **Cleaned up with segments**                                                 |
 | `recording.json`            | On `/complete` (and re-`/complete` after heal)   | Server-side copy of the client's timeline, authoritative post-upload                                                                      |
 | `chapters.json`             | On the first `/complete` carrying chapter markers | User-editable chapter list extracted from `recording.json` events. Times stored in the original recording timeline; remapped through `edits.json` at read time. Subsequent `/complete` calls are no-ops if the file already exists, so admin renames survive healing. |
-| `derivatives/source.mp4`    | Background task after each `complete` transition | Single-file MP4 stitched from HLS, then audio-processed (denoise + loudnorm). Video track is `-c copy`; audio is re-encoded AAC 160 kbps |
+| `derivatives/source.mp4`    | Background task once footage is whole (status → `processing`) | Single-file MP4 stitched from HLS, then audio-processed (denoise + loudnorm). Video track is `-c copy`; audio is re-encoded AAC 160 kbps |
 | `derivatives/thumbnail.jpg` | Same pipeline                                    | Promoted from `thumbnail-candidates/` — the best auto-selected or admin-chosen frame. ~1280px wide JPEG |
-| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom. **Cleaned up 10 days post-complete** |
+| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom. **Cleaned up 10 days post-`ready`** |
 | `derivatives/720p.mp4`      | Same pipeline (if source > 720p)                 | Downsampled variant, libx264 CRF 23, audio copied from processed source |
 | `derivatives/1080p.mp4`     | Same pipeline (if source > 1080p)                | Downsampled variant, libx264 CRF 20, audio copied from processed source |
 | `derivatives/captions.srt`  | On `PUT /api/videos/:id/transcript`              | SRT transcript uploaded by the macOS app's TranscribeAgent after WhisperKit inference |
@@ -64,10 +64,10 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
    - Reads the timeline's `segments[].filename` list (plus `init.mp4`, added implicitly) as the expected set.
    - Lists `data/<id>/` to get the present set.
    - Returns `{ url, slug, missing }`. `missing` is empty if the server has everything; otherwise it's the gap.
-   - Sets `status: "complete"` if nothing is missing, `"healing"` otherwise.
+   - Footage whole → `status: "processing"` (footage uploaded, not yet baked); footage missing → `"healing"`. `status: "complete"` no longer exists — see [Status model](#status-model).
    - Persists the received timeline as server-side `recording.json`.
    - Rebuilds the playlist.
-   - If the transition lands on `status: "complete"`, schedules derivative generation (`source.mp4` + `thumbnail.jpg`) as a background task. Fire-and-forget — the response is not delayed. See [Derivatives](#derivatives).
+   - If footage is whole, schedules the post-processing pipeline (`source.mp4` + thumbnail + metadata + variants + …) as a background task, which `reconcile()`s the video to `ready` once the mandatory steps validate. Fire-and-forget — the response is not delayed. See [Derivatives](#derivatives).
 5. **URL on clipboard.** Client receives the URL. The UI copies it to the clipboard ~1 second after stop — the user is done.
 6. **Heal (if needed).** If `missing` was non-empty, the client hands off to `HealAgent`. See below.
 
@@ -96,31 +96,44 @@ For each video being healed:
    - On success, patch the local `recording.json` to set `uploaded: true` for that filename.
    - On 404, mark `.orphaned` and stop.
    - On any other failure, log and move on — the recording will be picked up again at next startup.
-5. **Final `/complete`.** Re-POST with the updated timeline so the server's `recording.json` mirrors the healed local state. Server transitions `status: "healing"` → `"complete"` when there's nothing missing.
+5. **Final `/complete`.** Re-POST with the updated timeline so the server's `recording.json` mirrors the healed local state. Server transitions `status: "healing"` → `"processing"` → `"ready"` when there's nothing missing.
+
+## Status model
+
+`status` is a single behaviour-driving lifecycle field; "how far through post-processing" is a *derived* readiness checklist (`video_processing_steps`), not part of `status`. The states:
+
+| State | Meaning | Serves |
+| --- | --- | --- |
+| `recording` | capturing / uploading segments | live HLS |
+| `healing` | segments missing, being backfilled | HLS |
+| `processing` | core pipeline running; no stable validated MP4 yet | HLS |
+| `ready` | stable validated `source.mp4` exists | MP4 |
+| `reprocessing` | post-edit / manual regeneration in progress (atomic set) | last-good |
+| `processing_failed` | HLS plays, but core post-processing failed unrecoverably | HLS |
+| `incomplete` | never `/complete`d; serves whatever partial HLS exists | partial HLS |
+| `deleting` | being permanently deleted | — |
+
+`reconcile(videoId)` (`src/lib/processing/reconcile.ts`) owns the post-footage transitions: it reads the step rows and sets `processing` / `ready` / `processing_failed` from whether the **mandatory** steps (`source` + `metadata`) have validated. `ready` is reached the moment those two validate — before the slower audio/variant steps finish. `completedAt` marks the first time a video reached `ready`.
+
+The admin video page renders a **readiness checklist** (✅/❌/⏳/—) and a derived badge (`ready · enriching (N left)` / `awaiting transcript` / `complete ✓`) from `computeReadiness()`. Reprocess controls are dependency-aware via `reprocessability()` (`canRebuildSource` / `sourceValid` / `dataLoss`): a global **"Re-run post-processing"** (`POST /reprocess`, resumable), **"Rebuild from HLS"** (`POST /reprocess` with `rebuild=hls`, a forced full re-stitch — only when the HLS/upload source still exists), and per-row **"↻" regenerate** buttons (`POST /reprocess/:kind`) for the steps in `REGENERABLE_KINDS` (everything that reads `source.mp4` non-destructively — not `source` itself or `audio`). When nothing can be rebuilt, a data-loss message replaces the buttons. A daily sweep (`markStalledRecordingsIncomplete`) marks `recording` videos with no segment activity for >4h as `incomplete`, and the dashboard **"Needs attention"** filter (`?attention=1`) surfaces `processing_failed` / `incomplete` / stalled-`processing` videos.
 
 ## Derivatives
 
-After every transition to `status: "complete"`, the server runs a post-processing pipeline that generates derivative files in `data/<id>/derivatives/`. Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.
+Once footage is whole the video enters `processing` and the server runs a post-processing pipeline (`src/lib/processing/pipeline.ts`) that generates derivative files in `data/<id>/derivatives/`. Generation is fire-and-forget from the `/complete` handler so the stop flow is never delayed.
 
-The pipeline runs these steps in order:
+The pipeline is driven by a **step registry** (`src/lib/processing/registry.ts`) — each step declares `{ kind, tier, appliesTo, inputs, run, validate, artifact }`. Steps run roughly in this order: `source` (stitch HLS → `source.mp4`), `metadata` (ffprobe + `recording.json` → DB; runs *before* audio so `ready` doesn't wait on audio), `audio` (denoise + loudnorm in-place, recorded videos only — see [Audio Post-Processing](audio-post-processing.md)), `thumbnail`, `variant_1080`/`variant_720`, `storyboard`, `peaks`, `suggested_edits`. External (Mac-sent) artifacts — `transcript`, `words`, the suggestion items — get their step rows written by the API handlers that receive them, not the pipeline.
 
-1. **Stitch** — HLS segments → `source.mp4` via `ffmpeg -c copy` with `+faststart`.
-2. **Audio processing** — Denoise + loudness normalisation on `source.mp4` in-place (skipped if no audio track). See [Audio Post-Processing](audio-post-processing.md).
-3. **Thumbnail candidates** — Multiple frames extracted, scored by luminance variance, best one promoted to `thumbnail.jpg`. Admin can override via the thumbnail picker.
-4. **Metadata extraction** — ffprobe on `source.mp4` for dimensions/file size, `recording.json` for camera/mic names and recording health. Written to the `videos` DB row.
-5. **Video variants** — Downsampled 720p/1080p MP4s generated if source height warrants it.
-6. **Storyboard** — Sprite sheet + WebVTT for scrubber hover previews (skipped for videos under 60s).
-
-Each step is fault-tolerant — a failure is logged and the pipeline continues with the remaining steps.
+Each step writes a `video_processing_steps` row (`pending`/`ready`/`failed`/`skipped`) plus an event, and `reconcile()` runs after each so status advances as soon as the mandatory steps are good.
 
 Properties worth keeping in mind:
 
-- **Disk is truth.** Readiness of a derivative is the presence of its final file (except metadata, which writes to the DB).
-- **Atomic writes.** Recipes and post-recipe steps write to `.tmp` and rename on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written output.
-- **Per-video dedupe.** An in-memory `Map<videoId, Promise<void>>` collapses concurrent generations for the same video, so two back-to-back `/complete` calls mean one pipeline run.
-- **Healed recordings regenerate cleanly.** A healing→complete transition re-triggers the whole pipeline; the rename overwrites previous derivatives atomically.
-- **Failures are independent.** If audio processing fails, thumbnails and variants still run. Failures never surface to `/complete` and never invalidate the m3u8.
-- **Stale file cleanup.** A daily timer removes HLS segments (`init.mp4`, `seg_*.m4s`, `stream.m3u8`) and `thumbnail-candidates/` from videos that have been complete for >10 days and have a valid `source.mp4`. This is safe because the viewer only falls back to HLS when `source.mp4` is absent. Code: `src/lib/cleanup.ts`.
+- **Validated, not just present.** A generated video derivative is `ready` only when `isProbablyPlayable` (one header-only ffprobe) passes — this is what catches a byte-complete-but-broken `source.mp4`. Text artifacts get a cheap parse check.
+- **Atomic writes.** Steps write to `.tmp` and rename on success. A crash or ffmpeg failure leaves either a stale-but-complete final file or nothing — never a half-written output.
+- **Skip-if-ready resumability.** A step is a no-op when its row is `ready`/`skipped` and (for file producers) the artifact is present — so re-running the pipeline *is* "resume from where it failed". This is the durable dedupe (the in-memory in-flight `Map` only collapses concurrent calls within one process).
+- **Healed recordings regenerate cleanly.** A heal re-`/complete`s, dropping back to `processing`. Because healing *changes the HLS segments*, the `/complete` handler forces a full re-run (`scheduleReprocess(force: true)`) when the prior status was `healing`/`incomplete` — otherwise the resumable skip-if-ready would keep the stale `source.mp4` that was stitched before the heal. (A first `/complete` from `recording`, or a redundant `/complete` on an already-processed video, uses the plain resumable schedule — there's nothing to re-stitch.) The Mac-sent steps (transcript/words/suggestions) aren't server-run, so the force never touches them.
+- **Failures are scoped.** A failed *expected* step (audio, thumbnail, …) is logged and the pipeline continues. A failed *mandatory* step (`source`/`metadata`) lands the video in `processing_failed` (HLS still plays). Failures never invalidate the m3u8.
+- **Serving is table-gated.** The viewer decides MP4-vs-HLS on the step table (`source`/active-file step = `ready` AND the file present), not bare file presence — a broken or hand-deleted MP4 falls back to HLS automatically (`src/routes/videos/resolve.ts`).
+- **Stale file cleanup.** A daily timer removes HLS segments (`init.mp4`, `seg_*.m4s`, `stream.m3u8`) and `thumbnail-candidates/` from videos that have been `ready` for >10 days **and** whose `source` step is validated `ready` with the file present. This is the safety gate that stops a temporarily-broken MP4 from becoming permanently unplayable once its HLS is gone. Code: `src/lib/cleanup.ts`.
 
 ## Viewer
 

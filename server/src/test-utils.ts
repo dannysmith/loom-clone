@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { _setDbForTests, createDb } from "./db/client";
 import { createApiKey } from "./lib/api-keys";
+import { _drainInFlight } from "./lib/processing/pipeline";
 
 // Each test case gets its own temp directory used as the server's working
 // directory. Because `DATA_DIR` is a relative path ("data"), chdir'ing into
@@ -25,6 +26,10 @@ export async function setupTestEnv(): Promise<TestEnv> {
 }
 
 export async function teardownTestEnv(env: TestEnv): Promise<void> {
+  // Drain any fire-and-forget post-processing the test scheduled (via
+  // /complete, upload, etc.) so it finishes against the still-live DB/temp dir
+  // rather than racing the teardown below.
+  await _drainInFlight();
   _setDbForTests(null, null);
   process.chdir(env.originalCwd);
   await rm(env.tempDir, { recursive: true, force: true });

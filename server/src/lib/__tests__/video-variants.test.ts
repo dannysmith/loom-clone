@@ -4,7 +4,8 @@ import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { _variantsForHeight, generateVariants } from "../derivatives";
 
-const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+// generateVariants probes with ffprobe (probeMetadata), so require both tools.
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 
 let env: TestEnv;
 
@@ -19,46 +20,42 @@ afterEach(async () => {
 // --- variantsForHeight (pure logic) ---
 
 describe("variantsForHeight", () => {
+  // Assert the heights selected (highest-first); the canonical VARIANTS entries
+  // also carry `kind`/`crf`, which these cases don't need to pin.
+  const heights = (h: number) => _variantsForHeight(h).map((v) => v.height);
+
   test("720p source generates nothing", () => {
-    expect(_variantsForHeight(720)).toEqual([]);
+    expect(heights(720)).toEqual([]);
   });
 
   test("1080p source generates only 720p", () => {
-    const variants = _variantsForHeight(1080);
-    expect(variants).toEqual([{ height: 720, crf: 23 }]);
+    expect(heights(1080)).toEqual([720]);
   });
 
   test("1440p source generates both 1080p and 720p", () => {
-    const variants = _variantsForHeight(1440);
-    expect(variants).toEqual([
-      { height: 1080, crf: 20 },
-      { height: 720, crf: 23 },
-    ]);
+    expect(heights(1440)).toEqual([1080, 720]);
   });
 
   test("4K source generates both 1080p and 720p", () => {
-    const variants = _variantsForHeight(2160);
-    expect(variants).toEqual([
-      { height: 1080, crf: 20 },
-      { height: 720, crf: 23 },
-    ]);
+    expect(heights(2160)).toEqual([1080, 720]);
   });
 
   test("480p source generates nothing", () => {
-    expect(_variantsForHeight(480)).toEqual([]);
+    expect(heights(480)).toEqual([]);
   });
 
   test("1081p source generates both variants", () => {
-    const variants = _variantsForHeight(1081);
-    expect(variants).toEqual([
-      { height: 1080, crf: 20 },
-      { height: 720, crf: 23 },
-    ]);
+    expect(heights(1081)).toEqual([1080, 720]);
   });
 
   test("721p source generates only 720p", () => {
-    const variants = _variantsForHeight(721);
-    expect(variants).toEqual([{ height: 720, crf: 23 }]);
+    expect(heights(721)).toEqual([720]);
+  });
+
+  test("the 720p variant uses a higher CRF than 1080p (smaller file)", () => {
+    const v = _variantsForHeight(1440);
+    const crf = (h: number) => v.find((x) => x.height === h)?.crf;
+    expect(crf(720)).toBeGreaterThan(crf(1080)!);
   });
 });
 

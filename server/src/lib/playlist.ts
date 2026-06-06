@@ -37,7 +37,10 @@ export async function buildPlaylist(video: Video): Promise<string> {
     m3u8 += `\n#EXTINF:${duration.toFixed(3)},\n${filename}`;
   }
 
-  if (video.status === "complete") {
+  // Mark the playlist as a finished VOD once the footage is final. That's every
+  // status except the two where segments may still be growing: `recording`
+  // (live) and `healing` (segments being backfilled).
+  if (video.status !== "recording" && video.status !== "healing") {
     m3u8 += "\n#EXT-X-ENDLIST";
   }
 

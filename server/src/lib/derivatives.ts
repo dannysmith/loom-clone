@@ -1,31 +1,25 @@
 import { eq } from "drizzle-orm";
-import { mkdir, rename, rm } from "fs/promises";
+import { rename, rm } from "fs/promises";
 import { join, resolve } from "path";
 import { getDb } from "../db/client";
-import { videos } from "../db/schema";
-import { logEvent } from "./events";
+import { type ProcessingStepKind, videos } from "../db/schema";
 import { spawnFfmpeg } from "./ffmpeg";
-import { generatePeaks } from "./peaks";
-import { DATA_DIR, getVideo } from "./store";
-import { generateEditorStoryboard, generateStoryboard } from "./storyboard";
-import { generateSuggestedEdits, runSilenceDetect, type Silence } from "./suggested-edits";
-import { extractAndPromoteThumbnails } from "./thumbnails";
+import { hasAudioStream, probeJson } from "./ffprobe";
+import { isProbablyPlayable } from "./processing/playable";
+import { DATA_DIR } from "./store";
+import type { Silence } from "./suggested-edits";
 
 // Resolved absolutely so it survives test chdir() calls.
 const ARNNDN_MODEL = resolve(import.meta.dir, "../../assets/audio-models/cb.rnnn");
 
-// A derivative is any file produced from the converged HLS segments. Each
-// recipe declares its final output filename (relative to data/<id>/derivatives/)
-// and a generator that writes `<filename>.tmp` into that directory. The
-// orchestrator renames `.tmp` → final atomically on success, so a crash mid-
-// generation leaves either a stale-but-complete final file or nothing at all —
-// never a half-written output.
-export interface Recipe {
-  filename: string;
-  generate(videoId: string, dir: string): Promise<void>;
-}
+// Low-level derivative generators. Each writes `<name>.tmp` then renames it
+// atomically to its final name on success, so a crash mid-generation leaves
+// either a stale-but-complete final file or nothing at all — never a
+// half-written output. Orchestration (ordering, step tracking, status
+// reconciliation) lives in ./processing/pipeline.ts; this module only knows
+// how to produce individual files.
 
-function derivativesDir(videoId: string): string {
+export function derivativesDir(videoId: string): string {
   return join(DATA_DIR, videoId, "derivatives");
 }
 
@@ -55,21 +49,35 @@ async function runFfmpeg(args: string[]): Promise<void> {
   }
 }
 
-// Reads the cached duration populated by setVideoStatus when the video
-// transitions to `complete`. Derivatives are scheduled after that transition,
-// so this is always set by the time the thumbnail recipe runs. Returns 0 for
-// the rare case of a missing video record so ffmpeg just picks frame 0.
-async function videoDuration(videoId: string): Promise<number> {
-  const video = await getVideo(videoId, { includeTrashed: true });
-  return video?.durationSeconds ?? 0;
+// Run the stitch ffmpeg, then validate the tmp BEFORE renaming over any
+// existing source.mp4 (mirrors processAudio): a forced re-stitch that produces
+// an unplayable file must not clobber the previous good source, and a failed
+// ffmpeg must not leave an orphan .tmp behind. Structural check only (no
+// expectedDuration) — the registry's `source` step re-checks duration after.
+async function stitchSource(args: string[], tmp: string, final: string): Promise<void> {
+  try {
+    await runFfmpeg(args);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+  if (!(await isProbablyPlayable(tmp))) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw new Error(
+      "stitched source.mp4 failed playability check — keeping the previous source.mp4",
+    );
+  }
+  await rename(tmp, final);
 }
 
-const sourceMp4Recipe: Recipe = {
-  filename: "source.mp4",
-  async generate(videoId, dir) {
-    const playlist = join(DATA_DIR, videoId, "stream.m3u8");
-    const out = join(dir, "source.mp4.tmp");
-    await runFfmpeg([
+// Stitch the converged HLS segments into derivatives/source.mp4 (recorded
+// videos). Writes source.mp4.tmp then renames atomically.
+export async function generateSourceFromHls(videoId: string, dir: string): Promise<void> {
+  const playlist = join(DATA_DIR, videoId, "stream.m3u8");
+  const tmp = join(dir, "source.mp4.tmp");
+  const final = join(dir, "source.mp4");
+  await stitchSource(
+    [
       // m3u8 references init.mp4 and seg_*.m4s — allow all extensions so the
       // HLS demuxer doesn't reject .m4s sources.
       "-allowed_extensions",
@@ -86,93 +94,39 @@ const sourceMp4Recipe: Recipe = {
       // extension-based format detection.
       "-f",
       "mp4",
-      out,
-    ]);
-  },
-};
-
-// For uploaded videos: transcode upload.mp4 → derivatives/source.mp4 with faststart.
-const uploadSourceRecipe: Recipe = {
-  filename: "source.mp4",
-  async generate(videoId, dir) {
-    const input = join(DATA_DIR, videoId, "upload.mp4");
-    const out = join(dir, "source.mp4.tmp");
-    await runFfmpeg(["-i", input, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", out]);
-  },
-};
-
-// Recipes run in order. source.mp4 must land before post-recipe steps.
-// Thumbnail extraction is handled as a post-recipe step (not a Recipe) because
-// it produces multiple files and manages its own atomicity.
-const recipes: Recipe[] = [sourceMp4Recipe];
-const uploadRecipes: Recipe[] = [uploadSourceRecipe];
-
-const inFlight = new Map<string, Promise<void>>();
-
-// Fire-and-forget. Repeated calls while a generation is in flight collapse to
-// the same promise, preventing two ffmpegs from racing on the same video.
-export function scheduleDerivatives(videoId: string): void {
-  if (inFlight.has(videoId)) {
-    console.log(
-      `[derivatives] ${videoId} schedule skipped — already in flight (inFlight=${inFlight.size})`,
-    );
-    return;
-  }
-  const p = generateDerivatives(videoId).finally(() => {
-    inFlight.delete(videoId);
-    console.log(`[derivatives] ${videoId} inFlight cleared (inFlight=${inFlight.size})`);
-  });
-  inFlight.set(videoId, p);
-  console.log(`[derivatives] ${videoId} scheduled (inFlight=${inFlight.size})`);
-  p.catch((err) => {
-    console.error(`[derivatives] ${videoId} unexpected failure:`, err);
-  });
+      tmp,
+    ],
+    tmp,
+    final,
+  );
 }
 
-// Test-only: returns the in-flight promise for a given video id so tests can
-// await fire-and-forget generation. Undefined if nothing is running.
-export function _inFlightPromise(videoId: string): Promise<void> | undefined {
-  return inFlight.get(videoId);
-}
-
-// Fire-and-forget for uploaded videos. Uses uploadRecipes (no HLS → MP4 step).
-export function scheduleUploadDerivatives(videoId: string): void {
-  if (inFlight.has(videoId)) {
-    console.log(
-      `[derivatives] ${videoId} upload schedule skipped — already in flight (inFlight=${inFlight.size})`,
-    );
-    return;
-  }
-  const p = generateFromRecipes(videoId, uploadRecipes).finally(() => {
-    inFlight.delete(videoId);
-    console.log(`[derivatives] ${videoId} inFlight cleared (inFlight=${inFlight.size})`);
-  });
-  inFlight.set(videoId, p);
-  console.log(`[derivatives] ${videoId} upload scheduled (inFlight=${inFlight.size})`);
-  p.catch((err) => {
-    console.error(`[derivatives] ${videoId} upload derivatives failed:`, err);
-  });
+// Remux an uploaded upload.mp4 → derivatives/source.mp4 with faststart
+// (uploaded videos — no HLS segments exist).
+export async function generateSourceFromUpload(videoId: string, dir: string): Promise<void> {
+  const input = join(DATA_DIR, videoId, "upload.mp4");
+  const tmp = join(dir, "source.mp4.tmp");
+  const final = join(dir, "source.mp4");
+  await stitchSource(
+    ["-i", input, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp],
+    tmp,
+    final,
+  );
 }
 
 // Probe duration of a video file using ffprobe. Returns seconds or null
 // if ffprobe fails or isn't available.
 export async function probeDuration(filePath: string): Promise<number | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
-
-  try {
-    const proc = Bun.spawn(
-      [ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", filePath],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-    const data = JSON.parse(stdout) as { format?: { duration?: string } };
-    const d = Number.parseFloat(data.format?.duration ?? "");
-    return Number.isFinite(d) ? d : null;
-  } catch {
-    return null;
-  }
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_format",
+    filePath,
+  ])) as { format?: { duration?: string } } | null;
+  const d = Number.parseFloat(data?.format?.duration ?? "");
+  return Number.isFinite(d) ? d : null;
 }
 
 // Full video metadata from ffprobe: dimensions and file size.
@@ -183,43 +137,29 @@ export type ProbeMetadata = {
 };
 
 export async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_format",
+    "-show_streams",
+    "-select_streams",
+    "v:0",
+    filePath,
+  ])) as {
+    streams?: Array<{ width?: number; height?: number }>;
+    format?: { size?: string };
+  } | null;
+  if (!data) return null;
 
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        "-select_streams",
-        "v:0",
-        filePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
+  const stream = data.streams?.[0];
+  const w = stream?.width;
+  const h = stream?.height;
+  const size = Number.parseInt(data.format?.size ?? "", 10);
 
-    const data = JSON.parse(stdout) as {
-      streams?: Array<{ width?: number; height?: number }>;
-      format?: { size?: string };
-    };
-
-    const stream = data.streams?.[0];
-    const w = stream?.width;
-    const h = stream?.height;
-    const size = Number.parseInt(data.format?.size ?? "", 10);
-
-    if (!w || !h || !Number.isFinite(size)) return null;
-    return { width: w, height: h, fileBytes: size };
-  } catch {
-    return null;
-  }
+  if (!w || !h || !Number.isFinite(size)) return null;
+  return { width: w, height: h, fileBytes: size };
 }
 
 // Read recording.json sidecar for camera/mic names and recording health.
@@ -262,8 +202,9 @@ async function readRecordingJson(videoDir: string): Promise<RecordingMeta> {
 }
 
 // Extracts metadata from source.mp4 and recording.json, writes it to the DB.
-// Not a Recipe (doesn't produce a file) — called as a post-recipe step.
-export async function extractMetadata(videoId: string): Promise<void> {
+// Doesn't produce a file — it's a mandatory pipeline step (gates `ready`).
+// Returns false when ffprobe fails/unavailable so the step is marked failed.
+export async function extractMetadata(videoId: string): Promise<boolean> {
   const dir = derivativesDir(videoId);
   const sourcePath = join(dir, "source.mp4");
   const videoDir = join(DATA_DIR, videoId);
@@ -275,7 +216,7 @@ export async function extractMetadata(videoId: string): Promise<void> {
 
   if (!probe) {
     console.warn(`[derivatives] ${videoId} metadata extraction: ffprobe failed or unavailable`);
-    return;
+    return false;
   }
 
   const aspectRatio = Math.round((probe.width / probe.height) * 10000) / 10000;
@@ -296,6 +237,18 @@ export async function extractMetadata(videoId: string): Promise<void> {
   console.log(
     `[derivatives] ${videoId} metadata: ${probe.width}x${probe.height}, ${probe.fileBytes} bytes`,
   );
+  return true;
+}
+
+// Re-probe source.mp4 and update the cached fileBytes. Used after in-place
+// audio replacement, which runs AFTER metadata extraction (so the byte count
+// recorded by extractMetadata reflects the pre-loudnorm source). Dimensions
+// don't change with audio processing, so only fileBytes needs refreshing.
+export async function refreshFileBytes(videoId: string): Promise<void> {
+  const sourcePath = join(derivativesDir(videoId), "source.mp4");
+  const probe = await probeMetadata(sourcePath);
+  if (!probe) return;
+  await getDb().update(videos).set({ fileBytes: probe.fileBytes }).where(eq(videos.id, videoId));
 }
 
 // --- Audio processing chain ---
@@ -454,40 +407,17 @@ async function checkAudioModel(): Promise<boolean> {
   return true;
 }
 
-// Check whether a file contains an audio stream.
-async function hasAudioStream(filePath: string): Promise<boolean> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return false;
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=codec_type",
-        "-of",
-        "csv=p=0",
-        filePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return exitCode === 0 && stdout.trim().includes("audio");
-  } catch {
-    return false;
-  }
-}
-
 // Two-pass audio processing on an existing source.mp4. Replaces it in-place
 // with the processed version (video copied, audio re-encoded). The
 // `silences` argument feeds the afftdn noise-floor profile; if omitted the
 // chain falls back to a fixed -50 dB noise floor.
-export async function processAudio(sourcePath: string, silences?: Silence[]): Promise<void> {
-  if (!(await hasAudioStream(sourcePath))) return;
-  if (!(await checkAudioModel())) return;
+// Returns true when the source was actually re-encoded (loudnormed) and
+// replaced in place; false when audio processing was skipped (no audio stream
+// or the arnndn model is missing) — in which case the original source.mp4 is
+// left untouched and remains fully playable.
+export async function processAudio(sourcePath: string, silences?: Silence[]): Promise<boolean> {
+  if (!(await hasAudioStream(sourcePath))) return false;
+  if (!(await checkAudioModel())) return false;
 
   const fp = Bun.which("ffmpeg");
   if (!fp) throw new Error("ffmpeg not found on PATH");
@@ -552,17 +482,29 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
     throw new Error(`audio pass 2 failed (exit ${pass2Exit}): ${pass2Stderr.trim()}`);
   }
 
+  // Validate the processed file BEFORE overwriting the good served source —
+  // never replace a known-playable file with an unvalidated one.
+  if (!(await isProbablyPlayable(tmpOut))) {
+    await rm(tmpOut, { force: true }).catch(() => {});
+    throw new Error("audio output failed playability check — keeping original source.mp4");
+  }
+
   // Atomic replace: rename processed file over the original.
   await rename(tmpOut, sourcePath);
+  return true;
 }
 
 // --- Video variant generation ---
 
-// Variant definitions: target height and CRF quality.
-const VARIANTS = [
-  { height: 1080, crf: 20 },
-  { height: 720, crf: 23 },
-] as const;
+// Canonical downscaled-variant definitions, highest-first: the step kind, the
+// target height, and the CRF quality. Single source of truth — the processing
+// registry (which steps apply / how they run) and the viewer's <source> list
+// (resolve.ts) both key off this, so a rendition can't be added to one place
+// and forgotten in another.
+export const VARIANTS: ReadonlyArray<{ kind: ProcessingStepKind; height: number; crf: number }> = [
+  { kind: "variant_1080", height: 1080, crf: 20 },
+  { kind: "variant_720", height: 720, crf: 23 },
+];
 
 // Determine which variants to generate based on source height.
 // ≤720p: nothing. 721–1080p: 720p only. ≥1081p: 1080p and 720p.
@@ -625,257 +567,48 @@ export function _variantFfmpegArgs(
   ];
 }
 
-// Generate downsampled MP4 variants. When inputPath is provided (e.g. an
-// edited output), variants are generated from that file instead of source.mp4.
+// Generate a single downsampled variant (e.g. 720p.mp4) from `sourcePath`.
+// Writes <height>p.mp4.tmp then renames atomically. Throws on ffmpeg failure.
+export async function generateVariant(
+  dir: string,
+  height: number,
+  sourcePath: string,
+): Promise<void> {
+  const crf = VARIANTS.find((v) => v.height === height)?.crf ?? 23;
+  const outFile = `${height}p.mp4`;
+  const tmpPath = join(dir, `${outFile}.tmp`);
+  const finalPath = join(dir, outFile);
+  const started = Date.now();
+
+  const fp = Bun.which("ffmpeg");
+  if (!fp) throw new Error("ffmpeg not found on PATH");
+
+  const { exitCode, stderr } = await spawnFfmpeg(
+    fp,
+    _variantFfmpegArgs(sourcePath, height, crf, tmpPath),
+  );
+  if (exitCode !== 0) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw new Error(`variant ${outFile} failed (exit ${exitCode}): ${stderr.trim()}`);
+  }
+
+  await rename(tmpPath, finalPath);
+  console.log(`[derivatives] ${outFile} generated (${Date.now() - started}ms)`);
+}
+
+// Generate all downsampled MP4 variants needed for a source. When inputPath is
+// provided (e.g. an edited output) variants come from that file instead of
+// source.mp4. Used by the edit-pipeline's atomic regeneration; the main
+// post-recording pipeline drives variants per-height via the step registry.
 export async function generateVariants(dir: string, inputPath?: string): Promise<void> {
   const sourcePath = inputPath ?? join(dir, "source.mp4");
   const meta = await probeMetadata(sourcePath);
   if (!meta) return;
 
-  const needed = variantsForHeight(meta.height);
-  if (needed.length === 0) return;
-
-  const fp = Bun.which("ffmpeg");
-  if (!fp) throw new Error("ffmpeg not found on PATH");
-
-  for (const variant of needed) {
-    const outFile = `${variant.height}p.mp4`;
-    const tmpPath = join(dir, `${outFile}.tmp`);
-    const finalPath = join(dir, outFile);
-    const started = Date.now();
-
-    const { exitCode, stderr } = await spawnFfmpeg(
-      fp,
-      _variantFfmpegArgs(sourcePath, variant.height, variant.crf, tmpPath),
-    );
-    if (exitCode !== 0) {
-      await rm(tmpPath, { force: true }).catch(() => {});
-      throw new Error(`variant ${outFile} failed (exit ${exitCode}): ${stderr.trim()}`);
-    }
-
-    await rename(tmpPath, finalPath);
-    const ms = Date.now() - started;
-    console.log(`[derivatives] ${outFile} generated (${ms}ms)`);
+  for (const variant of variantsForHeight(meta.height)) {
+    await generateVariant(dir, variant.height, sourcePath);
   }
 }
 
 // Test-only: expose for direct testing.
 export { parseLoudnormJson as _parseLoudnormJson, variantsForHeight as _variantsForHeight };
-
-async function generateDerivatives(videoId: string): Promise<void> {
-  return generateFromRecipes(videoId, recipes);
-}
-
-async function generateFromRecipes(videoId: string, recipeList: Recipe[]): Promise<void> {
-  const dir = derivativesDir(videoId);
-  await mkdir(dir, { recursive: true });
-  const pipelineStarted = Date.now();
-  const steps: string[] = [];
-  console.log(`[derivatives] ${videoId} pipeline start`);
-
-  for (const recipe of recipeList) {
-    const tmp = join(dir, `${recipe.filename}.tmp`);
-    const final = join(dir, recipe.filename);
-    const started = Date.now();
-    try {
-      await recipe.generate(videoId, dir);
-      await rename(tmp, final);
-      const ms = Date.now() - started;
-      console.log(`[derivatives] ${videoId}/${recipe.filename} (${ms}ms)`);
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId}/${recipe.filename} failed:`,
-        err instanceof Error ? err.message : err,
-      );
-      await rm(tmp, { force: true }).catch(() => {});
-    }
-  }
-
-  // Post-recipe step 1: audio processing (denoise + loudnorm).
-  // Runs before thumbnails and metadata so they see the final file.
-  const sourcePath = join(dir, "source.mp4");
-  const sourceExists = await Bun.file(sourcePath).exists();
-  const duration = await videoDuration(videoId);
-
-  // Run silence detection on the RAW source before loudnorm. After
-  // loudnorm the dynamic range is compressed and background noise sits
-  // at ~-25 dB, making silence indistinguishable from quiet speech.
-  // Pre-loudnorm, true silence is -50 dB or lower, so -30 dB cleanly
-  // catches pauses without false positives.
-  let preLoudnormSilences: Silence[] | undefined;
-  if (sourceExists && duration >= 5) {
-    try {
-      preLoudnormSilences = await runSilenceDetect(sourcePath, duration);
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} pre-loudnorm silence detection failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  if (sourceExists) {
-    const audioStarted = Date.now();
-    try {
-      await processAudio(sourcePath, preLoudnormSilences);
-      const ms = Date.now() - audioStarted;
-      console.log(`[derivatives] ${videoId}/audio processed (${ms}ms)`);
-      steps.push("audio");
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} audio processing failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Post-recipe step 2+3: thumbnail candidates + metadata extraction.
-  // Both depend on source.mp4 existing.
-  try {
-    await extractAndPromoteThumbnails(dir, duration);
-    console.log(`[derivatives] ${videoId}/thumbnail candidates extracted`);
-    steps.push("thumbnails");
-  } catch (err) {
-    console.error(
-      `[derivatives] ${videoId} thumbnail extraction failed:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-
-  try {
-    await extractMetadata(videoId);
-    steps.push("metadata");
-  } catch (err) {
-    console.error(
-      `[derivatives] ${videoId} metadata extraction failed:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-
-  // Post-recipe step: delete upload.mp4 now that source.mp4 is confirmed valid.
-  // For uploaded videos, upload.mp4 is the input that produced source.mp4 — keeping
-  // both is pure waste. Gate on metadata success (fileBytes populated) so we never
-  // delete the only copy of a video.
-  if (sourceExists && steps.includes("metadata")) {
-    const uploadPath = join(DATA_DIR, videoId, "upload.mp4");
-    if (await Bun.file(uploadPath).exists()) {
-      try {
-        await rm(uploadPath, { force: true });
-        console.log(`[derivatives] ${videoId} upload.mp4 deleted (source.mp4 confirmed)`);
-      } catch (err) {
-        console.error(
-          `[derivatives] ${videoId} failed to delete upload.mp4:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-  }
-
-  // Post-recipe step 4: generate downsampled variants (720p, 1080p).
-  if (sourceExists) {
-    try {
-      await generateVariants(dir);
-      steps.push("variants");
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} variant generation failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Post-recipe step 5: storyboard sprite sheet + VTT (skipped for short videos).
-  if (sourceExists && duration >= 60) {
-    const storyStarted = Date.now();
-    try {
-      const generated = await generateStoryboard(dir, duration);
-      if (generated) {
-        const ms = Date.now() - storyStarted;
-        console.log(`[derivatives] ${videoId}/storyboard generated (${ms}ms)`);
-        steps.push("storyboard");
-      }
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} storyboard generation failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Post-recipe step 6: editor storyboard (dense frame extraction for the editing timeline).
-  if (sourceExists && duration >= 5) {
-    const editorStoryStarted = Date.now();
-    try {
-      const generated = await generateEditorStoryboard(dir, duration);
-      if (generated) {
-        const ms = Date.now() - editorStoryStarted;
-        console.log(`[derivatives] ${videoId}/editor-storyboard generated (${ms}ms)`);
-        steps.push("editor-storyboard");
-      }
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} editor storyboard generation failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Post-recipe step 7: audio peaks for wavesurfer.js.
-  if (sourceExists && duration >= 1) {
-    const peaksStarted = Date.now();
-    try {
-      const generated = await generatePeaks(dir, duration);
-      if (generated) {
-        const ms = Date.now() - peaksStarted;
-        console.log(`[derivatives] ${videoId}/peaks.json generated (${ms}ms)`);
-        steps.push("peaks");
-      }
-    } catch (err) {
-      console.error(
-        `[derivatives] ${videoId} peaks generation failed:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Post-recipe step 8: suggested edits from silence detection.
-  // Uses the silences captured from the raw source BEFORE loudnorm (see
-  // above). Skip if the user has already committed an edit (lastEditedAt
-  // set) — once they've used the editor we never surface auto-suggestions
-  // again. generateSuggestedEdits also no-ops when the file already
-  // exists, so a repeat run from healing is idempotent.
-  if (sourceExists && duration >= 5) {
-    const video = await getVideo(videoId, { includeTrashed: true });
-    if (!video?.lastEditedAt) {
-      const suggestStarted = Date.now();
-      try {
-        const generated = await generateSuggestedEdits(dir, duration, {
-          silences: preLoudnormSilences,
-        });
-        if (generated) {
-          const ms = Date.now() - suggestStarted;
-          console.log(`[derivatives] ${videoId}/suggested-edits.json generated (${ms}ms)`);
-          steps.push("suggested-edits");
-        }
-      } catch (err) {
-        console.error(
-          `[derivatives] ${videoId} suggested-edits generation failed:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-  }
-
-  const totalMs = Date.now() - pipelineStarted;
-  console.log(`[derivatives] ${videoId} pipeline done (${totalMs}ms, steps=[${steps.join(", ")}])`);
-
-  // Log a single summary event so the admin activity feed shows when
-  // post-processing finished and what was produced.
-  if (steps.length > 0) {
-    try {
-      await logEvent(videoId, "derivatives_ready", { steps, durationMs: totalMs });
-    } catch {
-      // DB may be gone in tests — don't let event logging crash the pipeline.
-    }
-  }
-}

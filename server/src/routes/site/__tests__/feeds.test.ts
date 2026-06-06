@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { siteConfig } from "../../../lib/site-config";
 import {
+  completeVideo,
   createVideo,
-  setVideoStatus,
   trashVideo,
   updateVideo,
   upsertTranscript,
@@ -49,7 +49,7 @@ describe("GET /feed.xml", () => {
   test("includes public complete videos", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public", title: "Public Video" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -66,7 +66,7 @@ describe("GET /feed.xml", () => {
   test("uses slug as title when video has no title", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -80,7 +80,7 @@ describe("GET /feed.xml", () => {
       title: "Described",
       description: "A cool walkthrough",
     });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -89,7 +89,7 @@ describe("GET /feed.xml", () => {
 
   test("excludes unlisted videos", async () => {
     const video = await createVideo();
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
     // visibility defaults to "unlisted"
 
     const res = await feeds.request("/feed.xml");
@@ -100,7 +100,7 @@ describe("GET /feed.xml", () => {
   test("excludes private videos", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "private" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -120,7 +120,7 @@ describe("GET /feed.xml", () => {
   test("excludes trashed videos", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
     await trashVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
@@ -131,11 +131,13 @@ describe("GET /feed.xml", () => {
   test("orders videos newest first", async () => {
     const v1 = await createVideo();
     await updateVideo(v1.id, { visibility: "public", title: "First" });
-    await setVideoStatus(v1.id, "complete");
+    await completeVideo(v1.id);
 
+    // Guarantee a distinct createdAt (the feed orders by ms-precision createdAt).
+    await new Promise((r) => setTimeout(r, 3));
     const v2 = await createVideo();
     await updateVideo(v2.id, { visibility: "public", title: "Second" });
-    await setVideoStatus(v2.id, "complete");
+    await completeVideo(v2.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -148,7 +150,7 @@ describe("GET /feed.xml", () => {
   test("escapes XML special characters in titles", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public", title: 'Test <script> & "quotes"' });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -197,7 +199,7 @@ describe("GET /feed.json", () => {
       title: "JSON Test",
       description: "A test video",
     });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.json");
     const body = await res.json();
@@ -216,11 +218,11 @@ describe("GET /feed.json", () => {
 
   test("excludes unlisted and private videos", async () => {
     const unlisted = await createVideo();
-    await setVideoStatus(unlisted.id, "complete");
+    await completeVideo(unlisted.id);
 
     const priv = await createVideo();
     await updateVideo(priv.id, { visibility: "private" });
-    await setVideoStatus(priv.id, "complete");
+    await completeVideo(priv.id);
 
     const res = await feeds.request("/feed.json");
     const body = await res.json();
@@ -230,7 +232,7 @@ describe("GET /feed.json", () => {
   test("includes truncated transcript excerpt", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public", title: "With Transcript" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     // Create a transcript with more than 200 words
     const longText = Array.from({ length: 250 }, (_, i) => `word${i}`).join(" ");
@@ -250,7 +252,7 @@ describe("GET /feed.json", () => {
   test("omits transcript fields when no transcript exists", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.json");
     const body = await res.json();
@@ -260,7 +262,7 @@ describe("GET /feed.json", () => {
   test("uses slug as title when video has no title", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/feed.json");
     const body = await res.json();
@@ -306,7 +308,7 @@ describe("GET /llms.txt", () => {
   test("lists public complete videos", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public", title: "LLM Test Video" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/llms.txt");
     const body = await res.text();
@@ -322,7 +324,7 @@ describe("GET /llms.txt", () => {
       title: "Described",
       description: "A detailed walkthrough",
     });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/llms.txt");
     const body = await res.text();
@@ -337,11 +339,11 @@ describe("GET /llms.txt", () => {
 
   test("excludes unlisted and private videos", async () => {
     const unlisted = await createVideo();
-    await setVideoStatus(unlisted.id, "complete");
+    await completeVideo(unlisted.id);
 
     const priv = await createVideo();
     await updateVideo(priv.id, { visibility: "private" });
-    await setVideoStatus(priv.id, "complete");
+    await completeVideo(priv.id);
 
     const res = await feeds.request("/llms.txt");
     const body = await res.text();
@@ -352,7 +354,7 @@ describe("GET /llms.txt", () => {
   test("uses slug as title when video has no title", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { visibility: "public" });
-    await setVideoStatus(video.id, "complete");
+    await completeVideo(video.id);
 
     const res = await feeds.request("/llms.txt");
     const body = await res.text();

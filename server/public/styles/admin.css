@@ -286,19 +286,22 @@ body.admin--login {
 
 .filter-pill--healing,
 .filter-pill--processing,
+.filter-pill--reprocessing,
 .filter-pill--deleting {
 	--pill-active-color: var(--color-warning);
 	--pill-active-bg: var(--color-warning-bg);
 	--pill-active-border: transparent;
 }
 
-.filter-pill--complete {
+.filter-pill--ready {
 	--pill-active-color: var(--color-success);
 	--pill-active-bg: var(--color-success-bg);
 	--pill-active-border: transparent;
 }
 
-.filter-pill--failed {
+.filter-pill--processing_failed,
+.filter-pill--incomplete,
+.filter-pill--attention {
 	--pill-active-color: var(--color-restricted);
 	--pill-active-bg: var(--color-restricted-bg);
 	--pill-active-border: var(--color-restricted-border);
@@ -802,14 +805,26 @@ body.admin--login {
 
 .badge--healing,
 .badge--processing,
+.badge--reprocessing,
 .badge--deleting {
 	color: var(--color-warning);
 	background-color: var(--color-warning-bg);
 }
 
+/* processing_failed: HLS plays but post-processing failed — needs attention.
+   incomplete: never completed, partial footage. Both read as a problem. */
+.badge--processing_failed,
+.badge--incomplete,
 .badge--failed {
 	color: var(--color-restricted);
 	background-color: var(--color-restricted-bg);
+}
+
+/* ready: the derived readiness badge ("ready · complete ✓" etc.) on the video
+   detail page. Success-tinted to match .filter-pill--ready. */
+.badge--ready {
+	color: var(--color-success);
+	background-color: var(--color-success-bg);
 }
 
 .badge--edited {
@@ -923,6 +938,12 @@ select.input {
 .btn--sm {
 	padding: var(--space-1) var(--space-2);
 	font-size: var(--font-size-xs);
+}
+
+.btn--xs {
+	padding: 0 var(--space-1);
+	font-size: var(--font-size-xs);
+	line-height: 1.4;
 }
 
 .btn--danger {
@@ -1261,6 +1282,86 @@ select.input {
 
 .video-meta {
 	margin-block-end: var(--space-5);
+}
+
+/* --- Post-processing tab (readiness table + reprocess controls) --- */
+.readiness {
+	padding-block-start: var(--space-3);
+}
+
+/* Reprocess buttons / data-loss notice, above the table. */
+.readiness-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin-block-end: var(--space-4);
+}
+
+.readiness-dataloss {
+	margin-block: 0 var(--space-4);
+	color: var(--color-restricted);
+	font-size: var(--font-size-sm);
+}
+
+/* Edited-video warning: reprocessing discards the edit. */
+.readiness-edit-warning {
+	margin-block: 0 var(--space-4);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: color-mix(in oklch, var(--color-restricted) 12%, transparent);
+	color: var(--color-restricted);
+	font-size: var(--font-size-sm);
+}
+
+/* "Your re-run is queued" info notice, above the reprocess controls. */
+.readiness-notice {
+	margin-block: 0 var(--space-4);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--color-surface-sunken);
+	color: var(--color-text-muted);
+	font-size: var(--font-size-sm);
+}
+
+.readiness-dataloss code {
+	font-size: 0.9em;
+}
+
+.readiness-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--font-size-sm);
+}
+
+.readiness-row {
+	border-block-end: 1px solid var(--color-border);
+}
+
+.readiness-row:last-child {
+	border-block-end: none;
+}
+
+/* Not-applicable rows are muted — present for inventory, not a problem. */
+.readiness-row--na {
+	color: var(--color-fg-muted);
+}
+
+.readiness-cell-glyph {
+	width: 1.5em;
+	padding: var(--space-2) var(--space-2) var(--space-2) 0;
+	text-align: center;
+}
+
+.readiness-cell-label {
+	padding: var(--space-2) 0;
+	width: 100%;
+}
+
+/* Trailing regenerate-button cell. */
+.readiness-cell-action {
+	padding: var(--space-1) 0;
+	text-align: end;
+	white-space: nowrap;
 }
 
 .video-meta-grid {

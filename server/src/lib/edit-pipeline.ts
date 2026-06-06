@@ -1,9 +1,15 @@
 // Applies an edit decision list (EDL) to a video's source.mp4, producing
 // an edited output named by resolution (e.g. 1440p.mp4). Triggers
 // re-generation of downscaled variants, storyboard, and edited captions.
+//
+// Edit regeneration is atomic-as-a-set (the reason `reprocessing` is its own
+// status): the full regenerated set is built and validated in a side staging
+// directory, then swapped into place in one fast pass of renames. A crash or
+// failure during the slow generation phase leaves the previous outputs
+// untouched — never a new {H}p.mp4 beside a stale variant or half-rewritten VTT.
 
 import { eq } from "drizzle-orm";
-import { rename, rm } from "fs/promises";
+import { mkdir, readdir, rename, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { videos } from "../db/schema";
@@ -19,6 +25,8 @@ import {
 import { logEvent } from "./events";
 import { spawnFfmpeg } from "./ffmpeg";
 import { nowIso } from "./format";
+import { isProbablyPlayable } from "./processing/playable";
+import { fileSizeBytes, markStepReady, markStepSkipped } from "./processing/steps-store";
 import { DATA_DIR, getVideo, upsertTranscript } from "./store";
 import { generateStoryboard } from "./storyboard";
 
@@ -47,26 +55,100 @@ export function _editInFlightPromise(videoId: string): Promise<void> | undefined
   return inFlight.get(videoId);
 }
 
+// Wash a committed edit away so the main pipeline can rebuild a consistent,
+// UNEDITED video from source.mp4. The main pipeline is edit-unaware — it would
+// otherwise regenerate the downscaled variants from the full source while the
+// active raw file stays the (shorter) edited cut, leaving the quality menu
+// jumping content/length. Called from runPipeline (the reprocess chokepoint)
+// before the main pipeline runs on a video with lastEditedAt set. No-op for an
+// unedited video.
+//
+// It deletes the edited MP4 outputs and the edited viewer storyboard (a
+// resumable run skips files that are still present, so they must be removed up
+// front; the main pipeline then regenerates the applicable ones from the full
+// source), re-derives the full transcript/captions from the unedited
+// words.json, resets the cached metadata from source.mp4, and clears
+// lastEditedAt. source.mp4, the thumbnail, peaks and the editor storyboard
+// already reflect the original, so they're left alone.
+export async function resetAllEdits(videoId: string): Promise<void> {
+  const video = await getVideo(videoId, { includeTrashed: true });
+  if (!video?.lastEditedAt) return;
+
+  const derivDir = join(DATA_DIR, videoId, "derivatives");
+  const sourcePath = join(derivDir, "source.mp4");
+
+  const [meta, duration] = await Promise.all([
+    probeMetadata(sourcePath),
+    probeDuration(sourcePath),
+  ]);
+  if (!meta || duration === null) {
+    throw new Error(`resetAllEdits: cannot probe source.mp4 for ${videoId}`);
+  }
+
+  // Delete the edited outputs the main pipeline won't otherwise overwrite on a
+  // resumable run: the source-resolution {H}p.mp4, the downscaled {720,1080}p.mp4
+  // variants, the edited viewer storyboard, and edits.json. Serving falls back
+  // to source.mp4 (lastEditedAt cleared below) and the pipeline regenerates the
+  // applicable variants/storyboard from the full source.
+  const entries = await readdir(derivDir).catch(() => [] as string[]);
+  await Promise.all(
+    entries
+      .filter((f) => /^\d+p\.mp4$/.test(f) || f === "storyboard.vtt" || f === "edits.json")
+      .map((f) => rm(join(derivDir, f), { force: true })),
+  );
+
+  // Re-derive the full transcript + captions.srt from the unedited words.json.
+  // The edit overwrote both with the edited cut and the original isn't preserved
+  // separately, so reconstruct it (one kept segment spanning the whole source).
+  const wordsFile = Bun.file(join(derivDir, "words.json"));
+  if (await wordsFile.exists()) {
+    const words = (await wordsFile.json()) as Word[];
+    const full = deriveEditedTranscript(words, [{ start: 0, end: duration }]);
+    if (full.srt) await Bun.write(join(derivDir, "captions.srt"), full.srt);
+    if (full.plainText) await upsertTranscript(videoId, "srt", full.plainText);
+  }
+
+  // Clear lastEditedAt (so activeRawFilename resolves back to source.mp4) and
+  // reset the cached metadata to the original source.
+  await getDb()
+    .update(videos)
+    .set({
+      lastEditedAt: null,
+      durationSeconds: duration,
+      fileBytes: meta.fileBytes,
+      width: meta.width,
+      height: meta.height,
+      aspectRatio: Math.round((meta.width / meta.height) * 10000) / 10000,
+      updatedAt: nowIso(),
+    })
+    .where(eq(videos.id, videoId));
+
+  await logEvent(videoId, "edits_reset");
+  console.log(`[edit-pipeline] ${videoId} edits reset — rebuilding from source.mp4`);
+}
+
 // --- Pipeline ---
 
 async function runEditPipeline(videoId: string): Promise<void> {
   const started = Date.now();
   const derivDir = join(DATA_DIR, videoId, "derivatives");
 
-  // Mark the video as processing so the UI shows the right state and
-  // prevents concurrent edits.
+  // Mark the video as reprocessing so the UI shows the right state and
+  // prevents concurrent edits. Post-edit regeneration must land as an atomic
+  // set, which is why it gets its own status rather than reusing `processing`.
   await getDb()
     .update(videos)
-    .set({ status: "processing", updatedAt: nowIso() })
+    .set({ status: "reprocessing", updatedAt: nowIso() })
     .where(eq(videos.id, videoId));
 
   try {
     await _runEditPipelineInner(videoId, derivDir, started);
   } catch (err) {
-    // Restore to complete on failure so the video isn't stuck in processing.
+    // Restore to ready on failure so the video isn't stuck in reprocessing
+    // (the pre-edit source.mp4 is untouched and still serves).
     await getDb()
       .update(videos)
-      .set({ status: "complete", updatedAt: nowIso() })
+      .set({ status: "ready", updatedAt: nowIso() })
       .where(eq(videos.id, videoId));
     throw err;
   }
@@ -100,113 +182,140 @@ async function _runEditPipelineInner(
     throw new Error("All content would be removed by edits");
   }
 
-  // 4. Run ffmpeg to produce the edited video at source resolution.
-  const outputFile = `${meta.height}p.mp4`;
-  const outputPath = join(derivDir, outputFile);
-  const tmpPath = join(derivDir, `${outputFile}.tmp`);
+  // 4. Build the full regenerated set in a staging directory. Generators write
+  //    into `stagingDir` (their first arg); the real derivatives stay untouched
+  //    until the whole set is validated and swapped. A failure anywhere here
+  //    throws — the catch in runEditPipeline restores `ready` and the previous
+  //    outputs are intact. Everything applicable is mandatory: a partial set
+  //    would defeat the atomicity guarantee.
+  const stagingDir = join(derivDir, ".edit-staging");
+  await rm(stagingDir, { recursive: true, force: true });
+  await mkdir(stagingDir, { recursive: true });
 
-  const args = buildFfmpegEditArgs(sourcePath, tmpPath, keptSegments);
-  await runFfmpeg(args);
-  await rename(tmpPath, outputPath);
-  console.log(`[edit-pipeline] ${videoId}/${outputFile} produced`);
-
-  // 5. Regenerate downscaled variants from the edited output.
   try {
-    await generateVariants(derivDir, outputPath);
-  } catch (err) {
-    console.error(
-      `[edit-pipeline] ${videoId} variant generation failed:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
+    // 4a. Edited video at source resolution.
+    const outputFile = `${meta.height}p.mp4`;
+    const stagedOutput = join(stagingDir, outputFile);
+    const tmpPath = `${stagedOutput}.tmp`;
+    await runFfmpeg(buildFfmpegEditArgs(sourcePath, tmpPath, keptSegments));
+    await rename(tmpPath, stagedOutput);
 
-  // 6. Regenerate the viewer-facing storyboard from the edited output.
-  // Editor-specific files (editor-storyboard, peaks.json) are NOT
-  // regenerated — the editor always works from source.mp4, so those
-  // must reflect the original source, not the edited version.
-  const editedDuration = await probeDuration(outputPath);
+    const editedDuration = (await probeDuration(stagedOutput)) ?? duration;
 
-  if (editedDuration !== null && editedDuration >= 60) {
-    try {
-      await generateStoryboard(derivDir, editedDuration, outputPath);
-      console.log(`[edit-pipeline] ${videoId}/storyboard regenerated`);
-    } catch (err) {
-      console.error(
-        `[edit-pipeline] ${videoId} storyboard regeneration failed:`,
-        err instanceof Error ? err.message : err,
-      );
+    // 4b. Downscaled variants, cut from the staged edited output.
+    await generateVariants(stagingDir, stagedOutput);
+
+    // 4c. Viewer storyboard (≥60s only). Editor-specific files
+    //     (editor-storyboard, peaks.json) are NOT regenerated — the editor
+    //     always works from source.mp4, so those reflect the original.
+    if (editedDuration >= 60) {
+      await generateStoryboard(stagingDir, editedDuration, stagedOutput);
     }
+
+    // 4d. Edited captions (from the unchanged words.json + the EDL).
+    const editedPlainText = await deriveEditedCaptions(derivDir, stagingDir, keptSegments);
+
+    // 5. Validate every staged video file before touching the real ones.
+    const stagedFiles = (await readdir(stagingDir)).filter((f) => !f.endsWith(".tmp"));
+    for (const f of stagedFiles) {
+      if (!f.endsWith(".mp4")) continue;
+      const ok = await isProbablyPlayable(join(stagingDir, f), {
+        expectedDuration: editedDuration,
+      });
+      if (!ok) throw new Error(`staged edited output ${f} failed playability check`);
+    }
+
+    // 6. Swap the validated set into place. Per-file renames within the same
+    //    directory are atomic, and we only reach here once the whole set is
+    //    built and validated — so there's no slow-generation window in which a
+    //    new file can sit beside a stale one.
+    for (const f of stagedFiles) {
+      await rename(join(stagingDir, f), join(derivDir, f));
+    }
+    console.log(`[edit-pipeline] ${videoId} swapped ${stagedFiles.length} edited output(s)`);
+
+    // 6b. Sync the step ledger to the freshly-swapped edited outputs. The edit
+    //     regenerated the variants from the edited cut (validated above), so
+    //     mark them ready — this also re-serves a variant that had failed before
+    //     the edit. The viewer storyboard is regenerated only when the edited cut
+    //     is ≥60s; if the edit dropped it below that threshold the old (longer)
+    //     storyboard must be removed so scrubbing doesn't reflect the un-edited
+    //     timeline. (source.mp4 is untouched, so its step row stays valid.)
+    for (const kind of ["variant_720", "variant_1080"] as const) {
+      const file = join(derivDir, kind === "variant_720" ? "720p.mp4" : "1080p.mp4");
+      if (await Bun.file(file).exists()) {
+        await markStepReady(videoId, kind, { sizeBytes: fileSizeBytes(file) });
+      }
+    }
+    const storyboardPath = join(derivDir, "storyboard.vtt");
+    if (editedDuration >= 60) {
+      if (await Bun.file(storyboardPath).exists()) {
+        await markStepReady(videoId, "storyboard", { sizeBytes: fileSizeBytes(storyboardPath) });
+      }
+    } else {
+      await rm(storyboardPath, { force: true }).catch(() => {});
+      await markStepSkipped(videoId, "storyboard");
+    }
+
+    // 7. Update the DB transcript with the edited plain text (post-swap).
+    if (editedPlainText) await upsertTranscript(videoId, "srt", editedPlainText);
+
+    // 8. Update DB metadata from the now-in-place edited output and restore
+    //    status to `ready`. lastEditedAt flips the active raw file to
+    //    {H}p.mp4 — set only after the file is on disk so serving stays valid.
+    const editedMeta = await probeMetadata(join(derivDir, outputFile));
+    await getDb()
+      .update(videos)
+      .set({
+        status: "ready",
+        durationSeconds: editedMeta ? editedDuration : undefined,
+        fileBytes: editedMeta?.fileBytes,
+        lastEditedAt: nowIso(),
+        updatedAt: nowIso(),
+      })
+      .where(eq(videos.id, videoId));
+
+    // 9. Drop the suggested-edits.json file. Suggestions are a one-shot helper
+    //    for the very first edit pass — once the user has committed, we never
+    //    surface auto-suggestions again. The lastEditedAt flag (set above) also
+    //    guards against the derivatives pipeline regenerating them on a heal.
+    await rm(join(derivDir, "suggested-edits.json"), { force: true }).catch((err) => {
+      console.warn(`[edit-pipeline] failed to remove suggested-edits.json for ${videoId}:`, err);
+    });
+
+    // 10. Purge CDN cache.
+    const video = await getVideo(videoId);
+    if (video) purgeVideo(video.slug);
+
+    const totalMs = Date.now() - started;
+    await logEvent(videoId, "edits_committed", { durationMs: totalMs, edits: edl.edits.length });
+    console.log(`[edit-pipeline] ${videoId} complete (${totalMs}ms)`);
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
   }
-
-  // 7. Derive edited captions from words.json + EDL.
-  try {
-    await deriveEditedCaptions(videoId, derivDir, keptSegments);
-    console.log(`[edit-pipeline] ${videoId}/captions derived`);
-  } catch (err) {
-    console.error(
-      `[edit-pipeline] ${videoId} caption derivation failed:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-
-  // 8. Update DB metadata from the edited output and restore status to complete.
-  const editedMeta = await probeMetadata(outputPath);
-  const finalDuration = editedDuration ?? duration;
-  await getDb()
-    .update(videos)
-    .set({
-      status: "complete",
-      durationSeconds: editedMeta ? finalDuration : undefined,
-      fileBytes: editedMeta?.fileBytes,
-      lastEditedAt: nowIso(),
-      updatedAt: nowIso(),
-    })
-    .where(eq(videos.id, videoId));
-
-  // 9. Drop the suggested-edits.json file. Suggestions are a one-shot
-  // helper for the very first edit pass — once the user has committed,
-  // we never want to surface auto-suggestions for this video again.
-  // The lastEditedAt flag (set above) also guards against the
-  // derivatives pipeline regenerating them on a subsequent healing run.
-  await rm(join(derivDir, "suggested-edits.json"), { force: true }).catch((err) => {
-    console.warn(`[edit-pipeline] failed to remove suggested-edits.json for ${videoId}:`, err);
-  });
-
-  // 10. Purge CDN cache.
-  const video = await getVideo(videoId);
-  if (video) {
-    purgeVideo(video.slug);
-  }
-
-  const totalMs = Date.now() - started;
-  await logEvent(videoId, "edits_committed", { durationMs: totalMs, edits: edl.edits.length });
-  console.log(`[edit-pipeline] ${videoId} complete (${totalMs}ms)`);
 }
 
 // --- Helpers ---
 
+// Derives edited captions from the unchanged words.json + the EDL, writing
+// captions.srt into `outDir` (the staging dir). Returns the edited plain text
+// for the caller to upsert into the transcript after the swap, or null when
+// there's no words.json to edit.
 async function deriveEditedCaptions(
-  videoId: string,
   derivDir: string,
+  outDir: string,
   keptSegments: Segment[],
-): Promise<void> {
-  const wordsPath = join(derivDir, "words.json");
-  const wordsFile = Bun.file(wordsPath);
-  if (!(await wordsFile.exists())) return;
+): Promise<string | null> {
+  const wordsFile = Bun.file(join(derivDir, "words.json"));
+  if (!(await wordsFile.exists())) return null;
 
   const originalWords = (await wordsFile.json()) as Word[];
   const result = deriveEditedTranscript(originalWords, keptSegments);
 
-  // Write edited captions.srt (overwrite — the original is recoverable from words.json).
   if (result.srt) {
-    const srtPath = join(derivDir, "captions.srt");
-    await Bun.write(srtPath, result.srt);
+    await Bun.write(join(outDir, "captions.srt"), result.srt);
   }
-
-  // Update DB transcript with edited plain text.
-  if (result.plainText) {
-    await upsertTranscript(videoId, "srt", result.plainText);
-  }
+  return result.plainText || null;
 }
 
 function buildFfmpegEditArgs(sourcePath: string, outputPath: string, kept: Segment[]): string[] {

@@ -3,7 +3,9 @@ import { eq } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../../../db/client";
+import type { ProcessingStepKind } from "../../../db/schema";
 import { videos as videosTable } from "../../../db/schema";
+import { markStepReady } from "../../../lib/processing/steps-store";
 import { createVideo, DATA_DIR, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { resolveForViewer, type ViewerVideo } from "../resolve";
@@ -18,10 +20,24 @@ afterEach(async () => {
   await teardownTestEnv(env);
 });
 
+// Maps a derivative filename to the step kind that gates its serving. Serving
+// is now table-gated (state `ready` + file present), so writing the file alone
+// isn't enough — the step row must say ready too.
+const STEP_FOR_FILE: Record<string, ProcessingStepKind> = {
+  "source.mp4": "source",
+  "1080p.mp4": "variant_1080",
+  "720p.mp4": "variant_720",
+};
+
 async function writeDerivative(video: Video, filename: string): Promise<void> {
   const dir = join(DATA_DIR, video.id, "derivatives");
   await mkdir(dir, { recursive: true });
   await Bun.write(join(dir, filename), "stub");
+  const kind = STEP_FOR_FILE[filename];
+  if (kind) await markStepReady(video.id, kind);
+  // MP4 serving is gated on the full mandatory set (source AND metadata), so a
+  // valid source.mp4 in these tests implies metadata extraction succeeded too.
+  if (filename === "source.mp4") await markStepReady(video.id, "metadata");
 }
 
 // Width/height/aspect are written by the metadata extraction step in
@@ -43,6 +59,22 @@ function asViewer(result: Awaited<ReturnType<typeof resolveForViewer>>): ViewerV
 describe("resolveForViewer — <source> ordering", () => {
   test("HLS fallback when no MP4 source exists", async () => {
     const video = await createVideo();
+    const v = asViewer(await resolveForViewer(video.slug));
+    expect(v.sources).toBeNull();
+    expect(v.src).toBe(`/${video.slug}/stream/stream.m3u8`);
+  });
+
+  test("HLS fallback when source is ready but metadata is not (mandatory set gate)", async () => {
+    // A present source.mp4 with a ready `source` step but a NON-ready `metadata`
+    // step (e.g. metadata extraction failed → processing_failed) must serve HLS,
+    // not an MP4 with no dimensions.
+    const video = await createVideo();
+    await setDimensions(video.id, 1280, 720);
+    const dir = join(DATA_DIR, video.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "source.mp4"), "stub");
+    await markStepReady(video.id, "source"); // metadata deliberately not ready
+
     const v = asViewer(await resolveForViewer(video.slug));
     expect(v.sources).toBeNull();
     expect(v.src).toBe(`/${video.slug}/stream/stream.m3u8`);

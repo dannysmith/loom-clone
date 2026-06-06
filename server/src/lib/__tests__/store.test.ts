@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { mkdir } from "fs/promises";
+import { join } from "path";
 import { getDb } from "../../db/client";
 import {
   slugRedirects as slugRedirectsTable,
@@ -8,11 +10,13 @@ import {
 } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { listEvents } from "../events";
+import { getStepStates } from "../processing/steps-store";
 import {
   addSegment,
   ConflictError,
   completeVideo,
   createVideo,
+  DATA_DIR,
   deleteVideo,
   duplicateVideo,
   getSegmentDurations,
@@ -134,13 +138,13 @@ describe("setVideoStatus / completeVideo", () => {
     expect(updated.updatedAt >= video.updatedAt).toBe(true);
   });
 
-  test("completeVideo sets status to complete, populates completedAt and durationSeconds", async () => {
+  test("completeVideo sets status to ready, populates completedAt and durationSeconds", async () => {
     const video = await createVideo();
     await addSegment(video.id, "seg_000.m4s", 4.0);
     await addSegment(video.id, "seg_001.m4s", 3.5);
 
     const updated = await completeVideo(video.id);
-    expect(updated.status).toBe("complete");
+    expect(updated.status).toBe("ready");
     expect(updated.completedAt).not.toBeNull();
     expect(updated.durationSeconds).toBeCloseTo(7.5, 5);
   });
@@ -183,7 +187,7 @@ describe("setVideoStatus / completeVideo", () => {
   });
 
   test("throws for unknown id", async () => {
-    expect(setVideoStatus("nope", "complete")).rejects.toThrow("Video nope not found");
+    expect(setVideoStatus("nope", "ready")).rejects.toThrow("Video nope not found");
   });
 });
 
@@ -630,6 +634,27 @@ describe("duplicateVideo", () => {
     expect(dup.slug).toContain(original.slug); // slug-1 pattern
   });
 
+  test("re-derives processing-step rows for the copy from its files", async () => {
+    const original = await createVideo();
+    await setVideoStatus(original.id, "ready");
+    await getDb()
+      .update(videosTable)
+      .set({ width: 1280, height: 720, durationSeconds: 90 })
+      .where(eq(videosTable.id, original.id));
+    // Put a couple of derivative files on disk for the original.
+    const dir = join(DATA_DIR, original.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "peaks.json"), "[]");
+
+    const dup = await duplicateVideo(original.id);
+
+    // The copy gets its own step rows inferred from the copied files — not the
+    // original's rows — so it serves correctly under table-gated logic.
+    const steps = await getStepStates(dup.id);
+    expect(steps.get("peaks")?.state).toBe("ready");
+    expect(steps.get("metadata")?.state).toBe("ready");
+  });
+
   test("appends (1) to title, increments existing suffix", async () => {
     const v = await createVideo();
     await updateVideo(v.id, { title: "My Video" });
@@ -699,6 +724,29 @@ describe("duplicateVideo", () => {
       .where(eq(slugRedirectsTable.videoId, dup.id));
     expect(redirects).toHaveLength(0);
   });
+
+  test("normalises a post-footage copy with an invalid source to processing_failed", async () => {
+    // A `reprocessing` original copied verbatim would strand the duplicate (no
+    // owner ever settles it); with an unvalidatable (stub) source the inferred
+    // ledger isn't ready, so the copy lands in processing_failed — reprocessable
+    // and honest — rather than stuck reprocessing.
+    const original = await createVideo();
+    await setVideoStatus(original.id, "reprocessing");
+    const dir = join(DATA_DIR, original.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "source.mp4"), "stub"); // not a playable video
+
+    const dup = await duplicateVideo(original.id);
+    expect(dup.status).toBe("processing_failed");
+  });
+
+  test("leaves a footage-state (recording) copy's status untouched", async () => {
+    // recording/healing/incomplete mirror footage, not the derivative ledger —
+    // the rollup must not relabel them.
+    const original = await createVideo(); // status: recording
+    const dup = await duplicateVideo(original.id);
+    expect(dup.status).toBe("recording");
+  });
 });
 
 describe("listVideosFiltered", () => {
@@ -751,6 +799,33 @@ describe("listVideosFiltered", () => {
     const result = await listVideosFiltered({ tagIds: [tag.id] });
     expect(result.items.map((v) => v.id)).toContain(tagged.id);
     expect(result.items.map((v) => v.id)).not.toContain(untagged.id);
+  });
+
+  test("needsAttention surfaces failed/incomplete/stalled-processing, not healthy videos", async () => {
+    const failed = await createVideo();
+    await setVideoStatus(failed.id, "processing_failed");
+    const incomplete = await createVideo();
+    await setVideoStatus(incomplete.id, "incomplete");
+
+    const stalled = await createVideo();
+    await setVideoStatus(stalled.id, "processing");
+    await getDb()
+      .update(videosTable)
+      .set({ updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }) // 1h ago
+      .where(eq(videosTable.id, stalled.id));
+
+    const freshProcessing = await createVideo();
+    await setVideoStatus(freshProcessing.id, "processing"); // updatedAt = now
+    const ready = await createVideo();
+    await completeVideo(ready.id);
+
+    const result = await listVideosFiltered({ needsAttention: true });
+    const ids = result.items.map((v) => v.id);
+    expect(ids).toContain(failed.id);
+    expect(ids).toContain(incomplete.id);
+    expect(ids).toContain(stalled.id);
+    expect(ids).not.toContain(freshProcessing.id);
+    expect(ids).not.toContain(ready.id);
   });
 
   test("FTS search filters results", async () => {

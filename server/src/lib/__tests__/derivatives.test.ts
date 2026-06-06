@@ -5,13 +5,12 @@ import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { _variantFfmpegArgs, generateVariants } from "../derivatives";
 import {
   _inFlightPromise,
-  _variantFfmpegArgs,
-  generateVariants,
   scheduleDerivatives,
   scheduleUploadDerivatives,
-} from "../derivatives";
+} from "../processing/pipeline";
 import { createVideo, DATA_DIR } from "../store";
 
 // Every ffmpeg-gated test in this file also shells out to ffprobe (directly or
@@ -190,7 +189,7 @@ describe("scheduleUploadDerivatives (upload path)", () => {
       const db = getDb();
       await db
         .update(videos)
-        .set({ status: "complete", durationSeconds: 2 })
+        .set({ status: "processing", durationSeconds: 2 })
         .where(eq(videos.id, video.id));
 
       scheduleUploadDerivatives(video.id);
@@ -372,7 +371,7 @@ describe("pipeline fault tolerance", () => {
       const db = getDb();
       await db
         .update(videos)
-        .set({ status: "complete", durationSeconds: 2 })
+        .set({ status: "processing", durationSeconds: 2 })
         .where(eq(videos.id, video.id));
 
       scheduleDerivatives(video.id);
@@ -414,7 +413,7 @@ describe("pipeline fault tolerance", () => {
       const db = getDb();
       await db
         .update(videos)
-        .set({ status: "complete", durationSeconds: 2 })
+        .set({ status: "processing", durationSeconds: 2 })
         .where(eq(videos.id, video.id));
 
       scheduleDerivatives(video.id);

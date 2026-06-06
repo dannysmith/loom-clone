@@ -2,6 +2,7 @@ import type { Tag, Video, VideoEvent, VideoTranscript } from "../../../db/schema
 import type { FileEntry } from "../../../lib/files";
 import { formatFileSize } from "../../../lib/files";
 import { formatDate, formatDateTime, formatDuration } from "../../../lib/format";
+import type { Readiness } from "../../../lib/processing/readiness";
 import type { ThumbnailCandidate } from "../../../lib/thumbnails";
 import { activeRawFilename } from "../../../lib/url";
 import { AdminLayout } from "../../layouts/AdminLayout";
@@ -16,6 +17,7 @@ import {
   IconRuler,
   IconUploadCloud,
 } from "../components/Icons";
+import { ReadinessPanel } from "../partials/ReadinessPanel";
 import { ThumbnailPicker } from "../partials/ThumbnailPicker";
 import { VideoActions } from "../partials/VideoActions";
 import {
@@ -35,8 +37,10 @@ type Props = {
   files: FileEntry[];
   thumbnailCandidates: ThumbnailCandidate[];
   transcript: VideoTranscript | undefined;
-  activeTab: "events" | "files" | "transcript";
+  activeTab: "events" | "files" | "transcript" | "processing";
   hasChapters: boolean;
+  readiness: Readiness;
+  reprocessNotice?: string;
 };
 
 export function VideoDetailPage({
@@ -49,6 +53,8 @@ export function VideoDetailPage({
   transcript,
   activeTab,
   hasChapters,
+  readiness,
+  reprocessNotice,
 }: Props) {
   const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
@@ -106,8 +112,12 @@ export function VideoDetailPage({
       {/* --- Metadata --- */}
       <div class="video-meta">
         <div class="video-meta-grid">
-          {video.status !== "complete" && (
+          {video.status !== "ready" ? (
             <span class={`badge badge--${video.status}`}>{video.status}</span>
+          ) : (
+            readiness.badge && (
+              <span class="badge badge--ready">ready &middot; {readiness.badge}</span>
+            )
           )}
           {video.lastEditedAt && (
             <a
@@ -192,13 +202,15 @@ export function VideoDetailPage({
       {/* --- Thumbnail picker --- */}
       <ThumbnailPicker video={video} candidates={thumbnailCandidates} />
 
-      {/* --- Tabs --- */}
+      {/* --- Tabs (events / files / transcript / processing) --- */}
       <VideoTabsSection
         video={video}
         events={events}
         files={files}
         transcript={transcript}
+        readiness={readiness}
         activeTab={activeTab}
+        reprocessNotice={reprocessNotice}
       />
 
       <dialog id="file-preview-dialog" class="file-preview-dialog">
@@ -213,14 +225,31 @@ export function VideoTabsSection({
   events,
   files,
   transcript,
+  readiness,
   activeTab,
+  reprocessNotice,
 }: {
   video: Video;
   events: VideoEvent[];
   files: FileEntry[];
   transcript: VideoTranscript | undefined;
-  activeTab: "events" | "files" | "transcript";
+  readiness: Readiness;
+  activeTab: "events" | "files" | "transcript" | "processing";
+  reprocessNotice?: string;
 }) {
+  const tabLink = (tab: string, label: string) => (
+    <a
+      href={`/admin/videos/${video.id}?tab=${tab}`}
+      hx-get={`/admin/videos/${video.id}/partials/tabs?tab=${tab}`}
+      hx-target="#video-tabs-section"
+      hx-swap="outerHTML"
+      hx-push-url="false"
+      class={`settings-tab ${activeTab === tab ? "active" : ""}`}
+    >
+      {label}
+    </a>
+  );
+
   return (
     <div
       id="video-tabs-section"
@@ -229,44 +258,24 @@ export function VideoTabsSection({
       hx-swap="outerHTML"
     >
       <div class="video-tabs">
-        <a
-          href={`/admin/videos/${video.id}?tab=events`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=events`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "events" ? "active" : ""}`}
-        >
-          Events ({events.length})
-        </a>
-        <a
-          href={`/admin/videos/${video.id}?tab=files`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=files`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "files" ? "active" : ""}`}
-        >
-          Files ({files.filter((f) => !f.isDirectory).length} &middot;{" "}
-          {formatFileSize(files.reduce((sum, f) => sum + (f.isDirectory ? 0 : f.size), 0))})
-        </a>
-        <a
-          href={`/admin/videos/${video.id}?tab=transcript`}
-          hx-get={`/admin/videos/${video.id}/partials/tabs?tab=transcript`}
-          hx-target="#video-tabs-section"
-          hx-swap="outerHTML"
-          hx-push-url="false"
-          class={`settings-tab ${activeTab === "transcript" ? "active" : ""}`}
-        >
-          Transcript{transcript ? ` (${transcript.wordCount} words)` : ""}
-        </a>
+        {tabLink("events", `Events (${events.length})`)}
+        {tabLink("processing", "Processing")}
+        {tabLink(
+          "files",
+          `Files (${files.filter((f) => !f.isDirectory).length} · ${formatFileSize(
+            files.reduce((sum, f) => sum + (f.isDirectory ? 0 : f.size), 0),
+          )})`,
+        )}
+        {tabLink("transcript", `Transcript${transcript ? ` (${transcript.wordCount} words)` : ""}`)}
       </div>
-      {activeTab === "events" ? (
-        <EventLog events={events} />
+      {activeTab === "processing" ? (
+        <ReadinessPanel video={video} readiness={readiness} notice={reprocessNotice} />
       ) : activeTab === "transcript" ? (
         <TranscriptView transcript={transcript} />
-      ) : (
+      ) : activeTab === "files" ? (
         <FileBrowser files={files} videoId={video.id} />
+      ) : (
+        <EventLog events={events} />
       )}
     </div>
   );

@@ -21,8 +21,8 @@ editor.get("/:id/editor", async (c) => {
   if (result instanceof Response) return result;
   const video = result;
 
-  // Only complete videos can be edited.
-  if (video.status !== "complete") {
+  // Only ready videos can be edited (a validated source.mp4 must exist).
+  if (video.status !== "ready") {
     return c.text(`Cannot edit a video with status "${video.status}"`, 400);
   }
   if (video.trashedAt) {
@@ -109,10 +109,16 @@ editor.post("/:id/editor/commit", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
 
-  if (result.status === "processing") {
+  // requireVideo includes trashed videos; mirror the editor page guard so a
+  // trashed video can't be committed/reprocessed.
+  if (result.trashedAt) {
+    return c.json({ error: "Cannot commit edits for a trashed video" }, 400);
+  }
+
+  if (result.status === "reprocessing") {
     return c.json({ error: "Video is already being processed" }, 409);
   }
-  if (result.status !== "complete") {
+  if (result.status !== "ready") {
     return c.json({ error: `Cannot commit edits for a video with status "${result.status}"` }, 400);
   }
 
@@ -124,7 +130,7 @@ editor.post("/:id/editor/commit", async (c) => {
 
   applyEdits(result.id);
 
-  return c.json({ ok: true, status: "processing" });
+  return c.json({ ok: true, status: "reprocessing" });
 });
 
 // --- Editor media files ---

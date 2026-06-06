@@ -333,7 +333,7 @@ export async function getVideosForTag(
     .where(
       and(
         eq(videoTags.tagId, tagId),
-        eq(videos.status, "complete"),
+        eq(videos.status, "ready"),
         isNull(videos.trashedAt),
         // Exclude only private videos — public AND unlisted appear.
         ne(videos.visibility, "private"),

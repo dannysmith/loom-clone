@@ -1,9 +1,13 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import type { ProcessingStepKind } from "../../db/schema";
 import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
 import { listVideoFiles } from "../../lib/files";
+import { scheduleReprocess } from "../../lib/processing/pipeline";
+import { canReprocess, computeReadiness, reprocessability } from "../../lib/processing/readiness";
+import { REGENERABLE_KINDS } from "../../lib/processing/registry";
 import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
@@ -46,9 +50,10 @@ const videoRoutes = new Hono<AdminEnv>();
 
 // --- Video detail ---
 
-function parseTab(q: string | undefined): "events" | "files" | "transcript" {
+function parseTab(q: string | undefined): "events" | "files" | "transcript" | "processing" {
   if (q === "files") return "files";
   if (q === "transcript") return "transcript";
+  if (q === "processing") return "processing";
   return "events";
 }
 
@@ -58,16 +63,31 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = parseTab(c.req.query("tab"));
-  const [videoTags, allTags, events, files, thumbnailCandidates, transcript, hasChapters] =
-    await Promise.all([
-      getVideoTags(video.id),
-      listTags(),
-      listEvents(video.id),
-      listVideoFiles(video.id),
-      listThumbnailCandidates(video.id),
-      getTranscript(video.id),
-      chaptersExist(video.id),
-    ]);
+  // Surface that a reprocess was queued behind an in-flight run (rather than
+  // started immediately) so the redirect after the POST isn't a silent no-op.
+  const reprocessNotice =
+    c.req.query("reprocessed") === "queued"
+      ? "A run is already in progress — your re-run is queued and will start when it finishes."
+      : undefined;
+  const [
+    videoTags,
+    allTags,
+    events,
+    files,
+    thumbnailCandidates,
+    transcript,
+    hasChapters,
+    readiness,
+  ] = await Promise.all([
+    getVideoTags(video.id),
+    listTags(),
+    listEvents(video.id),
+    listVideoFiles(video.id),
+    listThumbnailCandidates(video.id),
+    getTranscript(video.id),
+    chaptersExist(video.id),
+    computeReadiness(video),
+  ]);
 
   return c.html(
     <VideoDetailPage
@@ -80,6 +100,8 @@ videoRoutes.get("/:id", async (c) => {
       transcript={transcript}
       activeTab={activeTab}
       hasChapters={hasChapters}
+      readiness={readiness}
+      reprocessNotice={reprocessNotice}
     />,
   );
 });
@@ -229,10 +251,11 @@ videoRoutes.get("/:id/partials/tabs", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   const activeTab = parseTab(c.req.query("tab"));
-  const [events, files, transcript] = await Promise.all([
+  const [events, files, transcript, readiness] = await Promise.all([
     listEvents(result.id),
     listVideoFiles(result.id),
     getTranscript(result.id),
+    computeReadiness(result),
   ]);
   return c.html(
     <VideoTabsSection
@@ -240,6 +263,7 @@ videoRoutes.get("/:id/partials/tabs", async (c) => {
       events={events}
       files={files}
       transcript={transcript}
+      readiness={readiness}
       activeTab={activeTab}
     />,
   );
@@ -478,6 +502,68 @@ videoRoutes.post("/:id/delete-permanently", async (c) => {
 videoRoutes.post("/:id/duplicate", async (c) => {
   const duplicate = await duplicateVideo(c.req.param("id"));
   return c.redirect(`/admin/videos/${duplicate.id}`);
+});
+
+// Re-run the post-processing pipeline for the whole video. Default is the
+// resumable run (steps that already succeeded are skipped). With `rebuild=hls`
+// it forces a full from-HLS rebuild (re-stitch source + everything), only
+// possible while the source is rebuildable. reconcile() drives the status.
+videoRoutes.post("/:id/reprocess", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+
+  if (!canReprocess(result)) {
+    return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
+  }
+
+  const body = await c.req.parseBody();
+  const force = body.rebuild === "hls";
+  if (force) {
+    const { canRebuildSource } = await reprocessability(result);
+    if (!canRebuildSource) {
+      return c.text("Cannot rebuild — the source's HLS segments are gone", 400);
+    }
+  }
+
+  await logEvent(result.id, "reprocess_requested", force ? { rebuild: "hls" } : undefined);
+  const outcome = scheduleReprocess(result.id, { source: result.source, force });
+
+  return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
+});
+
+// Regenerate a single derivative from the existing source.mp4 (dependency-aware:
+// only the steps that read source.mp4 non-destructively, and only when source
+// is valid). The per-file tmp→rename makes a single-artifact regenerate atomic.
+videoRoutes.post("/:id/reprocess/:kind", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
+  const kind = c.req.param("kind") as ProcessingStepKind;
+
+  if (!canReprocess(result)) {
+    return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
+  }
+  // Per-artifact regen is edit-unaware (it would rebuild from the full source
+  // while the active file stays the edited cut), so it's disabled for edited
+  // videos — the UI hides the button; reject a direct POST too. Use the global
+  // "Re-run post-processing" (which resets the edit) instead.
+  if (result.lastEditedAt) {
+    return c.text(
+      "Per-artifact regeneration is disabled for edited videos — use Re-run post-processing instead",
+      400,
+    );
+  }
+  if (!REGENERABLE_KINDS.has(kind)) {
+    return c.text(`"${kind}" cannot be regenerated standalone`, 400);
+  }
+  const { sourceValid } = await reprocessability(result);
+  if (!sourceValid) {
+    return c.text("Cannot regenerate — source.mp4 is missing or invalid", 400);
+  }
+
+  await logEvent(result.id, "reprocess_requested", { only: kind });
+  const outcome = scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
+
+  return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
 });
 
 export default videoRoutes;

@@ -1,5 +1,6 @@
 import type { Tag, Video } from "../../../db/schema";
 import type { DashboardFilters } from "../../../lib/store";
+import { serializeFilters } from "../../../routes/admin/helpers";
 import { AdminLayout } from "../../layouts/AdminLayout";
 import {
   IconArrowDown,
@@ -42,9 +43,11 @@ const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "recording", label: "Recording" },
   { value: "healing", label: "Healing" },
-  { value: "complete", label: "Complete" },
   { value: "processing", label: "Processing" },
-  { value: "failed", label: "Failed" },
+  { value: "ready", label: "Ready" },
+  { value: "reprocessing", label: "Reprocessing" },
+  { value: "processing_failed", label: "Processing failed" },
+  { value: "incomplete", label: "Incomplete" },
 ] as const;
 
 // HTMX attributes shared by all filter/sort controls
@@ -194,6 +197,23 @@ export function DashboardPage({
             ))}
           </div>
 
+          {/* Needs attention (failed / incomplete / stalled processing) */}
+          <div class="filter-group">
+            <span class="filter-group-label">Attention</span>
+            <label class="filter-pill filter-pill--attention">
+              <input
+                type="checkbox"
+                name="attention"
+                value="1"
+                checked={filters.needsAttention ?? false}
+                data-filter
+                hx-trigger="change"
+                {...HX}
+              />
+              <span class="filter-pill-label">&#9888; Needs attention</span>
+            </label>
+          </div>
+
           {/* Tags (multi-select) */}
           {tags.length > 0 && (
             <div class="filter-group">
@@ -277,13 +297,10 @@ function updateTagFilter() {
   );
 }
 
+// Preserve every active filter when switching view. Uses the one shared
+// serializer so it can't drift from filtersToParams / parseFilters.
 function viewToggleUrl(filters: DashboardFilters, view: string): string {
-  const params = new URLSearchParams();
-  if (filters.search) params.set("q", filters.search);
-  if (filters.visibility) params.set("visibility", filters.visibility);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.tagIds?.length) params.set("tag", filters.tagIds.join(","));
-  if (filters.sort && filters.sort !== "date-desc") params.set("sort", filters.sort);
+  const params = serializeFilters(filters);
   params.set("view", view);
   const qs = params.toString();
   return `/admin${qs ? `?${qs}` : ""}`;

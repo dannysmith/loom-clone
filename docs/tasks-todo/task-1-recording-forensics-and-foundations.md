@@ -4,9 +4,11 @@ https://github.com/dannysmith/loom-clone/issues/44
 
 First of four ordered tasks spun out of #44. This one is the foundation: make recording failures **diagnosable after the fact** without changing anything on the recording hot path, plus a couple of low-hanging-fruit cleanups. It deliberately does **not** add live warnings or attempt to fix the underlying CMIO/encoder failures — those are tasks 2 and 3, and both depend on the diagnostics this task lays down.
 
-The framing that drives the whole task: **log capture here is a retrieval problem, not a capture problem.** The app already emits structured unified logs (`OSLog`, subsystem `is.danny.LoomClone`, all `.public` — see `Helpers/Logging.swift`), and macOS already persists them to the unified log store. The errors that actually matter during a bad recording (`-12743` CMIO synchronizer floods) are **Apple's**, from a CoreMediaIO subsystem, not ours. So the job is to *pull the right window of the existing store*, including Apple subsystems — which is a `log show` predicate, not new app logging.
+The framing that drives the whole task: **log capture here is a retrieval problem, not a capture problem.** The app already emits structured unified logs (`OSLog`, subsystem `is.danny.LoomClone`, all `.public` — see `Helpers/Logging.swift`), and macOS already persists them to the unified log store. The errors that actually matter during a bad recording (`-12743` CMIO synchronizer floods) are **Apple's**, from a CoreMediaIO subsystem, not ours. So the job is to *pull the right window of the existing store*, including Apple subsystems.
 
 And the hard constraint, straight from #3: **log volume itself causes the failure we're hunting.** #3's resolution proved that hundreds of CMIO lines/sec create I/O back-pressure on the capture dispatch queues, dropping frames and worsening AV desync. So we must **never** add synchronous disk logging to the recording hot path. All log capture here is **post-stop extraction** from the OS store — zero cost while recording.
+
+**Extraction lives in Swift, in the app binary — not a script on disk.** A shell script in the repo would not exist inside the bundled production `.app`, so shelling out to a repo path would silently no-op in production. Two facts about how this app is built make a clean in-binary approach possible: it is **not sandboxed** (`LoomClone.entitlements` declares only `com.apple.security.device.camera` + `audio-input` — no `app-sandbox` key), and it runs as the user's **admin** account. Under those two conditions, `OSLogStore(scope: .system)` can read the **whole** persisted store in-process, including other processes' and Apple-daemon subsystem entries — the private `com.apple.logging.local-store` entitlement (ungettable by third parties) is **not** required when running as admin. (Sandboxed apps are restricted to `.currentProcessIdentifier`, which only sees our own current launch — that restriction does not apply here.)
 
 ## Current state (what already exists)
 
@@ -21,34 +23,34 @@ And the hard constraint, straight from #3: **log volume itself causes the failur
 
 ### Part 1 — Post-stop log extraction (the core)
 
-A **script** plus a **post-stop task** that calls it. No hot-path logging.
+A small **Swift log-extractor type** plus a **post-stop task** that calls it. No hot-path logging, no on-disk script — it's all in the app binary via the `OSLog` framework's `OSLogStore`.
 
-**The script** (`app/Scripts/` or `scripts/` — match repo convention; the test harness already keeps scripts under `app/TestHarness/Scripts/`). A small shell/zsh wrapper around `log show` that, given a start time, end time, and PID, dumps the relevant slice of the unified log store to a file. It must pull **both** our subsystem and the Apple media subsystems:
+**Primary approach — `OSLogStore(scope: .system)`.** A new type (e.g. `Helpers/LogExtractor.swift`) that, given a time window, reads the persisted unified-log store in-process and writes the matching slice into the recording bundle. Shape:
 
-- `is.danny.LoomClone` (ours — the `health`, `camera`, `raw-writer`, `recording`, etc. categories).
-- The CoreMediaIO / CoreMedia / VideoToolbox subsystems that emit the `-12743` floods and encoder errors. **Confirm the exact subsystem/category strings during implementation** — candidates are `com.apple.cmio`, `com.apple.coremedia`, `com.apple.videotoolbox`. Verify by reproducing a flood and inspecting `log stream --debug --predicate '...'` so the predicate actually catches the lines from #3/#30 (`CMIOSampleBuffer.c`, `CMIO_Unit_Synchronizer_Video.cpp`, `RepeatPreviousFrame ... -12743`).
+1. `let store = try OSLogStore(scope: .system)` — `.system` (not `.currentProcessIdentifier`) is what reaches the Apple CMIO daemon entries; available because the app is non-sandboxed + admin (see header).
+2. `let position = store.position(date: recordingStartMinusPad)` — anchor enumeration near the recording window so we don't scan the entire store.
+3. Enumerate `store.getEntries(at: position, matching: predicate)`, filter to `OSLogEntryLog`, **stop** once entries pass the recording end (+pad).
+4. Predicate selects **both** our subsystem and the Apple media subsystems:
+   - `is.danny.LoomClone` (ours — `health`, `camera`, `raw-writer`, `recording`, etc.).
+   - The CoreMediaIO / CoreMedia / VideoToolbox subsystems that emit the `-12743` floods + encoder errors. **Confirm the exact subsystem strings at impl time** — candidates `com.apple.cmio`, `com.apple.coremedia`, `com.apple.videotoolbox`. Verify by reproducing a flood (`log stream --predicate ...` in Terminal) so the predicate actually catches the #3/#30 lines (`CMIOSampleBuffer.c`, `CMIO_Unit_Synchronizer_Video.cpp`, `RepeatPreviousFrame ... -12743`). `NSPredicate(format: "subsystem == %@ OR subsystem BEGINSWITH %@ OR ...", ...)`.
+5. Serialize each `OSLogEntryLog` (`date`, `subsystem`, `category`, `level`, `process`, `processIdentifier`, `composedMessage`) as NDJSON lines into `cmio-log.ndjson` (or similar) in the recording bundle, next to `recording.json`/`diagnostics.json`.
 
-Predicate shape (illustrative — pin exactly at impl time):
+Implementation constraints / decisions:
+- **Window from the recording, not wall clock.** Use `recording.json`'s start/end wall-clock fields (already present), padded a few seconds each side.
+- **Do NOT over-constrain on process.** Apple's CMIO logs come from daemons (`cmiodalassistants`/`coremediad`), a *different* process than ours — subsystem is the selector; filtering to our PID would drop exactly the Apple lines we want.
+- **Stream + cap (memory discipline).** Even post-stop, a `-12743` flood is tens of thousands of entries — don't build one giant in-memory array (this project has an OOM history). Enumerate lazily, write incrementally, and cap at N entries with a recorded `"truncated at N"` marker rather than an unbounded file.
+- **Persistence level caveat.** `OSLogStore` reads the *persisted* store: `error`/`fault`/`notice` are persisted; `debug` and most `info` are memory-only and may be gone by stop. The `-12743` lines read as error-level so should be present — confirm at impl time, and accept that debug-level context is lost (capturing it live would require `log stream` *during* recording, reintroducing the #3 back-pressure we're avoiding).
 
-```
-log show --start "<ISO>" --end "<ISO>" --style ndjson \
-  --predicate 'subsystem == "is.danny.LoomClone" OR subsystem BEGINSWITH "com.apple.cmio" OR subsystem BEGINSWITH "com.apple.coremedia"'
-```
+**Fallback approach (documented, only if needed).** If `.system` enumeration proves too slow/heavy on a busy store, spawn `/usr/bin/log show --start … --end … --predicate … --style ndjson` via `Process` and capture stdout. `/usr/bin/log` is a stable Apple-signed system binary (no repo file, no bundling) and spawning it is permitted (the app isn't sandboxed; hardened runtime doesn't block Apple-signed binaries). Out-of-process, so it doesn't bloat our heap — the trade is parsing text instead of structured entries. Keep this in the back pocket; default to `OSLogStore`.
 
-Notes / decisions to make at impl time:
-- **Time window from the recording, not wall clock.** Use `recording.json`'s start/end wall-clock fields (already present — "start/end wall-clock" in the timeline) padded by a few seconds each side. The script takes them as args.
-- **PID filtering is best-effort.** `log show` can filter by process, but the recording PID is the app itself; subsystem filtering is the primary selector. Consider adding `process == "LoomClone"` to scope ours, but Apple's CMIO logs may be emitted from a daemon (`cmiodalassistants`/`coremediad`) under a *different* process — so do **not** over-constrain on process or we'll drop exactly the Apple lines we want. Validate against a real flood.
-- **Output format.** `--style ndjson` (or `syslog`) into `cmio-log.ndjson` (or `.log`) in the recording bundle. Keep it greppable.
-- **Size guard.** A `-12743` flood can be tens of thousands of lines. That's *fine* on disk post-hoc (it's the whole point), but cap pathological cases — e.g. `--last`/window bounding already limits it; optionally truncate with a recorded "truncated at N lines" marker rather than writing an unbounded file.
+**The post-stop task.** After `recording.json`/`diagnostics.json` are written in the stop flow (`RecordingActor+Stop.swift`), kick off a **detached, low-priority** task that runs the extractor and writes the dump into the recording bundle. Constraints:
+- **Fire-and-forget, off the actor, after stop completes** — must not delay stop, block the clipboard URL, or touch the recording pipeline. Recording is already finished; this is pure post-processing.
+- **Graceful degradation if not admin.** `OSLogStore(scope: .system)` requires admin. If it throws (or a future non-admin run), fall back to `.currentProcessIdentifier` to at least capture our own `is.danny.LoomClone` entries, and write a marker noting CMIO capture was skipped. Never throw out of the post-stop path.
+- **Debug vs release.** Run in **both** — production failures are exactly when we'll want it (#44 explicitly asks for production log access). The bundle is local-only, never uploaded, so no privacy/transport cost.
 
-**The post-stop task.** After `recording.json`/`diagnostics.json` are written in the stop flow (`RecordingActor+Stop.swift`), kick off a **detached, low-priority** task that shells out to the script (via `Process`) and writes the log dump into the recording bundle. Constraints:
-- **Fire-and-forget, off the actor, after stop completes** — it must not delay stop, block the clipboard URL, or touch the recording pipeline. The recording is already finished; this is pure post-processing.
-- **Debug vs release.** Decide whether to run it always or only in DEBUG. Leaning: **run in both** but make it cheap — production failures are exactly when we'll want it (#44 explicitly asks for production log access). The bundle is local-only and never uploaded, so there's no privacy/transport cost.
-- **Failure-tolerant.** If `log show` isn't available or returns nothing, log a line and move on. Never throw out of the post-stop path.
+**Dev + re-extraction convenience.** Because extraction is a pure function of a time window, expose a way to **re-run it for any past recording on demand** — an action in `UI/RecordingsSettingsTab.swift` (which already lists past recordings). That covers #44's "persistent place for Xcode development logs to stay locally" without a separate tool; the OS store is read retroactively. (For pure ad-hoc dev use, `log show` in Terminal remains available too — but that's a convenience, not something we build.)
 
-**Dev convenience.** Also expose the script as a standalone command (a `make` target, e.g. `make logs SESSION=<id>`, or a flag) so we can re-extract logs for any past recording on demand — #44's "persistent place for Xcode development logs to stay locally." This satisfies the dev-log-capture ask **without any app code change at all** — it reads the OS store retroactively.
-
-**UI affordance (small).** In `UI/RecordingsSettingsTab.swift`, add a "Reveal logs" button next to the existing "Reveal recording.json", and/or a "Re-extract logs" action that runs the script for that session. Optional but cheap.
+**UI affordance (small).** In `UI/RecordingsSettingsTab.swift`, add a "Reveal logs" button next to the existing "Reveal recording.json", plus the "Re-extract logs" action above. Optional but cheap.
 
 ### Part 2 — Walk the `NSUnderlyingError` chain (#30 step 0)
 
@@ -86,7 +88,7 @@ Honest limitation to document (don't build around it): there is **no clean app-l
 
 | Concern | File |
 |---|---|
-| Log-extraction script | `app/Scripts/` (new) or repo-convention scripts dir; `app/Makefile` target |
+| `OSLogStore` extractor (Swift, in-binary) | `Helpers/LogExtractor.swift` (new) |
 | Post-stop log dump task | `Pipeline/RecordingActor+Stop.swift` (kick off after artifact writes) |
 | `NSUnderlyingError` walk | `Pipeline/RawStreamWriter.swift` (`captureFailure`, `WriterFailure`), `Pipeline/RecordingActor+Stop.swift` (`recordRawWriterFailures`, `checkRawWriterStatus`) |
 | Enriched event fields | `Models/RecordingTimeline.swift` / `Models/RecordingTimelineBuilder.swift` (`recordRawWriterFailed`) |

@@ -25,7 +25,12 @@ And the hard constraint, straight from #3: **log volume itself causes the failur
 
 > **Status (landed):** `Helpers/LogExtractor.swift` (`OSLogStore(scope: .system)`, window from `recording.json`, NDJSON → `os-log.ndjson`, stream + cap + admin fallback), the detached post-stop call in `RecordingActor+Stop.swift`, the "Reveal Logs" / "Re-extract Logs" affordances in `RecordingsSettingsTab.swift`, and `LogExtractorTests` (window parsing). A standalone probe on the dev Mac confirmed `.system` scope opens as admin with no entitlement and that `com.apple.cmio` + `com.apple.coremedia` are live, matched subsystems — so the predicate routing is correct. **Still to confirm against a real `-12743` flood:** that those specific lines are persisted at `error`/`notice` level (not memory-only `debug`), which is the go/no-go for whether post-stop extraction catches them.
 >
-> **Parts 2, 3, and 4 also landed.** All of task 1 is implemented. **Not yet closed out** — pending local testing on the dev Mac (record with the ZV-1, confirm `os-log.ndjson` captures the CMIO `-12743` lines at a persisted level, confirm the preview badge + underlying-error capture behave). Move to `tasks-done/` only after that passes.
+> **Parts 2, 3, and 4 also landed. Validated and closed out 2026-06-06.** Five test recordings (4 debug/Xcode + 1 detached Release build) confirmed all three parts end-to-end:
+> - **Part 1:** `os-log.ndjson` written on every recording with `scope=system`, `cmioCaptured=true`; the CMIO `-12743` lines are captured at **`error` level** (persisted, not memory-only debug) — the open go/no-go is answered YES. Flood counts tracked reality: 4,314 / 11,217 / 22,932 / 28,428 on the ZV-1 recordings vs **0** on the clean FaceTime one.
+> - **Part 2:** every ZV-1 `raw.writer.failed` now carries the real underlying `NSOSStatusErrorDomain -16364` instead of the bare generic `-11800` — data #30 had been blocked on for months.
+> - **Part 3:** the preview badge showed `1280×720 · 24.4fps` in orange (below the 30 target) and *predicted the meltdown before recording started*.
+>
+> The tests also produced the actual diagnosis (ZV-1 USB-streaming locked-rate CMIO meltdown causing AV desync in both debug **and** production) — driven to #30 for the task-3 fix.
 
 A small **Swift log-extractor type** plus a **post-stop task** that calls it. No hot-path logging, no on-disk script — it's all in the app binary via the `OSLog` framework's `OSLogStore`.
 

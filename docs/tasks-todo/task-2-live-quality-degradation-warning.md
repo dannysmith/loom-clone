@@ -14,6 +14,13 @@ Because frames never stop for a full second, the camera-stale watchdog barely fi
 
 The opportunity: **we already compute the signal.** The `MetronomeDiagnostics` counters on `RecordingActor` (`Pipeline/RecordingActor+Diagnostics.swift`) — `rejectMonotonicity`, `rejectNegElapsed`, `skipsStale`, `noSourceTicks`, `emitOK`, `iterations` — are incremented every metronome tick, live, and snapshotted every ~2s. They're only serialized at stop, into `recording.json`'s `runtime` block. Reading a **rolling window** of them mid-recording and firing a warning when the reject/no-source rate spikes catches the meltdown for almost nothing, reusing the entire existing `RecordingWarning` → `WarningBannerView` pipeline.
 
+> **Update (2026-06-06) — re-scope in light of the task-1 findings + task 3.** Two things changed since this was first written:
+>
+> 1. **Don't fire on "camera slower than target" — that's normal, and it's the badge's job.** Task-1 Part 3 already ships a pre-recording badge that flags a sub-target camera (e.g. the ZV-1's honest ~24fps against a 30 target, shown in orange). And once **task 3** lands, an under-delivering camera running clean VFR is the *expected, healthy* state — a ZV-1 at 24fps must **not** trip this warning. So this warning must key on **degradation signatures** — a spike in `rejectMonotonicity`/`rejectNegElapsed` (the ~2s backward-PTS jumps the meltdown produces), or output collapsing *relative to the camera's own recent baseline* — **not** on "fps below the chosen target." Below-target-but-steady is fine; *destabilising* is the signal.
+> 2. **A real calibration set now exists.** The five 2026-06-06 recordings (4 ZV-1 meltdowns + 1 clean FaceTime) plus their `os-log.ndjson` are a ready-made labelled dataset — `-12743` counts of 4,314 / 11,217 / 22,932 / 28,428 vs **0**, with matching `monoRejects`/`effectiveCameraFps`. Calibrate the threshold against these (see Part 2).
+>
+> Sequencing note: if task 3 lands first (likely — it fixes the user's main workflow), the ZV-1 will mostly stop melting down, so this warning's job narrows to catching *other*/residual mid-recording degradation. Still worth building — it's the safety net for any camera/condition task 3 doesn't fully cover.
+
 ## Current state (what we build on)
 
 - **Live counters.** `MetronomeDiagnostics` (`RecordingActor+Diagnostics.swift`): per-tick `Int64` counters listed above, plus periodic snapshots (`PeriodicSnapshot`, pushed ~every 2s from the metronome loop) and the histograms. All live on the actor during recording.
@@ -45,7 +52,7 @@ The hard part is **not crying wolf.** Several benign things move these counters 
 - **Keep-alive / static-screen runs** legitimately produce no fresh source — `noSourceTicks` rises without anything being wrong. Don't count no-source against quality when keep-alive is active / in a screen mode with a static screen.
 - **The brief cameraOnly warm-up** after switching into it (the freshness gate discarding pre-switch frames) is expected.
 
-If the warning false-positives even occasionally, the user learns to ignore it and it becomes worthless — so **calibrate against real data, not intuition.** There is an archive of `recording.json` + `diagnostics.json` from past recordings (good ones and the known-bad #30 sessions, e.g. `6a9f962f…`, the 2026-06-03 720p meltdown). Concretely:
+If the warning false-positives even occasionally, the user learns to ignore it and it becomes worthless — so **calibrate against real data, not intuition.** The 2026-06-06 test set is the labelled ground truth: four ZV-1 meltdowns (`recording.json` + `diagnostics.json` + `os-log.ndjson`, `-12743` counts 4,314 / 11,217 / 22,932 / 28,428, `monoRejects` 5–53, `effectiveCameraFps` ~21–24) and one clean FaceTime baseline (0 `-12743`, `monoRejects` 0, `skipsStale` 0). Crucially, the clean baseline and the *steady* parts of the meltdowns both run below/around target fps — so the separator can't be "fps < target"; it has to be the reject-spike / destabilisation. Also keep the older #30 sessions (e.g. `6a9f962f…`) as extra samples. Concretely:
 
 1. Write a small offline analysis (a script, or a throwaway harness) that replays the periodic snapshots / counters from those JSONs and computes the candidate windowed signal over time.
 2. Find a threshold (and window length, and required-consecutive-windows) that **clearly separates** the known-bad sessions from the healthy ones, including across mode switches and static runs.

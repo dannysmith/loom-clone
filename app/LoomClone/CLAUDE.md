@@ -14,7 +14,7 @@ For the full narrative walkthrough of the recording pipeline (actors, timing, mo
 
 Four actors, each owning one concern:
 
-- **RecordingActor** — orchestrates everything. Owns the metronome (30fps emit loop), the camera frame queue, the recording clock anchor, pause/resume state. Entry point for all capture callbacks. Split across extensions: `+Metronome` (drift-corrected emit loop), `+FrameHandling` (capture callbacks, PTS retiming, metronome frame emission), `+CompositionRecovery` (GPU failure handling and terminal escalation).
+- **RecordingActor** — orchestrates everything. Owns the metronome (emit loop at the target rate, 30 or 60fps), the camera frame queue, the recording clock anchor, pause/resume state. Entry point for all capture callbacks. Split across extensions: `+Metronome` (drift-corrected emit loop), `+FrameHandling` (capture callbacks, PTS retiming, metronome frame emission), `+CompositionRecovery` (GPU failure handling and terminal escalation).
 - **CompositionActor** — Metal/CIContext rendering. Takes a screen buffer + camera buffer + mode, returns a composited pixel buffer. Stateless between frames except for the CIContext itself.
 - **WriterActor** — AVAssetWriter in HLS fMP4 mode. Receives composited video + audio, cuts segments, reports them back for upload. Owns the AAC timestamp adjuster (priming offset + pause accumulator).
 - **UploadActor** — streams segments to the server during recording, retries on failure, hands off to HealAgent for post-stop recovery.
@@ -25,9 +25,11 @@ Recording start is split into `prepareRecording` (slow: hardware init, server se
 
 ## How video frames reach the output
 
-- **cameraOnly**: camera delivers frames into a bounded FIFO queue. The metronome pops one per tick and composites it. Every camera frame reaches the output in order at its native capture PTS.
-- **screenAndCamera**: metronome drives at 30fps. It reads the latest screen frame (single-slot cache) and peeks the most recent camera frame from the queue (without popping) as the PiP overlay.
-- **screenOnly**: metronome drives at 30fps from the screen cache. No camera involvement.
+The metronome ticks at the target rate (30 or 60fps) but that tick is a **budget, not a contract** (post-#21 cadence rework): output rate tracks whatever the active mode's source actually delivers, so a sub-target camera produces honest VFR rather than fabricated frames. See `docs/developer/recording-pipeline.md` for the full model.
+
+- **cameraOnly**: camera delivers frames into a bounded FIFO queue. The metronome pops one per tick and composites it. Every camera frame reaches the output in order at its native capture PTS; output cadence = the camera's real delivery rate.
+- **screenAndCamera**: screen drives the cadence (latest screen frame from a single-slot cache); the most recent camera frame is peeked (without popping) as the PiP overlay. A 60fps target gives 60fps screen output even with a slower camera.
+- **screenOnly**: screen drives the cadence from the screen cache. No camera involvement.
 
 Video PTS is always the source frame's hardware capture time, not the wall clock at emit. Audio PTS is likewise the mic's hardware capture time. Both are relative to `recordingStartTime`, which is anchored to the most recent source frame's capture PTS at commit (not `CMClockGetTime`). This is what keeps A/V in sync.
 
@@ -37,4 +39,6 @@ Three additional writers (ProRes screen, H.264 camera, AAC audio) write raw mast
 
 ## Camera format selection
 
-`CameraCaptureManager.bestFormat()` picks the highest-resolution format that supports ≈30fps (threshold: `maxFrameRate >= 29.0` to accept NTSC 29.97). UVC cameras report fixed-rate ranges as CMTimes that don't exactly equal `1/30` — the code only sets `activeVideoMinFrameDuration` when `1/30` is strictly within the reported range, otherwise leaves the camera at its native rate. This avoids an uncatchable `NSInvalidArgumentException` from AVCaptureDevice.
+`CameraCaptureManager.bestFormat(targetFPS:)` picks the highest-resolution format whose advertised rate range contains the target (30 or 60fps), matched on **rate** with a 0.5fps tolerance (`targetRateFits`) so NTSC fractional rates (29.97 / 59.94) pass. `lockFrameRateIfSupported` then locks the device by setting **both** `activeVideoMinFrameDuration` **and** `activeVideoMaxFrameDuration` to the target (for discrete `min == max` ranges it uses the range's own reported duration, not `CMTime(1, fps)`, to dodge an uncatchable `NSInvalidArgumentException`). This shape dates from #34.
+
+> ⚠️ **Known issue — being fixed in task 3 / #30.** Setting `activeVideoMaxFrameDuration` imposes a *minimum* frame rate (a floor). A camera that **advertises but can't sustain** the target — notably the **ZV-1 over USB streaming** (claims 30fps, delivers ~24) — then triggers a CMIO `-12743` synchronizer meltdown: CMIO fabricates the missing frames, corrupts the camera PTS timeline, and the result is heavy A/V desync (plus a raw `camera.mp4` writer death, underlying `OSStatus -16364`). Confirmed in **both** debug and production builds (2026-06-06). The fix drops the rate **floor** and leans on the post-#21 cadence model — output rate tracks the active source's real delivery rate, so the camera doesn't need to be pinned. Until task 3 lands, the ZV-1 produces desynced recordings. See #30 / #44 and `docs/tasks-todo/task-3-camera-frame-rate-fix.md`.

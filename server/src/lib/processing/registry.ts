@@ -245,8 +245,7 @@ export const REQUIRED_KINDS: ProcessingStepKind[] = PROCESSING_STEPS.filter(
 export const REGENERABLE_KINDS = new Set<ProcessingStepKind>([
   "metadata",
   "thumbnail",
-  "variant_1080",
-  "variant_720",
+  ...VARIANTS.map((v) => v.kind),
   "storyboard",
   "peaks",
   "suggested_edits",

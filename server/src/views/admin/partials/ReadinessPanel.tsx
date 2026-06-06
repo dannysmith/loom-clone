@@ -124,6 +124,7 @@ function ReadinessRow({
               type="submit"
               class="btn btn--xs"
               title={`Regenerate ${item.label.toLowerCase()}`}
+              aria-label={`Regenerate ${item.label.toLowerCase()}`}
             >
               ↻
             </button>

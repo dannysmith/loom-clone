@@ -9,7 +9,9 @@ export async function probeJson(args: string[]): Promise<unknown | null> {
   const ffprobePath = Bun.which("ffprobe");
   if (!ffprobePath) return null;
   try {
-    const proc = Bun.spawn([ffprobePath, ...args], { stdout: "pipe", stderr: "pipe" });
+    // stderr is ignored, not piped — we never read it, and an unconsumed pipe
+    // could deadlock a probe that writes a lot to it.
+    const proc = Bun.spawn([ffprobePath, ...args], { stdout: "pipe", stderr: "ignore" });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return null;
     return JSON.parse(stdout);

@@ -4,7 +4,8 @@ import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { _variantsForHeight, generateVariants } from "../derivatives";
 
-const ffmpegAvailable = Bun.which("ffmpeg") !== null;
+// generateVariants probes with ffprobe (probeMetadata), so require both tools.
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 
 let env: TestEnv;
 

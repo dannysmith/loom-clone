@@ -999,7 +999,11 @@ export async function duplicateVideo(id: string): Promise<Video> {
     const steps = await getStepStates(newId);
     const allReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
     if (allReady) {
-      await markVideoReady(newId); // stamps completedAt (set-once) + publishes feeds
+      await markVideoReady(newId); // stamps completedAt (set-once)
+      // markVideoReady only publishes feeds when it actually transitions; a copy
+      // inserted as `ready` (from a `ready` original) makes it a no-op, so purge
+      // explicitly — the duplicate is a new public-facing video.
+      purgeGlobalFeeds();
     } else if (duplicate.status !== "processing_failed") {
       await setVideoStatus(newId, "processing_failed");
     }

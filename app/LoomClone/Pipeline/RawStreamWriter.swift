@@ -210,18 +210,50 @@ actor RawStreamWriter {
     private func captureFailure() {
         guard !hasFailed else { return }
         hasFailed = true
-        let nsError = writer?.error as NSError?
-        let failure = WriterFailure(
-            description: nsError?.localizedDescription ?? "unknown",
-            code: nsError?.code,
-            domain: nsError?.domain
-        )
-        lastFailure = failure
+        lastFailure = Self.makeFailure(from: writer?.error)
+        let failure = lastFailure ?? WriterFailure.unknown
         let codeStr = failure.code.map(String.init) ?? "?"
         let domainStr = failure.domain ?? "?"
+        let underlying = failure.underlyingDomain.map { "\($0) \(failure.underlyingCode.map(String.init) ?? "?")" } ?? "none"
         Log.rawWriter.log(
-            "\(url.lastPathComponent) entered .failed during recording: \(failure.description) [domain=\(domainStr) code=\(codeStr)]"
+            "\(url.lastPathComponent) entered .failed during recording: \(failure.description) [domain=\(domainStr) code=\(codeStr) underlying=\(underlying)]"
         )
+    }
+
+    /// Build a `WriterFailure` from an `AVAssetWriter.error`, walking the
+    /// `NSUnderlyingError` chain to the deepest error. The top-level
+    /// `AVFoundationErrorDomain` code is usually generic (`-11800`
+    /// `AVErrorUnknown`); the real VideoToolbox / CoreMediaIO cause
+    /// (`-12909`/`-12903`/`-12743`-class) lives further down the chain. See #30.
+    static func makeFailure(from error: Error?) -> WriterFailure? {
+        guard let nsError = error as NSError? else { return nil }
+        let deepest = deepestUnderlyingError(nsError)
+        return WriterFailure(
+            description: nsError.localizedDescription,
+            code: nsError.code,
+            domain: nsError.domain,
+            underlyingCode: deepest?.code,
+            underlyingDomain: deepest?.domain,
+            underlyingDescription: deepest.map { $0.localizedFailureReason ?? $0.localizedDescription }
+        )
+    }
+
+    /// Follow `userInfo[NSUnderlyingErrorKey]` (and the multiple-errors variant)
+    /// to the deepest error. Returns nil when there's no underlying chain. Hop
+    /// count is bounded so a pathological self-referential chain can't loop.
+    static func deepestUnderlyingError(_ top: NSError) -> NSError? {
+        var deepest: NSError?
+        var current: NSError? = top
+        var hops = 0
+        while let err = current, hops < 16 {
+            hops += 1
+            let next = (err.userInfo[NSUnderlyingErrorKey] as? NSError)
+                ?? (err.userInfo[NSMultipleUnderlyingErrorsKey] as? [Any])?
+                .lazy.compactMap { $0 as? NSError }.first
+            if let next { deepest = next }
+            current = next
+        }
+        return deepest
     }
 
     // MARK: - Finish
@@ -254,7 +286,7 @@ actor RawStreamWriter {
         // Check status first and bail with a log if the writer already failed.
         if writer.status == .failed {
             captureFailure()
-            let failure = lastFailure ?? WriterFailure(description: "unknown", code: nil, domain: nil)
+            let failure = lastFailure ?? WriterFailure.unknown
             Log.rawWriter.log("\(url.lastPathComponent) FAILED before finish: \(failure.description)")
             self.writer = nil
             self.input = nil
@@ -269,7 +301,7 @@ actor RawStreamWriter {
         let result: FinishResult
         if writer.error != nil {
             captureFailure()
-            let failure = lastFailure ?? WriterFailure(description: "unknown", code: nil, domain: nil)
+            let failure = lastFailure ?? WriterFailure.unknown
             let codeStr = failure.code.map(String.init) ?? "?"
             let domainStr = failure.domain ?? "?"
             Log.rawWriter.log(
@@ -316,10 +348,25 @@ actor RawStreamWriter {
     /// can match against specific Apple error codes (e.g. `AVError`,
     /// VideoToolbox `-12909`/`-12903`) in `recording.json` rather than just a
     /// localized string.
-    struct WriterFailure: Sendable, Equatable {
+    struct WriterFailure: Equatable {
         let description: String
         let code: Int?
         let domain: String?
+        /// Deepest error in the `NSUnderlyingError` chain — the real
+        /// VideoToolbox/CMIO cause behind a generic top-level `AVErrorUnknown`.
+        /// nil when the error had no underlying chain.
+        let underlyingCode: Int?
+        let underlyingDomain: String?
+        let underlyingDescription: String?
+
+        static let unknown = WriterFailure(
+            description: "unknown",
+            code: nil,
+            domain: nil,
+            underlyingCode: nil,
+            underlyingDomain: nil,
+            underlyingDescription: nil
+        )
     }
 
     enum RawWriterError: Error {

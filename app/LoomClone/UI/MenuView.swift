@@ -288,6 +288,22 @@ struct MenuView: View {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 160, maxHeight: 160)
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .bottomLeading) { cameraMetadataBadge }
+    }
+
+    /// Gate the overlay on low-frequency state only (mode + presence). The
+    /// frame-rate metadata updates ~1×/second; reading `previewMetadata` here
+    /// would invalidate MenuView — which hosts `NativePopUpPicker` — on every
+    /// update, the picker-flood failure mode. So the actual high-frequency read
+    /// lives in the leaf `CameraMetadataBadge`, the only view that re-renders.
+    @ViewBuilder
+    private var cameraMetadataBadge: some View {
+        if coordinator.mode != .screenOnly, coordinator.cameraPreview.isActive {
+            CameraMetadataBadge(
+                manager: coordinator.cameraPreview,
+                targetFrameRate: coordinator.frameRate
+            )
+        }
     }
 
     // MARK: - Camera Adjustments
@@ -520,5 +536,53 @@ struct MenuView: View {
             return "Main Display"
         }
         return "Display \(display.displayID)"
+    }
+}
+
+/// Leaf overlay showing the camera feed's delivered resolution + frame rate,
+/// flagging when the rate falls below the selected target. Isolated into its
+/// own view so the ~1Hz `previewMetadata` updates re-render only this badge,
+/// not the parent MenuView (which hosts NativePopUpPicker — see the
+/// picker-flood note).
+private struct CameraMetadataBadge: View {
+    let manager: CameraPreviewManager
+    let targetFrameRate: FrameRate
+
+    var body: some View {
+        if let meta = manager.previewMetadata {
+            let effectiveFPS = meta.measuredFPS ?? meta.advertisedMaxFPS
+            let belowTarget = effectiveFPS > 0 && effectiveFPS < targetFrameRate.minAcceptableRate
+            HStack(spacing: 4) {
+                if belowTarget {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("\(meta.width)×\(meta.height) · \(Self.formatFPS(effectiveFPS))")
+                    .foregroundStyle(belowTarget ? .orange : .secondary)
+            }
+            .font(.caption2)
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.black.opacity(0.45), in: Capsule())
+            .padding(6)
+            .help(helpText(meta))
+        }
+    }
+
+    private func helpText(_ meta: CameraPreviewManager.PreviewMetadata) -> String {
+        var parts = ["Camera: \(meta.width)×\(meta.height)", "advertised \(Self.formatFPS(meta.advertisedMaxFPS))"]
+        if let measured = meta.measuredFPS {
+            parts.append("measured \(Self.formatFPS(measured))")
+        }
+        parts.append("target \(targetFrameRate.rawValue) fps")
+        return parts.joined(separator: " · ")
+    }
+
+    private static func formatFPS(_ fps: Double) -> String {
+        let rounded = (fps * 10).rounded() / 10
+        return rounded == rounded.rounded()
+            ? String(format: "%.0f fps", rounded)
+            : String(format: "%.1f fps", rounded)
     }
 }

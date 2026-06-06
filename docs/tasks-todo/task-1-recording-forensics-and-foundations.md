@@ -23,7 +23,9 @@ And the hard constraint, straight from #3: **log volume itself causes the failur
 
 ### Part 1 — Post-stop log extraction (the core)
 
-> **Status (landed):** `Helpers/LogExtractor.swift` (`OSLogStore(scope: .system)`, window from `recording.json`, NDJSON → `os-log.ndjson`, stream + cap + admin fallback), the detached post-stop call in `RecordingActor+Stop.swift`, the "Reveal Logs" / "Re-extract Logs" affordances in `RecordingsSettingsTab.swift`, and `LogExtractorTests` (window parsing). A standalone probe on the dev Mac confirmed `.system` scope opens as admin with no entitlement and that `com.apple.cmio` + `com.apple.coremedia` are live, matched subsystems — so the predicate routing is correct. **Still to confirm against a real `-12743` flood:** that those specific lines are persisted at `error`/`notice` level (not memory-only `debug`), which is the go/no-go for whether post-stop extraction catches them. Parts 2–4 below remain.
+> **Status (landed):** `Helpers/LogExtractor.swift` (`OSLogStore(scope: .system)`, window from `recording.json`, NDJSON → `os-log.ndjson`, stream + cap + admin fallback), the detached post-stop call in `RecordingActor+Stop.swift`, the "Reveal Logs" / "Re-extract Logs" affordances in `RecordingsSettingsTab.swift`, and `LogExtractorTests` (window parsing). A standalone probe on the dev Mac confirmed `.system` scope opens as admin with no entitlement and that `com.apple.cmio` + `com.apple.coremedia` are live, matched subsystems — so the predicate routing is correct. **Still to confirm against a real `-12743` flood:** that those specific lines are persisted at `error`/`notice` level (not memory-only `debug`), which is the go/no-go for whether post-stop extraction catches them.
+>
+> **Parts 2 + 3 also landed.** Part 4 (doc fixes + low-hanging fruit) remains.
 
 A small **Swift log-extractor type** plus a **post-stop task** that calls it. No hot-path logging, no on-disk script — it's all in the app binary via the `OSLog` framework's `OSLogStore`.
 
@@ -56,6 +58,8 @@ Implementation constraints / decisions:
 
 ### Part 2 — Walk the `NSUnderlyingError` chain (#30 step 0)
 
+> **Status (landed):** `RawStreamWriter.makeFailure(from:)` + `deepestUnderlyingError(_:)` walk the `NSUnderlyingError` / `NSMultipleUnderlyingErrors` chain (hop-bounded); `WriterFailure` gained `underlyingCode`/`underlyingDomain`/`underlyingDescription`; both stop-flow sites (`recordRawWriterFailures`, `checkRawWriterStatus`) and `recordRawWriterFailed` carry the new fields into the `raw.writer.failed` event. Covered by `RawStreamWriterErrorTests`.
+
 In `RawStreamWriter.captureFailure()` (`:210`), the current `WriterFailure` snapshot stops at the top-level `NSError`. Extend it to **recursively walk `userInfo[NSUnderlyingErrorKey]`** (and `userInfo[NSMultipleUnderlyingErrorsKey]` / `underlyingErrors` where present) and record the deepest/most-specific `domain` + `code`, plus `localizedFailureReason`. Surface this in the `raw.writer.failed` timeline event data (additive fields — don't break the existing `code`/`domain`).
 
 This is what turns the useless generic `-11800 AVErrorUnknown` into the actual `-12909`/`-12903`-class VideoToolbox/CMIO code that #30 has been hunting since it was filed. It's a few lines, it's the cheapest possible enabler for task 3, and it belongs in the foundations task.
@@ -63,6 +67,8 @@ This is what turns the useless generic `-11800 AVErrorUnknown` into the actual `
 Mirror the same walk in the stop-time path (`recordRawWriterFailures` in `RecordingActor+Stop.swift:178`) and in `checkRawWriterStatus` so both detection sites carry the enriched error.
 
 ### Part 3 — Surface camera metadata in the pre-recording pane
+
+> **Status (landed):** `CameraPreviewManager` now publishes `previewMetadata` (delivered resolution from `device.activeFormat` + advertised max fps + a frame rate measured from delivered buffers over a rolling ~1s window). `MenuView`'s preview shows a subtle "W×H · fps" badge that turns orange when the camera's rate falls below the selected target's `minAcceptableRate` (e.g. a 25fps PAL camera against a 30fps target). Display-only, as scoped — live cadence/health monitoring stays in task 2.
 
 The preview pane shows the camera feed so the user can confirm it looks right before recording. We already capture the *facts* needed to flag a misconfigured device (advertised formats, selected format, actual vs target framerate, did-lock-rate) — but only at stop, in `recording.json`. Surface a condensed version **live in the preview pane**:
 

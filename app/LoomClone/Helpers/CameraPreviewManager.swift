@@ -14,6 +14,24 @@ final class CameraPreviewManager: NSObject {
     /// SwiftUI views read this to decide whether to show the preview area.
     private(set) var isActive: Bool = false
 
+    /// Live metadata about the camera feed shown in the preview: actual
+    /// delivered resolution + advertised/measured frame rate. Surfaced in the
+    /// popover so the user can spot a misconfigured device — wrong resolution,
+    /// or a PAL camera delivering 25fps against a 30fps target — *before*
+    /// recording. Display-only; cadence-stability / health monitoring is a
+    /// separate concern (task 2).
+    private(set) var previewMetadata: PreviewMetadata?
+
+    struct PreviewMetadata: Equatable {
+        let width: Int
+        let height: Int
+        /// Highest frame rate the active format advertises.
+        let advertisedMaxFPS: Double
+        /// Frame rate measured from delivered buffers over a rolling ~1s
+        /// window; nil until the first window completes.
+        var measuredFPS: Double?
+    }
+
     /// Set by consumers to receive live sample buffers. Called from the
     /// capture queue (a high-priority dispatch queue), not the main thread.
     /// Excluded from `@Observable` tracking — the macro's generated code can't
@@ -47,6 +65,14 @@ final class CameraPreviewManager: NSObject {
     /// `startRunning()`. Read by the watchdog to decide whether to retry.
     @ObservationIgnored
     nonisolated(unsafe) private var hasReceivedFrame: Bool = false
+
+    /// Rolling-window frame-rate measurement state. Written only on the capture
+    /// queue (single writer); published to `previewMetadata` ~once/second via a
+    /// MainActor hop. Reset in `startSession` before frames begin.
+    @ObservationIgnored
+    nonisolated(unsafe) private var rateWindowStart: Double = 0
+    @ObservationIgnored
+    nonisolated(unsafe) private var rateWindowCount: Int = 0
 
     /// How long to wait for the first frame before concluding the session is
     /// dead and retrying. USB cameras (ZV-1, capture cards) can take a moment
@@ -120,6 +146,9 @@ final class CameraPreviewManager: NSObject {
         self.session = session
         self.currentDeviceID = device.uniqueID
         self.hasReceivedFrame = false
+        rateWindowStart = 0
+        rateWindowCount = 0
+        previewMetadata = nil
         sessionGeneration += 1
         let generation = sessionGeneration
 
@@ -130,6 +159,7 @@ final class CameraPreviewManager: NSObject {
             }
         }
         self.isActive = true
+        captureActiveFormatMetadata(from: device)
         Log.cameraPreview.log("Started: \(device.localizedName) (attempt \(retryCount + 1))")
 
         // Watchdog: if no frame arrives within the timeout, the CMIO device
@@ -178,7 +208,30 @@ final class CameraPreviewManager: NSObject {
         self.session = nil
         currentDeviceID = nil
         isActive = false
+        previewMetadata = nil
         Log.cameraPreview.log("Stopped")
+    }
+
+    /// Read delivered resolution + advertised max frame rate from the device's
+    /// active format once the session is live. The measured frame rate is
+    /// filled in later from delivered buffers (see the delegate).
+    private func captureActiveFormatMetadata(from device: AVCaptureDevice) {
+        let format = device.activeFormat
+        let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let advertised = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+        previewMetadata = PreviewMetadata(
+            width: Int(dims.width),
+            height: Int(dims.height),
+            advertisedMaxFPS: advertised,
+            measuredFPS: nil
+        )
+    }
+
+    /// Fold a freshly-measured frame rate into the published metadata. No-op if
+    /// the session was torn down between measurement and this MainActor hop.
+    private func publishMeasuredFPS(_ fps: Double) {
+        guard previewMetadata != nil else { return }
+        previewMetadata?.measuredFPS = fps
     }
 }
 
@@ -195,6 +248,20 @@ extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         if !hasReceivedFrame {
             hasReceivedFrame = true
             Log.cameraPreview.log("First frame received")
+        }
+
+        // Measure delivered frame rate over a rolling ~1s window and publish it
+        // to the observable metadata. Cheap: an integer counter on the capture
+        // queue, with one MainActor hop per second (not per frame).
+        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        if rateWindowStart == 0 { rateWindowStart = now }
+        rateWindowCount += 1
+        let elapsed = now - rateWindowStart
+        if elapsed >= 1.0 {
+            let fps = Double(rateWindowCount) / elapsed
+            rateWindowCount = 0
+            rateWindowStart = now
+            Task { @MainActor [weak self] in self?.publishMeasuredFPS(fps) }
         }
 
         // Tag the pixel buffer with explicit Rec. 709 colour metadata before

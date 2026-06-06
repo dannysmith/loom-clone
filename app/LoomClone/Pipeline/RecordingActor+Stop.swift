@@ -193,6 +193,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -202,6 +205,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -211,6 +217,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -286,6 +295,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }
@@ -297,6 +309,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }
@@ -308,6 +323,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }

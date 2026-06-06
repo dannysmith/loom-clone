@@ -25,7 +25,7 @@ And the hard constraint, straight from #3: **log volume itself causes the failur
 
 > **Status (landed):** `Helpers/LogExtractor.swift` (`OSLogStore(scope: .system)`, window from `recording.json`, NDJSON → `os-log.ndjson`, stream + cap + admin fallback), the detached post-stop call in `RecordingActor+Stop.swift`, the "Reveal Logs" / "Re-extract Logs" affordances in `RecordingsSettingsTab.swift`, and `LogExtractorTests` (window parsing). A standalone probe on the dev Mac confirmed `.system` scope opens as admin with no entitlement and that `com.apple.cmio` + `com.apple.coremedia` are live, matched subsystems — so the predicate routing is correct. **Still to confirm against a real `-12743` flood:** that those specific lines are persisted at `error`/`notice` level (not memory-only `debug`), which is the go/no-go for whether post-stop extraction catches them.
 >
-> **Parts 2 + 3 also landed.** Part 4 (doc fixes + low-hanging fruit) remains.
+> **Parts 2, 3, and 4 also landed.** All of task 1 is implemented. **Not yet closed out** — pending local testing on the dev Mac (record with the ZV-1, confirm `os-log.ndjson` captures the CMIO `-12743` lines at a persisted level, confirm the preview badge + underlying-error capture behave). Move to `tasks-done/` only after that passes.
 
 A small **Swift log-extractor type** plus a **post-stop task** that calls it. No hot-path logging, no on-disk script — it's all in the app binary via the `OSLog` framework's `OSLogStore`.
 
@@ -80,6 +80,8 @@ Keep this **display-only**. Live *health* monitoring of the preview (detecting a
 Honest limitation to document (don't build around it): there is **no clean app-level API to reset a wedged USB/CMIO device.** The realistic recovery options are rebuild-the-`AVCaptureSession` (the preview watchdog in `CameraPreviewManager` already does this) or physically unplug/replug. We surface info and let the user decide; we don't promise a device reset macOS won't grant. Relates to #3.
 
 ### Part 4 — Fix the stale developer doc + low-hanging fruit
+
+> **Status (landed):** rewrote the `recording-pipeline.md` "Source failure behaviour" section to describe what's actually built (staleness watchdog + thresholds, capture-error handlers, audio failover, HLS terminal escalation, the warning-pill UI), updated the timeline events list + raw-writer/HLS-health subsections for the underlying-error enrichment, documented the new `os-log.ndjson` artifact, added a preview-metadata note to the Coordinator/UI section, and added `RecordingActor+SourceHealth.swift` + `Helpers/LogExtractor.swift` to the code-location table. Swept `AGENTS.md` / `app/LoomClone/CLAUDE.md` and the other developer docs — no other stale "not handled" claims.
 
 - **`docs/developer/recording-pipeline.md` is wrong about source failures.** The "Source failure behaviour" section says source-level failures "are not handled" and points at `docs/tasks-todo/task-2-source-failure-handling.md` as planned — but that work shipped (`docs/tasks-done/task-2026-05-05-2-source-failure-handling.md`) and the code is live in `RecordingActor+SourceHealth.swift` (staleness detection, capture-error handlers, audio failover, HLS-writer terminal escalation, the warning-pill UI). Rewrite the section to describe what actually exists, and document the new log-extraction artifact + the `NSUnderlyingError` enrichment.
 - Sweep `AGENTS.md` / `app/LoomClone/CLAUDE.md` for any other stale "not handled" claims about source health.

@@ -168,31 +168,38 @@ Result: the output stream has no gap. Segments continue with continuous indexing
 
 ## Source failure behaviour
 
-What happens today when a capture source dies mid-recording. GPU/composition failures are handled robustly (see above); source-level failures are not. See `docs/tasks-todo/task-2-source-failure-handling.md` for planned improvements.
+When a capture source dies or stalls mid-recording, the failure is detected, surfaced to the user as a warning pill in the recording panel, and recorded in the timeline. Detection lives in `RecordingActor+SourceHealth.swift`; the UI is `WarningBannerView` / `WarningPill` driven by `RecordingCoordinator.activeWarnings`. Two complementary mechanisms run:
+
+- **Staleness watchdog** (`checkSourceHealth()`, run periodically off the metronome/health loop). Compares now against each source's last-delivery host time. Thresholds: screen 2s, camera 1s, audio 2s. On breach it records a `source.{screen,camera,audio}.stale` event and fires a pill; when the source delivers again the warning clears and a `source.*.recovered` event is recorded. Fires once per stall, re-arms after recovery.
+- **Capture-error handlers.** Each capture manager forwards `AVCaptureSession.runtimeErrorNotification` / `wasInterruptedNotification` (camera, mic) and the `SCStreamDelegate` stop-with-error (screen) into RecordingActor, which records `source.{...}.failed` and fires a pill.
+
+Severity is mode-aware: losing a source the active mode depends on (screen in `screenOnly`, camera in `cameraOnly`) is `.critical`; a degraded-but-still-useful loss (the PiP camera in `screenAndCamera`) is `.warning`.
+
+> Note: detection of a fully-silent source is solid, but the staleness watchdog does **not** catch the messier failure where a camera keeps delivering frames at a reduced rate with corrupt PTS (the CMIO `-12743` meltdown — see #30/#44). Surfacing that from the metronome reject/no-source counters is tracked as a separate live quality warning (task 2 of #44).
 
 ### Screen capture (SCStream)
 
-`ScreenCaptureManager` implements the `SCStreamDelegate` method `stream(_:didStopWithError:)` but only logs the error to console. There is no callback to RecordingActor, no timeline event, and no user notification. If SCStream dies, the single-slot `latestScreenFrame` cache retains the last delivered frame and the freshness gate begins rejecting every tick (its `capturePTS` stops advancing). After 1s the keep-alive starts firing at ~1Hz, so the recording continues with frozen pixels at low cadence rather than a hard freeze. The recording appears normal from the pipeline's perspective — just with a static image.
+`ScreenCaptureManager` forwards `stream(_:didStopWithError:)` to `handleScreenCaptureError`, which records `source.screen.failed` and fires a pill. For a silent stall (no error, just no frames), the staleness watchdog fires `source.screen.stale` after 2s. At the pipeline level the single-slot `latestScreenFrame` cache retains the last frame and the freshness gate rejects every tick; after 1s the keep-alive fires at ~1Hz, so the output holds frozen pixels at low cadence rather than hard-freezing.
 
 ### Camera (AVCaptureSession)
 
-No `AVCaptureSession.runtimeErrorNotification` or `wasInterruptedNotification` observers are registered. If the camera session dies (e.g. USB disconnect), frames stop arriving and the FIFO queue drains naturally. In `cameraOnly` mode the metronome starts skipping every tick (no frames to emit). In `screenAndCamera` mode the PiP overlay disappears but screen recording continues. No detection, no alert, no recovery attempt.
+`CameraCaptureManager` forwards session runtime errors and interruptions to `handleCameraSessionError` / `handleCameraSessionInterrupted` (→ `source.camera.failed` + pill); a silent stall trips `source.camera.stale` after 1s. At the pipeline level the FIFO drains naturally — in `cameraOnly` the metronome skips every tick; in `screenAndCamera` the PiP overlay disappears but screen recording continues.
 
 ### Microphone (AVCaptureSession)
 
-Same as camera — no session error notifications. If the mic stops delivering, audio goes silent in the output. The only detection is at prepare time: `startCaptureSources()` waits up to 1 second for the first audio sample, but continues recording even if audio never arrives.
+`MicrophoneCaptureManager` forwards session errors/interruptions to `handleMicSessionError` / `handleMicSessionInterrupted` (→ `source.audio.failed` + pill); a silent stall trips `source.audio.stale` after 2s (the warning pill it raises is the `.audioMissing` kind). The prepare-time guard still applies: `startCaptureSources()` waits up to 1 second for the first audio sample, but continues recording even if audio never arrives.
 
 ### Shared session coupling
 
-When camera and mic share an `AVCaptureSession` (for AV sync — see the "shared session" design in `CameraCaptureManager`), disconnecting the camera kills the entire session, including the mic audio track. The standalone `MicrophoneCaptureManager` session continues running independently and writes to `audio.m4a`, but it does NOT feed the HLS writer — so the composited output loses audio silently. This is the most dangerous failure mode: camera disconnect causes invisible audio death.
+When camera and mic share an `AVCaptureSession` (for AV sync — see the "shared session" design in `CameraCaptureManager`), disconnecting the camera kills the entire session, including its mic audio track. This used to silently kill audio in the composited output. It now fails over: on camera-session death, `failoverSharedSessionAudio` flips routing so the standalone `MicrophoneCaptureManager` session (always running, writing `audio.m4a`) starts feeding the HLS writer, and an `audio.failover` event is recorded. Audio continues — degraded by the reintroduced cross-session clock jitter, but not lost.
 
 ### Raw writer failures
 
-Handled via `RawStreamWriter`. Each writer checks `writer.status == .failed` on append and sets a `hasFailed` flag. The moment the writer transitions to `.failed`, a `WriterFailure` snapshot of the underlying `NSError` (description, code, domain) is captured into `lastFailure` so the diagnostic survives even after the writer is nilled out. `checkRawWriterStatus()` is called at segment boundaries and emits a `raw.writer.failed` timeline event with those fields on first detection. At stop time, `finish()` returns a `FinishResult` (.ok / .neverStarted / .failed(WriterFailure)) carrying the same snapshot, which is recorded in the timeline metadata. Raw writer failures do not stop the recording — the HLS path is independent.
+Handled via `RawStreamWriter`. Each writer checks `writer.status == .failed` on append and sets a `hasFailed` flag. On transition to `.failed`, `makeFailure(from:)` snapshots the `AVAssetWriter.error` into a `WriterFailure` (`description`, `code`, `domain`) **and walks the `NSUnderlyingError` chain** (and the `NSMultipleUnderlyingErrors` variant) to the deepest error, recording `underlyingCode`/`underlyingDomain`/`underlyingDescription`. This is what surfaces the real VideoToolbox/CMIO code behind a generic top-level `AVErrorUnknown` (`-11800`) — see #30. The snapshot lands in `lastFailure` so it survives after the writer is nilled out. `checkRawWriterStatus()` (segment boundaries) and the stop-time `finish()` → `FinishResult` (`.ok` / `.neverStarted` / `.failed(WriterFailure)`) both emit a `raw.writer.failed` event carrying all of those fields. Raw writer failures do **not** stop the recording — the HLS path is independent.
 
 ### HLS writer health
 
-`WriterActor` does not currently check `writer.status` during operation (unlike raw writers). If the HLS writer enters `.failed` state mid-recording, frames are silently dropped and the failure is only discovered at `finish()` time.
+`checkHLSWriterHealth()` runs at segment boundaries (from `handleSegment`). If the HLS writer has entered `.failed`, it records `writer.hls.failed`, fires a critical pill, and escalates as a **terminal** error — unlike a raw-writer failure (recoverable; HLS continues), the primary output is dead, so the coordinator runs a clean stop with the footage saved up to that point.
 
 ## Mode switching
 
@@ -233,7 +240,7 @@ It contains:
 - **Inputs:** which display, camera, mic were used (ids, names, dimensions). For cameras v3 additionally carries an `advertisedFormats` list (deduplicated by `(width, height, maxFrameRate)`) and a `selectedFormat` block — what AVCaptureSession actually picked plus whether `1/targetFPS` was inside the format's rate range (`didLockRate`).
 - **Preset:** output dimensions and bitrate.
 - **Segments:** per-segment index, filename, bytes, duration, upload status.
-- **Events:** timestamped log of commits, stops, mode switches, pauses, resumes, segment emissions, upload outcomes, composition failures/rebuilds. v3 adds `keepalive.emitted` (one per static run) and `monotonicity.rejected` (every safety-net fire — should be zero on healthy recordings). The `chapter.marker` kind carries `data: { id: "<uuid>" }` and is emitted when the user presses the bookmark button in the recording panel — `t` is the user-visible clock time (frozen at the pause-start value if the recording was paused at the moment of the press).
+- **Events:** timestamped log of commits, stops, mode switches, pauses, resumes, segment emissions, upload outcomes, composition failures/rebuilds, and source-health events (`source.*.stale`/`.failed`/`.recovered`, `audio.failover`, `writer.hls.failed`, and `raw.writer.failed` carrying its top-level **and** deepest-underlying NSError `code`/`domain`). v3 adds `keepalive.emitted` (one per static run) and `monotonicity.rejected` (every safety-net fire — should be zero on healthy recordings). The `chapter.marker` kind carries `data: { id: "<uuid>" }` and is emitted when the user presses the bookmark button in the recording panel — `t` is the user-visible clock time (frozen at the pause-start value if the recording was paused at the moment of the press).
 - **Raw streams (optional):** codec, dimensions, bitrate, final bytes for each raw writer.
 - **Composition stats (optional):** error/stall/rebuild counts, only present if non-zero.
 - **Runtime (v3, optional):** aggregate metronome metrics — `effectiveCameraFps`, `effectiveScreenFps`, `outputFps`, camera/screen capture-interval P50 and P95 in ms (estimated from histogram buckets — coarse but enough to answer "is the camera delivering at ~33ms?"), and a `metronome` counter sub-block (`iterations`, `emitOK`, `skipsStale`, `keepAliveEmits`, `monoRejects`).
@@ -252,13 +259,15 @@ A condensed view of the same data lands in `recording.json`'s `runtime` block (`
 
 Schema and ring-buffer semantics are documented on `MetronomeDiagnostics.FullDump` in `Pipeline/RecordingActor+Diagnostics.swift`.
 
+A third local artifact, **`os-log.ndjson`**, is written by a detached post-stop task: the slice of the macOS unified log covering the recording's time window, filtered to our subsystem (`is.danny.LoomClone`) plus the Apple CoreMediaIO / CoreMedia / VideoToolbox subsystems. It captures the Apple-side camera/encoder errors (e.g. the CMIO `-12743` synchronizer floods) that originate outside our process and so never reach our own logs. It's read from the OS's already-persisted store via `OSLogStore(scope: .system)` — available because the app is not sandboxed and runs as admin — and **never** written on the recording hot path (log volume during recording is itself a frame-drop cause; see #3). Local-only, never uploaded; streamed and capped to bound size. See `Helpers/LogExtractor.swift`; re-runnable for any past recording from the Recordings settings tab.
+
 ## Coordinator and UI
 
 `RecordingCoordinator` lives on the main actor and bridges the UI to the pipeline. Key responsibilities:
 
 - **State machine:** `.idle` → `.countdown` → `.recording` → `.stopped` → `.idle`. SwiftUI observes this for panel content.
 - **Device enumeration:** Refreshes display/camera/mic lists when the popover opens, polls every 2s for hot-plug detection.
-- **Preview lifecycle:** Starts/stops camera and screen previews based on popover visibility, source selection, and current mode. Previews are torn down when not visible to save resources.
+- **Preview lifecycle:** Starts/stops camera and screen previews based on popover visibility, source selection, and current mode. Previews are torn down when not visible to save resources. The camera preview also publishes live `previewMetadata` (delivered resolution + measured/advertised frame rate); the popover shows a subtle badge that flags when the camera's rate falls below the selected target (e.g. a 25fps PAL camera against a 30fps target) so a misconfigured device is visible before recording.
 - **Camera adjustments:** Owns a shared `CameraAdjustmentsState` box passed to CompositionActor. Slider moves update the box; next composition tick reads the values.
 - **Healing handoff:** After stop, if the server reports missing segments, passes them to HealAgent for background recovery. Fire-and-forget — the URL is already on the clipboard.
 
@@ -272,6 +281,8 @@ Schema and ring-buffer semantics are documented on `MetronomeDiagnostics.FullDum
 | Composite, freshness gate, keep-alive      | `Pipeline/RecordingActor+FrameHandling.swift`       |
 | GPU failure recovery                       | `Pipeline/RecordingActor+CompositionRecovery.swift` |
 | Diagnostics (counters + per-tick trace)    | `Pipeline/RecordingActor+Diagnostics.swift`         |
+| Source health + warning detection          | `Pipeline/RecordingActor+SourceHealth.swift`        |
+| Post-stop OS-log extraction                | `Helpers/LogExtractor.swift`                        |
 | Metal/CIContext rendering                  | `Pipeline/CompositionActor.swift`                   |
 | AVAssetWriter + HLS segmentation           | `Pipeline/WriterActor.swift`                        |
 | Segment upload + retry                     | `Pipeline/UploadActor.swift`                        |

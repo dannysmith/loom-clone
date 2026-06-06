@@ -1,5 +1,7 @@
 # Post-Processing — Review Fixes & Follow-ups (Task 4)
 
+> **Status (2026-06-06): complete.** All four phases were implemented on `task-4-post-processing-robustness` (commits "Task 4 review fixes — Phase 1–4") and the branch is green. Two items did **not** land here and were spun out to GitHub: **Phase 3.2** (thumbnail-candidates cleanup) — decision flipped to *remove* it entirely rather than fix it → [#45](https://github.com/dannysmith/loom-clone/issues/45); and the three **deferred** items below → [#46](https://github.com/dannysmith/loom-clone/issues/46).
+
 ## Background
 
 Fixes and follow-ups for the post-processing work that landed in [task-4](task-4-post-processing-status-and-robustness.md) (step ledger, `reconcile`, the registry-driven pipeline, status model, readiness UI, reprocess/regenerate controls, edit atomic-set staging). All of it is to be addressed **on the current `task-4-post-processing-robustness` branch** — none of these items is large-and-unrelated enough to warrant its own branch; they all arise from, or are exposed by, the task-4 changes.
@@ -102,9 +104,11 @@ Independent, low-risk; can land in any order after Phase 1.
 - `resolve.ts` never reads `status` and gates only on the `source` step, so a video that reaches `processing_failed` because **`metadata`** failed while `source` validated is still served as a finished MP4 with null dimensions — contradicting "`processing_failed` → serves HLS". Rare (both use ffprobe), but add a guard (require `metadata` too, or have serving consider the rollup) — or consciously accept + document the decoupling.
 - `computeReadiness`'s badge counts a **failed** expected step toward `enriching (N left)`, so a `ready` video whose `audio` step failed shows "enriching (1 left)" forever. Distinguish failed-expected from pending in the badge.
 
-### 3.2 Dead thumbnail-candidates cleanup (item H, pre-existing)
+### 3.2 Dead thumbnail-candidates cleanup (item H, pre-existing) — superseded by [#45](https://github.com/dannysmith/loom-clone/issues/45)
 
-IMPORTANT: Discuss this with the user before implementing. Since the original cleanup was written, we have added features to allow the user to generate and add thumbnails to the candidates manually. This means that we should not really be cleaning them up. So I actually think instead of fixing this, we should simply remove anything to do with thumbnail candidates from the cleanup process. There is also now a way for users to manually remove thumbnails. Which there wasn't when the the cleanup process was originally developed. 
+> **Outcome:** the directory-check bug was fixed in the Phase 3 commit (candidates now actually delete), but the conscious decision is to **remove candidate cleanup entirely** — users now generate/add and manually remove thumbnail candidates, so we shouldn't be auto-deleting them. That removal is tracked in [#45](https://github.com/dannysmith/loom-clone/issues/45), not done here.
+
+Since the original cleanup was written, we added features to let the user generate/add thumbnail candidates manually, and to manually remove them — so we should not be cleaning them up at all. Remove anything to do with thumbnail candidates from the cleanup process rather than fixing it.
 
 `cleanup.ts` guards the `thumbnail-candidates` removal with `await Bun.file(candidatesDir).exists()`, but `Bun.file(dir).exists()` returns **`false` for a directory** (verified on Bun 1.3.14) — so that branch never runs and candidate frames accumulate forever. Pre-existing on `main`, but it lives in the cleanup function this task rewrote, so fix here: use `fs/promises` `stat`/`readdir` (or `existsSync`) for the directory check.
 
@@ -147,7 +151,7 @@ Pure polish (maps to task-4's intended Phase 4). No behaviour change; do last.
 
 ---
 
-## Out of scope (deferred, by decision)
+## Out of scope (deferred, by decision) — tracked in [#46](https://github.com/dannysmith/loom-clone/issues/46)
 
 - **Full staged atomic swap for the manual from-HLS rebuild** — Phase 1.3 takes the lighter "hold `ready` + reset stale rows" approach instead. If the brief serving window ever proves a problem in practice, generalising `edit-pipeline`'s `.edit-staging` build→validate→swap to the main forced rebuild is the deeper fix; revisit then.
 - **Edit-aware single-artifact regeneration** — sidestepped by hiding `↻` on edited videos (Phase 2.2).

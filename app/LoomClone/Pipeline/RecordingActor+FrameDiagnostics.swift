@@ -27,6 +27,15 @@ extension RecordingActor {
         }
         lastCameraCapturePTS = capturePTS
 
+        // Live quality signal: feed the capture PTS into the cadence monitor
+        // so the ~2Hz health timer (`checkQualityHealth`) can spot a
+        // non-monotonic (CMIO-corrupt) camera timeline. `hostNow` is the
+        // monotonic window clock — capture PTS is the thing being judged, so it
+        // can't also time the window. Bump the forensic counter on a violation.
+        if cameraCadenceMonitor.recordFrame(capturePTSSeconds: capturePTS.seconds, now: hostNow.seconds) {
+            diagnostics.cameraNonMonotonicPTS += 1
+        }
+
         // Capture-lag histogram.
         if captureLagS >= 0 {
             MetronomeDiagnostics.bumpHistogram(

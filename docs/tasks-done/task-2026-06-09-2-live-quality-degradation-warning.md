@@ -2,6 +2,8 @@
 
 https://github.com/dannysmith/loom-clone/issues/44
 
+> **Status: ✅ Completed 2026-06-09.** Both parts shipped on the `recording-reliability` branch and validated against three live ZV-1 recordings (two native-USB meltdowns + one clean HDMI→Cam Link baseline). See "Outcome" at the bottom for what was built, the one design refinement the real data forced, and the validation evidence.
+
 Second of four tasks from #44. Depends on **task 1** (forensics & foundations) having landed — task 1's extracted CMIO logs + the labelled 2026-06-06 recording set are what let us *confirm* what a degraded recording actually looks like in the data, rather than guessing.
 
 The core insight (see the #44 investigation comment): the existing source-health system catches the **clean** failures — a source going fully silent (`RecordingActor+SourceHealth.swift`: screen 2s / camera 1s / audio 2s staleness thresholds, plus capture-error and interruption handlers). But the failure that actually ruins recordings — the CMIO synchronizer meltdown from #30 — is **not** silence. The camera keeps delivering frames at ~25fps while feeding **corrupt, non-monotonic capture PTS** (frames arriving ~2s in the past; fabricated repeat-frames). Because frames never stop for a full second, the camera-stale watchdog barely fires. The user gets no signal, records for 40 minutes, and discovers the A/V desync afterwards. **That is the exact frustration #44 is about, and the current warnings are blind to it.**
@@ -94,3 +96,31 @@ If task 3 lands first (likely — it fixes the user's main workflow), the ZV-1 m
 | Preview cadence health + UI note | `Helpers/CameraPreviewManager.swift`; popover preview pane view in `UI/` (leaf subview) |
 | Tests | `LoomCloneTests/` — `CameraCadenceMonitor` unit tests (boil the lake: monotonic/VFR/dropped-frame = healthy; backward/duplicate = degraded; debounce; recover) |
 | Doc update | `docs/developer/recording-pipeline.md` (document the quality warning + the invariant it keys on) |
+
+## Outcome (completed 2026-06-09)
+
+Both parts shipped as designed. Files landed:
+
+- **`Helpers/CameraCadenceMonitor.swift`** (new) — the shared, pure, `Sendable`, unit-tested predicate.
+- **`Pipeline/RecordingActor+QualityHealth.swift`** (new) — `checkQualityHealth()`, evaluated from the existing ~2Hz health timer; fires/clears a single `.qualityDegraded` `.warning` pill via the existing `fireWarning`/`clearWarning` dispatch (made internal so the new extension can reuse them). Clears cleanly if the mode switches away from the camera mid-recording.
+- Fed from **`RecordingActor+FrameDiagnostics.swift`** (the free camera measurement point); `.qualityDegraded` added to **`RecordingWarning.swift`**; `quality.degraded` / `quality.recovered` events (with windowed non-monotonic count + measured fps) in **`RecordingTimelineBuilder.swift`**; forensic `cameraNonMonotonicPTS` counter in **`RecordingActor+Diagnostics.swift`** (counters, `PeriodicSnapshot`, summary line).
+- **Part 2:** `CameraPreviewManager` feeds the same monitor and publishes `previewFeedUnstable` on transition; surfaced as the leaf `CameraFeedStabilityNote` in the popover preview pane (`UI/MenuView.swift`), keeping the high-frequency read out of the `NativePopUpPicker` parent.
+- Docs updated in `docs/developer/recording-pipeline.md`; 19 `CameraCadenceMonitor` unit tests.
+
+### Design refinement the real data forced: high-water mark, not previous-frame
+
+The original design said "does each frame's capture PTS advance **from the last** [frame]?" Validating against a real ZV-1 meltdown (`2dee88cf`) refuted the *previous-frame* reading: the meltdown's severe form is a **sustained backward shift** — the timeline jumps ~4s into the past, then runs *forward* at the normal interval. Against the previous frame those catch-up frames look healthy (+33ms); a 32-frame flood registered as a **single** event and never fired. The fix: judge each frame against the **high-water mark** (highest PTS seen so far), which is the same comparison the encoder's own monotonicity guard uses. All the original properties hold (zero violations on monotonic / VFR / dropped-frame feeds), but the sustained shift now flags every catch-up frame. Two regression tests lock it in.
+
+### Validation (three live ZV-1 recordings)
+
+| Recording | Path | `-12743` | `nonMonoPTS` | Warning | Notes |
+|---|---|---|---|---|---|
+| `2dee88cf` | native USB | 7,842 | 9 | fired t=8.8→12.3 (cameraOnly) | exposed the previous-frame miss → high-water fix |
+| `cd798c48` | native USB | 7,017 | 15 | fired t=22.9→30.0 (**screenAndCamera**) | the hard case; user saw the pill on screen and narrated it in the transcript — confirms the UI renders, not just the timeline |
+| `ee52f73a` | HDMI → Cam Link 4K | 0 | 0 | never fired | clean baseline; zero false positives |
+
+The `screenAndCamera` fire on `cd798c48` is the key proof: the screen drives output cadence so the metronome looks healthy while the camera PiP timeline rots — exactly the case a metronome-counter or "output collapsed" proxy would miss, and the capture-PTS invariant caught it. The Cam Link baseline (same camera, HDMI path, no meltdown) confirms zero false positives and seeded a comment on #30 noting the meltdown is specific to the ZV-1's native USB/UVC streaming.
+
+### Carried forward to task 3
+
+Task 3 should *enforce* the same invariant this task observes — drop / hold non-monotonic camera frames (judged against the high-water mark) before they reach the raw writer / desync output. The `CameraCadenceMonitor` predicate and the `cameraNonMonotonicPTS` instrumentation are the shared foundation.

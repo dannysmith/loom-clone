@@ -168,14 +168,26 @@ Result: the output stream has no gap. Segments continue with continuous indexing
 
 ## Source failure behaviour
 
-When a capture source dies or stalls mid-recording, the failure is detected, surfaced to the user as a warning pill in the recording panel, and recorded in the timeline. Detection lives in `RecordingActor+SourceHealth.swift`; the UI is `WarningBannerView` / `WarningPill` driven by `RecordingCoordinator.activeWarnings`. Two complementary mechanisms run:
+When a capture source dies or stalls mid-recording, the failure is detected, surfaced to the user as a warning pill in the recording panel, and recorded in the timeline. Detection lives in `RecordingActor+SourceHealth.swift`; the UI is `WarningBannerView` / `WarningPill` driven by `RecordingCoordinator.activeWarnings`. Three complementary mechanisms run:
 
 - **Staleness watchdog** (`checkSourceHealth()`, run periodically off the metronome/health loop). Compares now against each source's last-delivery host time. Thresholds: screen 2s, camera 1s, audio 2s. On breach it records a `source.{screen,camera,audio}.stale` event and fires a pill; when the source delivers again the warning clears and a `source.*.recovered` event is recorded. Fires once per stall, re-arms after recovery.
 - **Capture-error handlers.** Each capture manager forwards `AVCaptureSession.runtimeErrorNotification` / `wasInterruptedNotification` (camera, mic) and the `SCStreamDelegate` stop-with-error (screen) into RecordingActor, which records `source.{...}.failed` and fires a pill.
+- **Quality-degradation monitor** (`checkQualityHealth()`, same ~2Hz health loop). Catches the failure the staleness watchdog is blind to — see below.
 
 Severity is mode-aware: losing a source the active mode depends on (screen in `screenOnly`, camera in `cameraOnly`) is `.critical`; a degraded-but-still-useful loss (the PiP camera in `screenAndCamera`) is `.warning`.
 
-> Note: detection of a fully-silent source is solid, but the staleness watchdog does **not** catch the messier failure where a camera keeps delivering frames at a reduced rate with corrupt PTS (the CMIO `-12743` meltdown — see #30/#44). Surfacing that from the metronome reject/no-source counters is tracked as a separate live quality warning (task 2 of #44).
+### Live quality degradation (camera capture-PTS corruption)
+
+The staleness watchdog only catches *silence*. The failure that actually ruins recordings — the CMIO `-12743` synchronizer meltdown (#30/#44) — is **not** silence: the camera keeps delivering frames at roughly the right rate while feeding **corrupt, non-monotonic capture PTS** (frames stamped ~2s in the past; fabricated repeats). A garbage video timeline against a clean audio timeline *is* the A/V desync, and because frames never stop for a full second, the camera-stale watchdog barely fires.
+
+`checkQualityHealth()` makes that visible while it's happening. It keys on the one invariant the whole pipeline rests on — **the camera's capture-PTS timeline advances monotonically** — rather than curve-fitting a detector to the meltdown's symptoms. (The metronome reject counters were tried and *refuted* against the labelled 2026-06-06 recordings: the post-#21 source-PTS freshness gate absorbs corrupt frames before they reach the encoder monotonicity guard, so a severe meltdown can show `rejectMonotonicity = 0`.)
+
+- **The predicate** lives in `CameraCadenceMonitor` (`Helpers/`, pure + unit-tested). It ingests each camera frame's capture PTS and flags a *non-monotonic event* when the frame fails to advance past the **high-water mark** (the highest PTS seen so far) by more than 1ms — covering backward jumps, zero gaps, and duplicate/fabricated PTS. The high-water reference (not the immediately-previous frame) is load-bearing: the meltdown's severe form is a *sustained backward shift* — the timeline jumps ~4s into the past then runs forward at the normal interval, so those catch-up frames look healthy against the previous frame (+33ms) but are all behind the high-water mark. This was confirmed against a real ZV-1 meltdown (`2dee88cf`, 2026-06-09), where a 32-frame flood registered as a single event under a previous-frame predicate and never fired. It reports **degraded** once a small number of events land within a short trailing window, and **recovers** (hysteretically) only once the window goes fully quiet. The window is timed on the host clock — not capture PTS, which is the thing being judged.
+- **Why it's robust to any camera, not just the ZV-1.** It's rate-agnostic and VFR-safe by construction: a real camera at 24/25/29.97/30/60fps or honest VFR produces forward-advancing PTS and trips nothing ("below-target-but-steady is fine; *destabilising* is the signal"). A dropped/stuttering frame is a *large forward* gap, also fine. The boundary is categorical (healthy = exactly zero non-monotonic frames), so the window/count numbers are debounce, not calibrated thresholds.
+- **Wiring.** Fed from `recordCameraFrameForDiagnostics` (`RecordingActor+FrameDiagnostics.swift`, the existing camera measurement point) and evaluated from the health loop. On transition it fires a single `.qualityDegraded` pill (`.warning` severity — output is still being produced; the user's call to pause/stop/carry on) and records `quality.degraded` / `quality.recovered` timeline events carrying the windowed non-monotonic count and measured camera fps. A forensic `cameraNonMonotonicPTS` counter is also carried in `diagnostics.json` counters + periodic snapshots so a recording's firing window can be cross-checked against the extracted `-12743` flood.
+- **Preview.** The same `CameraCadenceMonitor` runs in `CameraPreviewManager` (the preview shares the device + CMIO path, so a stuttering preview predicts a stuttering recording). When the preview feed goes non-monotonic it sets `previewFeedUnstable`, surfaced as a gentle pre-record note in the popover preview pane. There is no clean app-level API to reset a wedged USB/CMIO device, so the guidance is reconnect / see logs.
+
+This task **observes** the violation; enforcing the invariant (dropping non-monotonic frames before they desync output) is task 3 of #44.
 
 ### Screen capture (SCStream)
 
@@ -282,6 +294,8 @@ A third local artifact, **`os-log.ndjson`**, is written by a detached post-stop 
 | GPU failure recovery                       | `Pipeline/RecordingActor+CompositionRecovery.swift` |
 | Diagnostics (counters + per-tick trace)    | `Pipeline/RecordingActor+Diagnostics.swift`         |
 | Source health + warning detection          | `Pipeline/RecordingActor+SourceHealth.swift`        |
+| Live quality-degradation warning           | `Pipeline/RecordingActor+QualityHealth.swift`       |
+| Camera capture-PTS cadence predicate       | `Helpers/CameraCadenceMonitor.swift`                |
 | Post-stop OS-log extraction                | `Helpers/LogExtractor.swift`                        |
 | Metal/CIContext rendering                  | `Pipeline/CompositionActor.swift`                   |
 | AVAssetWriter + HLS segmentation           | `Pipeline/WriterActor.swift`                        |

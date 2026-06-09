@@ -18,9 +18,18 @@ final class CameraPreviewManager: NSObject {
     /// delivered resolution + advertised/measured frame rate. Surfaced in the
     /// popover so the user can spot a misconfigured device — wrong resolution,
     /// or a PAL camera delivering 25fps against a 30fps target — *before*
-    /// recording. Display-only; cadence-stability / health monitoring is a
-    /// separate concern (task 2).
+    /// recording. Display-only; cadence-stability is the separate
+    /// `previewFeedUnstable` signal below.
     private(set) var previewMetadata: PreviewMetadata?
+
+    /// True when the preview feed's capture-PTS timeline is going non-monotonic
+    /// — the same CMIO corruption that desyncs a real recording (#30 / #44).
+    /// The preview uses the same device + CMIO path, so a stuttering preview
+    /// predicts a stuttering recording: surfacing it here lets the user catch it
+    /// *before* hitting record. Read in a leaf subview only (the popover hosts
+    /// `NativePopUpPicker`; see the picker-flood note). See
+    /// `CameraCadenceMonitor`.
+    private(set) var previewFeedUnstable: Bool = false
 
     struct PreviewMetadata: Equatable {
         let width: Int
@@ -73,6 +82,16 @@ final class CameraPreviewManager: NSObject {
     nonisolated(unsafe) private var rateWindowStart: Double = 0
     @ObservationIgnored
     nonisolated(unsafe) private var rateWindowCount: Int = 0
+
+    /// Cadence-health detector fed from delivered preview buffers. Written only
+    /// on the capture queue (single writer) plus a reset in `startSession`
+    /// before frames begin. `lastPublishedUnstable` throttles the MainActor hop
+    /// to transitions only (not per frame). Same predicate the recording
+    /// pipeline uses — see `CameraCadenceMonitor`.
+    @ObservationIgnored
+    nonisolated(unsafe) private var cadenceMonitor = CameraCadenceMonitor()
+    @ObservationIgnored
+    nonisolated(unsafe) private var lastPublishedUnstable: Bool = false
 
     /// How long to wait for the first frame before concluding the session is
     /// dead and retrying. USB cameras (ZV-1, capture cards) can take a moment
@@ -148,6 +167,9 @@ final class CameraPreviewManager: NSObject {
         self.hasReceivedFrame = false
         rateWindowStart = 0
         rateWindowCount = 0
+        cadenceMonitor = CameraCadenceMonitor()
+        lastPublishedUnstable = false
+        previewFeedUnstable = false
         previewMetadata = nil
         sessionGeneration += 1
         let generation = sessionGeneration
@@ -209,6 +231,8 @@ final class CameraPreviewManager: NSObject {
         currentDeviceID = nil
         isActive = false
         previewMetadata = nil
+        previewFeedUnstable = false
+        lastPublishedUnstable = false
         Log.cameraPreview.log("Stopped")
     }
 
@@ -232,6 +256,13 @@ final class CameraPreviewManager: NSObject {
     private func publishMeasuredFPS(_ fps: Double) {
         guard previewMetadata != nil else { return }
         previewMetadata?.measuredFPS = fps
+    }
+
+    /// Publish a cadence-health transition. No-op if the session was torn down
+    /// between the capture-queue evaluation and this MainActor hop.
+    private func publishFeedUnstable(_ unstable: Bool) {
+        guard isActive else { return }
+        previewFeedUnstable = unstable
     }
 }
 
@@ -262,6 +293,18 @@ extension CameraPreviewManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             rateWindowCount = 0
             rateWindowStart = now
             Task { @MainActor [weak self] in self?.publishMeasuredFPS(fps) }
+        }
+
+        // Cadence health: feed the buffer's capture PTS into the same monitor
+        // the recording pipeline uses. A non-monotonic preview timeline predicts
+        // a desynced recording. Publish only on transition to keep the
+        // observable read out of the per-frame path.
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        cadenceMonitor.recordFrame(capturePTSSeconds: pts, now: now)
+        let unstable = cadenceMonitor.evaluateHealth(now: now)
+        if unstable != lastPublishedUnstable {
+            lastPublishedUnstable = unstable
+            Task { @MainActor [weak self] in self?.publishFeedUnstable(unstable) }
         }
 
         // Tag the pixel buffer with explicit Rec. 709 colour metadata before

@@ -334,6 +334,25 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         appendEvent(t: t, kind: "source.\(source).recovered", data: nil)
     }
 
+    // MARK: - Quality Degradation Events
+
+    /// The camera's capture-PTS timeline went non-monotonic (CMIO meltdown) and
+    /// the live quality warning fired. `nonMonotonicCount` is the windowed event
+    /// count at fire time; `cameraFps` the lifetime-average camera rate. Lets us
+    /// cross-check the firing window against the extracted `-12743` flood for
+    /// the same session. See `CameraCadenceMonitor`.
+    func recordQualityDegraded(nonMonotonicCount: Int, cameraFps: Double?, t: Double) {
+        var data: [String: JSONValue] = ["nonMonotonicCount": .int(nonMonotonicCount)]
+        if let cameraFps { data["cameraFps"] = .double(cameraFps) }
+        appendEvent(t: t, kind: "quality.degraded", data: data)
+    }
+
+    /// The camera cadence recovered (window went quiet) and the quality warning
+    /// cleared.
+    func recordQualityRecovered(t: Double) {
+        appendEvent(t: t, kind: "quality.recovered", data: nil)
+    }
+
     func recordHLSWriterFailed(error: String, t: Double) {
         appendEvent(
             t: t,

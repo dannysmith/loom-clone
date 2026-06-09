@@ -289,6 +289,18 @@ struct MenuView: View {
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .bottomLeading) { cameraMetadataBadge }
+        .overlay(alignment: .top) { cameraStabilityNote }
+    }
+
+    /// Pre-record cadence-stability note. Gated on low-frequency state (mode +
+    /// presence) for the same picker-flood reason as `cameraMetadataBadge`; the
+    /// high-frequency `previewFeedUnstable` read lives in the leaf
+    /// `CameraFeedStabilityNote`.
+    @ViewBuilder
+    private var cameraStabilityNote: some View {
+        if coordinator.mode != .screenOnly, coordinator.cameraPreview.isActive {
+            CameraFeedStabilityNote(manager: coordinator.cameraPreview)
+        }
     }
 
     /// Gate the overlay on low-frequency state only (mode + presence). The
@@ -584,5 +596,35 @@ private struct CameraMetadataBadge: View {
         return rounded == rounded.rounded()
             ? String(format: "%.0f fps", rounded)
             : String(format: "%.1f fps", rounded)
+    }
+}
+
+/// Leaf note shown when the live preview's capture-PTS timeline is going
+/// non-monotonic — the CMIO corruption that desyncs a real recording. Pairs
+/// with `CameraMetadataBadge`: that shows the static facts (resolution / fps),
+/// this adds the stability dimension. Isolated so the `previewFeedUnstable`
+/// read re-renders only this note, not the parent MenuView (which hosts
+/// NativePopUpPicker — see the picker-flood note). There is no clean app-level
+/// API to reset a wedged USB/CMIO device, so the guidance is reconnect / see
+/// logs, not a magic reset.
+private struct CameraFeedStabilityNote: View {
+    let manager: CameraPreviewManager
+
+    var body: some View {
+        if manager.previewFeedUnstable {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform.path.ecg")
+                Text("Camera feed looks unstable — try reconnecting")
+            }
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(6)
+            .help(
+                "The camera's frame timing is unstable. Recording now may produce A/V desync. Try unplugging and reconnecting the camera, or check the logs."
+            )
+        }
     }
 }

@@ -328,6 +328,7 @@ extension RecordingActor {
 
         // Diagnostics: reset all counters + buffers for the new recording.
         diagnostics.reset()
+        cameraCadenceMonitor = CameraCadenceMonitor()
         lastCameraCapturePTS = .invalid
         lastScreenCapturePTS = .invalid
         lastEmitLogicalSeconds = -1

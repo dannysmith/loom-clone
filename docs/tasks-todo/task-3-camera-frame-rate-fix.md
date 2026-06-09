@@ -68,6 +68,17 @@ The core move: **stop forcing a minimum frame rate on the camera** — i.e. stop
 
 Also fold in the now-stale docs: `app/LoomClone/CLAUDE.md`'s "Camera format selection" paragraph still describes the *original* min-only-when-in-range behaviour, which `#34` overrode — update it to match whatever this task lands on.
 
+## Defence-in-depth: stop blindly trusting the camera clock
+
+The rate-unlock above is the **primary** fix — it removes the *trigger* that corrupts the camera's capture-PTS for the ZV-1. But the durable, camera-agnostic learning from the 2026-06-09 analysis is **structural**: the pipeline treats the camera's capture-PTS as unquestioned ground truth for A/V sync (video PTS = camera capture time; audio PTS = mic capture time; sync is *defined* by trusting that camera timeline). The rate-unlock fixes the *known* trigger for *one* camera — but "USB cameras are unreliable" is this project's founding premise, so the robust posture is to *also not blindly trust the camera clock*. A flaky camera could still hand us a backward / duplicate PTS for reasons we haven't enumerated.
+
+The same one-line invariant that powers **task 2's warning** is the natural place to *enforce* it — task 2 **observes** the violation, task 3 **enforces** it:
+
+- **The composited / emit path already enforces it.** The freshness gate `isStaleSource` (`RecordingActor+FrameHandling.swift`) drops a camera frame whose capture PTS isn't strictly newer than the last emitted — which is *why* a corrupt feed makes output stall rather than emit a garbage timeline. This protection already exists; the rate-unlock just means it rarely has to act. Leave it; document that it *is* the invariant guard for the output path.
+- **The gap is the raw camera writer.** `handleCameraFrame` appends every arriving frame to `cameraRawWriter`, and a single backward-PTS sample makes `AVAssetWriter` reject it → `.failed` → `-16364` → an **unplayable `camera.mp4`**. The safety-net master is itself fragile. Add a thin guard: track the last appended raw-camera PTS and **skip any frame whose retimed PTS does not strictly advance**, so a corrupt frame leaves the raw file *truncated-but-playable* instead of dead. This is cheap, camera-agnostic, and makes the safety net actually safe.
+
+**Keep it minimal — do not over-engineer.** No PTS *repair*, no re-stamping content onto fabricated times (that is its own desync). The move is "distrust / drop non-monotonic camera frames at ingestion," nothing more. If the rate-unlock works as the diagnosis predicts, the raw-writer guard almost never fires — it is cheap insurance, justified only because a safety-net file should not be brittle. Whether to land the raw-writer guard in this task or note it as a fast follow is a judgement call for the implementing session; the recommendation is to include it, since it is small and directly closes the `-16364` failure mode #30 has been tracking.
+
 ## Test matrix (verify with task-1 forensics)
 
 For each row, run a 2–3 min recording (production build, detached) and check `os-log.ndjson` `-12743` count, `recording.json` `effectiveCameraFps` / `monoRejects` / `raw.writer.failed`, and watch-back A/V sync:
@@ -86,6 +97,7 @@ The clean FaceTime baseline + the ZV-1 before/after are the regression guards. K
 
 - ZV-1-over-USB recording produces **no `-12743` flood**, no `raw.writer.failed`, and is **A/V-synced** — confirmed against an `os-log.ndjson` from a production-build recording.
 - Every row of the test matrix passes (no regression for Cam Link / 60fps-composite / clean cameras).
+- (If the defence-in-depth guard lands) a deliberately-corrupt / flaky camera no longer kills `camera.mp4` — the raw master is truncated-but-playable, not a broken-moov-atom file.
 - `app/LoomClone/CLAUDE.md` "Camera format selection" and `docs/developer/recording-pipeline.md` updated to the new behaviour.
 - A short note appended to #30 (and the issue closed if this resolves it).
 
@@ -100,6 +112,7 @@ The clean FaceTime baseline + the ZV-1 before/after are the regression guards. K
 | Concern | File |
 |---|---|
 | Frame-rate lock (drop the floor; keep matching) | `Capture/CameraCaptureManager.swift` (`lockFrameRateIfSupported`, `bestFormat`, `configureDeviceFormat`) |
+| Defence-in-depth: skip non-monotonic frames into the raw camera writer | `Pipeline/RecordingActor+FrameHandling.swift` (`handleCameraFrame` / `retimedSampleForRawWriter`) |
 | Possibly: warmup capability probe | `Pipeline/RecordingActor+Prepare.swift` |
 | Doc: camera format selection | `app/LoomClone/CLAUDE.md` |
 | Doc: pipeline / frame flow | `docs/developer/recording-pipeline.md` |

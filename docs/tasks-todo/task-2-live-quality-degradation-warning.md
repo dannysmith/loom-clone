@@ -2,87 +2,95 @@
 
 https://github.com/dannysmith/loom-clone/issues/44
 
-Second of four tasks from #44. Depends on **task 1** (forensics & foundations) having landed — task 1's extracted CMIO logs are what let us *confirm* that a counter-derived warning actually coincides with a real `-12743` meltdown rather than benign noise.
+Second of four tasks from #44. Depends on **task 1** (forensics & foundations) having landed — task 1's extracted CMIO logs + the labelled 2026-06-06 recording set are what let us *confirm* what a degraded recording actually looks like in the data, rather than guessing.
 
-The core insight (see the #44 investigation comment): the existing source-health system catches the **clean** failures — a source going fully silent (`RecordingActor+SourceHealth.swift`: screen 2s / camera 1s / audio 2s staleness thresholds, plus capture-error and interruption handlers). But the failure that actually ruins recordings — the CMIO synchronizer meltdown from #30 — is **not** silence. The camera keeps delivering frames at ~25fps while feeding **corrupt, non-monotonic PTS**:
+The core insight (see the #44 investigation comment): the existing source-health system catches the **clean** failures — a source going fully silent (`RecordingActor+SourceHealth.swift`: screen 2s / camera 1s / audio 2s staleness thresholds, plus capture-error and interruption handlers). But the failure that actually ruins recordings — the CMIO synchronizer meltdown from #30 — is **not** silence. The camera keeps delivering frames at ~25fps while feeding **corrupt, non-monotonic capture PTS** (frames arriving ~2s in the past; fabricated repeat-frames). Because frames never stop for a full second, the camera-stale watchdog barely fires. The user gets no signal, records for 40 minutes, and discovers the A/V desync afterwards. **That is the exact frustration #44 is about, and the current warnings are blind to it.**
 
-```
-outputFps 22.7 (target 30) · effectiveCameraFps 25.5 · monoRejects 81 · neg 10 · noSrc 1076 · skipsStale 338
-```
+This task makes that failure **visible** while it's happening, so the user can pause, stop, or carry on. It does **not** fix the meltdown — that's task 3.
 
-Because frames never stop for a full second, the camera-stale watchdog barely fires. The user gets no signal, records for 40 minutes, and discovers the AV desync afterwards. **That is the exact frustration #44 is about, and the current warnings are blind to it.**
+## The framing that drives the design (read this first)
 
-The opportunity: **we already compute the signal.** The `MetronomeDiagnostics` counters on `RecordingActor` (`Pipeline/RecordingActor+Diagnostics.swift`) — `rejectMonotonicity`, `rejectNegElapsed`, `skipsStale`, `noSourceTicks`, `emitOK`, `iterations` — are incremented every metronome tick, live, and snapshotted every ~2s. They're only serialized at stop, into `recording.json`'s `runtime` block. Reading a **rolling window** of them mid-recording and firing a warning when the reject/no-source rate spikes catches the meltdown for almost nothing, reusing the entire existing `RecordingWarning` → `WarningBannerView` pipeline.
-
-> **Update (2026-06-06) — re-scope in light of the task-1 findings + task 3.** Two things changed since this was first written:
+> **Don't curve-fit a detector to five recordings. Detect the broken invariant.**
 >
-> 1. **Don't fire on "camera slower than target" — that's normal, and it's the badge's job.** Task-1 Part 3 already ships a pre-recording badge that flags a sub-target camera (e.g. the ZV-1's honest ~24fps against a 30 target, shown in orange). And once **task 3** lands, an under-delivering camera running clean VFR is the *expected, healthy* state — a ZV-1 at 24fps must **not** trip this warning. So this warning must key on **degradation signatures** — a spike in `rejectMonotonicity`/`rejectNegElapsed` (the ~2s backward-PTS jumps the meltdown produces), or output collapsing *relative to the camera's own recent baseline* — **not** on "fps below the chosen target." Below-target-but-steady is fine; *destabilising* is the signal.
-> 2. **A real calibration set now exists.** The five 2026-06-06 recordings (4 ZV-1 meltdowns + 1 clean FaceTime) plus their `os-log.ndjson` are a ready-made labelled dataset — `-12743` counts of 4,314 / 11,217 / 22,932 / 28,428 vs **0**, with matching `monoRejects`/`effectiveCameraFps`. Calibrate the threshold against these (see Part 2).
+> An earlier pass at this task (and #44's original wording) proposed firing on a *spike in metronome reject counters* (`rejectMonotonicity` / `rejectNegElapsed`) and treated **calibrating thresholds against the 2026-06-06 set as the centre of gravity**. A calibration session (2026-06-09) **refuted that approach** against the real data — see "What the data actually showed" below. The reject counters do not track the meltdown, and tuning window-lengths / cluster-counts to a handful of *intermittent* samples is fitting noise.
 >
-> Sequencing note: if task 3 lands first (likely — it fixes the user's main workflow), the ZV-1 will mostly stop melting down, so this warning's job narrows to catching *other*/residual mid-recording degradation. Still worth building — it's the safety net for any camera/condition task 3 doesn't fully cover.
+> Instead, key on the **one invariant the entire recording rests on**. From the pipeline design (and confirmed as the exact failure mechanism on #30):
+>
+> > Video PTS = the camera frame's hardware **capture time**. Audio PTS = the mic's. A/V sync is *defined* by trusting that camera capture-PTS timeline.
+>
+> The meltdown is precisely a **violation of that invariant**: the camera's capture-PTS stops advancing monotonically (jumps backward, or repeats). A garbage video timeline against a clean audio timeline *is* the desync. So the signal is a direct question, asked at the source:
+>
+> > **Is the camera's capture-PTS timeline still sane — i.e. does each frame's capture PTS advance from the last?**
 
-## Current state (what we build on)
+### Why this is the right signal (robust to *any* camera, not just the ZV-1)
 
-- **Live counters.** `MetronomeDiagnostics` (`RecordingActor+Diagnostics.swift`): per-tick `Int64` counters listed above, plus periodic snapshots (`PeriodicSnapshot`, pushed ~every 2s from the metronome loop) and the histograms. All live on the actor during recording.
-- **Health-check cadence.** `checkSourceHealth()` (`RecordingActor+SourceHealth.swift:21`) already runs periodically (piggybacked on the metronome / a lightweight timer) and is the natural place to also evaluate a rolling reject-rate.
-- **Warning model + UI.** `RecordingWarning` (`Models/RecordingWarning.swift`) with `.critical`/`.warning` severities and a `Kind` enum; `WarningBannerView`/`WarningPill` (`UI/`); `RecordingCoordinator.activeWarnings`; `fireWarning`/`clearWarning` dispatch (`RecordingActor+SourceHealth.swift:251`). Adding a warning is: one new `Kind` case + fire/clear logic.
-- **Timeline events.** `recordSourceStale`/`recordSourceRecovered` etc. already exist; we add a `quality.degraded`/`quality.recovered` pair the same way.
-- **Preview watchdog.** `Helpers/CameraPreviewManager.swift` already has a first-frame watchdog (1.5s × 2 retries). Part 2 extends it to cadence monitoring.
+- **Rate-agnostic / VFR-safe.** A camera at 24, 25, 29.97, 30, 60fps, or honest VFR all produce *forward-advancing, monotonic* capture PTS. The check is blind to the rate — it only sees direction and plausibility. This satisfies the re-scope's hard requirement: **"below-target-but-steady is fine; *destabilising* is the signal."** A healthy ZV-1 at 24fps (the expected state once task 3 lands) cannot trip it.
+- **Dropped frames don't trip it.** A slow / stuttering camera produces *large forward* gaps — not flagged. Only *non-advancing* (≤ ~1ms, which covers backward jumps and duplicate/fabricated PTS) gaps count. A drop is not a corruption.
+- **Mode-independent and mode-switch-proof.** It is measured at **raw camera frame arrival** (`handleCameraFrame`), which is one continuous stream across the whole recording — the camera `AVCaptureSession` starts once in `prepare` and stops only at `stop`; `switchMode` just flips a flag. So there is **no FIFO-drain / mode-switch confound** (the thing that made the metronome-counter approach noisy) and **no grace window is needed**.
+- **It catches the cause, not a mode-specific effect.** It flags both `cameraOnly` meltdowns *and* `screenAndCamera` ones (where the screen drives output so the metronome looks healthy, but the camera PiP / sync is still rotting). A downstream "output collapsed" proxy only sees the `cameraOnly` half.
+- **The data confirms it; it does not define it.** The boundary is *categorical*, not a tuned line: a healthy camera produces **exactly zero** non-advancing frames; corruption produces some. That is why we don't need a finely-calibrated threshold — only a small debounce so a single fluke doesn't fire.
+
+This is the same predicate task 3 should use to *enforce* the invariant (drop non-monotonic frames before they kill the raw writer / desync output). Task 2 **observes** the violation; task 3 **enforces** the invariant. See `task-3-camera-frame-rate-fix.md`.
+
+## What the data actually showed (2026-06-09 calibration session)
+
+Five labelled recordings: four ZV-1 meltdowns (`-12743` counts **4,314 / 11,217 / 22,932 / 28,428**) + one clean FaceTime baseline (**0**). All have `recording.json` + `diagnostics.json` + `os-log.ndjson` in `~/Library/Application Support/LoomClone[-Debug]/recordings/<id>/`. Findings:
+
+1. **The metronome reject counters do *not* detect the meltdown — hypothesis refuted.** `rejectMonotonicity`+`rejectNegElapsed` rate: clean **0.2%** vs meltdowns **0.2%–2.9%**. The killer counterexample is `cb202438` — a severe meltdown (22,932 `-12743`) with `mono=0` and the *same* reject rate as the clean baseline. **Why:** post-#21, the source-PTS freshness gate (`skipStale`) absorbs corrupt frames *before* they reach the encoder-level monotonicity guard, so the meltdown never shows up as a reject. Any plan built on "reject-rate spike" is dead on arrival.
+2. **`skipsStale` is *not* a clean signal either** — it conflates the `cameraOnly` meltdown case with the entirely-benign `screenAndCamera` static-screen case (both set `cameraBranch = "skipStale"`), and it spikes harmlessly right after every mode switch (FIFO drain). Confounded by mode; do not key on it.
+3. **The clean baseline has a perfectly regular, monotonic camera cadence** — 100% of inter-frame capture-PTS gaps in the 30–35ms bucket, **zero** gaps below 5ms across the entire 917-frame recording.
+4. **Every meltdown violates capture-PTS monotonicity at the source** — sub-5ms / backward gaps appear in all four (physically impossible for a real camera at any rate; these are CMIO fabrication / `RepeatPreviousFrame`). The os-log corroborates: `monotonicity.rejected` frames arriving ~2s in the past.
+
+So the data's role is to **confirm the shape** (healthy = monotonic; corruption = non-monotonic) and to serve as a sanity-check / regression reference — *not* to source numeric thresholds. With only a handful of intermittent samples, fitting thresholds to them would be fragile. Keep the five recordings as the labelled reference set; cross-check the warning's firing windows against task 1's extracted `-12743` floods for the same sessions (it should light up where the flood is and stay dark on the clean baseline).
 
 ## Design
 
 ### Part 1 — In-recording quality-degradation warning
 
-**The signal.** Maintain a short rolling window (suggest ~2–3s, i.e. the last N periodic snapshots or a small ring of per-tick deltas) and compute, over that window:
+**The detector (shared, simple).** A small pure type — e.g. `Helpers/CameraCadenceMonitor.swift`, `Sendable`, unit-tested — ingests one camera capture-PTS per frame and answers "is the feed healthy?":
 
-- reject rate = `(rejectMonotonicity + rejectNegElapsed) / iterations`
-- no-source rate = `noSourceTicks / iterations`
-- effective output fps vs target (we already derive `outputFps`/`effectiveCameraFps` at stop — compute the windowed version live)
+- Track the previous frame's capture PTS. A new frame whose gap from it is **≤ ~1ms (covering backward, zero, and duplicate/fabricated PTS)** is a *non-monotonic event* — the invariant violation.
+- Keep a short trailing window of recent non-monotonic events. Report **degraded** when the count within the window crosses a small debounce threshold; report **recovered** after a quiet period with none.
 
-Fire a single `.qualityDegraded` warning ("Recording quality may be degraded — check your camera") when the windowed signal crosses a threshold; clear it when the window recovers, mirroring the existing stale/recover pattern (fire-once, auto-clear on recovery, re-fire on a subsequent spike). Record `quality.degraded` / `quality.recovered` timeline events with the windowed metrics in `data` for post-hoc forensics.
+The exact numbers (window length, count threshold) are **debounce / fluke-protection on a categorical signal**, not calibrated discriminators — pick conservative defaults (e.g. a few events within a few seconds), document them as such with a pointer to this section, and lean on the instrumentation below to confirm/adjust against real recordings. Do **not** present them as tuned science.
 
-**Severity.** `.warning`, not `.critical` — the recording is still producing output, just degraded. The user's call whether to pause/restart/continue. (Matches #44: "subtly warn… gives the user the opportunity to either pause… stop… or carry on.")
+**Wiring.** Feed the monitor from `recordCameraFrameForDiagnostics` (`RecordingActor+FrameDiagnostics.swift`), which already computes the camera inter-frame gap via `lastCameraCapturePTS` — the measurement point is free. Evaluate health from the existing ~2Hz health timer (the same one that drives `checkSourceHealth`), in a new `checkQualityHealth()` (a `RecordingActor+QualityHealth.swift` extension, or folded into `+SourceHealth`). Fire a single `.qualityDegraded` warning and clear it on recovery, mirroring the existing stale/recover dispatch (`fireWarning`/`clearWarning`, `activeSourceWarnings` dedup, fire-once → auto-clear → re-fire).
 
-### Part 2 — Calibration is the actual work (don't guess thresholds)
+**Severity & copy.** `.warning`, not `.critical` — the recording is still producing output, just degraded; the user's call whether to pause/stop/continue (matches #44: "subtly warn… gives the user the opportunity to either pause… stop… or carry on"). Message along the lines of "Recording quality may be degraded — check your camera."
 
-The hard part is **not crying wolf.** Several benign things move these counters and must **not** trigger the warning:
+**Timeline.** Record `quality.degraded` / `quality.recovered` events (`RecordingTimeline` / `RecordingTimelineBuilder`) carrying the windowed metrics in `data` (non-monotonic count, measured camera fps) for post-hoc forensics.
 
-- **`skipsStale` is normal** on a slow/VFR camera and on static screens — the freshness gate skipping is by-design (see the cadence-rework doc). Treat `skipsStale` as weak evidence at most; lean on `rejectMonotonicity`/`rejectNegElapsed` (which should be ~0 on healthy recordings per task-21) and the output-fps shortfall.
-- **Mode-switch flurries** briefly spike rejects/no-source as the freshness gate walks carryover frames (documented in `recording-pipeline.md`, and #30's 2026-05-11 repro noted the failure within ~1s of two mode switches). Suppress evaluation for a short grace window after a `mode.switched` event.
-- **Keep-alive / static-screen runs** legitimately produce no fresh source — `noSourceTicks` rises without anything being wrong. Don't count no-source against quality when keep-alive is active / in a screen mode with a static screen.
-- **The brief cameraOnly warm-up** after switching into it (the freshness gate discarding pre-switch frames) is expected.
+### Part 2 — Pre-recording preview cadence/health monitoring
 
-If the warning false-positives even occasionally, the user learns to ignore it and it becomes worthless — so **calibrate against real data, not intuition.** The 2026-06-06 test set is the labelled ground truth: four ZV-1 meltdowns (`recording.json` + `diagnostics.json` + `os-log.ndjson`, `-12743` counts 4,314 / 11,217 / 22,932 / 28,428, `monoRejects` 5–53, `effectiveCameraFps` ~21–24) and one clean FaceTime baseline (0 `-12743`, `monoRejects` 0, `skipsStale` 0). Crucially, the clean baseline and the *steady* parts of the meltdowns both run below/around target fps — so the separator can't be "fps < target"; it has to be the reject-spike / destabilisation. Also keep the older #30 sessions (e.g. `6a9f962f…`) as extra samples. Concretely:
+#44 reasons (correctly) that the preview uses the same device + CMIO path as the real recording, so a stuttering preview predicts a stuttering recording — far better to catch it *before* hitting record. `CameraPreviewManager` already measures delivered frame rate per sample buffer (task-1 Part 3) and has a first-frame watchdog. Feed its sample-buffer capture PTS into the **same `CameraCadenceMonitor`** and surface a gentle pre-record note in the popover preview pane ("Camera feed looks unstable — try reconnecting / see logs") when it reports degraded. This is the "factor the common piece so preview and recording share one notion of healthy" the task wants — and now that the notion is one predicate, the sharing is trivial.
 
-1. Write a small offline analysis (a script, or a throwaway harness) that replays the periodic snapshots / counters from those JSONs and computes the candidate windowed signal over time.
-2. Find a threshold (and window length, and required-consecutive-windows) that **clearly separates** the known-bad sessions from the healthy ones, including across mode switches and static runs.
-3. Bake the chosen constants in with a comment pointing at the calibration data, the way the staleness thresholds are documented in `SourceHealth`.
+Per the picker-flood memory, keep any high-frequency observable reads in a **leaf subview**, not a parent hosting `NativePopUpPicker`.
 
-This calibration step is the deliverable's center of gravity. Cross-check the firing windows against task 1's extracted CMIO logs for the same sessions — the warning should light up where the `-12743` flood is, and stay dark otherwise.
+Pairs with task-1 Part 3's metadata badge (actual vs reported resolution/fps): that shows the *static facts*; this adds the *stability* dimension on top. Same honest caveat as task 1: there is **no clean app-level API to reset a wedged USB/CMIO device** — offer "rebuild the preview session" (the watchdog already does this) and "unplug/replug," not a magic reset. Relates to #3.
 
-### Part 3 — Pre-recording preview cadence/health monitoring
+### Instrumentation (for forensic validation, not tuning)
 
-#44 reasons (correctly) that the preview uses the same device and CMIO path as the real recording, so a stuttering preview predicts a stuttering recording — and it's far better to catch it *before* hitting record. Extend `CameraPreviewManager` beyond its first-frame watchdog to monitor **frame cadence** during preview:
-
-- Track inter-frame intervals of preview sample buffers; if cadence is erratic / far below the device's advertised rate for a sustained window, surface a gentle pre-record warning in the popover ("Camera feed looks unstable — see logs / try reconnecting").
-- This shares its detection logic with Part 1 (windowed cadence health) — factor the common piece so the preview and the recording use the same notion of "is this feed healthy."
-- Pair with task 1 Part 3's metadata display (actual vs reported resolution/fps already shown there). Here we add the *health/stability* dimension on top of the *static facts*.
-
-Same honest caveat as task 1: no clean device-reset API — offer "rebuild the preview session" (already what the watchdog does) and "unplug/replug," not a magic reset. Relates to #3.
+Add a lightweight `cameraNonMonotonicPTS` counter to `MetronomeDiagnostics` (incremented at the same measurement point) and into `PeriodicSnapshot`, so the *next* real recordings carry the live signal into `recording.json` / `diagnostics.json`. This lets us confirm the detector fired where the `-12743` flood actually was (cross-referenced with task 1's `os-log.ndjson`) and adjust the debounce if real-world data ever shows a need — the categorical separation means that should be rare.
 
 ## Out of scope
 
-- Fixing the underlying meltdown (H.264 contention / CMIO corruption) — **task 3**. This task makes it *visible*, not *gone*.
-- Any change to the metronome's actual frame-handling/emit logic — we only *read* its counters.
-- Test-recording / warmup probe — **task 4**.
+- **Fixing the underlying meltdown** (the rate-lock / CMIO corruption) — **task 3**. This task makes it *visible*, not *gone*. (Task 3 should *enforce* the same invariant this task observes — drop non-monotonic camera frames before they kill the raw writer / desync output. See task 3.)
+- **Any change to the metronome's frame-handling / emit logic** — we only *read* the camera capture PTS at arrival.
+- **Test-recording / warmup probe** — **task 4**.
+
+## Sequencing note
+
+If task 3 lands first (likely — it fixes the user's main workflow), the ZV-1 mostly stops melting down, so this warning's job narrows to catching *other* / residual mid-recording degradation (a different flaky camera, a USB hiccup, a condition task 3 doesn't fully cover). Still worth building — it's the safety net, and because it keys on the invariant rather than the ZV-1 specifically, it covers cases we haven't seen yet. Bias toward **zero false positives over catching every mild burst**: the warning only earns trust if it never cries wolf.
 
 ## Files likely touched
 
 | Concern | File |
 |---|---|
-| Windowed signal + warning fire/clear | `Pipeline/RecordingActor+SourceHealth.swift` (or a new `+QualityHealth` extension), reading `Pipeline/RecordingActor+Diagnostics.swift` counters |
-| New warning kind | `Models/RecordingWarning.swift` (`.qualityDegraded`) |
-| New timeline events | `Models/RecordingTimeline.swift` / `Models/RecordingTimelineBuilder.swift` (`quality.degraded`/`quality.recovered`) |
-| Preview cadence monitoring | `Helpers/CameraPreviewManager.swift`; popover preview pane view in `UI/` |
-| Calibration analysis | throwaway script / harness against archived `recording.json` + `diagnostics.json` |
-| Doc update | `docs/developer/recording-pipeline.md` (document the quality warning + thresholds) |
+| Shared cadence/PTS-health detector (pure, unit-tested) | `Helpers/CameraCadenceMonitor.swift` (new) |
+| Feed the monitor from camera arrival + evaluate health | `Pipeline/RecordingActor+FrameDiagnostics.swift` (measurement point), `Pipeline/RecordingActor+QualityHealth.swift` (new) or `+SourceHealth` |
+| New warning kind + fire/clear | `Models/RecordingWarning.swift` (`.qualityDegraded`), reusing `fireWarning`/`clearWarning` |
+| New timeline events | `Models/RecordingTimeline.swift` / `RecordingTimelineBuilder.swift` (`quality.degraded` / `quality.recovered`) |
+| Forensic instrumentation | `Pipeline/RecordingActor+Diagnostics.swift` (`cameraNonMonotonicPTS` counter + `PeriodicSnapshot`) |
+| Preview cadence health + UI note | `Helpers/CameraPreviewManager.swift`; popover preview pane view in `UI/` (leaf subview) |
+| Tests | `LoomCloneTests/` — `CameraCadenceMonitor` unit tests (boil the lake: monotonic/VFR/dropped-frame = healthy; backward/duplicate = degraded; debounce; recover) |
+| Doc update | `docs/developer/recording-pipeline.md` (document the quality warning + the invariant it keys on) |

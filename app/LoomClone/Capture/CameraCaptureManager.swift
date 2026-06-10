@@ -203,19 +203,19 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         do {
             try device.lockForConfiguration()
             device.activeFormat = best
-            let didLockRate = lockFrameRateIfSupported(device: device, format: best, targetFPS: targetFPS)
+            let didCapRate = capFrameRateIfSupported(device: device, format: best, targetFPS: targetFPS)
             device.unlockForConfiguration()
 
             let dims = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
             let rate = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
             Log.camera.log(String(
-                format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d, lockedRate=%@)",
+                format: "Selected format: %dx%d @ %.2ffps (target: %d, cap: %d, rateCeiling=%@)",
                 dims.width,
                 dims.height,
                 min(rate, Double(targetFPS.rawValue)),
                 targetFPS.rawValue,
                 maxHeight,
-                didLockRate ? "yes" : "NO (range mismatch — camera runs at its own rate)"
+                didCapRate ? "yes" : "NO (range mismatch — camera runs at its own rate)"
             ))
 
             let pf = CMFormatDescriptionGetMediaSubType(best.formatDescription)
@@ -224,9 +224,13 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 height: Int(dims.height),
                 pixelFormat: PixelFormatLabel.string(for: pf),
                 targetFPS: Int(targetFPS.rawValue),
-                didLockRate: didLockRate,
-                activeMinFrameDurationSeconds: device.activeVideoMinFrameDuration.seconds,
-                activeMaxFrameDurationSeconds: device.activeVideoMaxFrameDuration.seconds,
+                didLockRate: didCapRate,
+                // We no longer set a max-frame-duration floor, so it reports the
+                // format default (often kCMTimeInvalid → NaN). Guard both, since
+                // JSONEncoder rejects non-finite floats and would drop the whole
+                // diagnostics dump.
+                activeMinFrameDurationSeconds: Self.finiteSeconds(device.activeVideoMinFrameDuration),
+                activeMaxFrameDurationSeconds: Self.finiteSeconds(device.activeVideoMaxFrameDuration),
                 advertisedMaxFrameRate: rate
             )
         } catch {
@@ -235,41 +239,68 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Lock the camera to the target frame rate when one of the format's
+    /// Cap the camera's frame rate at the target when one of the format's
     /// supported rate ranges contains the target (with a 0.5fps tolerance for
-    /// NTSC fractional rates).
+    /// NTSC fractional rates). Sets a **ceiling** only — never a floor.
     ///
-    /// The comparison is on frame **rate** (Double), not frame **duration**
-    /// (CMTime). UVC cameras like the ZV-1 and the Cam Link 4K advertise
-    /// rates as a list of fixed-rate ranges whose durations are stored in
-    /// 100ns units (e.g. `333333/10000000`). `CMTime(1, 30)` is not
-    /// byte-equal to that representation, so the previous CMTime-based
-    /// boundary check `minDur <= 1/30 <= maxDur` collapsed to `==` for
-    /// single-rate ranges and failed — leaving the camera at HDMI source rate
-    /// regardless of what we picked.
+    /// > ⚠️ We set `activeVideoMinFrameDuration` (a ceiling — "don't deliver
+    /// > *faster* than target") but deliberately **do not** set
+    /// > `activeVideoMaxFrameDuration` (a floor — "don't deliver *slower* than
+    /// > target"). The floor is what triggered the ZV-1 CMIO `-12743` meltdown
+    /// > (#30): a UVC camera that advertises a 30fps rate it can't sustain
+    /// > (delivers ~24) gets asked by CMIO to *fabricate* the missing frames to
+    /// > hold the floor, which corrupts the capture-PTS timeline and desyncs
+    /// > A/V. A ceiling never forces fabrication, and the post-#21 cadence model
+    /// > already produces correct output from whatever the camera actually
+    /// > delivers — so the floor bought us nothing and cost us the meltdown.
+    /// > See `docs/developer/recording-pipeline.md` and task 3 / #30.
     ///
-    /// When the matching range is discrete (min == max), we use the range's
-    /// own reported duration to lock — not `CMTime(1, fps)` — because
-    /// `AVCaptureDevice` throws an **uncatchable** `NSInvalidArgumentException`
-    /// if `activeVideoMinFrameDuration` is set to a value outside the
-    /// format's reported range, even by a fp-precision sliver. The range's
-    /// own value is guaranteed in-range.
-    private func lockFrameRateIfSupported(
+    /// The match is on frame **rate** (Double), not frame **duration** (CMTime).
+    /// UVC cameras like the ZV-1 and the Cam Link 4K advertise rates as a list
+    /// of fixed-rate ranges whose durations are stored in 100ns units (e.g.
+    /// `333333/10000000`). `CMTime(1, 30)` is not byte-equal to that
+    /// representation, so a CMTime-based boundary check `minDur <= 1/30 <=
+    /// maxDur` collapses to `==` for single-rate ranges and fails — leaving the
+    /// camera at its source rate regardless of what we picked (#34).
+    ///
+    /// When the matching range is discrete (min == max), we use the range's own
+    /// reported duration — not `CMTime(1, fps)` — because `AVCaptureDevice`
+    /// throws an **uncatchable** `NSInvalidArgumentException` if
+    /// `activeVideoMinFrameDuration` is set to a value outside the format's
+    /// reported range, even by a fp-precision sliver. The range's own value is
+    /// guaranteed in-range.
+    private func capFrameRateIfSupported(
         device: AVCaptureDevice,
         format: AVCaptureDevice.Format,
         targetFPS: FrameRate
     ) -> Bool {
         let target = Double(targetFPS.rawValue)
-        guard let match = format.videoSupportedFrameRateRanges.first(where: { range in
+        let ranges = format.videoSupportedFrameRateRanges
+        guard let match = ranges.first(where: { range in
             Self.targetRateFits(target: target, minRate: range.minFrameRate, maxRate: range.maxFrameRate)
         }) else { return false }
+
+        // Only set the ceiling when the format has rate *headroom* — it can
+        // deliver faster or slower than the target. For a format rate-LOCKED to
+        // the target (every range ≈ target, e.g. the ZV-1's sole discrete 30-30
+        // USB format) we must set nothing: there, setting
+        // `activeVideoMinFrameDuration` drags `activeVideoMaxFrameDuration` up
+        // to the target too (it's the only valid value), re-imposing the floor
+        // that makes CMIO fabricate frames the camera can't deliver — the #30
+        // meltdown. Setting neither leaves the camera free-running at its real
+        // rate (the clean pre-#34 behaviour). Cameras with headroom keep a
+        // lower floor when we set the ceiling, so they never fabricate.
+        let formatMaxRate = ranges.map(\.maxFrameRate).max() ?? target
+        let formatMinRate = ranges.map(\.minFrameRate).min() ?? target
+        guard Self.shouldCapRate(formatMinRate: formatMinRate, formatMaxRate: formatMaxRate, target: target)
+        else { return false }
 
         let isDiscrete = match.minFrameRate == match.maxFrameRate
         let durationToSet: CMTime = isDiscrete
             ? match.minFrameDuration
             : targetFPS.frameDuration
+        // Ceiling only — see the method doc. NO activeVideoMaxFrameDuration.
         device.activeVideoMinFrameDuration = durationToSet
-        device.activeVideoMaxFrameDuration = durationToSet
         return true
     }
 
@@ -282,6 +313,28 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     static func targetRateFits(target: Double, minRate: Double, maxRate: Double) -> Bool {
         let epsilon = 0.5
         return (minRate - epsilon) <= target && target <= (maxRate + epsilon)
+    }
+
+    /// Whether to apply the frame-rate ceiling for a format with the given
+    /// advertised rate span, against `target`. Returns `false` only when the
+    /// format is **rate-locked to the target** (can't deliver faster or slower)
+    /// — the ZV-1's sole discrete 30-30 USB format. There, setting the ceiling
+    /// re-imposes a floor the camera can't sustain (#30 meltdown), so we set
+    /// nothing and let it free-run. Any format with headroom (faster OR slower
+    /// available) takes the ceiling safely. Pure + static for unit testing.
+    static func shouldCapRate(formatMinRate: Double, formatMaxRate: Double, target: Double) -> Bool {
+        let epsilon = 0.5
+        let rateLockedToTarget = formatMaxRate <= target + epsilon && formatMinRate >= target - epsilon
+        return !rateLockedToTarget
+    }
+
+    /// `CMTime.seconds` guarded against non-finite values. An unset
+    /// `activeVideoMaxFrameDuration` is `kCMTimeInvalid`, whose `.seconds` is
+    /// NaN — and `JSONEncoder` rejects NaN, which would silently drop the
+    /// entire diagnostics dump. Returns 0 for invalid/non-finite times.
+    static func finiteSeconds(_ time: CMTime) -> Double {
+        let s = time.seconds
+        return s.isFinite ? s : 0
     }
 
     private func addVideoInput(session: AVCaptureSession, device: AVCaptureDevice) -> Bool {

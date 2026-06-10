@@ -331,6 +331,7 @@ extension RecordingActor {
         cameraCadenceMonitor = CameraCadenceMonitor()
         lastCameraCapturePTS = .invalid
         lastScreenCapturePTS = .invalid
+        lastRawCameraAppendedPTS = .invalid
         lastEmitLogicalSeconds = -1
         lastPeriodicSnapshotS = -1
     }

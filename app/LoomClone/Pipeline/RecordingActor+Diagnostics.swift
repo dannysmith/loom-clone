@@ -170,6 +170,11 @@ struct MetronomeDiagnostics {
     /// corruption (#30 / #44). Forensic only — carried into snapshots so real
     /// recordings show where the detector fired vs the `-12743` flood.
     var cameraNonMonotonicPTS: Int64 = 0
+    /// Camera frames dropped by the raw-writer monotonicity guard (their
+    /// retimed PTS didn't strictly advance). Keeps `camera.mp4` playable on a
+    /// corrupt feed instead of failing the writer (#30 `-16364`). Should be 0
+    /// once the rate-unlock stops the ZV-1 fabrication.
+    var cameraRawFramesSkipped: Int64 = 0
 
     // MARK: Histograms
 
@@ -474,7 +479,7 @@ struct MetronomeDiagnostics {
         mono=\(rejectMonotonicity) neg=\(rejectNegElapsed) noSrc=\(noSourceTicks) \
         peek=\(cameraOnlyRepeatBranch) pop=\(cameraOnlyPopBranch) \
         camFrames=\(cameraFramesReceived) (~\(camRate)fps) \
-        nonMonoPTS=\(cameraNonMonotonicPTS) \
+        nonMonoPTS=\(cameraNonMonotonicPTS) rawSkip=\(cameraRawFramesSkipped) \
         scrFrames=\(screenFramesReceived) \
         evictions=\(cameraFramesEvicted) \
         compFails=\(compositionFailures) \
@@ -519,7 +524,8 @@ struct MetronomeDiagnostics {
                 cameraFramesEvicted: cameraFramesEvicted,
                 screenFramesReceived: screenFramesReceived,
                 audioSamplesReceived: audioSamplesReceived,
-                cameraNonMonotonicPTS: cameraNonMonotonicPTS
+                cameraNonMonotonicPTS: cameraNonMonotonicPTS,
+                cameraRawFramesSkipped: cameraRawFramesSkipped
             ),
             histograms: Histograms(
                 cameraIntervalMs: makeHistogram(edges: Self.cameraIntervalEdgesMs, counts: cameraIntervalHist),
@@ -582,6 +588,7 @@ struct MetronomeDiagnostics {
         let screenFramesReceived: Int64
         let audioSamplesReceived: Int64
         let cameraNonMonotonicPTS: Int64
+        let cameraRawFramesSkipped: Int64
     }
 
     struct Histograms: Encodable {

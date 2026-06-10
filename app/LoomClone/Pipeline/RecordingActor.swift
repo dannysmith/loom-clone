@@ -315,6 +315,11 @@ actor RecordingActor {
     var cameraCadenceMonitor = CameraCadenceMonitor()
     /// Last screen capturePTS seen — same purpose for screen frames.
     var lastScreenCapturePTS: CMTime = .invalid
+    /// Last *retimed* PTS actually appended to the raw camera writer. Used to
+    /// drop non-monotonic frames before they reach `AVAssetWriter` — a single
+    /// backward/duplicate PTS would fail the writer and leave an unplayable
+    /// `camera.mp4` (#30's `-16364`). See `handleCameraFrame`.
+    var lastRawCameraAppendedPTS: CMTime = .invalid
     /// Last successful emit PTS (logical seconds since start, stripped of
     /// priming offset). Used to bucket the inter-emit cadence histogram.
     var lastEmitLogicalSeconds: Double = -1

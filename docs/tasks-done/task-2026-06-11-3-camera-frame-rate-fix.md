@@ -5,7 +5,63 @@ https://github.com/dannysmith/loom-clone/issues/44 (parent)
 
 Third of four tasks from #44. Originally framed as an *investigation* (which of #30's hypotheses is true). **That investigation is now resolved** — task 1's forensics (#44) gave a definitive diagnosis on 2026-06-06. This doc is now the **fix**: make the failure stop happening, robustly, across every camera/mode/rate combination — taking the best of the historical work rather than blindly reverting any of it.
 
-## The diagnosis (resolved — full writeup on #30)
+---
+
+## ⚠️ REVISED DIAGNOSIS & OUTCOME (2026-06-10) — read this first
+
+> Implementing the fix and validating against **real device recordings** corrected the diagnosis below. The original "frame-rate **lock** regression (#34)" framing is **wrong** — it was refuted by the data. Everything from "## The diagnosis" down is kept as historical context but is **superseded by this section.**
+
+### What we shipped (landed, builds/tests/lint green; validated on-device)
+
+1. **Ceiling, not floor.** `lockFrameRateIfSupported` → `capFrameRateIfSupported`: set at most `activeVideoMinFrameDuration` (a *ceiling* — "don't run faster than target"), **never** `activeVideoMaxFrameDuration` (a *floor*). Plus `shouldCapRate`: only apply the ceiling when the format has rate **headroom** (can run faster *or* slower than target). For a format **rate-locked to the target** (the ZV-1's sole discrete `30-30` USB format) set **nothing** — replicating the clean pre-#34 path.
+2. **Camera raw-writer monotonicity guard** (`handleCameraFrame`): drop any camera frame whose retimed PTS doesn't strictly advance, counted as `cameraRawFramesSkipped`. Closes the `-16364` `camera.mp4` death — a corrupt feed now leaves the master *truncated-but-playable*.
+3. NaN-safe diagnostic (`finiteSeconds`) now that we don't pin the max duration; docs in `app/LoomClone/CLAUDE.md` + `docs/developer/recording-pipeline.md`; unit tests for `shouldCapRate` / `targetRateFits` / `finiteSeconds`.
+
+### Validation matrix (live recordings, 2026-06-09/10)
+
+| Camera / path | Floor (from format) | Delivers | Meets floor? | `-12743` | Synced |
+|---|---|---|---|---|---|
+| FaceTime (built-in) | 30 | **35.8fps** | ✅ | 0 | ✅ |
+| Cam Link 4K (ZV-1 over HDMI), 1080p30 & 1440p60 | **25** (format advertises 25-60) | ~26fps | ✅ | 0 | ✅ |
+| **ZV-1 native USB**, all modes | **30** (sole format is `30-30`) | **~25fps** | ❌ | ~4–6k | ❌ |
+
+### The actual root cause (refutes the "lock regression")
+
+The meltdown is **not** caused by our lock, and **not** fixed by removing it. Proof: the final ZV-1 native-USB recording (`18975ff7`) ran with `didLock=False` (we set nothing) **and still melted** (5,640 `-12743`) — because selecting the ZV-1's sole discrete `30-30` format makes AVFoundation default `activeVideoMaxFrameDuration` to 1/30 regardless of what we do. **The 30fps floor is intrinsic to the only format the camera offers; there is no app-level lever to lower it.**
+
+The single variable that separates clean from meltdown is **whether the camera meets its floor**:
+
+- It melts **only** because the ZV-1 over native USB now **delivers ~25fps while advertising NTSC `30-30`** → 25 < 30 floor → CMIO fabricates the missing frames (`RepeatPreviousFrame` ×1,817, *"getting frames too slowly by a lot"*) → corrupt PTS → desync.
+- FaceTime (delivers 35 ≥ 30) and the Cam Link (floor 25, delivers 26) **meet their floors**, so CMIO never fabricates — clean, *even with the same shared camera+mic session active* (confirmed: their `camera.mp4` files carry both tracks). **So the shared session is not the trigger either.**
+
+### Why it worked before (answered from git + the original task)
+
+The original A/V-sync task (`task-2026-04-16-1-av-sync`, recording `9c6e30bd`) recorded the **ZV-1 in NTSC mode delivering 29.97fps** — it *met* the 30 floor, so nothing was fabricated (349 frames in → 349 out, clean). The camera-format code then was **identical to what we ship now** (`activeFormat` set, duration lock skipped for the ZV-1 because the old CMTime check failed). Learning #5 from that task, verbatim: *"The Sony ZV-1 over USB advertises a single locked format. The fps is whatever the camera's region switch is set to (PAL = 25, NTSC ≈ 29.97) — it's a hardware menu setting."* **The camera's effective USB delivery rate has since dropped from ~30 to ~25** (USB bandwidth, cable/port, or a camera menu/firmware setting). That drop — not any code change — is what now pushes it below the floor.
+
+### Conclusion
+
+**The ZV-1 over native USB is a hardware limitation at its current ~25fps delivery**, not an app bug. No app-level fix exists: we can't lower a floor the camera's sole format pins at 30, and we can't make a bandwidth-starved USB camera deliver 30. The fixes we shipped are still worth it and validated:
+
+- Every **other** camera (multi-rate / cameras that meet their floor) is clean and synced.
+- The raw-writer guard keeps `camera.mp4` **playable** even during a full ZV-1 meltdown.
+- Task 2's cadence warning fires on the live degradation (camera-agnostic safety net).
+
+**Recommended user-side mitigations** (not code): check the ZV-1's frame-rate/region menu to coax a true 30 again, try a cleaner USB port/cable, or — proven clean — record the ZV-1 via **HDMI → Cam Link 4K** (its `25-60` format floors at 25, which it meets).
+
+**Generalises to other USB cameras:** any camera whose *only* format is a single discrete rate it can't sustain will hit this same wall. It's structurally detectable (`shouldCapRate` already flags "rate-locked to target" formats) — a future pre-record "this camera may not sustain Nfps" hint is the natural follow-up; for now the task-2 warning covers it.
+
+### Definition of done — revised
+
+The original DoD ("ZV-1-over-USB produces no `-12743` flood … A/V-synced") is **not achievable in software** and is retired. The achievable, shipped bar:
+
+- No regression for multi-rate / floor-meeting cameras (Cam Link ×2, FaceTime) — **met**.
+- `camera.mp4` no longer dies on a corrupt feed (raw-writer guard) — **met**.
+- ZV-1-over-USB documented as a hardware limitation with user-side mitigations + HDMI path — **this section**.
+- `#30` updated with the corrected diagnosis.
+
+---
+
+## The diagnosis (resolved — full writeup on #30) — ⚠️ SUPERSEDED, see revised section above
 
 Five test recordings (4 debug/Xcode + 1 detached **Release** build), ZV-1 over USB streaming, analysed via `os-log.ndjson` + the `NSUnderlyingError` walk:
 
@@ -20,7 +76,9 @@ Five test recordings (4 debug/Xcode + 1 detached **Release** build), ZV-1 over U
 
 So this is **not** a raw-writer problem and not an encoder problem — it's our **frame-rate lock forcing a UVC camera to fabricate frames it can't deliver**. The raw-writer death and the desync are both symptoms.
 
-## How we got here — the regression (verified against git history)
+## How we got here — the regression (verified against git history) — ⚠️ SUPERSEDED
+
+> The "#34 lock regression" theory below was **refuted on-device** (the ZV-1 melts even with `didLock=False`). The real cause is the camera's USB delivery dropping below the floor its sole format pins at 30 — see the revised section at the top. Kept for history; the git timeline itself is accurate, only the causal conclusion was wrong.
 
 The ZV-1 used to work. The capability got locked away by a later, well-intentioned change. Timeline:
 

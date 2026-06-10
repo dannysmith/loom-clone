@@ -36,6 +36,13 @@ final class CameraPreviewManager: NSObject {
         let height: Int
         /// Highest frame rate the active format advertises.
         let advertisedMaxFPS: Double
+        /// Lowest frame rate the active format advertises. Together with
+        /// `advertisedMaxFPS` this says whether the format is *rate-locked* to a
+        /// single rate (min ≈ max) — the dangerous shape: a camera whose only
+        /// option is a rate it can't sustain has no lower floor to fall back to,
+        /// so CMIO fabricates and the recording desyncs (#30). Used by the
+        /// pre-record health note via `CameraCaptureManager.shouldCapRate`.
+        let advertisedMinFPS: Double
         /// Frame rate measured from delivered buffers over a rolling ~1s
         /// window; nil until the first window completes.
         var measuredFPS: Double?
@@ -242,11 +249,14 @@ final class CameraPreviewManager: NSObject {
     private func captureActiveFormatMetadata(from device: AVCaptureDevice) {
         let format = device.activeFormat
         let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-        let advertised = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+        let ranges = format.videoSupportedFrameRateRanges
+        let advertisedMax = ranges.map(\.maxFrameRate).max() ?? 0
+        let advertisedMin = ranges.map(\.minFrameRate).min() ?? advertisedMax
         previewMetadata = PreviewMetadata(
             width: Int(dims.width),
             height: Int(dims.height),
-            advertisedMaxFPS: advertised,
+            advertisedMaxFPS: advertisedMax,
+            advertisedMinFPS: advertisedMin,
             measuredFPS: nil
         )
     }

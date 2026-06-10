@@ -289,17 +289,20 @@ struct MenuView: View {
         .background(Color.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .bottomLeading) { cameraMetadataBadge }
-        .overlay(alignment: .top) { cameraStabilityNote }
+        .overlay(alignment: .top) { cameraHealthNote }
     }
 
-    /// Pre-record cadence-stability note. Gated on low-frequency state (mode +
+    /// Pre-record camera-health note. Gated on low-frequency state (mode +
     /// presence) for the same picker-flood reason as `cameraMetadataBadge`; the
-    /// high-frequency `previewFeedUnstable` read lives in the leaf
-    /// `CameraFeedStabilityNote`.
+    /// high-frequency reads (`previewMetadata`, `previewFeedUnstable`) live in
+    /// the leaf `CameraHealthNote`.
     @ViewBuilder
-    private var cameraStabilityNote: some View {
+    private var cameraHealthNote: some View {
         if coordinator.mode != .screenOnly, coordinator.cameraPreview.isActive {
-            CameraFeedStabilityNote(manager: coordinator.cameraPreview)
+            CameraHealthNote(
+                manager: coordinator.cameraPreview,
+                targetFrameRate: coordinator.frameRate
+            )
         }
     }
 
@@ -599,22 +602,35 @@ private struct CameraMetadataBadge: View {
     }
 }
 
-/// Leaf note shown when the live preview's capture-PTS timeline is going
-/// non-monotonic — the CMIO corruption that desyncs a real recording. Pairs
-/// with `CameraMetadataBadge`: that shows the static facts (resolution / fps),
-/// this adds the stability dimension. Isolated so the `previewFeedUnstable`
-/// read re-renders only this note, not the parent MenuView (which hosts
+/// Leaf pre-record camera-health note. Pairs with `CameraMetadataBadge`: that
+/// shows the static facts (resolution / fps), this interprets them and warns.
+/// Surfaces the most actionable of two related signals before the user hits
+/// record, prioritising the *cause* over the *symptom*:
+///
+/// 1. **Rate-locked + under-delivering** — the camera's only format is locked to
+///    a single rate (no lower floor to fall back to) and it's measurably not
+///    sustaining it. This is the exact #30 shape: a 30-only camera delivering
+///    ~25fps will make CMIO fabricate frames and desync the recording. A
+///    multi-rate camera (e.g. Cam Link, floor 25) delivering below target is
+///    *fine* — `shouldCapRate` tells the two apart, so we don't cry wolf.
+/// 2. **Cadence instability** — the preview's capture-PTS is already going
+///    non-monotonic (`previewFeedUnstable`). Generic fallback when (1) doesn't
+///    apply.
+///
+/// Isolated so the high-frequency `previewMetadata` / `previewFeedUnstable`
+/// reads re-render only this note, not the parent MenuView (which hosts
 /// NativePopUpPicker — see the picker-flood note). There is no clean app-level
-/// API to reset a wedged USB/CMIO device, so the guidance is reconnect / see
-/// logs, not a magic reset.
-private struct CameraFeedStabilityNote: View {
+/// API to reset a wedged USB/CMIO device, so the guidance is reconnect / use a
+/// different port / HDMI, not a magic reset.
+private struct CameraHealthNote: View {
     let manager: CameraPreviewManager
+    let targetFrameRate: FrameRate
 
     var body: some View {
-        if manager.previewFeedUnstable {
+        if let warning = activeWarning {
             HStack(spacing: 4) {
-                Image(systemName: "waveform.path.ecg")
-                Text("Camera feed looks unstable — try reconnecting")
+                Image(systemName: warning.icon)
+                Text(warning.message)
             }
             .font(.caption2)
             .foregroundStyle(.orange)
@@ -622,9 +638,55 @@ private struct CameraFeedStabilityNote: View {
             .padding(.vertical, 2)
             .background(.black.opacity(0.55), in: Capsule())
             .padding(6)
-            .help(
-                "The camera's frame timing is unstable. Recording now may produce A/V desync. Try unplugging and reconnecting the camera, or check the logs."
+            .help(warning.help)
+        }
+    }
+
+    private struct Warning {
+        let icon: String
+        let message: String
+        let help: String
+    }
+
+    private var activeWarning: Warning? {
+        // 1. Rate-locked format the camera can't sustain — the cause.
+        if let meta = manager.previewMetadata, let measured = meta.measuredFPS {
+            let rateLocked = !CameraCaptureManager.shouldCapRate(
+                formatMinRate: meta.advertisedMinFPS,
+                formatMaxRate: meta.advertisedMaxFPS,
+                target: Double(targetFrameRate.rawValue)
+            )
+            let underDelivering = measured < targetFrameRate.minAcceptableRate
+            if rateLocked, underDelivering {
+                let help = "This camera only offers \(Self.fps(meta.advertisedMaxFPS)) and is delivering "
+                    + "~\(Self.fps(measured)). Recording at \(targetFrameRate.rawValue)fps will likely desync "
+                    + "audio and video. Try a different USB port or cable, or connect the camera via HDMI capture."
+                return Warning(
+                    icon: "exclamationmark.triangle.fill",
+                    message: "Camera can't sustain \(targetFrameRate.rawValue)fps — may desync",
+                    help: help
+                )
+            }
+        }
+
+        // 2. Generic cadence instability — the symptom.
+        if manager.previewFeedUnstable {
+            let help = "The camera's frame timing is unstable. Recording now may produce A/V desync. "
+                + "Try unplugging and reconnecting the camera, or check the logs."
+            return Warning(
+                icon: "waveform.path.ecg",
+                message: "Camera feed looks unstable — try reconnecting",
+                help: help
             )
         }
+
+        return nil
+    }
+
+    private static func fps(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        return rounded == rounded.rounded()
+            ? String(format: "%.0ffps", rounded)
+            : String(format: "%.1ffps", rounded)
     }
 }

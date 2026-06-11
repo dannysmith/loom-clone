@@ -24,6 +24,7 @@ import {
   type StepContext,
   stepByKind,
 } from "./registry";
+import { clearRunActive, markRunActive } from "./run-lock";
 import {
   fileSizeBytes,
   getStep,
@@ -88,7 +89,10 @@ function schedule(videoId: string, opts: RunOpts): ScheduleOutcome {
   }
   const p = runPipeline(videoId, opts).finally(() => {
     inFlight.delete(videoId);
-    // Fire the deferred run, if any, now the slot is free.
+    clearRunActive(videoId);
+    // Fire the deferred run, if any, now the slot is free. It re-marks the lock
+    // synchronously (no await between here and there), so a queued rerun never
+    // leaves an observable gap in which the editor gate could open.
     const next = pendingRerun.get(videoId);
     if (next) {
       pendingRerun.delete(videoId);
@@ -96,6 +100,7 @@ function schedule(videoId: string, opts: RunOpts): ScheduleOutcome {
     }
   });
   inFlight.set(videoId, p);
+  markRunActive(videoId);
   console.log(
     `[pipeline] ${videoId} scheduled (source=${opts.source}, force=${opts.force ?? false}, only=${opts.only ?? "—"}, n=${inFlight.size})`,
   );
@@ -180,7 +185,12 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
       if (await Bun.file(join(dir, "source.mp4")).exists()) {
         heightState.probed = true;
         const meta = await probeMetadata(join(dir, "source.mp4"));
-        if (meta) ctx.height = meta.height;
+        if (meta) {
+          ctx.height = meta.height;
+          // Reused by the metadata step (extractMetadata) so source.mp4 is
+          // probed once per run, not twice.
+          ctx.scratch.sourceMeta = meta;
+        }
       }
     }
 

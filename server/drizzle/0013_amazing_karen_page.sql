@@ -1,0 +1,1 @@
+ALTER TABLE `video_processing_steps` DROP COLUMN `attempts`;

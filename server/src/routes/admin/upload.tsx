@@ -5,7 +5,9 @@ import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { probeDuration } from "../../lib/derivatives";
+import { logEvent } from "../../lib/events";
 import { scheduleUploadDerivatives } from "../../lib/processing/pipeline";
+import { isProbablyPlayable } from "../../lib/processing/playable";
 import { ConflictError, createUploadedVideo, DATA_DIR, ValidationError } from "../../lib/store";
 import { addTagToVideo, listTags } from "../../lib/tags";
 import { UploadPage } from "../../views/admin/pages/UploadPage";
@@ -50,6 +52,13 @@ upload.post("/", async (c) => {
         .set({ durationSeconds: duration })
         .where(eq(videos.id, video.id));
     }
+
+    // Validate the upload at intake and surface the result in the admin event
+    // log. A genuinely-broken upload is the uploader's problem (caught here,
+    // immediately); we don't reject it — resolve.ts still falls back to serving
+    // upload.mp4 if post-processing can't produce a source.mp4.
+    const playable = await isProbablyPlayable(uploadPath);
+    await logEvent(video.id, "upload_received", { playable, bytes: file.size });
 
     // Apply tags.
     for (const tagId of tagIds) {

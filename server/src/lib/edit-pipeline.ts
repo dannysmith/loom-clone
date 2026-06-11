@@ -26,6 +26,7 @@ import { logEvent } from "./events";
 import { spawnFfmpeg } from "./ffmpeg";
 import { nowIso } from "./format";
 import { isProbablyPlayable } from "./processing/playable";
+import { clearRunActive, markRunActive } from "./processing/run-lock";
 import { fileSizeBytes, markStepReady, markStepSkipped } from "./processing/steps-store";
 import { DATA_DIR, getVideo, upsertTranscript } from "./store";
 import { generateStoryboard } from "./storyboard";
@@ -41,8 +42,10 @@ const inFlight = new Map<string, Promise<void>>();
 
 export function applyEdits(videoId: string): void {
   if (inFlight.has(videoId)) return;
+  markRunActive(videoId);
   const p = runEditPipeline(videoId).finally(() => {
     inFlight.delete(videoId);
+    clearRunActive(videoId);
   });
   inFlight.set(videoId, p);
   p.catch((err) => {

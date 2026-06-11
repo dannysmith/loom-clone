@@ -608,13 +608,13 @@ describe("DELETE /:id", () => {
     expect(res.status).toBe(200);
   });
 
-  test("returns 409 VIDEO_ALREADY_COMPLETE for ready videos", async () => {
+  test("returns 409 VIDEO_NOT_DELETABLE for ready videos", async () => {
     const { id } = await createVideoViaApi();
     await setVideoStatus(id, "ready");
     const res = await videos.request(`/${id}`, { method: "DELETE" });
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.code).toBe("VIDEO_ALREADY_COMPLETE");
+    expect(body.code).toBe("VIDEO_NOT_DELETABLE");
     // Video still exists
     expect(await getVideo(id)).toBeTruthy();
   });

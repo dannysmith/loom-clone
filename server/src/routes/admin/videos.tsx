@@ -4,10 +4,12 @@ import type { ProcessingStepKind } from "../../db/schema";
 import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
+import { probeJson } from "../../lib/ffprobe";
 import { listVideoFiles } from "../../lib/files";
 import { scheduleReprocess } from "../../lib/processing/pipeline";
 import { canReprocess, computeReadiness, reprocessability } from "../../lib/processing/readiness";
 import { REGENERABLE_KINDS } from "../../lib/processing/registry";
+import { hasActiveRun } from "../../lib/processing/run-lock";
 import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
@@ -63,12 +65,16 @@ videoRoutes.get("/:id", async (c) => {
   const video = result;
 
   const activeTab = parseTab(c.req.query("tab"));
-  // Surface that a reprocess was queued behind an in-flight run (rather than
-  // started immediately) so the redirect after the POST isn't a silent no-op.
+  // Surface the reprocess outcome so the redirect after the POST isn't a silent
+  // no-op: `queued` means it'll start once the current run settles; `skipped`
+  // means a resumable run was already in progress and there was nothing to add.
+  const reprocessedParam = c.req.query("reprocessed");
   const reprocessNotice =
-    c.req.query("reprocessed") === "queued"
+    reprocessedParam === "queued"
       ? "A run is already in progress — your re-run is queued and will start when it finishes."
-      : undefined;
+      : reprocessedParam === "skipped"
+        ? "Nothing to do — a post-processing run is already in progress."
+        : undefined;
   const [
     videoTags,
     allTags,
@@ -102,6 +108,7 @@ videoRoutes.get("/:id", async (c) => {
       hasChapters={hasChapters}
       readiness={readiness}
       reprocessNotice={reprocessNotice}
+      runInFlight={hasActiveRun(video.id)}
     />,
   );
 });
@@ -391,30 +398,20 @@ const MAX_UPLOAD_WIDTH = 3840;
 // saveCustomThumbnail will resize regardless). Writes a temp file because
 // ffprobe needs a path, not a buffer.
 async function probeImageWidth(videoId: string, imageData: ArrayBuffer): Promise<number | null> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) return null;
-
   const tmpPath = `data/${videoId}/derivatives/thumbnail-candidates/_upload-check.tmp`;
   await Bun.write(tmpPath, imageData);
   try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_streams",
-        "-select_streams",
-        "v:0",
-        tmpPath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-    const data = JSON.parse(stdout) as { streams?: Array<{ width?: number }> };
-    return data.streams?.[0]?.width ?? null;
+    const data = (await probeJson([
+      "-v",
+      "quiet",
+      "-print_format",
+      "json",
+      "-show_streams",
+      "-select_streams",
+      "v:0",
+      tmpPath,
+    ])) as { streams?: Array<{ width?: number }> } | null;
+    return data?.streams?.[0]?.width ?? null;
   } finally {
     const { rm } = await import("fs/promises");
     await rm(tmpPath, { force: true }).catch(() => {});

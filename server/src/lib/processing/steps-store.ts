@@ -49,12 +49,9 @@ type UpsertFields = {
   producedAt?: string | null;
   sizeBytes?: number | null;
   error?: string | null;
-  // When true, bumps the informational attempts counter (a manual reprocess).
-  incrementAttempts?: boolean;
 };
 
-// Upsert a step row, preserving the attempts counter across updates. The
-// composite PK (videoId, kind) makes this idempotent.
+// Upsert a step row. The composite PK (videoId, kind) makes this idempotent.
 export async function upsertStep(
   videoId: string,
   kind: ProcessingStepKind,
@@ -63,7 +60,6 @@ export async function upsertStep(
   const db = getDb();
   const now = nowIso();
   const existing = await getStep(videoId, kind);
-  const attempts = (existing?.attempts ?? 0) + (fields.incrementAttempts ? 1 : 0);
 
   const row = {
     videoId,
@@ -73,7 +69,6 @@ export async function upsertStep(
       fields.producedAt ?? (fields.state === "ready" ? now : (existing?.producedAt ?? null)),
     sizeBytes: fields.sizeBytes ?? existing?.sizeBytes ?? null,
     error: fields.error ?? null,
-    attempts,
     updatedAt: now,
   };
 
@@ -87,7 +82,6 @@ export async function upsertStep(
         producedAt: row.producedAt,
         sizeBytes: row.sizeBytes,
         error: row.error,
-        attempts: row.attempts,
         updatedAt: row.updatedAt,
       },
     });

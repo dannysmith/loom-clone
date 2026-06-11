@@ -13,6 +13,7 @@ import {
   generateSourceFromHls,
   generateSourceFromUpload,
   generateVariant,
+  type ProbeMetadata,
   processAudio,
   refreshFileBytes,
   VARIANTS,
@@ -36,7 +37,13 @@ export type StepContext = {
   duration: number; // seconds
   height: number; // probed source height (0 before metadata)
   force: boolean;
-  scratch: { silences?: Silence[]; silencesComputed: boolean };
+  scratch: {
+    silences?: Silence[];
+    silencesComputed: boolean;
+    // source.mp4 probe, seeded by the pipeline's height probe and reused by the
+    // metadata step so source.mp4 is probed once per run, not twice.
+    sourceMeta?: ProbeMetadata;
+  };
 };
 
 export type ProcessingStep = {
@@ -142,7 +149,7 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     inputs: ["source"],
     appliesTo: () => true,
     run: async (ctx) => {
-      const ok = await extractMetadata(ctx.videoId);
+      const ok = await extractMetadata(ctx.videoId, ctx.scratch.sourceMeta);
       if (!ok) throw new Error("ffprobe metadata extraction failed");
       return "ready";
     },

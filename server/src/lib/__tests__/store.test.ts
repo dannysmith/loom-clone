@@ -672,6 +672,22 @@ describe("duplicateVideo", () => {
     expect(dup.title).toBeNull();
   });
 
+  test("preserves notes and the edited flag (lastEditedAt) on the copy", async () => {
+    // [P1.2] A copy that drops lastEditedAt is treated as unedited:
+    // activeRawFilename then resolves to the full-length source.mp4 instead of
+    // the edited cut, and step inference validates source.mp4 against the
+    // (shorter) edited duration and fails it → processing_failed.
+    const original = await createVideo();
+    await getDb()
+      .update(videosTable)
+      .set({ notes: "private notes", lastEditedAt: "2026-01-02T03:04:05.000Z" })
+      .where(eq(videosTable.id, original.id));
+
+    const dup = await duplicateVideo(original.id);
+    expect(dup.notes).toBe("private notes");
+    expect(dup.lastEditedAt).not.toBeNull();
+  });
+
   test("preserves visibility, description, and source", async () => {
     const v = await createVideo();
     await updateVideo(v.id, {

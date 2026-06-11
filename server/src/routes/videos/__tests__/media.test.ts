@@ -56,6 +56,17 @@ describe("GET /:slug/raw/:file", () => {
     expect(res.status).toBe(404);
   });
 
+  test("serves upload.mp4 from the video dir (uploaded-video fallback)", async () => {
+    // [P1.3] upload.mp4 lives one dir up from derivatives/; it's the fallback an
+    // uploaded video serves when post-processing couldn't produce source.mp4.
+    const video = await createVideo();
+    await writeVideoFile(video.id, "upload.mp4", "raw-upload");
+    const res = await media.request(`/${video.slug}/raw/upload.mp4`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("video/mp4");
+    expect(await res.text()).toBe("raw-upload");
+  });
+
   test("returns 404 for missing file on disk", async () => {
     const video = await createVideo();
     const res = await media.request(`/${video.slug}/raw/source.mp4`);

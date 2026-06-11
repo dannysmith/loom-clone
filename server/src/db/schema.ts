@@ -100,11 +100,15 @@ export const videoSegments = sqliteTable(
 // AND a cheap disk `stat`, so the table stays honest without ever serving a
 // phantom file.
 //
-// `attempts` is an informational reprocess counter; there is no auto-retry.
+// There is no auto-retry: a failed step is recovered by a manual reprocess.
+//
+// NOTE: this is an UNORDERED key set, not the run order. The pipeline runs
+// source → metadata → audio → … (metadata must gate `ready` before the fragile
+// audio step); `PROCESSING_STEPS` in registry.ts is the ordering authority.
 export const PROCESSING_STEP_KINDS = [
   "source",
-  "audio",
   "metadata",
+  "audio",
   "thumbnail",
   "variant_720",
   "variant_1080",
@@ -133,7 +137,6 @@ export const videoProcessingSteps = sqliteTable(
     producedAt: text("produced_at"),
     sizeBytes: integer("size_bytes"),
     error: text("error"),
-    attempts: integer("attempts").notNull().default(0),
     updatedAt: text("updated_at").notNull().$defaultFn(nowIso),
   },
   (t) => [primaryKey({ columns: [t.videoId, t.kind] })],

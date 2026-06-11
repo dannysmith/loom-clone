@@ -224,6 +224,10 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
                 height: Int(dims.height),
                 pixelFormat: PixelFormatLabel.string(for: pf),
                 targetFPS: Int(targetFPS.rawValue),
+                // `didLockRate` is kept as the schema field name for JSON /
+                // diagnostics back-compat, but post-task-3 it means "did apply a
+                // rate **ceiling**" (`didCapRate`), not "locked min+max to a
+                // floor". See `capFrameRateIfSupported`.
                 didLockRate: didCapRate,
                 // We no longer set a max-frame-duration floor, so it reports the
                 // format default (often kCMTimeInvalid → NaN). Guard both, since

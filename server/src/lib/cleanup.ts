@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
-import { readdir, rm, stat } from "fs/promises";
+import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
 import { videoSegments, videos } from "../db/schema";
@@ -16,7 +16,7 @@ const STALE_DAYS = 10;
 // paused recording produces no segments.
 const STALE_RECORDING_HOURS = 4;
 
-// Deletes HLS segments and thumbnail candidates for videos that have been
+// Deletes HLS segments for videos that have been
 // `ready` for longer than STALE_DAYS and have a VALIDATED source.mp4. Once the
 // HLS segments are gone the MP4 is the only copy, so this gates on the `source`
 // step being `ready` (isProbablyPlayable passed at generation) AND the file
@@ -84,17 +84,6 @@ export async function cleanupStaleFiles(): Promise<void> {
       }
     } catch {
       // Directory may have been removed between the query and now.
-    }
-
-    // Delete thumbnail candidate images (the promoted thumbnail.jpg is kept).
-    // Bun.file(dir).exists() returns false for a directory, so stat it instead.
-    const candidatesDir = join(derivDir, "thumbnail-candidates");
-    const candidatesExist = await stat(candidatesDir)
-      .then((s) => s.isDirectory())
-      .catch(() => false);
-    if (candidatesExist) {
-      await rm(candidatesDir, { recursive: true, force: true });
-      filesRemoved++;
     }
 
     if (filesRemoved > 0) {

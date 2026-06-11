@@ -9,16 +9,14 @@
 // the segment-derived steps — they are never flagged as needing repair.
 
 import { join } from "path";
-import type { ProcessingStepKind } from "../../db/schema";
 import { probeMetadata } from "../derivatives";
 import { hasAudioStream } from "../ffprobe";
 import { getTranscript, getVideo } from "../store";
-import { isProbablyPlayable } from "./playable";
 import {
   applicabilityContext,
   PROCESSING_STEPS,
+  type ProcessingStep,
   type StepContext,
-  sourceExpectedDuration,
 } from "./registry";
 import { fileSizeBytes, markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
 
@@ -35,28 +33,21 @@ export async function inferStepsFromDisk(videoId: string): Promise<void> {
 
   for (const step of PROCESSING_STEPS) {
     if (!step.appliesTo(ctx)) continue;
-    await inferStep(step.kind, ctx, sourceFile);
+    await inferStep(step, ctx, sourceFile);
   }
 }
 
 async function inferStep(
-  kind: ProcessingStepKind,
+  step: ProcessingStep,
   ctx: StepContext,
   sourceFile: string,
 ): Promise<void> {
   const { videoId, dir } = ctx;
 
-  switch (kind) {
-    case "source": {
-      if (!(await exists(sourceFile))) return; // no row — nothing to serve
-      const ok = await isProbablyPlayable(sourceFile, {
-        expectedDuration: sourceExpectedDuration(ctx),
-      });
-      if (ok) await markStepReady(videoId, "source", { sizeBytes: fileSizeBytes(sourceFile) });
-      else await markStepFailed(videoId, "source", "backfill: source.mp4 failed playability check");
-      return;
-    }
-    case "metadata": {
+  // The few steps with no servable artifact need bespoke inference; everything
+  // else is driven off the registry's artifact()/validate() below.
+  switch (step.kind) {
+    case "metadata":
       // Stored dimensions imply metadata extraction succeeded previously.
       if (ctx.video.width && ctx.video.height) await markStepReady(videoId, "metadata");
       else if (await exists(sourceFile)) {
@@ -64,8 +55,7 @@ async function inferStep(
         if (meta) await markStepReady(videoId, "metadata");
       }
       return;
-    }
-    case "audio": {
+    case "audio":
       // No standalone artifact — assume processed if the source carries audio.
       // This is a deliberate fidelity trade-off: a recorded video whose source
       // has audio is marked `ready` even though we can't tell whether loudnorm
@@ -76,38 +66,26 @@ async function inferStep(
       if (await hasAudioStream(sourceFile)) await markStepReady(videoId, "audio");
       else await markStepSkipped(videoId, "audio");
       return;
-    }
-    case "variant_1080":
-    case "variant_720": {
-      const file = join(dir, `${kind === "variant_1080" ? 1080 : 720}p.mp4`);
-      if (!(await exists(file))) return;
-      const ok = await isProbablyPlayable(file);
-      if (ok) await markStepReady(videoId, kind, { sizeBytes: fileSizeBytes(file) });
-      else await markStepFailed(videoId, kind, "backfill: variant failed playability check");
-      return;
-    }
-    case "thumbnail":
-      if (await exists(join(dir, "thumbnail.jpg"))) await markStepReady(videoId, "thumbnail");
-      return;
-    case "storyboard":
-      if (await exists(join(dir, "storyboard.vtt"))) await markStepReady(videoId, "storyboard");
-      return;
-    case "peaks":
-      if (await exists(join(dir, "peaks.json"))) await markStepReady(videoId, "peaks");
-      return;
-    case "suggested_edits":
-      if (await exists(join(dir, "suggested-edits.json")))
-        await markStepReady(videoId, "suggested_edits");
-      return;
     case "transcript":
       if (await getTranscript(videoId)) await markStepReady(videoId, "transcript");
       return;
     case "words":
+      // External (Mac-sent), so no registry artifact — but it does leave
+      // words.json on disk, so it's inferable.
       if (await exists(join(dir, "words.json"))) await markStepReady(videoId, "words");
       return;
-    // The remaining external suggestion items (title/description/chapter_titles)
-    // leave no inferable on-disk trace — leave them absent ("—").
-    default:
-      return;
   }
+
+  // Generic file-producing steps (source, variants, thumbnail, storyboard,
+  // peaks, suggested_edits): validate against the SAME artifact()/validate() the
+  // pipeline used at generation time, off the registry — so renaming an artifact
+  // can't silently break backfill/duplicate. The remaining external suggestion
+  // items (title/description/chapter_titles) have no artifact and leave no
+  // on-disk trace, so they fall through here as "—".
+  const path = step.artifact?.(ctx);
+  if (!path) return;
+  if (!(await exists(path))) return; // no row — nothing to serve
+  const ok = step.validate ? await step.validate(ctx) : true;
+  if (ok) await markStepReady(videoId, step.kind, { sizeBytes: fileSizeBytes(path) });
+  else await markStepFailed(videoId, step.kind, `backfill: ${step.kind} failed validation`);
 }

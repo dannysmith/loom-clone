@@ -90,9 +90,16 @@ Low-risk, high-value, no refactor required. Each is self-contained. Independent 
 
 ---
 
-## Phase 2 — "Shrink the model" prep
+## Phase 2 — "Shrink the model" prep ✅ DONE
 
 Cheap, mostly mechanical, and they de-risk the Phase 3 refactor by removing duplicated rules first. Independent of Phase 1.
+
+**Status:** shipped on branch `task-1-phase-1-correctness-fixes` (kept as the single branch for the whole task). `bun run check && bun run typecheck && bun test` green (714 pass). Notes per item:
+
+- **[P2.1] ✅** — one pure `rollupFromSteps(steps)` in `reconcile.ts`, now used by `reconcile`, `recoverStrandedReprocessing`, and `duplicateVideo`. This also fixed the drift the doc flagged: a mid-`processing` copy now lands on `processing`, not mislabelled `processing_failed`.
+- **[P2.2] ✅** — new `lib/status.ts` is the single home for `RECONCILE_OWNED`, `POST_FOOTAGE_STATUSES`, and `VALID_STATUS` (members validated against the schema enum via `satisfies`). `reconcile`/`readiness`/`store`/admin `helpers` import from it; the uphill `readiness → reconcile` import is gone.
+- **[P2.3] ✅** — `inferStepsFromDisk` now drives file-producing steps off each step's `artifact(ctx)`/`validate(ctx)`; only `metadata`/`audio`/`transcript`/`words` keep bespoke handling.
+- **[P2.4] ✅** — one `recordExternalStep(id, kind, { payload? })` receipt helper replaces the five hand-rolled `markStepReady` calls in `routes/api/videos.ts` (it centralises the transcript byte-length sizing).
 
 ### [P2.1] The status rollup is hand-written three times and already disagrees
 

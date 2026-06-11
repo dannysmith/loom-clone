@@ -49,7 +49,20 @@ extension RecordingActor {
         if let cameraRawWriter,
            let retimed = retimedSampleForRawWriter(sampleBuffer)
         {
-            await cameraRawWriter.append(retimed)
+            // Defence-in-depth (#30): a single backward / duplicate PTS makes
+            // AVAssetWriter reject the sample, fail the writer, and leave an
+            // unplayable camera.mp4 (`-16364`). Drop any frame whose retimed PTS
+            // doesn't strictly advance past the last appended one, so a corrupt
+            // feed leaves the raw master truncated-but-playable instead of dead.
+            // The rate-unlock (no fabricated frames) means this rarely fires; we
+            // do NOT repair or re-stamp PTS — that would be its own desync.
+            let pts = CMSampleBufferGetPresentationTimeStamp(retimed)
+            if !lastRawCameraAppendedPTS.isValid || pts > lastRawCameraAppendedPTS {
+                lastRawCameraAppendedPTS = pts
+                await cameraRawWriter.append(retimed)
+            } else {
+                diagnostics.cameraRawFramesSkipped += 1
+            }
         }
     }
 
@@ -190,14 +203,13 @@ extension RecordingActor {
     /// the metronome over-ran the camera's delivery rate.
     private func compositeForCurrentMode() async -> CompositeDecision {
         let queueDepthBefore = cameraFrameQueue.count
-        let step: ModeCompositeStep
-        switch mode {
+        let step: ModeCompositeStep = switch mode {
         case .screenOnly:
-            step = await compositeScreenOnly()
+            await compositeScreenOnly()
         case .screenAndCamera:
-            step = await compositeScreenAndCamera()
+            await compositeScreenAndCamera()
         case .cameraOnly:
-            step = await compositeCameraOnly(queueDepthBefore: queueDepthBefore)
+            await compositeCameraOnly(queueDepthBefore: queueDepthBefore)
         }
 
         var decision = CompositeDecision(
@@ -270,16 +282,15 @@ extension RecordingActor {
             && !activeSourceWarnings.contains(.cameraFailed)
             && !activeSourceWarnings.contains(.cameraStale)
         let startedAt = Date()
-        let result: Result<CVPixelBuffer, CompositionError>?
-        if cameraAvailable, let camera {
-            result = await composition.compositeFrame(
+        let result: Result<CVPixelBuffer, CompositionError>? = if cameraAvailable, let camera {
+            await composition.compositeFrame(
                 screenBuffer: screen.pixelBuffer,
                 cameraBuffer: camera.pixelBuffer,
                 mode: .screenAndCamera,
                 pipPosition: pipPosition
             )
         } else {
-            result = await composition.compositeFrame(
+            await composition.compositeFrame(
                 screenBuffer: screen.pixelBuffer,
                 cameraBuffer: nil,
                 mode: .screenOnly

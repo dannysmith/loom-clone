@@ -164,6 +164,17 @@ struct MetronomeDiagnostics {
     var cameraFramesEvicted: Int64 = 0
     var screenFramesReceived: Int64 = 0
     var audioSamplesReceived: Int64 = 0
+    /// Camera frames whose capture PTS failed to advance (≤1ms gap: backward,
+    /// zero, or fabricated) — the live signal `CameraCadenceMonitor` keys on.
+    /// Zero on a healthy camera at any rate; non-zero indicates CMIO
+    /// corruption (#30 / #44). Forensic only — carried into snapshots so real
+    /// recordings show where the detector fired vs the `-12743` flood.
+    var cameraNonMonotonicPTS: Int64 = 0
+    /// Camera frames dropped by the raw-writer monotonicity guard (their
+    /// retimed PTS didn't strictly advance). Keeps `camera.mp4` playable on a
+    /// corrupt feed instead of failing the writer (#30 `-16364`). Should be 0
+    /// once the rate-unlock stops the ZV-1 fabrication.
+    var cameraRawFramesSkipped: Int64 = 0
 
     // MARK: Histograms
 
@@ -247,6 +258,7 @@ struct MetronomeDiagnostics {
         let cameraOnlyRepeatBranch: Int64
         let cameraFramesReceived: Int64
         let screenFramesReceived: Int64
+        let cameraNonMonotonicPTS: Int64
     }
 
     // MARK: Phase 4 — runtime / camera-format projections
@@ -438,7 +450,8 @@ struct MetronomeDiagnostics {
                 noSourceTicks: noSourceTicks,
                 cameraOnlyRepeatBranch: cameraOnlyRepeatBranch,
                 cameraFramesReceived: cameraFramesReceived,
-                screenFramesReceived: screenFramesReceived
+                screenFramesReceived: screenFramesReceived,
+                cameraNonMonotonicPTS: cameraNonMonotonicPTS
             )
         )
     }
@@ -466,6 +479,7 @@ struct MetronomeDiagnostics {
         mono=\(rejectMonotonicity) neg=\(rejectNegElapsed) noSrc=\(noSourceTicks) \
         peek=\(cameraOnlyRepeatBranch) pop=\(cameraOnlyPopBranch) \
         camFrames=\(cameraFramesReceived) (~\(camRate)fps) \
+        nonMonoPTS=\(cameraNonMonotonicPTS) rawSkip=\(cameraRawFramesSkipped) \
         scrFrames=\(screenFramesReceived) \
         evictions=\(cameraFramesEvicted) \
         compFails=\(compositionFailures) \
@@ -509,7 +523,9 @@ struct MetronomeDiagnostics {
                 cameraFramesReceived: cameraFramesReceived,
                 cameraFramesEvicted: cameraFramesEvicted,
                 screenFramesReceived: screenFramesReceived,
-                audioSamplesReceived: audioSamplesReceived
+                audioSamplesReceived: audioSamplesReceived,
+                cameraNonMonotonicPTS: cameraNonMonotonicPTS,
+                cameraRawFramesSkipped: cameraRawFramesSkipped
             ),
             histograms: Histograms(
                 cameraIntervalMs: makeHistogram(edges: Self.cameraIntervalEdgesMs, counts: cameraIntervalHist),
@@ -571,6 +587,8 @@ struct MetronomeDiagnostics {
         let cameraFramesEvicted: Int64
         let screenFramesReceived: Int64
         let audioSamplesReceived: Int64
+        let cameraNonMonotonicPTS: Int64
+        let cameraRawFramesSkipped: Int64
     }
 
     struct Histograms: Encodable {

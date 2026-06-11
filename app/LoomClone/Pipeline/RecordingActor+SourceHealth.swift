@@ -248,13 +248,13 @@ extension RecordingActor {
 
     // MARK: - Warning Dispatch
 
-    private func fireWarning(_ warning: RecordingWarning) {
+    func fireWarning(_ warning: RecordingWarning) {
         if let callback = onWarningChanged {
             Task { await callback(warning, true) }
         }
     }
 
-    private func clearWarning(_ kind: RecordingWarning.Kind) {
+    func clearWarning(_ kind: RecordingWarning.Kind) {
         if let callback = onWarningChanged {
             // Send a dummy warning with the right id so the coordinator can
             // identify which warning to remove.

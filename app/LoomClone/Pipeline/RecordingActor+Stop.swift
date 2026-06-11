@@ -136,6 +136,17 @@ extension RecordingActor {
         // immediate at-a-glance feedback.
         writeDiagnosticsDump(sessionID: builtTimeline.session.id)
 
+        // Post-stop OS-log extraction (task 1 / #44). Detached + low priority so
+        // it never delays stop or the clipboard URL. Reads the just-written
+        // recording.json for its time window and dumps the matching unified-log
+        // slice (ours + Apple CMIO subsystems) next to it. The recording is
+        // already finished, so this is off the hot path — see LogExtractor.
+        if let localDir = localSavePath {
+            Task.detached(priority: .utility) {
+                LogExtractor.extract(bundleDirectory: localDir)
+            }
+        }
+
         // Complete upload (includes the timeline in the payload)
         do {
             let result = try await upload.complete(timeline: timelineData)
@@ -182,6 +193,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -191,6 +205,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -200,6 +217,9 @@ extension RecordingActor {
                 error: failure.description,
                 code: failure.code,
                 domain: failure.domain,
+                underlyingCode: failure.underlyingCode,
+                underlyingDomain: failure.underlyingDomain,
+                underlyingError: failure.underlyingDescription,
                 t: t
             )
         }
@@ -275,6 +295,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }
@@ -286,6 +309,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }
@@ -297,6 +323,9 @@ extension RecordingActor {
                 error: failure?.description ?? "detected at segment boundary",
                 code: failure?.code,
                 domain: failure?.domain,
+                underlyingCode: failure?.underlyingCode,
+                underlyingDomain: failure?.underlyingDomain,
+                underlyingError: failure?.underlyingDescription,
                 t: t
             )
         }

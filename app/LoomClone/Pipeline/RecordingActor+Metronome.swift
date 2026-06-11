@@ -30,6 +30,7 @@ extension RecordingActor {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, !Task.isCancelled else { break }
                 await self.checkSourceHealth()
+                await self.checkQualityHealth()
                 await self.checkFocusedWindowVisibility()
 
                 // Periodically re-enumerate Finder browser windows when desktop

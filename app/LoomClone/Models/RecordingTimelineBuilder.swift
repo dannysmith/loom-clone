@@ -289,6 +289,9 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         error: String,
         code: Int? = nil,
         domain: String? = nil,
+        underlyingCode: Int? = nil,
+        underlyingDomain: String? = nil,
+        underlyingError: String? = nil,
         t: Double
     ) {
         var data: [String: JSONValue] = [
@@ -297,6 +300,11 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
         ]
         if let code { data["code"] = .int(code) }
         if let domain { data["domain"] = .string(domain) }
+        // The deepest NSUnderlyingError — the real VideoToolbox/CMIO cause
+        // behind a generic top-level AVErrorUnknown (#30).
+        if let underlyingCode { data["underlyingCode"] = .int(underlyingCode) }
+        if let underlyingDomain { data["underlyingDomain"] = .string(underlyingDomain) }
+        if let underlyingError { data["underlyingError"] = .string(underlyingError) }
         appendEvent(
             t: t,
             kind: "raw.writer.failed",
@@ -324,6 +332,25 @@ final class RecordingTimelineBuilder: @unchecked Sendable {
 
     func recordSourceRecovered(source: String, t: Double) {
         appendEvent(t: t, kind: "source.\(source).recovered", data: nil)
+    }
+
+    // MARK: - Quality Degradation Events
+
+    /// The camera's capture-PTS timeline went non-monotonic (CMIO meltdown) and
+    /// the live quality warning fired. `nonMonotonicCount` is the windowed event
+    /// count at fire time; `cameraFps` the lifetime-average camera rate. Lets us
+    /// cross-check the firing window against the extracted `-12743` flood for
+    /// the same session. See `CameraCadenceMonitor`.
+    func recordQualityDegraded(nonMonotonicCount: Int, cameraFps: Double?, t: Double) {
+        var data: [String: JSONValue] = ["nonMonotonicCount": .int(nonMonotonicCount)]
+        if let cameraFps { data["cameraFps"] = .double(cameraFps) }
+        appendEvent(t: t, kind: "quality.degraded", data: data)
+    }
+
+    /// The camera cadence recovered (window went quiet) and the quality warning
+    /// cleared.
+    func recordQualityRecovered(t: Double) {
+        appendEvent(t: t, kind: "quality.recovered", data: nil)
     }
 
     func recordHLSWriterFailed(error: String, t: Double) {

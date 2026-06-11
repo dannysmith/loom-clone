@@ -27,5 +27,9 @@ struct RecordingWarning: Identifiable, Equatable {
         case audioMissing
         case hlsWriterFailed
         case focusedWindowHidden
+        /// Camera feed is delivering frames but with a corrupt (non-monotonic)
+        /// capture-PTS timeline — the CMIO meltdown that desyncs A/V without
+        /// the camera going silent. See `CameraCadenceMonitor`.
+        case qualityDegraded
     }
 }

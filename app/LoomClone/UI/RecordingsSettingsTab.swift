@@ -178,6 +178,25 @@ struct RecordingsSettingsTab: View {
                         [entry.directory.appendingPathComponent("recording.json")]
                     )
                 }
+                Button("Reveal Logs") {
+                    NSWorkspace.shared.activateFileViewerSelecting(
+                        [entry.directory.appendingPathComponent(LogExtractor.outputFilename)]
+                    )
+                }
+                Button("Re-extract Logs") {
+                    // Re-run the unified-log extraction for this recording's
+                    // window (task 1 / #44). Detached — walking the log store is
+                    // slow — then reveal the result on the main actor.
+                    let directory = entry.directory
+                    Task.detached(priority: .utility) {
+                        LogExtractor.extract(bundleDirectory: directory)
+                        await MainActor.run {
+                            NSWorkspace.shared.activateFileViewerSelecting(
+                                [directory.appendingPathComponent(LogExtractor.outputFilename)]
+                            )
+                        }
+                    }
+                }
                 Divider()
                 Button("Copy UUID") { copy(entry.id) }
                 Button("Copy Slug") { copy(entry.slug) }

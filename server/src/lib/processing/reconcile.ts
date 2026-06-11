@@ -12,24 +12,27 @@
 
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../../db/client";
+import type { ProcessingStepKind, VideoProcessingStep } from "../../db/schema";
 import { videos } from "../../db/schema";
 import { purgeGlobalFeeds } from "../cdn";
+import { RECONCILE_OWNED } from "../status";
 import { getVideo, markVideoReady, setVideoStatus } from "../store";
 import { REQUIRED_KINDS } from "./registry";
 import { getStepStates } from "./steps-store";
 
-// The post-footage statuses reconcile may transition. This is ALSO the set of
-// statuses from which a manual reprocess makes sense (readiness.canReprocess
-// imports it) — keeping them one constant means a reprocessable status can never
-// lack an owner to settle it back to `ready`/`processing_failed`. Excluded:
-// recording/healing (owned by /complete), reprocessing (owned by the editor),
-// deleting (terminal).
-export const RECONCILE_OWNED: ReadonlySet<string> = new Set([
-  "processing",
-  "ready",
-  "processing_failed",
-  "incomplete",
-]);
+// The one rollup rule, in one place: every required step `ready` → `ready`; any
+// required step `failed` → `processing_failed`; otherwise still `processing`.
+// Pure — callers layer the run/hold/incomplete nuances on top. This logic used
+// to be hand-written three times (here, recoverStrandedReprocessing,
+// duplicateVideo) and had already drifted.
+export function rollupFromSteps(
+  steps: ReadonlyMap<ProcessingStepKind, VideoProcessingStep>,
+): "ready" | "processing" | "processing_failed" {
+  const requiredStates = REQUIRED_KINDS.map((k) => steps.get(k)?.state);
+  if (requiredStates.every((s) => s === "ready")) return "ready";
+  if (requiredStates.some((s) => s === "failed")) return "processing_failed";
+  return "processing";
+}
 
 export async function reconcile(
   videoId: string,
@@ -39,10 +42,7 @@ export async function reconcile(
   if (!video || video.trashedAt) return;
   if (!RECONCILE_OWNED.has(video.status)) return;
 
-  const steps = await getStepStates(videoId);
-  const requiredStates = REQUIRED_KINDS.map((k) => steps.get(k)?.state);
-  const allReady = requiredStates.every((s) => s === "ready");
-  const anyFailed = requiredStates.some((s) => s === "failed");
+  const rollup = rollupFromSteps(await getStepStates(videoId));
   // Leaving `ready` (a forced rebuild that demoted, or a regressed mandatory
   // step) must drop the video from the public feeds promptly — the origin query
   // filters status='ready', but the BunnyCDN-cached feed would otherwise keep
@@ -53,7 +53,7 @@ export async function reconcile(
   // for a forced multi-file rebuild that is still regenerating its expected
   // outputs (variants/storyboard/…). The hold keeps status (and feeds) honest
   // until the whole forced set has re-validated at running:false.
-  if (allReady && !opts.hold) {
+  if (rollup === "ready" && !opts.hold) {
     await markVideoReady(videoId);
     return;
   }
@@ -67,7 +67,7 @@ export async function reconcile(
   // A deterministic failure of a mandatory step (and no active run that could
   // still produce it) → processing_failed: HLS still plays, but there's no
   // stable validated MP4 and it needs manual attention.
-  if (!opts.running && anyFailed) {
+  if (!opts.running && rollup === "processing_failed") {
     if (video.status !== "processing_failed") {
       await setVideoStatus(videoId, "processing_failed");
       if (wasReady) purgeGlobalFeeds();
@@ -101,9 +101,8 @@ export async function recoverStrandedReprocessing(): Promise<void> {
 
   let recovered = 0;
   for (const { id } of rows) {
-    const steps = await getStepStates(id);
-    const allReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
-    if (!allReady) continue; // can't safely settle — leave for manual reprocess
+    const rollup = rollupFromSteps(await getStepStates(id));
+    if (rollup !== "ready") continue; // can't safely settle — leave for manual reprocess
     await markVideoReady(id);
     recovered++;
     console.log(`[reconcile] recovered stranded reprocessing video ${id} → ready`);

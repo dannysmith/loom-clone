@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { createVideo, getVideo, setVideoStatus } from "../../store";
-import { reconcile, recoverStrandedReprocessing } from "../reconcile";
-import { markStepFailed, markStepReady } from "../steps-store";
+import { reconcile, recoverStrandedReprocessing, rollupFromSteps } from "../reconcile";
+import { getStepStates, markStepFailed, markStepReady } from "../steps-store";
 
 let env: TestEnv;
 
@@ -149,6 +149,30 @@ describe("reconcile", () => {
     await recoverStrandedReprocessing();
 
     expect((await getVideo(video.id))?.status).toBe("reprocessing");
+  });
+
+  // [P2.1] The one rollup rule, now a shared pure helper used by reconcile,
+  // recoverStrandedReprocessing, and duplicateVideo.
+  describe("rollupFromSteps", () => {
+    test("all required ready → ready", async () => {
+      const video = await createVideo();
+      await markStepReady(video.id, "source");
+      await markStepReady(video.id, "metadata");
+      expect(rollupFromSteps(await getStepStates(video.id))).toBe("ready");
+    });
+
+    test("a required step failed → processing_failed", async () => {
+      const video = await createVideo();
+      await markStepReady(video.id, "source");
+      await markStepFailed(video.id, "metadata", "x");
+      expect(rollupFromSteps(await getStepStates(video.id))).toBe("processing_failed");
+    });
+
+    test("required steps merely pending (none failed) → processing", async () => {
+      const video = await createVideo();
+      await markStepReady(video.id, "source"); // metadata absent, not failed
+      expect(rollupFromSteps(await getStepStates(video.id))).toBe("processing");
+    });
   });
 
   test("completedAt is set-once across re-derivation", async () => {

@@ -18,6 +18,7 @@ import { purgeGlobalFeeds, purgeSlugRename, purgeVideo } from "./cdn";
 import { type EventType, logEvent } from "./events";
 import { nowIso } from "./format";
 import { searchVideoIds, updateFtsTranscript } from "./search";
+import { POST_FOOTAGE_STATUSES } from "./status";
 
 export const DATA_DIR = "data";
 
@@ -996,25 +997,25 @@ export async function duplicateVideo(id: string): Promise<Video> {
   await inferStepsFromDisk(newId);
 
   // Normalise the copy's status from the inferred ledger rather than trusting
-  // the value copied from the original: a duplicate of a mid-edit
-  // (`reprocessing`) video would otherwise be stranded (no owner ever settles
-  // it), and a copy whose source can't be validated would sit at `ready` while
-  // the serving gate refuses it. Only for post-footage statuses — a
-  // footage-state original (recording/healing/incomplete) mirrors its footage,
-  // not the derivative ledger.
+  // the value copied from the original, using the SAME rollup reconcile uses (so
+  // a mid-`processing` copy lands on `processing`, not mislabelled
+  // `processing_failed`): a duplicate of a mid-edit (`reprocessing`) video would
+  // otherwise be stranded (no owner ever settles it), and a copy whose source
+  // can't be validated would sit at `ready` while the serving gate refuses it.
+  // Only for post-footage statuses — a footage-state original
+  // (recording/healing/incomplete) mirrors its footage, not the derivative ledger.
   if (POST_FOOTAGE_STATUSES.has(original.status)) {
     const { getStepStates } = await import("./processing/steps-store");
-    const { REQUIRED_KINDS } = await import("./processing/registry");
-    const steps = await getStepStates(newId);
-    const allReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
-    if (allReady) {
+    const { rollupFromSteps } = await import("./processing/reconcile");
+    const rollup = rollupFromSteps(await getStepStates(newId));
+    if (rollup === "ready") {
       await markVideoReady(newId); // stamps completedAt (set-once)
       // markVideoReady only publishes feeds when it actually transitions; a copy
       // inserted as `ready` (from a `ready` original) makes it a no-op, so purge
       // explicitly — the duplicate is a new public-facing video.
       purgeGlobalFeeds();
-    } else if (duplicate.status !== "processing_failed") {
-      await setVideoStatus(newId, "processing_failed");
+    } else if (duplicate.status !== rollup) {
+      await setVideoStatus(newId, rollup);
     }
   }
 
@@ -1024,15 +1025,6 @@ export async function duplicateVideo(id: string): Promise<Video> {
 
   return (await getVideo(newId, { includeTrashed: true })) ?? duplicate;
 }
-
-// Post-footage statuses where a video is expected to have a validated MP4, so a
-// duplicate's status can be derived from the inferred step ledger.
-const POST_FOOTAGE_STATUSES: ReadonlySet<string> = new Set([
-  "ready",
-  "reprocessing",
-  "processing",
-  "processing_failed",
-]);
 
 // Finds an available slug by appending -1, -2, etc.
 async function findAvailableSlug(baseSlug: string): Promise<string> {

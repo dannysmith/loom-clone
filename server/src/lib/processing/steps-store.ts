@@ -107,6 +107,21 @@ export async function markStepFailed(
   await upsertStep(videoId, kind, { state: "failed", error: error.slice(0, 2000) });
 }
 
+// Receipt for a Mac-sent external step (transcript / words / the suggestion
+// items). The registry has no run/validate for these — their rows are written
+// here when the API route handler receives the payload. Centralises the
+// bookkeeping (including the byte-length sizing the transcript route needs) so
+// all five external kinds go through one path instead of hand-rolled
+// markStepReady calls scattered across the route module.
+export async function recordExternalStep(
+  videoId: string,
+  kind: ProcessingStepKind,
+  opts: { payload?: string } = {},
+): Promise<void> {
+  const sizeBytes = opts.payload !== undefined ? Buffer.byteLength(opts.payload) : null;
+  await markStepReady(videoId, kind, { sizeBytes });
+}
+
 // Byte size of an artifact for the sizeBytes column, or null if unavailable.
 export function fileSizeBytes(path: string): number | null {
   try {

@@ -6,8 +6,8 @@
 import { join } from "path";
 import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
 import { derivativesDir } from "../derivatives";
+import { RECONCILE_OWNED } from "../status";
 import { DATA_DIR } from "../store";
-import { RECONCILE_OWNED } from "./reconcile";
 import {
   applicabilityContext,
   PROCESSING_STEPS,

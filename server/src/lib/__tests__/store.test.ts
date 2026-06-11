@@ -756,6 +756,18 @@ describe("duplicateVideo", () => {
     expect(dup.status).toBe("processing_failed");
   });
 
+  test("a mid-processing copy is labelled processing, not processing_failed", async () => {
+    // [P2.1] The shared rollup distinguishes "still processing" (required steps
+    // merely pending) from "failed" (a required step actually failed). The old
+    // hand-written duplicate rollup collapsed both to processing_failed.
+    const original = await createVideo();
+    await setVideoStatus(original.id, "processing");
+    // No source.mp4 on disk → the inferred ledger has no ready/failed required
+    // steps, so the rollup is "processing".
+    const dup = await duplicateVideo(original.id);
+    expect(dup.status).toBe("processing");
+  });
+
   test("leaves a footage-state (recording) copy's status untouched", async () => {
     // recording/healing/incomplete mirror footage, not the derivative ledger —
     // the rollup must not relabel them.

@@ -10,7 +10,7 @@ import { apiError, ErrorCode } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
 import { scheduleDerivatives, scheduleReprocess } from "../../lib/processing/pipeline";
-import { markStepReady } from "../../lib/processing/steps-store";
+import { recordExternalStep } from "../../lib/processing/steps-store";
 import { parseSrtToPlainText } from "../../lib/srt";
 import {
   addSegment,
@@ -331,9 +331,10 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   // Parse to plain text and upsert into DB + FTS.
   const plainText = parseSrtToPlainText(body);
   await upsertTranscript(id, format, plainText);
-  // Byte length, not body.length (UTF-16 code-unit count) — matches the size of
-  // the file actually written to disk for multibyte transcripts.
-  await markStepReady(id, "transcript", { sizeBytes: Buffer.byteLength(body) });
+  // Pass the raw body so the receipt records byte length, not body.length
+  // (UTF-16 code-unit count) — matches the file actually written for multibyte
+  // transcripts.
+  await recordExternalStep(id, "transcript", { payload: body });
   await logEvent(id, "transcript_uploaded", {
     format,
     wordCount: plainText.split(/\s+/).filter(Boolean).length,
@@ -378,7 +379,7 @@ videos.put("/:id/words", bodyLimit({ maxSize: 10 * 1024 * 1024 }), async (c) => 
   await Bun.write(tmpPath, JSON.stringify(words));
   await fsRename(tmpPath, finalPath);
 
-  await markStepReady(id, "words");
+  await recordExternalStep(id, "words");
   await logEvent(id, "words_uploaded", { wordCount: (words as unknown[]).length });
 
   console.log(`[words] ${id} (${(words as unknown[]).length} words)`);
@@ -413,7 +414,7 @@ videos.put(
     }
 
     await updateVideo(id, { title });
-    await markStepReady(id, "title_suggestion");
+    await recordExternalStep(id, "title_suggestion");
     await logEvent(id, "title_suggested", { title, applied: true });
     console.log(`[suggest-title] ${id}: "${title}"`);
     return c.json({ applied: true });
@@ -448,7 +449,7 @@ videos.put(
     }
 
     await updateVideo(id, { description });
-    await markStepReady(id, "description_suggestion");
+    await recordExternalStep(id, "description_suggestion");
     await logEvent(id, "description_suggested", { description, applied: true });
     console.log(`[suggest-description] ${id}: "${description}"`);
     return c.json({ applied: true });
@@ -510,7 +511,7 @@ videos.put(
     const nextChapters = [...data.chapters];
     nextChapters[idx] = { ...chapter, title };
     await writeChapters(id, nextChapters);
-    await markStepReady(id, "chapter_titles");
+    await recordExternalStep(id, "chapter_titles");
     await logEvent(id, "chapter_title_suggested", { chapterId, title, applied: true });
     console.log(`[chapter-suggest] ${id}/${chapterId}: "${title}"`);
     return c.json({ applied: true });

@@ -685,7 +685,8 @@ describe("duplicateVideo", () => {
 
     const dup = await duplicateVideo(original.id);
     expect(dup.notes).toBe("private notes");
-    expect(dup.lastEditedAt).not.toBeNull();
+    // Preserved verbatim (not reset to the duplication time).
+    expect(dup.lastEditedAt).toBe("2026-01-02T03:04:05.000Z");
   });
 
   test("preserves visibility, description, and source", async () => {

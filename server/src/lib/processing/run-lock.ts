@@ -16,19 +16,27 @@
 // pipeline-unification task; Phase 3 collapses the two pipelines into one and
 // this becomes the only in-flight map.
 
-const active = new Set<string>();
+// Reference-counted: this is an ADVISORY signal, and as Phase 3 routes more run
+// types through it (main pipeline, reprocess, per-artifact regen, edit) two
+// holders can briefly overlap. A plain Set would clear on the first release and
+// read "free" while another run is still writing; the count keeps hasActiveRun
+// honest until the LAST holder releases.
+const active = new Map<string, number>();
 
 // Is a post-processing run (main pipeline or edit) currently in flight for this
 // video? The editor page-load and commit gates consult this on top of
 // `status === ready`.
 export function hasActiveRun(videoId: string): boolean {
-  return active.has(videoId);
+  return (active.get(videoId) ?? 0) > 0;
 }
 
 export function markRunActive(videoId: string): void {
-  active.add(videoId);
+  active.set(videoId, (active.get(videoId) ?? 0) + 1);
 }
 
 export function clearRunActive(videoId: string): void {
-  active.delete(videoId);
+  const count = active.get(videoId) ?? 0;
+  if (count <= 1)
+    active.delete(videoId); // also a safe no-op for an unknown id
+  else active.set(videoId, count - 1);
 }

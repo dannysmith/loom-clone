@@ -376,10 +376,12 @@ videos.put("/:id/words", bodyLimit({ maxSize: 10 * 1024 * 1024 }), async (c) => 
   await mkdir(derivDir, { recursive: true });
   const tmpPath = join(derivDir, "words.json.tmp");
   const finalPath = join(derivDir, "words.json");
-  await Bun.write(tmpPath, JSON.stringify(words));
+  const serialized = JSON.stringify(words);
+  await Bun.write(tmpPath, serialized);
   await fsRename(tmpPath, finalPath);
 
-  await recordExternalStep(id, "words");
+  // Pass the payload so sizeBytes is recorded, consistent with the transcript step.
+  await recordExternalStep(id, "words", { payload: serialized });
   await logEvent(id, "words_uploaded", { wordCount: (words as unknown[]).length });
 
   console.log(`[words] ${id} (${(words as unknown[]).length} words)`);

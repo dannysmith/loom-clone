@@ -1,5 +1,9 @@
 # Post-Processing & Admin Pipeline — Unify the Pipelines, Fix Concurrency & Correctness Edges
 
+> **✅ COMPLETE (Phases 1–2).** This doc has done its job: it captured the #48 review and delivered the independent correctness fixes (Phase 1, incl. the live editor-lock bug) and the SSOT prep (Phase 2). The two remaining phases were spun out into their own docs and continue from here:
+> [Phase 3 — unify the pipelines](../tasks-todo/task-1-pipeline-unification-phase-3.md) and [Phase 4 — cleanup](../tasks-todo/task-x-pipeline-unification-cleanup.md).
+> It is kept as the record of Phases 1–2 plus the original analysis (core problem, agreed design decisions, what's good, explicitly-not-doing).
+
 ## Why this task exists
 
 Tasks 1–4 spun out of the [#40](https://github.com/dannysmith/loom-clone/issues/40) OOM incident landed the durable foundations: a `video_processing_steps` ledger, `reconcile()` as the status deriver, a resumable skip-if-ready pipeline, `isProbablyPlayable` validation, table-gated serving, the memory-footprint reductions (Task 2), the cgroup limit (Task 1), and frame-rate correctness (Task 3 / #42, plus the camera-fps fix in #44). On top of that, an architectural review of the whole recording → server → post-processing → admin flow ([#48](https://github.com/dannysmith/loom-clone/issues/48)) found that the subsystem is well-built and most failure modes are handled — but the documented invariants ("`reconcile` owns post-footage status; the registry is the single source of truth for steps") are only *partially* realised, plus a small number of genuine correctness edges remain. This doc turns that review into an executable, phased plan.
@@ -127,39 +131,14 @@ Cheap, mostly mechanical, and they de-risk the Phase 3 refactor by removing dupl
 
 ---
 
-## Phase 3 — Unify the pipelines (the centrepiece)
+## Phases 3 & 4 — spun out into their own task docs
 
-The large one. Break it into its own sub-task doc(s) at execution time. The job is to eliminate the parallel edit-pipeline per the agreed model (decisions 1–3), so that there is **one pipeline, `reconcile` is the only post-footage status writer, `runStep` is the only step-row writer, and there is one rebuild atomicity primitive.** Depends on nothing in Phases 1–2 strictly, but lands cleaner after them.
+The big refactor and its cleanup were split out of this doc once Phases 1–2 shipped (they are too large to track inline, per the original "break it into its own sub-task doc(s) at execution time" note):
 
-### [P3.1] The edit-pipeline is a parallel implementation of the main pipeline — (subsumes #46 item 1)
+- **Phase 3 — unify the pipelines (the centrepiece):** [`task-1-pipeline-unification-phase-3.md`](../tasks-todo/task-1-pipeline-unification-phase-3.md). Eliminate the parallel edit-pipeline so there is one parameterised pipeline, `reconcile` is the only post-footage status writer, `runStep` is the only ledger writer, and staging-swap is the single rebuild atomicity primitive. Subsumes #46 item 1. Carries the agreed design decisions forward as requirements.
+- **Phase 4 — cleanup fallout:** [`task-x-pipeline-unification-cleanup.md`](../tasks-todo/task-x-pipeline-unification-cleanup.md). Pure polish that depends on Phase 3 (plus the small #46-item-2 feature, P4.7). Unprioritised until Phase 3 lands.
 
-- **Problem (the divergences to remove):**
-  - **Own status writes** — it sets `reprocessing`/`ready` via raw `videos` UPDATEs (`edit-pipeline.ts:141,150,268`) and **never calls `reconcile`**, which is why `reconcile` isn't really the single owner and why `recoverStrandedReprocessing` has to exist.
-  - **Own ledger writes with hardcoded variant literals** — it marks `variant_720`/`variant_1080`/`storyboard` by hand (`edit-pipeline.ts:244-252`, `"720p.mp4"`/`"1080p.mp4"`), a fourth place the variant kind↔height↔filename mapping lives, defeating the `VARIANTS` single-source-of-truth. Add a third rendition and the edit path silently won't mark it.
-  - **A different "ready" definition** — it marks ledger rows `ready` on bare `Bun.file(...).exists()` (`:246,252`) rather than the validated state the main pipeline gates on (it *does* run `isProbablyPlayable` on the staged outputs before swap, but the ledger marking itself is existence-only).
-  - **A second atomicity strategy** — staging-swap (`.edit-staging`, `:191-234`), vs. the main pipeline's `hold` + `resetRegeneratedSteps` (`pipeline.ts:171-172,199,204,334-340`; `reconcile.ts:56`).
-  - **A separate in-flight map** (`:40`) — the root of [P1.1]; once unified, there is one lock.
-  - *(Note: the ffmpeg wrapper duplication called out in #48 is already gone — `runFfmpeg` at `:414-430` now wraps the shared `spawnFfmpeg`. No action needed there.)*
-- **Where:** `lib/edit-pipeline.ts` (whole file), against `processing/pipeline.ts` + `registry.ts` + `lib/derivatives.ts`.
-- **Direction (the end state):**
-  - Edit becomes a **mode**: the active-file production step gains an apply-EDL strategy; downstream steps consume `ctx.activeFile`; `audio`/`suggested_edits` are gated off via `appliesTo`; the edited-transcript-to-DB becomes part of the captions step.
-  - The edit commit goes through the normal scheduling so **`reconcile` writes status** (picking `reprocessing` vs `processing` from the run mode, decision 2) and **`runStep` writes the ledger** (validated, off `VARIANTS`).
-  - **Staging-swap becomes the single rebuild atomicity primitive** (decision 3), used by edits *and* the forced from-HLS rebuild; **`hold`/`resetRegeneratedSteps` are deleted**. The first post-recording build keeps publishing incrementally.
-  - `recoverStrandedReprocessing` shrinks to (at most) "a run was interrupted; settle a video whose required steps validated back to `ready`," since the editor no longer owns status out-of-band.
-
----
-
-## Phase 4 — Cleanup fallout
-
-Pure polish after Phase 3 lands; no behaviour change — except [P4.7], which is a small feature folded in from #46 item 2. Depends on Phase 3.
-
-- **[P4.1] Delete `generateVariants` / `variantsForHeight`** (`derivatives.ts:511,603-614`) — a parallel "which variants apply" computation to the registry's `appliesTo`, used only by the edit-pipeline (`edit-pipeline.ts:206`); redundant once the edit drives the pipeline.
-- **[P4.2] One `isServable(step, ctx)` predicate** — the "row `ready` AND file present" rule is currently inlined ~5 times (`inputsSatisfied` `pipeline.ts:298-310`, `isAlreadyDone` `pipeline.ts:314-326`, `computeReadiness` `readiness.ts:107-143`, `resolve.ts:27-40`, `cleanup.ts:55-57`). This is the central invariant of the "ledger is a receipt, not an inventory" design; each inline copy is a place to forget the disk check and reintroduce the phantom-file bug. Extract one helper.
-- **[P4.4] `resolve.ts` hand-copies `reconcile`'s mandatory-set bar** — it checks `source` + `metadata` ready with a "same bar reconcile uses" comment (`resolve.ts:27-32`). Check `REQUIRED_KINDS.every(...)` (`reconcile.ts:43-44`) so a future third required kind can't drift.
-- **[P4.5] Inconsistent dynamic `import("fs/promises")` mid-function** in `routes/api/videos.ts` and `routes/admin/editor.ts`, where static imports are available elsewhere in the same files.
-- **[P4.6] A cross-reference comment** between `couldStillProduce`/`computeBadge` (readiness UI) and reconcile's "a `ready` video can still be enriching expected steps" status nuance — the same concept is expressed in two places.
-- **[P4.7] Edit-aware single-artifact regeneration — (#46 item 2).** Today the per-artifact "↻" regenerate is **hidden on edited videos** (a source-derived single-artifact regen would mismatch the edited active file); the only reprocess offered on an edited video is the global "Re-run post-processing", which resets the edit first. Once Phase 3 makes "edit" a pipeline mode with a context `activeFile`, a single-artifact regen can run *from the edited output* instead of the full source. Build that edit-aware regen path and surface "↻" on edited videos. (Depends on [P3.1]; if Phase 3 slips, this stays hidden — the hide-on-edited behaviour is a complete interim solution.)
-- *(P4.3 — remove thumbnail-candidates cleanup — already shipped in #45 / commit `fa21a36`. Not listed as work.)*
+The "Agreed design decisions", "Explicitly NOT doing", and "What's good — do not disturb" sections below are reproduced (and kept current) in the Phase 3 doc.
 
 ---
 
@@ -178,7 +157,7 @@ The registry shape (`{kind, tier, inputs, appliesTo, run, validate, artifact}`);
 
 ## Suggested sequencing
 
-Phase 1 (independent correctness — **ship [P1.1] the editor lock first**) → Phase 2 (cheap SSOT prep) → Phase 3 (the unification, broken into its own sub-doc) → Phase 4 (cleanup that falls out of Phase 3, including [P4.7]). Phases 1 and 2 are independent of each other and of Phase 3; Phase 4 depends on Phase 3.
+**Phase 1 ✅ → Phase 2 ✅** landed here (one branch, one commit each). **Phase 3** (the unification) and **Phase 4** (cleanup that falls out of it, incl. [P4.7]) continue in their own docs — Phase 4 depends on Phase 3.
 
 ## References
 

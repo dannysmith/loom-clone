@@ -17,8 +17,12 @@ import { activeRawFilename } from "../../lib/url";
 type EditsFileLike = { edits?: unknown };
 
 // Allowlists constrain which on-disk files each route can serve, preventing
-// traversal and keeping the public surface focused.
-const RAW_FILENAME = /^(source|\d+p)\.mp4$/;
+// traversal and keeping the public surface focused. `upload.mp4` is the
+// original of an UPLOADED video — served only as a fallback when its
+// post-processing failed to produce a servable source.mp4 (resolve.ts), and it
+// only ever exists in that failure case (maybeDeleteUpload removes it once
+// source+metadata succeed). It lives in the video dir, not derivatives/.
+const RAW_FILENAME = /^(source|\d+p|upload)\.mp4$/;
 const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
 
 async function resolveForMedia(slug: string) {
@@ -33,7 +37,11 @@ media.get("/:slug/raw/:file", async (c) => {
   if (!RAW_FILENAME.test(file)) return c.text("Not found", 404);
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-  const path = join(DATA_DIR, video.id, "derivatives", file);
+  // upload.mp4 sits in the video dir; everything else under derivatives/.
+  const path =
+    file === "upload.mp4"
+      ? join(DATA_DIR, video.id, "upload.mp4")
+      : join(DATA_DIR, video.id, "derivatives", file);
   // Derivatives are written atomically (tmp→rename) and never mutated.
   return serveFileWithRange(c, path, "video/mp4", "immutable");
 });

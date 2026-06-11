@@ -41,6 +41,7 @@ type Props = {
   hasChapters: boolean;
   readiness: Readiness;
   reprocessNotice?: string;
+  runInFlight?: boolean;
 };
 
 export function VideoDetailPage({
@@ -55,6 +56,7 @@ export function VideoDetailPage({
   hasChapters,
   readiness,
   reprocessNotice,
+  runInFlight,
 }: Props) {
   const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
@@ -97,7 +99,7 @@ export function VideoDetailPage({
       </div>
 
       {/* --- Actions --- */}
-      <VideoActions video={video} />
+      <VideoActions video={video} runInFlight={runInFlight} />
 
       {/* --- Player --- */}
       <div class="video-player-container">

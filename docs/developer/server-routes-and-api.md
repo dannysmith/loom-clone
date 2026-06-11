@@ -33,7 +33,7 @@ Error codes:
 | `INVALID_API_KEY`          | 401    | Token unknown or revoked                   |
 | `VIDEO_NOT_FOUND`          | 404    | Unknown or trashed video                   |
 | `INVALID_SEGMENT_FILENAME` | 400    | Filename doesn't match the allowlist       |
-| `VIDEO_ALREADY_COMPLETE`   | 409    | DELETE attempted on a ready / processing / reprocessing video |
+| `VIDEO_NOT_DELETABLE`      | 409    | DELETE attempted on a ready / processing / reprocessing video |
 | `VALIDATION_ERROR`         | 400    | Request body fails zod schema validation   |
 | `SLUG_CONFLICT`            | 409    | Slug already in use by another video/redirect |
 | `CONFLICT`                 | 409    | Store-level conflict (generic)             |
@@ -251,7 +251,7 @@ Cancel/delete a recording. Refused for videos that are `ready`, `processing`, or
 
 **Response** `200`: `{ "ok": true }`
 
-**Errors**: `404` `VIDEO_NOT_FOUND` | `409` `VIDEO_ALREADY_COMPLETE`
+**Errors**: `404` `VIDEO_NOT_FOUND` | `409` `VIDEO_NOT_DELETABLE`
 
 ## Viewer routes (`/:slug`)
 

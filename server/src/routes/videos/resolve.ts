@@ -153,6 +153,18 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     } else {
       sources = [sourceEntry, ...variantEntries];
     }
+  } else if (video.source === "uploaded") {
+    // An uploaded video with no servable source.mp4 means its (limited)
+    // post-processing failed. It has no HLS to fall back to, so serve the
+    // original upload.mp4 (kept on disk until source+metadata succeed) rather
+    // than a dead HLS player pointing at a 404 manifest. Decision 5 of the
+    // pipeline-unification task.
+    const uploadPath = join(DATA_DIR, video.id, "upload.mp4");
+    if (await Bun.file(uploadPath).exists()) {
+      sources = [{ src: `/${video.slug}/raw/upload.mp4`, type: "video/mp4" }];
+    } else {
+      src = urls.hls; // genuinely nothing left to serve (true data loss)
+    }
   } else {
     src = urls.hls;
   }

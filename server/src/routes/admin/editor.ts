@@ -5,6 +5,7 @@ import { join } from "path";
 import { z } from "zod";
 import { applyEdits } from "../../lib/edit-pipeline";
 import { serveFileWithRange } from "../../lib/file-serve";
+import { hasActiveRun } from "../../lib/processing/run-lock";
 import { DATA_DIR } from "../../lib/store";
 import { loadEntryAssets } from "../../lib/vite-manifest";
 import { type AdminEnv, requireVideo } from "./helpers";
@@ -27,6 +28,14 @@ editor.get("/:id/editor", async (c) => {
   }
   if (video.trashedAt) {
     return c.text("Cannot edit a trashed video", 400);
+  }
+  // A `ready` video can still have a run in flight — reconcile publishes `ready`
+  // the moment source+metadata validate, while audio (an in-place rewrite of
+  // source.mp4) and the variants are still being produced. Editing during that
+  // window would race two writers on the same derivatives/ dir, so block it
+  // until the run settles.
+  if (hasActiveRun(video.id)) {
+    return c.text("Post-processing is still running for this video — try again shortly", 409);
   }
 
   const { scripts } = loadEntryAssets("index.html");
@@ -120,6 +129,13 @@ editor.post("/:id/editor/commit", async (c) => {
   }
   if (result.status !== "ready") {
     return c.json({ error: `Cannot commit edits for a video with status "${result.status}"` }, 400);
+  }
+  // Mirror the page-load gate: a `ready` video may still have the post-recording
+  // run enriching in the background (audio rewrites source.mp4 in place, variants
+  // still cutting). Committing now would run two ffmpeg + ledger writers against
+  // the same derivatives/ dir. Block until the run settles.
+  if (hasActiveRun(result.id)) {
+    return c.json({ error: "Post-processing is still running for this video" }, 409);
   }
 
   const edlPath = join(DATA_DIR, result.id, "derivatives", "edits.json");

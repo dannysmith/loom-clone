@@ -20,6 +20,7 @@ export type EventType =
   | "tag_added"
   | "tag_removed"
   | "uploaded"
+  | "upload_received" // an uploaded file landed; data.playable records the intake validation
   | "thumbnail_promoted"
   | "thumbnail_uploaded"
   | "thumbnail_deleted"

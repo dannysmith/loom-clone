@@ -80,6 +80,37 @@ describe("resolveForViewer — <source> ordering", () => {
     expect(v.src).toBe(`/${video.slug}/stream/stream.m3u8`);
   });
 
+  test("uploaded video with failed processing serves upload.mp4, not dead HLS", async () => {
+    // [P1.3] An uploaded video has no HLS. When its post-processing fails to
+    // produce a servable source.mp4, fall back to the original upload.mp4 (kept
+    // on disk until source+metadata succeed) rather than a 404 HLS manifest.
+    const video = await createVideo();
+    await getDb()
+      .update(videosTable)
+      .set({ source: "uploaded" })
+      .where(eq(videosTable.id, video.id));
+    await mkdir(join(DATA_DIR, video.id), { recursive: true });
+    await Bun.write(join(DATA_DIR, video.id, "upload.mp4"), "stub");
+
+    const v = asViewer(await resolveForViewer(video.slug));
+    expect(v.src).toBeNull();
+    expect(v.sources?.map((s) => s.src)).toEqual([`/${video.slug}/raw/upload.mp4`]);
+  });
+
+  test("uploaded video with neither source.mp4 nor upload.mp4 falls through to HLS", async () => {
+    // True data loss: nothing left to serve. The HLS player will 404, but
+    // that's the honest end state (surfaced by the needs-attention filter).
+    const video = await createVideo();
+    await getDb()
+      .update(videosTable)
+      .set({ source: "uploaded" })
+      .where(eq(videosTable.id, video.id));
+
+    const v = asViewer(await resolveForViewer(video.slug));
+    expect(v.sources).toBeNull();
+    expect(v.src).toBe(`/${video.slug}/stream/stream.m3u8`);
+  });
+
   test("source ≤720p: only source.mp4 in sources", async () => {
     const video = await createVideo();
     await setDimensions(video.id, 1280, 720);

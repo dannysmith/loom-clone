@@ -21,7 +21,16 @@ function buildEmbedHtml(video: Video): string {
   ].join("\n");
 }
 
-export function VideoActions({ video }: { video: Video }) {
+export function VideoActions({
+  video,
+  runInFlight = false,
+}: {
+  video: Video;
+  // True when a post-processing run is still touching this video's derivatives.
+  // A `ready` video can be mid-enrichment, so the editor must stay closed until
+  // the run settles (see hasActiveRun / the editor route gate).
+  runInFlight?: boolean;
+}) {
   const isPublicOrUnlisted = video.visibility !== "private";
   const publicUrl = `/${video.slug}`;
   const embedHtml = buildEmbedHtml(video);
@@ -47,7 +56,7 @@ export function VideoActions({ video }: { video: Video }) {
         </>
       )}
 
-      {video.status === "ready" && (
+      {video.status === "ready" && !runInFlight && (
         <a href={`/admin/videos/${video.id}/editor`} class="btn btn--sm">
           <IconScissors size={14} /> Edit video
         </a>

@@ -536,7 +536,7 @@ videos.delete("/:id", async (c) => {
       c,
       409,
       "Cannot delete a video that is processing or ready",
-      ErrorCode.VIDEO_ALREADY_COMPLETE,
+      ErrorCode.VIDEO_NOT_DELETABLE,
     );
   }
 

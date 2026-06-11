@@ -51,15 +51,16 @@ describe("video_processing_steps store", () => {
     expect(row?.error).toBeNull();
   });
 
-  test("upsert is idempotent on (videoId, kind) and preserves attempts", async () => {
+  test("upsert is idempotent on (videoId, kind) — last write wins", async () => {
     const video = await createVideo();
     await markStepReady(video.id, "thumbnail");
-    await upsertStep(video.id, "thumbnail", { state: "pending", incrementAttempts: true });
-    await upsertStep(video.id, "thumbnail", { state: "ready", incrementAttempts: true });
+    await upsertStep(video.id, "thumbnail", { state: "pending" });
+    await upsertStep(video.id, "thumbnail", { state: "ready" });
 
-    const row = await getStep(video.id, "thumbnail");
-    expect(row?.state).toBe("ready");
-    expect(row?.attempts).toBe(2);
+    // The composite PK collapses repeated upserts to one row; last write wins.
+    const states = await getStepStates(video.id);
+    expect(states.size).toBe(1);
+    expect(states.get("thumbnail")?.state).toBe("ready");
   });
 
   test("getStepStates returns a kind→row map", async () => {

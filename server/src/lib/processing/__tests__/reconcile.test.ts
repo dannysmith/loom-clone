@@ -75,12 +75,25 @@ describe("reconcile", () => {
     expect((await getVideo(video.id))?.status).toBe("healing");
   });
 
-  test("does not touch reprocessing (owned by the editor)", async () => {
+  test("settles reprocessing UP to ready once required steps validate", async () => {
     const video = await processingVideo();
     await markStepReady(video.id, "source");
     await markStepReady(video.id, "metadata");
     await reconcile(video.id, { running: false }); // → ready
     await setVideoStatus(video.id, "reprocessing");
+
+    await reconcile(video.id, { running: false });
+
+    expect((await getVideo(video.id))?.status).toBe("ready");
+  });
+
+  test("never demotes reprocessing — a failed required step leaves it reprocessing", async () => {
+    // The edit run owns reprocessing's downward transitions (restoring `ready` on
+    // failure); reconcile only ever promotes it up.
+    const video = await createVideo();
+    await setVideoStatus(video.id, "reprocessing");
+    await markStepReady(video.id, "source");
+    await markStepFailed(video.id, "metadata", "boom");
 
     await reconcile(video.id, { running: false });
 

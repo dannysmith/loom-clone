@@ -14,14 +14,18 @@ import {
   generateSourceFromUpload,
   generateVariant,
   type ProbeMetadata,
+  probeDuration,
   processAudio,
   refreshFileBytes,
   VARIANTS,
 } from "../derivatives";
+import { type Edl, renderEditedOutput } from "../edit-render";
+import { computeKeptSegments, type Segment } from "../edit-transcript";
 import { generatePeaks } from "../peaks";
 import { generateStoryboard } from "../storyboard";
 import { generateSuggestedEdits, runSilenceDetect, type Silence } from "../suggested-edits";
 import { extractAndPromoteThumbnails } from "../thumbnails";
+import { activeRawFilename } from "../url";
 import { isProbablyPlayable } from "./playable";
 
 export type StepTier = "required" | "expected" | "external";
@@ -54,6 +58,10 @@ export type StepContext = {
     // source.mp4 probe, seeded by the pipeline's height probe and reused by the
     // metadata step so source.mp4 is probed once per run, not twice.
     sourceMeta?: ProbeMetadata;
+    // Set by the edited_output step during an edit run, for the post-swap edit
+    // actions (edited captions, durationSeconds).
+    keptSegments?: Segment[];
+    editedDuration?: number;
   };
 };
 
@@ -156,6 +164,38 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     validate: (ctx) =>
       isProbablyPlayable(sourcePath(ctx), { expectedDuration: sourceExpectedDuration(ctx) }),
     artifact: (ctx) => sourcePath(ctx),
+  },
+  {
+    // The EDL-cut active file for an edited video ({height}p.mp4), produced from
+    // the preserved source.mp4. Runs only on an edit; in readiness/backfill
+    // (mode `build`) it shows for an already-edited video so the served cut is a
+    // first-class, validated checklist item. Not in REQUIRED_KINDS — `lastEditedAt`
+    // is set only after a validated swap, so a video that presents as edited
+    // already has a valid edited_output.
+    kind: "edited_output",
+    tier: "expected",
+    inputs: ["source"],
+    appliesTo: (ctx) => ctx.mode === "edit" || ctx.video.lastEditedAt != null,
+    run: async (ctx) => {
+      const realDir = derivativesDir(ctx.videoId);
+      const edlFile = Bun.file(join(realDir, "edits.json"));
+      if (!(await edlFile.exists())) throw new Error("edited_output: no edits.json to apply");
+      const edl = (await edlFile.json()) as Edl;
+      const realSource = join(realDir, "source.mp4");
+      const sourceDuration = await probeDuration(realSource);
+      if (sourceDuration === null) throw new Error("edited_output: cannot probe source.mp4");
+      const kept = computeKeptSegments(edl.edits, sourceDuration);
+      if (kept.length === 0) throw new Error("edited_output: all content removed by edits");
+      await renderEditedOutput(realSource, ctx.activeFile, kept);
+      const editedDuration = (await probeDuration(ctx.activeFile)) ?? sourceDuration;
+      ctx.duration = editedDuration; // the storyboard threshold reads ctx.duration
+      ctx.scratch.keptSegments = kept;
+      ctx.scratch.editedDuration = editedDuration;
+      return "ready";
+    },
+    validate: (ctx) =>
+      isProbablyPlayable(ctx.activeFile, { expectedDuration: ctx.scratch.editedDuration }),
+    artifact: (ctx) => ctx.activeFile,
   },
   {
     kind: "metadata",
@@ -299,10 +339,10 @@ export function applicabilityContext(video: Video): StepContext {
     source: video.source,
     mode: "build",
     dir,
-    // source.mp4 for now (no current applicability/artifact check reads
-    // activeFile); becomes activeRawFilename(video) when the edited_output step
-    // lands and readiness/backfill need to point at the edited cut.
-    activeFile: join(dir, "source.mp4"),
+    // The active served file: source.mp4 for unedited videos, the {height}p.mp4
+    // cut for edited ones — so edited_output's artifact resolves correctly in
+    // readiness/backfill.
+    activeFile: join(dir, activeRawFilename(video)),
     duration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
     force: false,

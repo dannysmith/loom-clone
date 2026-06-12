@@ -4,11 +4,12 @@
 // validated. It also owns the `incomplete → ready` recovery transition.
 //
 // It does NOT own the recording↔healing boundary (decided in the /complete
-// handler by diffing the client timeline against on-disk segments), and it does
-// NOT touch `reprocessing` (owned transiently by the editor, which must land an
-// atomic set before reconciling — and recovered on boot by
-// recoverStrandedReprocessing). Call it after each pipeline step (running:true)
-// and once when a run settles (running:false).
+// handler by diffing the client timeline against on-disk segments). It settles a
+// `reprocessing` video (an edit run) UP to `ready` once its mandatory steps
+// validate, but never demotes one — the edit run owns the failure path
+// (restoring `ready`), and a crash leaves it for recoverStrandedReprocessing on
+// boot. Call it after each pipeline step (running:true) and once when a run
+// settles (running:false).
 
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../../db/client";
@@ -40,7 +41,10 @@ export async function reconcile(
 ): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video || video.trashedAt) return;
-  if (!RECONCILE_OWNED.has(video.status)) return;
+  // reconcile settles its owned post-footage statuses plus `reprocessing` (an
+  // edit run, which it only ever promotes UP to `ready`).
+  const isReprocessing = video.status === "reprocessing";
+  if (!RECONCILE_OWNED.has(video.status) && !isReprocessing) return;
 
   const rollup = rollupFromSteps(await getStepStates(videoId));
   // Leaving `ready` (a forced rebuild that demoted, or a regressed mandatory
@@ -57,6 +61,11 @@ export async function reconcile(
     await markVideoReady(videoId);
     return;
   }
+
+  // An edit run is the only owner of `reprocessing`'s downward transitions
+  // (restoring `ready` on failure); reconcile only ever settles it UP (above),
+  // never demotes it to processing/processing_failed.
+  if (isReprocessing) return;
 
   // `incomplete` only ever escapes upward to `ready` (above). Its footage was
   // never whole, so while a recovery run is still in progress — or if it failed

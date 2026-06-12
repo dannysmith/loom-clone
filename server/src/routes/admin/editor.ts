@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import { raw } from "hono/html";
 import { join } from "path";
 import { z } from "zod";
-import { applyEdits } from "../../lib/edit-pipeline";
 import { serveFileWithRange } from "../../lib/file-serve";
+import { scheduleEdit } from "../../lib/processing/pipeline";
 import { hasActiveRun } from "../../lib/processing/run-lock";
 import { DATA_DIR } from "../../lib/store";
 import { loadEntryAssets } from "../../lib/vite-manifest";
@@ -144,7 +144,7 @@ editor.post("/:id/editor/commit", async (c) => {
     return c.json({ error: "No edits.json found — save edits first" }, 400);
   }
 
-  applyEdits(result.id);
+  scheduleEdit(result.id, result.source);
 
   return c.json({ ok: true, status: "reprocessing" });
 });

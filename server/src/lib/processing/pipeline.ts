@@ -9,12 +9,17 @@
 // disk — unless `force` is set. So re-running the pipeline IS "resume from where
 // it failed", which is what the manual reprocess button relies on.
 
+import { eq } from "drizzle-orm";
 import { mkdir, readdir, rename, rm } from "fs/promises";
 import { basename, join } from "path";
-import type { ProcessingStepKind } from "../../db/schema";
+import { getDb } from "../../db/client";
+import { type ProcessingStepKind, videos } from "../../db/schema";
+import { purgeVideo } from "../cdn";
 import { derivativesDir, probeMetadata } from "../derivatives";
+import { deriveEditedCaptions } from "../edit-render";
 import { logEvent } from "../events";
-import { DATA_DIR, getVideo } from "../store";
+import { nowIso } from "../format";
+import { DATA_DIR, getVideo, setVideoStatus, upsertTranscript } from "../store";
 import { generateEditorStoryboard } from "../storyboard";
 import { reconcile } from "./reconcile";
 import {
@@ -58,6 +63,12 @@ export function scheduleUploadDerivatives(videoId: string): void {
   schedule(videoId, { source: "uploaded" });
 }
 
+// Fire-and-forget an edit commit: applies the saved EDL as an `edit`-mode run.
+// The editor route gates this on `ready` + no in-flight run, so it never races.
+export function scheduleEdit(videoId: string, source: "recorded" | "uploaded"): ScheduleOutcome {
+  return schedule(videoId, { source, mode: "edit" });
+}
+
 // Fire-and-forget a manual reprocess: a forced full rebuild (force, no `only`)
 // or a single-artifact regenerate (`only`). Returns whether the run started now
 // or was queued behind an in-flight run, so the admin route can tell the user.
@@ -70,8 +81,10 @@ export function scheduleReprocess(
 
 function schedule(videoId: string, opts: RunOpts): ScheduleOutcome {
   if (inFlight.has(videoId)) {
-    // A plain resumable re-schedule is already covered by the in-flight run.
-    if (!opts.force && !opts.only) {
+    // A plain resumable re-schedule is already covered by the in-flight run. A
+    // forced rebuild, single-artifact regen, or edit does work the resumable run
+    // won't, so it's deferred (below) rather than dropped.
+    if (!opts.force && !opts.only && opts.mode !== "edit") {
       console.log(
         `[pipeline] ${videoId} schedule skipped — already in flight (n=${inFlight.size})`,
       );
@@ -124,28 +137,37 @@ export async function _drainInFlight(): Promise<void> {
 }
 
 // `only` restricts the run to a single step (a per-artifact regenerate);
-// `force` re-runs steps even when already ready (manual reprocess).
+// `force` re-runs steps even when already ready (manual reprocess); `mode`
+// `edit` applies the saved EDL instead of (re)producing source.mp4.
 type RunOpts = {
   source: "recorded" | "uploaded";
   force?: boolean;
   only?: ProcessingStepKind;
+  mode?: "build" | "edit";
 };
 
 export async function runPipeline(videoId: string, opts: RunOpts): Promise<void> {
   let video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
 
-  // Reprocess chokepoint: the main pipeline is edit-unaware, so before it runs
-  // on an edited video (any full reprocess — manual or heal force re-run) wash
-  // the edit away and rebuild a consistent UNEDITED video from source.mp4.
-  // Per-artifact `only` regens are rejected for edited videos at the route, so
-  // they never reach here. (Dynamic import avoids an import cycle with
-  // edit-pipeline, which pulls in derivatives/storyboard.)
-  if (!opts.only && video.lastEditedAt) {
+  const mode: "build" | "edit" = opts.mode ?? "build";
+
+  // Reprocess chokepoint: a BUILD reprocess of an edited video washes the edit
+  // away first and rebuilds a consistent UNEDITED video from source.mp4 (the
+  // build steps consume source.mp4, not the edited cut). An edit run skips this —
+  // it re-applies the new EDL to the preserved source.mp4. Per-artifact `only`
+  // regens are rejected for edited videos at the route. (Dynamic import avoids an
+  // import cycle with edit-pipeline.)
+  if (!opts.only && mode !== "edit" && video.lastEditedAt) {
     const { resetAllEdits } = await import("../edit-pipeline");
     await resetAllEdits(videoId);
     const reloaded = await getVideo(videoId, { includeTrashed: true });
     if (reloaded) video = reloaded;
+  }
+
+  if (mode === "edit" && !video.height) {
+    console.error(`[pipeline] ${videoId} edit run aborted — no cached height`);
+    return;
   }
 
   const dir = derivativesDir(videoId);
@@ -155,49 +177,56 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     videoId,
     video,
     source: opts.source,
-    mode: "build",
+    mode,
     dir,
-    // Active playable file consumed by variants/storyboard/metadata. source.mp4
-    // for every current path; the edit mode will point it at the EDL-cut file.
-    activeFile: join(dir, "source.mp4"),
+    // The active served file: source.mp4 for a build, the resolution-named EDL
+    // cut for an edit (source.mp4 is preserved as the original).
+    activeFile: mode === "edit" ? join(dir, `${video.height}p.mp4`) : join(dir, "source.mp4"),
     duration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
     force: opts.force ?? false,
     scratch: { silencesComputed: false },
   };
 
+  // An edit run publishes `reprocessing` while it works — source.mp4 is preserved
+  // and the pre-edit set keeps serving (lastEditedAt is still unset, so serving
+  // resolves to source.mp4). It restores `ready` on failure.
+  if (mode === "edit") await setVideoStatus(videoId, "reprocessing");
+
   const started = Date.now();
   const produced: string[] = [];
 
-  // A forced rebuild of an already-served (`ready`) video regenerates the served
-  // set, so it runs into a staging dir and swaps the whole validated set into
-  // place atomically — the previous outputs keep serving until the swap, and a
-  // failed run leaves them (and the ledger and status) untouched. Everything else
-  // writes in place: the first build, a heal re-stitch (status `healing` — still
-  // serving HLS, not replacing a served MP4 set, so a failed stitch should
-  // surface as a failed `source`), a resumable run, and single-artifact `only`
-  // regenerates are all additive or non-destructive (each step is atomic
-  // tmp→rename).
-  const staged = !opts.only && (opts.force ?? false) && video.status === "ready";
+  // Stage→validate→swap for runs that replace an already-served set: every edit,
+  // and a forced rebuild of a `ready` video. The previous outputs keep serving
+  // until the swap, and a failed run leaves them (and the ledger) untouched.
+  // Everything else writes in place: the first build, a heal re-stitch (status
+  // `healing`, still serving HLS — a failed stitch should surface as a failed
+  // `source`), a resumable run, and single-artifact `only` regenerates are
+  // additive or non-destructive (each step is atomic tmp→rename).
+  const staged =
+    !opts.only && (mode === "edit" || ((opts.force ?? false) && video.status === "ready"));
   if (staged) {
     try {
       await runStepsStaged(videoId, ctx, produced);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[pipeline] ${videoId} staged rebuild failed (previous outputs kept):`, msg);
-      await logStep(videoId, "source", "failed", `staged rebuild: ${msg}`);
-      return; // leave the previous served set, ledger, and status intact
+      console.error(`[pipeline] ${videoId} staged ${mode} failed (previous outputs kept):`, msg);
+      await logStep(videoId, "source", "failed", `staged ${mode}: ${msg}`);
+      // An edit set `reprocessing` up front; restore the pre-edit `ready` (its
+      // outputs are untouched). A forced rebuild was already `ready`.
+      if (mode === "edit") await setVideoStatus(videoId, "ready");
+      return;
     }
   } else {
     await runStepsInPlace(videoId, ctx, opts, produced);
   }
 
-  // Single-artifact regenerate (`only`) touches just that step — skip the
-  // whole-run side effects (editor storyboard, upload cleanup).
-  if (!opts.only) {
+  if (mode === "edit") {
+    // Edit-specific finalisation — only after a validated swap.
+    await finalizeEdit(videoId, ctx);
+  } else if (!opts.only) {
     // Editor storyboard: dense frames for the editing timeline. Not part of the
     // public checklist (no step row), regenerated only from the original source.
-    // Written to the real dir (not part of the served set, so not staged).
     if (ctx.duration >= 5) {
       try {
         await generateEditorStoryboard(dir, ctx.duration);
@@ -455,6 +484,52 @@ async function isAlreadyDone(
   const path = step.artifact?.(ctx);
   if (path && !(await Bun.file(path).exists())) return false;
   return true;
+}
+
+// Edit-specific finalisation, run after the validated staged swap: derive the
+// edited captions, drop the now-stale viewer storyboard if the cut fell below
+// the threshold, remove suggested-edits.json, and flip the video to edited
+// (lastEditedAt + edited durationSeconds). Setting lastEditedAt last means
+// serving only resolves to the {height}p.mp4 cut once it's in place and valid.
+async function finalizeEdit(videoId: string, ctx: StepContext): Promise<void> {
+  const dir = ctx.dir;
+  const kept = ctx.scratch.keptSegments ?? [];
+  const editedDuration = ctx.scratch.editedDuration ?? ctx.video.durationSeconds ?? 0;
+
+  // Edited captions from the unchanged words.json + the kept segments.
+  try {
+    const editedPlainText = await deriveEditedCaptions(dir, dir, kept);
+    if (editedPlainText) await upsertTranscript(videoId, "srt", editedPlainText);
+  } catch (err) {
+    console.error(
+      `[pipeline] ${videoId} edited captions failed:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // If the edited cut dropped below the storyboard threshold, the storyboard step
+  // didn't run (so nothing was staged/swapped) — remove the old, longer one so
+  // scrubbing doesn't reflect the un-edited timeline.
+  if (editedDuration < 60) {
+    await rm(join(dir, "storyboard.vtt"), { force: true }).catch(() => {});
+    await markStepSkipped(videoId, "storyboard");
+  }
+
+  // Suggestions are a one-shot pre-first-edit helper; never re-surface post-edit.
+  await rm(join(dir, "suggested-edits.json"), { force: true }).catch(() => {});
+
+  await getDb()
+    .update(videos)
+    .set({ lastEditedAt: nowIso(), durationSeconds: editedDuration, updatedAt: nowIso() })
+    .where(eq(videos.id, videoId));
+
+  const video = await getVideo(videoId);
+  if (video) purgeVideo(video.slug);
+  try {
+    await logEvent(videoId, "edits_committed", { editedDuration });
+  } catch {
+    // DB may be gone in tests.
+  }
 }
 
 async function maybeDeleteUpload(videoId: string): Promise<void> {

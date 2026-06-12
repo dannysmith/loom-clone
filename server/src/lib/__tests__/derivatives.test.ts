@@ -5,7 +5,7 @@ import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { _variantFfmpegArgs, generateVariants } from "../derivatives";
+import { _variantFfmpegArgs, generateVariant } from "../derivatives";
 import {
   _inFlightPromise,
   scheduleDerivatives,
@@ -282,7 +282,7 @@ async function generateVfrSource(outPath: string): Promise<void> {
   if (exitCode !== 0) throw new Error(`VFR fixture generation failed: ${stderr}`);
 }
 
-describe("generateVariants frame-rate handling", () => {
+describe("variant frame-rate handling", () => {
   // Deterministic guard for the fix: the variant encode must pass
   // `-fps_mode passthrough` so VFR / mis-declared-r_frame_rate sources don't
   // get their surplus frames silently dropped onto a bogus constant grid.
@@ -309,7 +309,7 @@ describe("generateVariants frame-rate handling", () => {
       const sourceFrames = await countVideoFrames(sourcePath);
       expect(sourceFrames).toBeGreaterThan(0);
 
-      await generateVariants(dir);
+      await generateVariant(dir, 720, sourcePath);
 
       // 1080p source → 720p variant is produced.
       const variantPath = join(dir, "720p.mp4");

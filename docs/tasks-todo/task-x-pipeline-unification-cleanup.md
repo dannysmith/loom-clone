@@ -16,6 +16,8 @@ This is **Phase 4** of the [post-processing pipeline unification](../tasks-done/
 
 - **[P4.4] `resolve.ts` hand-copies `reconcile`'s mandatory-set bar** — it checks `source` + `metadata` ready with a "same bar reconcile uses" comment. Check `REQUIRED_KINDS.every(...)` so a future third required kind can't drift. (Pairs naturally with P4.2.)
 
+- **[P4.8] Gate the edited active file on `edited_output` (deferred from Phase 3).** Phase 3 added a validated `edited_output` step but deliberately left `resolve.ts`'s serving gate unchanged (source+metadata + active-file-present), so legacy edited videos with no `edited_output` row still serve. Once the `isServable(step, ctx)` predicate (P4.2) exists, gate the active file on *its producing step* (`source` for unedited, `edited_output` for edited) so the edited cut gets the same validated-serving guarantee as recorded videos. Needs a one-time `inferStepsFromDisk` pass (or accept that legacy edited videos backfill on next reprocess) so existing edited videos gain the row before the gate tightens.
+
 - **[P4.5] Inconsistent dynamic `import("fs/promises")` mid-function** in `routes/api/videos.ts` and `routes/admin/editor.ts`, where static imports are available elsewhere in the same files. Make them static.
 
 - **[P4.6] A cross-reference comment** between `couldStillProduce`/`computeBadge` (readiness UI) and reconcile's "a `ready` video can still be enriching expected steps" status nuance — the same concept is expressed in two places; link them.

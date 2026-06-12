@@ -12,8 +12,8 @@ import { srtToVtt } from "../../lib/srt";
 import { DATA_DIR, resolveSlug } from "../../lib/store";
 import { activeRawFilename } from "../../lib/url";
 
-// Loose-typed EDL shape — we only need the edits array. Avoids pulling the
-// edit-pipeline module into the media route just for a type.
+// Loose-typed EDL shape — we only need the edits array. Avoids pulling an
+// edit module into the media route just for a type.
 type EditsFileLike = { edits?: unknown };
 
 // Allowlists constrain which on-disk files each route can serve, preventing

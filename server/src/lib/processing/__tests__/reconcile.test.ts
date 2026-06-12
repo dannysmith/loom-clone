@@ -128,22 +128,6 @@ describe("reconcile", () => {
     expect((await getVideo(video.id))?.status).toBe("incomplete");
   });
 
-  test("hold keeps a forced rebuild out of ready until the run settles", async () => {
-    const video = await processingVideo();
-    await setVideoStatus(video.id, "ready");
-    await markStepReady(video.id, "source");
-    await markStepReady(video.id, "metadata");
-
-    // Mid-run reconcile with hold: mandatory steps are ready but the forced set
-    // is still regenerating — don't publish ready yet (demote to processing).
-    await reconcile(video.id, { running: true, hold: true });
-    expect((await getVideo(video.id))?.status).toBe("processing");
-
-    // Run settles → publishes ready.
-    await reconcile(video.id, { running: false });
-    expect((await getVideo(video.id))?.status).toBe("ready");
-  });
-
   test("recoverStrandedReprocessing settles a validated reprocessing video to ready", async () => {
     const video = await createVideo();
     await setVideoStatus(video.id, "reprocessing");

@@ -17,6 +17,9 @@ export type Edl = {
 // keeping only `kept` segments. A single kept segment is a simple trim; multiple
 // segments are concatenated with a short audio fade at each join to avoid clicks.
 export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segment[]): string[] {
+  if (kept.length === 0) {
+    throw new Error("buildEditArgs: kept must contain at least one segment");
+  }
   if (kept.length === 1) {
     const seg = kept[0]!;
     return [

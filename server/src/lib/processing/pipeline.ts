@@ -521,10 +521,21 @@ async function finalizeEdit(videoId: string, ctx: StepContext): Promise<void> {
   await rm(join(dir, "suggested-edits.json"), { force: true }).catch(() => {});
   await markStepSkipped(videoId, "suggested_edits");
 
-  await getDb()
-    .update(videos)
-    .set({ lastEditedAt: nowIso(), durationSeconds: editedDuration, updatedAt: nowIso() })
-    .where(eq(videos.id, videoId));
+  try {
+    await getDb()
+      .update(videos)
+      .set({ lastEditedAt: nowIso(), durationSeconds: editedDuration, updatedAt: nowIso() })
+      .where(eq(videos.id, videoId));
+  } catch (err) {
+    // The staged swap already landed the edited {height}p.mp4, so a failure here
+    // leaves the filesystem edited but the DB unedited (activeRawFilename still
+    // resolves to source.mp4). Surface the mismatch loudly rather than swallow it.
+    console.error(
+      `[pipeline] ${videoId} edit flip FAILED after swap — files edited but lastEditedAt unset:`,
+      err instanceof Error ? err.message : err,
+    );
+    throw err;
+  }
 
   const video = await getVideo(videoId);
   if (video) purgeVideo(video.slug);

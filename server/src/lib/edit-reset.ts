@@ -43,18 +43,6 @@ export async function resetAllEdits(videoId: string): Promise<void> {
     throw new Error(`resetAllEdits: cannot probe source.mp4 for ${videoId}`);
   }
 
-  // Delete the edited outputs the build pipeline won't otherwise overwrite on a
-  // resumable run: the source-resolution {H}p.mp4, the downscaled {720,1080}p.mp4
-  // variants, the edited viewer storyboard, and edits.json. Serving falls back to
-  // source.mp4 (lastEditedAt cleared below) and the pipeline regenerates the
-  // applicable variants/storyboard from the full source.
-  const entries = await readdir(derivDir).catch(() => [] as string[]);
-  await Promise.all(
-    entries
-      .filter((f) => /^\d+p\.mp4$/.test(f) || f === "storyboard.vtt" || f === "edits.json")
-      .map((f) => rm(join(derivDir, f), { force: true })),
-  );
-
   // Re-derive the full transcript + captions.srt from the unedited words.json.
   // The edit overwrote both with the edited cut and the original isn't preserved
   // separately, so reconstruct it (one kept segment spanning the whole source).
@@ -66,13 +54,13 @@ export async function resetAllEdits(videoId: string): Promise<void> {
     if (full.plainText) await upsertTranscript(videoId, "srt", full.plainText);
   }
 
-  // The edited cut is gone; settle its ledger row so it doesn't linger as a
-  // phantom `ready` (it's masked as "—" once lastEditedAt is cleared, but keep
-  // the ledger honest).
+  // Flip the DB to unedited FIRST, then delete the edited files. If a failure
+  // strands the cleanup, the video is already unedited (activeRawFilename →
+  // source.mp4, which still serves) with some harmless orphaned files — never
+  // still-marked-edited with its active file deleted. Clear lastEditedAt + reset
+  // the cached metadata to the original source, and settle the edited_output
+  // ledger row so it isn't a phantom `ready`.
   await markStepSkipped(videoId, "edited_output");
-
-  // Clear lastEditedAt (so activeRawFilename resolves back to source.mp4) and
-  // reset the cached metadata to the original source.
   await getDb()
     .update(videos)
     .set({
@@ -85,6 +73,18 @@ export async function resetAllEdits(videoId: string): Promise<void> {
       updatedAt: nowIso(),
     })
     .where(eq(videos.id, videoId));
+
+  // Delete the edited outputs the build pipeline won't otherwise overwrite on a
+  // resumable run: the source-resolution {H}p.mp4, the downscaled {720,1080}p.mp4
+  // variants, the edited viewer storyboard, and edits.json. The build pipeline
+  // (run next, from the reprocess chokepoint) regenerates the applicable
+  // variants/storyboard from the full source.
+  const entries = await readdir(derivDir).catch(() => [] as string[]);
+  await Promise.all(
+    entries
+      .filter((f) => /^\d+p\.mp4$/.test(f) || f === "storyboard.vtt" || f === "edits.json")
+      .map((f) => rm(join(derivDir, f), { force: true })),
+  );
 
   await logEvent(videoId, "edits_reset");
   console.log(`[edit-reset] ${videoId} edits reset — rebuilding from source.mp4`);

@@ -139,9 +139,18 @@ describe("edit mode through the unified pipeline", () => {
   );
 
   test.skipIf(!ffmpegAvailable)(
-    "a failed edit restores ready and leaves the previous outputs untouched",
+    "a failed edit restores ready and leaves the previously-served output byte-untouched",
     async () => {
       const { id, dir } = await readyEditable();
+      // Simulate an already-edited video: a prior edited cut on disk (marker
+      // content) with its ledger row + lastEditedAt set.
+      await Bun.write(join(dir, "1080p.mp4"), "PRIOR-EDIT-OUTPUT");
+      await markStepReady(id, "edited_output");
+      await getDb()
+        .update(videos)
+        .set({ lastEditedAt: new Date().toISOString() })
+        .where(eq(videos.id, id));
+
       // An EDL that removes everything → edited_output throws before any swap.
       await Bun.write(
         join(dir, "edits.json"),
@@ -155,11 +164,12 @@ describe("edit mode through the unified pipeline", () => {
       scheduleEdit(id, "recorded");
       await _drainInFlight();
 
+      // Status restored, staging cleaned up.
       expect((await getVideo(id))?.status).toBe("ready");
-      expect((await getVideo(id))?.lastEditedAt).toBeNull();
       expect(await Bun.file(join(dir, ".staging")).exists()).toBe(false);
-      // No edited cut was produced.
-      expect(await Bun.file(join(dir, "1080p.mp4")).exists()).toBe(false);
+      // The previously-served edited output is byte-for-byte untouched (the
+      // failed edit never swapped).
+      expect(await Bun.file(join(dir, "1080p.mp4")).text()).toBe("PRIOR-EDIT-OUTPUT");
     },
     60_000,
   );

@@ -204,19 +204,21 @@ async function readRecordingJson(videoDir: string): Promise<RecordingMeta> {
 // Extracts metadata from source.mp4 and recording.json, writes it to the DB.
 // Doesn't produce a file — it's a mandatory pipeline step (gates `ready`).
 // Returns false when ffprobe fails/unavailable so the step is marked failed.
-// `preProbed` lets the caller pass an already-computed source.mp4 probe (the
-// pipeline seeds one when it probes for resolution-gated steps) so source.mp4
-// isn't probed twice in the same run.
+// Probes the active file (defaults to source.mp4) for dimensions/size and reads
+// recording.json, writing both to the DB. `opts.activeFile` lets an edit run
+// point metadata at the edited cut; `opts.preProbed` lets the caller pass an
+// already-computed probe (the pipeline seeds one for resolution-gated steps) so
+// the active file isn't probed twice in the same run.
 export async function extractMetadata(
   videoId: string,
-  preProbed?: ProbeMetadata,
+  opts: { activeFile?: string; preProbed?: ProbeMetadata } = {},
 ): Promise<boolean> {
   const dir = derivativesDir(videoId);
-  const sourcePath = join(dir, "source.mp4");
+  const activeFile = opts.activeFile ?? join(dir, "source.mp4");
   const videoDir = join(DATA_DIR, videoId);
 
   const [probe, recording] = await Promise.all([
-    preProbed ?? probeMetadata(sourcePath),
+    opts.preProbed ?? probeMetadata(activeFile),
     readRecordingJson(videoDir),
   ]);
 

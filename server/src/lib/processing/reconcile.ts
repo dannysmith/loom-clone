@@ -4,11 +4,12 @@
 // validated. It also owns the `incomplete → ready` recovery transition.
 //
 // It does NOT own the recording↔healing boundary (decided in the /complete
-// handler by diffing the client timeline against on-disk segments), and it does
-// NOT touch `reprocessing` (owned transiently by the editor, which must land an
-// atomic set before reconciling — and recovered on boot by
-// recoverStrandedReprocessing). Call it after each pipeline step (running:true)
-// and once when a run settles (running:false).
+// handler by diffing the client timeline against on-disk segments). It settles a
+// `reprocessing` video (an edit run) UP to `ready` once its mandatory steps
+// validate, but never demotes one — the edit run owns the failure path
+// (restoring `ready`), and a crash leaves it for recoverStrandedReprocessing on
+// boot. Call it after each pipeline step (running:true) and once when a run
+// settles (running:false).
 
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../../db/client";
@@ -34,13 +35,13 @@ export function rollupFromSteps(
   return "processing";
 }
 
-export async function reconcile(
-  videoId: string,
-  opts: { running: boolean; hold?: boolean },
-): Promise<void> {
+export async function reconcile(videoId: string, opts: { running: boolean }): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video || video.trashedAt) return;
-  if (!RECONCILE_OWNED.has(video.status)) return;
+  // reconcile settles its owned post-footage statuses plus `reprocessing` (an
+  // edit run, which it only ever promotes UP to `ready`).
+  const isReprocessing = video.status === "reprocessing";
+  if (!RECONCILE_OWNED.has(video.status) && !isReprocessing) return;
 
   const rollup = rollupFromSteps(await getStepStates(videoId));
   // Leaving `ready` (a forced rebuild that demoted, or a regressed mandatory
@@ -49,14 +50,18 @@ export async function reconcile(
   // listing it until TTL. markVideoReady re-purges on the way back in.
   const wasReady = video.status === "ready";
 
-  // Promote to `ready` once the mandatory steps validate — unless we're holding
-  // for a forced multi-file rebuild that is still regenerating its expected
-  // outputs (variants/storyboard/…). The hold keeps status (and feeds) honest
-  // until the whole forced set has re-validated at running:false.
-  if (rollup === "ready" && !opts.hold) {
+  // Promote to `ready` once the mandatory steps validate. (Forced rebuilds and
+  // edits regenerate atomically via the staging swap, so there's no longer a
+  // mid-run window to hold status open for.)
+  if (rollup === "ready") {
     await markVideoReady(videoId);
     return;
   }
+
+  // An edit run is the only owner of `reprocessing`'s downward transitions
+  // (restoring `ready` on failure); reconcile only ever settles it UP (above),
+  // never demotes it to processing/processing_failed.
+  if (isReprocessing) return;
 
   // `incomplete` only ever escapes upward to `ready` (above). Its footage was
   // never whole, so while a recovery run is still in progress — or if it failed
@@ -84,30 +89,18 @@ export async function reconcile(
   }
 }
 
-// A `reprocessing` row means an edit/reprocess was in flight when the process
-// last stopped. Those runs are in-memory fire-and-forget, so a restart (or the
-// 0012 migration's processing→reprocessing remap of a mid-edit video) strands
-// them — reconcile deliberately doesn't own `reprocessing`. On boot no edit can
-// still be running, so any reprocessing video whose mandatory steps validated is
-// safe to settle back to `ready` (it serves the untouched source.mp4 / original
-// outputs; a half-applied edit never set lastEditedAt, so activeRawFilename
-// resolves to source.mp4). Videos without validated mandatory steps are left for
-// a manual reprocess. Run once at startup and from the backfill script.
+// A `reprocessing` row means an edit run was in flight when the process last
+// stopped. Those runs are in-memory fire-and-forget, so a restart strands them.
+// On boot no edit can still be running, so reconcile each one: a video whose
+// mandatory steps validated settles back to `ready` (it serves the untouched
+// source.mp4 — a half-applied edit never set lastEditedAt, so activeRawFilename
+// resolves to source.mp4); the rest stay `reprocessing` (reconcile never demotes
+// it) for a manual reprocess. Run once at startup and from the backfill script.
 export async function recoverStrandedReprocessing(): Promise<void> {
   const rows = await getDb()
     .select({ id: videos.id })
     .from(videos)
     .where(and(eq(videos.status, "reprocessing"), isNull(videos.trashedAt)));
 
-  let recovered = 0;
-  for (const { id } of rows) {
-    const rollup = rollupFromSteps(await getStepStates(id));
-    if (rollup !== "ready") continue; // can't safely settle — leave for manual reprocess
-    await markVideoReady(id);
-    recovered++;
-    console.log(`[reconcile] recovered stranded reprocessing video ${id} → ready`);
-  }
-  if (recovered > 0) {
-    console.log(`[reconcile] recovered ${recovered} stranded reprocessing video(s)`);
-  }
+  for (const { id } of rows) await reconcile(id, { running: false });
 }

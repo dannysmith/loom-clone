@@ -107,6 +107,7 @@ export const videoSegments = sqliteTable(
 // audio step); `PROCESSING_STEPS` in registry.ts is the ordering authority.
 export const PROCESSING_STEP_KINDS = [
   "source",
+  "edited_output",
   "metadata",
   "audio",
   "thumbnail",

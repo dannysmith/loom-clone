@@ -5,6 +5,7 @@
 
 import { join } from "path";
 import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
+import { hasRecordedChapters } from "../chapters";
 import { derivativesDir } from "../derivatives";
 import { RECONCILE_OWNED } from "../status";
 import { DATA_DIR } from "../store";
@@ -79,6 +80,7 @@ export function canReprocess(video: Video): boolean {
 
 const LABELS: Record<ProcessingStepKind, string> = {
   source: "Source video",
+  edited_output: "Edited video",
   metadata: "Metadata",
   audio: "Audio processed",
   thumbnail: "Thumbnail",
@@ -105,7 +107,9 @@ function couldStillProduce(status: Video["status"], tier: StepTier): boolean {
 }
 
 export async function computeReadiness(video: Video): Promise<Readiness> {
-  const ctx = applicabilityContext(video);
+  const ctx = applicabilityContext(video, {
+    hasRecordedChapters: await hasRecordedChapters(video.id),
+  });
   // Load the step map once and share it with reprocessability (was fetched
   // twice).
   const steps = await getStepStates(video.id);

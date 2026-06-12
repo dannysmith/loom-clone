@@ -6,6 +6,7 @@ import { getDb } from "../../../db/client";
 import type { ProcessingStepKind } from "../../../db/schema";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
+import { writeChapters } from "../../chapters";
 import { createVideo, DATA_DIR, getVideo } from "../../store";
 import { canReprocess, computeReadiness, type ReadinessItem, reprocessability } from "../readiness";
 import { markStepFailed, markStepReady } from "../steps-store";
@@ -118,6 +119,26 @@ describe("computeReadiness — icons", () => {
     const { items } = await computeReadiness((await getVideo(video.id))!);
     expect(icon(items, "transcript")).toBe("na");
     expect(icon(items, "audio")).toBe("na");
+  });
+
+  // [P3.2] chapter_titles is only expected when the recording captured markers.
+  test("chapter_titles is '—' with no recorded chapters, expected with them", async () => {
+    const noChapters = await readyVideo({ width: 1280, height: 720, duration: 30 });
+    expect(icon((await computeReadiness(noChapters)).items, "chapter_titles")).toBe("na");
+
+    // An editor-added chapter (createdDuringRecording=false) must NOT trigger it.
+    const editorOnly = await readyVideo({ width: 1280, height: 720, duration: 30 });
+    await writeChapters(editorOnly.id, [
+      { id: "c1", title: "Added later", t: 5, createdDuringRecording: false },
+    ]);
+    expect(icon((await computeReadiness(editorOnly)).items, "chapter_titles")).toBe("na");
+
+    // A recorded marker makes it expected (❌ until the Mac sends a suggestion).
+    const recorded = await readyVideo({ width: 1280, height: 720, duration: 30 });
+    await writeChapters(recorded.id, [
+      { id: "c1", title: null, t: 5, createdDuringRecording: true },
+    ]);
+    expect(icon((await computeReadiness(recorded)).items, "chapter_titles")).toBe("missing");
   });
 });
 

@@ -64,6 +64,15 @@ export async function chaptersExist(videoId: string): Promise<boolean> {
   return !!data && data.chapters.length > 0;
 }
 
+// Whether the recording itself captured chapter markers (as opposed to chapters
+// a user later added in the editor). Only these trigger the Mac's suggested-
+// chapter-title pass, so the `chapter_titles` step is only *expected* when this
+// is true.
+export async function hasRecordedChapters(videoId: string): Promise<boolean> {
+  const data = await readChapters(videoId);
+  return !!data && data.chapters.some((c) => c.createdDuringRecording);
+}
+
 // --- Extraction from recording.json ---
 
 // Loose typing so timeline schema evolution doesn't break us — we only

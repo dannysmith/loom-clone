@@ -9,6 +9,7 @@
 // the segment-derived steps — they are never flagged as needing repair.
 
 import { join } from "path";
+import { hasRecordedChapters } from "../chapters";
 import { probeMetadata } from "../derivatives";
 import { hasAudioStream } from "../ffprobe";
 import { getTranscript, getVideo } from "../store";
@@ -28,7 +29,9 @@ async function exists(path: string): Promise<boolean> {
 export async function inferStepsFromDisk(videoId: string): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
-  const ctx = applicabilityContext(video);
+  const ctx = applicabilityContext(video, {
+    hasRecordedChapters: await hasRecordedChapters(videoId),
+  });
   const sourceFile = join(ctx.dir, "source.mp4");
 
   for (const step of PROCESSING_STEPS) {

@@ -51,6 +51,10 @@ export type StepContext = {
   activeFile: string;
   duration: number; // seconds
   height: number; // probed source height (0 before metadata)
+  // Whether the recording captured chapter markers — gates chapter_titles
+  // applicability. Only set when the context is built for readiness/backfill (the
+  // live pipeline never evaluates the external chapter_titles step).
+  hasRecordedChapters?: boolean;
   force: boolean;
   scratch: {
     silences?: Silence[];
@@ -287,7 +291,16 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
   externalStep("words"),
   externalStep("title_suggestion"),
   externalStep("description_suggestion"),
-  externalStep("chapter_titles"),
+  {
+    // Only expect Mac-sent suggested chapter titles when the recording actually
+    // captured chapter markers — those are what trigger the Mac's suggestion
+    // pass. Chapters a user adds later in the editor (createdDuringRecording =
+    // false) don't count, so a marker-less recording shows "—", not ❌.
+    kind: "chapter_titles",
+    tier: "external",
+    inputs: [],
+    appliesTo: (ctx) => ctx.source === "recorded" && ctx.hasRecordedChapters === true,
+  },
 ];
 
 function externalStep(kind: ProcessingStepKind): ProcessingStep {
@@ -331,7 +344,10 @@ export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined
 // Builds a StepContext from a stored video row, for applicability/artifact
 // checks outside a live pipeline run (readiness UI, backfill). height/duration
 // come from the cached metadata; the run-only fields are inert here.
-export function applicabilityContext(video: Video): StepContext {
+export function applicabilityContext(
+  video: Video,
+  opts: { hasRecordedChapters?: boolean } = {},
+): StepContext {
   const dir = derivativesDir(video.id);
   return {
     videoId: video.id,
@@ -339,6 +355,7 @@ export function applicabilityContext(video: Video): StepContext {
     source: video.source,
     mode: "build",
     dir,
+    hasRecordedChapters: opts.hasRecordedChapters,
     // The active served file: source.mp4 for unedited videos, the {height}p.mp4
     // cut for edited ones — so edited_output's artifact resolves correctly in
     // readiness/backfill.

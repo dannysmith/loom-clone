@@ -34,6 +34,11 @@ export type StepContext = {
   video: Video;
   source: "recorded" | "uploaded";
   dir: string; // derivatives directory
+  // Absolute path to the "active" playable file that downstream steps (variants,
+  // storyboard, metadata) consume. Defaults to source.mp4; in edit mode it
+  // becomes the EDL-cut {height}p.mp4. source.mp4-specific steps (source, audio,
+  // silence detection) stay on sourcePath() regardless.
+  activeFile: string;
   duration: number; // seconds
   height: number; // probed source height (0 before metadata)
   force: boolean;
@@ -77,7 +82,7 @@ function variantStep(kind: ProcessingStepKind, height: number): ProcessingStep {
     inputs: ["source"],
     appliesTo: (ctx) => ctx.height > height,
     run: async (ctx) => {
-      await generateVariant(ctx.dir, height, sourcePath(ctx));
+      await generateVariant(ctx.dir, height, ctx.activeFile);
       return "ready";
     },
     validate: (ctx) => isProbablyPlayable(join(ctx.dir, file)),
@@ -149,7 +154,10 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     inputs: ["source"],
     appliesTo: () => true,
     run: async (ctx) => {
-      const ok = await extractMetadata(ctx.videoId, ctx.scratch.sourceMeta);
+      const ok = await extractMetadata(ctx.videoId, {
+        activeFile: ctx.activeFile,
+        preProbed: ctx.scratch.sourceMeta,
+      });
       if (!ok) throw new Error("ffprobe metadata extraction failed");
       return "ready";
     },
@@ -187,7 +195,8 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     tier: "expected",
     inputs: ["source"],
     appliesTo: (ctx) => ctx.duration >= 60,
-    run: async (ctx) => ((await generateStoryboard(ctx.dir, ctx.duration)) ? "ready" : "skipped"),
+    run: async (ctx) =>
+      (await generateStoryboard(ctx.dir, ctx.duration, ctx.activeFile)) ? "ready" : "skipped",
     validate: (ctx) => Bun.file(join(ctx.dir, "storyboard.vtt")).exists(),
     artifact: (ctx) => join(ctx.dir, "storyboard.vtt"),
   },
@@ -266,11 +275,16 @@ export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined
 // checks outside a live pipeline run (readiness UI, backfill). height/duration
 // come from the cached metadata; the run-only fields are inert here.
 export function applicabilityContext(video: Video): StepContext {
+  const dir = derivativesDir(video.id);
   return {
     videoId: video.id,
     video,
     source: video.source,
-    dir: derivativesDir(video.id),
+    dir,
+    // source.mp4 for now (no current applicability/artifact check reads
+    // activeFile); becomes activeRawFilename(video) when the edited_output step
+    // lands and readiness/backfill need to point at the edited cut.
+    activeFile: join(dir, "source.mp4"),
     duration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
     force: false,

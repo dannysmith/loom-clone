@@ -156,6 +156,9 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     video,
     source: opts.source,
     dir,
+    // Active playable file consumed by variants/storyboard/metadata. source.mp4
+    // for every current path; the edit mode will point it at the EDL-cut file.
+    activeFile: join(dir, "source.mp4"),
     duration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
     force: opts.force ?? false,
@@ -179,15 +182,16 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   for (const step of RUNNABLE_STEPS) {
     if (opts.only && step.kind !== opts.only) continue;
 
-    // Probe source height once it exists, so resolution-gated steps (variants)
-    // see the real value even on a fresh run where video.height was still null.
+    // Probe the active file's height once it exists, so resolution-gated steps
+    // (variants) see the real value even on a fresh run where video.height was
+    // still null.
     if (!heightState.probed && ctx.height === 0) {
-      if (await Bun.file(join(dir, "source.mp4")).exists()) {
+      if (await Bun.file(ctx.activeFile).exists()) {
         heightState.probed = true;
-        const meta = await probeMetadata(join(dir, "source.mp4"));
+        const meta = await probeMetadata(ctx.activeFile);
         if (meta) {
           ctx.height = meta.height;
-          // Reused by the metadata step (extractMetadata) so source.mp4 is
+          // Reused by the metadata step (extractMetadata) so the active file is
           // probed once per run, not twice.
           ctx.scratch.sourceMeta = meta;
         }

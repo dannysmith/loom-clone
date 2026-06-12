@@ -155,6 +155,7 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     videoId,
     video,
     source: opts.source,
+    mode: "build",
     dir,
     // Active playable file consumed by variants/storyboard/metadata. source.mp4
     // for every current path; the edit mode will point it at the EDL-cut file.

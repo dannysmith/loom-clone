@@ -33,6 +33,12 @@ export type StepContext = {
   videoId: string;
   video: Video;
   source: "recorded" | "uploaded";
+  // Run mode. `build` produces/replaces source.mp4 (first build, heal re-stitch,
+  // forced from-HLS rebuild). `edit` applies an EDL, producing the edited cut as
+  // the active file while leaving source.mp4 untouched. Gates which steps run:
+  // source/audio/thumbnail/peaks/suggested_edits are build-only; edited_output is
+  // edit-only. Defaults to `build` everywhere except an edit run.
+  mode: "build" | "edit";
   dir: string; // derivatives directory
   // Absolute path to the "active" playable file that downstream steps (variants,
   // storyboard, metadata) consume. Defaults to source.mp4; in edit mode it
@@ -138,7 +144,10 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "source",
     tier: "required",
     inputs: [],
-    appliesTo: () => true,
+    // Edit runs don't re-produce source.mp4 — it's the preserved original and a
+    // precondition of the EDL apply. (In readiness/backfill, mode is `build`, so
+    // source still shows for edited videos — its row stays ready.)
+    appliesTo: (ctx) => ctx.mode !== "edit",
     run: async (ctx) => {
       if (ctx.source === "uploaded") await generateSourceFromUpload(ctx.videoId, ctx.dir);
       else await generateSourceFromHls(ctx.videoId, ctx.dir);
@@ -167,7 +176,9 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     tier: "expected",
     inputs: ["source"],
     // Uploads aren't mic recordings — loudnorm/denoise shouldn't run on them.
-    appliesTo: (ctx) => ctx.source === "recorded",
+    // Edit runs cut from the already-loudnormed source.mp4, so audio never
+    // re-runs (and never touches the preserved source.mp4) in edit mode.
+    appliesTo: (ctx) => ctx.source === "recorded" && ctx.mode !== "edit",
     run: async (ctx) => {
       const silences = await ensureSilences(ctx);
       const processed = await processAudio(sourcePath(ctx), silences);
@@ -179,7 +190,9 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "thumbnail",
     tier: "expected",
     inputs: ["source"],
-    appliesTo: () => true,
+    // The thumbnail comes from the original source.mp4 and is not regenerated on
+    // edit (the editor works from source; the existing thumbnail stays valid).
+    appliesTo: (ctx) => ctx.mode !== "edit",
     run: async (ctx) => {
       await extractAndPromoteThumbnails(ctx.dir, ctx.duration);
       return "ready";
@@ -204,7 +217,9 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "peaks",
     tier: "expected",
     inputs: ["source"],
-    appliesTo: (ctx) => ctx.duration >= 1,
+    // Waveform peaks reflect the original source.mp4 (the editor timeline works
+    // from source); not regenerated on edit.
+    appliesTo: (ctx) => ctx.duration >= 1 && ctx.mode !== "edit",
     run: async (ctx) => ((await generatePeaks(ctx.dir, ctx.duration)) ? "ready" : "skipped"),
     validate: (ctx) => jsonParses(join(ctx.dir, "peaks.json")),
     artifact: (ctx) => join(ctx.dir, "peaks.json"),
@@ -213,8 +228,10 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "suggested_edits",
     tier: "expected",
     inputs: ["source"],
-    // Once the user has committed an edit we never surface auto-suggestions again.
-    appliesTo: (ctx) => ctx.duration >= 5 && !ctx.video.lastEditedAt,
+    // Once the user has committed an edit we never surface auto-suggestions
+    // again. The `mode` guard also covers the in-flight edit run, where
+    // lastEditedAt isn't set yet but suggestions still must not regenerate.
+    appliesTo: (ctx) => ctx.duration >= 5 && !ctx.video.lastEditedAt && ctx.mode !== "edit",
     run: async (ctx) => {
       const silences = await ensureSilences(ctx);
       const generated = await generateSuggestedEdits(ctx.dir, ctx.duration, { silences });
@@ -280,6 +297,7 @@ export function applicabilityContext(video: Video): StepContext {
     videoId: video.id,
     video,
     source: video.source,
+    mode: "build",
     dir,
     // source.mp4 for now (no current applicability/artifact check reads
     // activeFile); becomes activeRawFilename(video) when the edited_output step

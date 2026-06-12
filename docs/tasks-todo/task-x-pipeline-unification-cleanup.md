@@ -2,7 +2,7 @@
 
 ## Lineage
 
-This is **Phase 4** of the [post-processing pipeline unification](../tasks-done/task-2026-06-11-1-post-processing-pipeline-unification.md). It is **pure cleanup fallout from [Phase 3](./task-1-pipeline-unification-phase-3.md)** — no behaviour change, *except* [P4.7], which is a small feature folded in from [#46](https://github.com/dannysmith/loom-clone/issues/46) item 2.
+This is **Phase 4** of the [post-processing pipeline unification](../tasks-done/task-2026-06-11-1-post-processing-pipeline-unification.md). It is **pure cleanup fallout from [Phase 3](../tasks-done/task-2026-06-12-1-pipeline-unification-phase-3.md)** — no behaviour change, *except* [P4.7], which is a small feature folded in from [#46](https://github.com/dannysmith/loom-clone/issues/46) item 2.
 
 **Depends on Phase 3.** Do not start until the pipelines are unified — most of these items only become possible (or only make sense) once "edit" is a pipeline mode with a context `activeFile`. Unprioritised (`task-x`) because it's dependent cleanup; promote it once Phase 3 lands.
 
@@ -28,5 +28,5 @@ This is **Phase 4** of the [post-processing pipeline unification](../tasks-done/
 
 ## References
 
-- [Phase 3 doc](./task-1-pipeline-unification-phase-3.md) (prerequisite).
+- [Phase 3 doc](../tasks-done/task-2026-06-12-1-pipeline-unification-phase-3.md) (prerequisite).
 - [Parent doc + full review](../tasks-done/task-2026-06-11-1-post-processing-pipeline-unification.md), [#48](https://github.com/dannysmith/loom-clone/issues/48), [#46](https://github.com/dannysmith/loom-clone/issues/46) item 2.

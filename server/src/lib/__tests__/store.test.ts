@@ -20,6 +20,7 @@ import {
   deleteVideo,
   duplicateVideo,
   getSegmentDurations,
+  getTranscript,
   getVideo,
   getVideoBySlug,
   listVideos,
@@ -33,6 +34,7 @@ import {
   untrashVideo,
   updateSlug,
   updateVideo,
+  upsertTranscript,
   ValidationError,
   validateSlugFormat,
 } from "../store";
@@ -701,6 +703,20 @@ describe("duplicateVideo", () => {
     expect(dup.visibility).toBe("private");
     expect(dup.description).toBe("A description");
     expect(dup.source).toBe("recorded");
+  });
+
+  test("copies the transcript (DB row + step) to the duplicate", async () => {
+    // The captions file is copied with the rest of derivatives/, but the
+    // video_transcripts row + FTS index are per-id — without re-inserting them
+    // the copy's transcript tab/search are empty and the transcript step (which
+    // infers from the DB row, not the file) shows missing.
+    const original = await createVideo();
+    await upsertTranscript(original.id, "srt", "hello from the transcript");
+
+    const dup = await duplicateVideo(original.id);
+
+    expect((await getTranscript(dup.id))?.plainText).toBe("hello from the transcript");
+    expect((await getStepStates(dup.id)).get("transcript")?.state).toBe("ready");
   });
 
   test("preserves tag associations", async () => {

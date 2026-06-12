@@ -991,6 +991,17 @@ export async function duplicateVideo(id: string): Promise<Video> {
     await mkdir(dstDir, { recursive: true });
   }
 
+  // Copy the transcript. The captions file was copied above, but the
+  // video_transcripts row and FTS index are keyed per-id and must be
+  // re-inserted — otherwise the copy's transcript tab + search are empty and
+  // (since the transcript step infers from the DB row, not the file) its
+  // readiness shows transcript missing. Must run before inferStepsFromDisk so
+  // the transcript step infers `ready`.
+  const originalTranscript = await getTranscript(id);
+  if (originalTranscript) {
+    await upsertTranscript(newId, originalTranscript.format, originalTranscript.plainText);
+  }
+
   // Re-derive video_processing_steps from the copied files rather than cloning
   // the original's rows — the table is gated for serving, and re-deriving
   // avoids carrying over stale state. (Dynamic import breaks the store↔backfill

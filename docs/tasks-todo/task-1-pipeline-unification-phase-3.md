@@ -14,7 +14,7 @@ The docs describe a clean two-axis model: a single behaviour-driving `status`, a
 
 After Phases 1–2, the remaining duplication is concentrated in the edit-pipeline:
 
-- **Two pipelines** with **two atomicity strategies** (the edit-pipeline's staging-dir swap vs. the main pipeline's `hold` + `resetRegeneratedSteps` dance) and (until Phase 1's shared run-lock) two independent in-flight maps.
+- **Two pipelines** with **two atomicity strategies** (the edit-pipeline's staging-dir swap vs. the main pipeline's `hold` + `resetRegeneratedSteps` dance) and **two independent in-flight maps** (Phase 1 added the shared `run-lock` as a cross-cutting *signal* on top, but each pipeline still keeps its own coalescing `inFlight` map — this phase collapses them into one).
 - The edit-pipeline **writes `status` itself** via raw `videos` UPDATEs (`reprocessing`, `ready`) and **never calls `reconcile`** — which is *why* `reconcile` isn't really the single post-footage status owner and why `recoverStrandedReprocessing` has to exist.
 - The edit-pipeline **writes ledger rows by hand** with hardcoded variant literals (`"720p.mp4"`/`"1080p.mp4"`), a fourth place the variant kind↔height↔filename mapping lives, and marks them `ready` on bare `exists()` rather than the validated state the main pipeline gates on.
 
@@ -36,14 +36,27 @@ These were settled during the #48 review — implement *to* them. If implementin
 5. **An uploaded video that fails post-processing serves the original `upload.mp4`, never a dead player.** *Shipped in Phase 1 (P1.3).* Keep the behaviour intact through the refactor.
 6. **No auto-retry (keep the decision)** — the dead `attempts` machinery was already removed in Phase 1.
 
+### Current-state caveats (verified against `main`, post Phase 1–2)
+
+The decisions above are the *target*. A few of them describe state that doesn't exist yet — note these so the implementation doesn't assume them:
+
+- **There is no `captions` step.** Decision 1(c) / the direction say the edited-transcript-to-DB "becomes part of the captions step," but the registry has no such step today (captions come from the Mac transcript upload → `captions.srt` + DB row, and the edit-pipeline's `deriveEditedCaptions`). This phase must **create** a captions step (or place the edited-transcript derivation deliberately), not fold into an existing one.
+- **`reconcile` does not own `reprocessing` today — by design.** `RECONCILE_OWNED` (now in `lib/status.ts`) excludes it, and `recoverStrandedReprocessing` exists *precisely because* the editor writes that status out-of-band. Decision 2 therefore requires a real change to the ownership invariant: add `reprocessing` to `RECONCILE_OWNED` (or equivalent) and pass the run **mode** to `reconcile` so it maps "in-progress" → `reprocessing` for edits. `rollupFromSteps` returns only `ready`/`processing`/`processing_failed`, so the mode→label mapping is layered on top. `recoverStrandedReprocessing` only shrinks *after* that lands.
+- **The run-lock currently gates only the editor.** `hasActiveRun` is consulted in exactly two places (editor page-load + commit) plus the UI button. Decision 4's "serialises the main pipeline, reprocess, per-artifact regen, and edit" is the *target* — reprocess and per-artifact regen are gated by `status`/`canReprocess`, **not** the lock, today. Wiring them through the lock (or through the unified pipeline's single `inFlight` map) is part of this phase.
+- **Edit-mode `appliesTo` must also gate off `thumbnail` and `peaks`, not just `audio`/`suggested_edits`.** Today the edit-pipeline regenerates only variants/storyboard/captions and leaves the thumbnail, peaks and editor-storyboard reflecting the original `source.mp4` (the editor always works from source). Preserve that: in edit mode, `thumbnail` and `peaks` stay source-based (gated off). Regenerating peaks from the edited audio would be a *conscious* behaviour change, not a freebie — decide it explicitly.
+
+> The `edit-pipeline.ts` line numbers in the divergences below are approximate — they drifted slightly after the Phase 1 merge. Re-anchor them at execution time.
+
 ---
 
-## The work — [P3.1] eliminate the parallel edit-pipeline (subsumes #46 item 1)
+## The work
+
+### [P3.1] Eliminate the parallel edit-pipeline (subsumes #46 item 1)
 
 **The divergences to remove:**
 
-- **Own status writes** — it sets `reprocessing`/`ready` via raw `videos` UPDATEs (`edit-pipeline.ts:139-142,149-153,267-276`) and never calls `reconcile`. This is why `reconcile` isn't really the single owner and why `recoverStrandedReprocessing` has to exist.
-- **Own ledger writes with hardcoded variant literals** — it marks `variant_720`/`variant_1080`/`storyboard` by hand (`edit-pipeline.ts:244-258`, `"720p.mp4"`/`"1080p.mp4"`), defeating the `VARIANTS` single-source-of-truth. Add a third rendition and the edit path silently won't mark it.
+- **Own status writes** — it sets `reprocessing`/`ready` via raw `videos` UPDATEs (`edit-pipeline.ts:~144/~154/~273`) and never calls `reconcile`. This is why `reconcile` isn't really the single owner and why `recoverStrandedReprocessing` has to exist.
+- **Own ledger writes with hardcoded variant literals** — it marks `variant_720`/`variant_1080`/`storyboard` by hand (`edit-pipeline.ts:~250-260`, `"720p.mp4"`/`"1080p.mp4"`), defeating the `VARIANTS` single-source-of-truth. Add a third rendition and the edit path silently won't mark it.
 - **A different "ready" definition** — it marks ledger rows `ready` on bare `Bun.file(...).exists()` rather than the validated state the main pipeline gates on (it *does* run `isProbablyPlayable` on the staged outputs before swap, but the ledger marking itself is existence-only).
 - **A second atomicity strategy** — staging-swap (`.edit-staging`), vs. the main pipeline's `hold` + `resetRegeneratedSteps` (`pipeline.ts` + `reconcile.ts`).
 
@@ -56,6 +69,17 @@ These were settled during the #48 review — implement *to* them. If implementin
 
 **Where:** `lib/edit-pipeline.ts` (whole file), against `lib/processing/pipeline.ts` + `registry.ts` + `lib/derivatives.ts` + `routes/admin/editor.ts` + `reconcile.ts`.
 
+#### Active file ↔ ledger model (resolved: Option B)
+
+The edited cut `{height}p.mp4` is the file an edited video actually serves, yet today it has **no ledger step** and is gated at serve time by bare disk-presence (`resolve.ts`), not a validated `ready` state — a weaker guarantee than recorded videos get. The unified model fixes this with a **dedicated active-file step** rather than overloading `source`:
+
+- **`source` keeps meaning `source.mp4`** — the preserved original. Its row is set `ready` at first build and stays valid forever (editing never mutates `source.mp4`). `reprocessability.sourceValid`, re-editing, and from-source regen all keep relying on it unchanged.
+- **Add an `edited_output` step** (the active-file step): `appliesTo` = the video is edited; `artifact(ctx)` = `ctx.activeFile` (the `{height}p.mp4` cut); `validate` = `isProbablyPlayable`. So the edited cut becomes a first-class, validated artifact that's **visible in the readiness checklist** (today it's invisible).
+- **Serving gates on the active-file producer.** `resolve.ts` serves the active file iff *the step that produced it* is `ready` AND the file is present — `source` for recorded/uploaded, `edited_output` for edited. (This is the natural home for Phase 4's `isServable(step, ctx)` predicate.)
+- **`ready` (status) stays `source` + `metadata`.** `lastEditedAt` is set **only after** a validated staging-swap, so by the time a video presents as edited its `edited_output` is already valid — `ready` needn't add a mode-dependent required kind. (`metadata` describes the edited output for edited videos, as today.)
+
+**Failure behaviour — preserve exactly what we have:** staging-swap never swaps a set that fails validation, and `lastEditedAt` is set only after a successful swap. So a failed edit leaves the *prior* served state untouched (the previous edited cut, or `source.mp4` for a first edit) — it can never produce a dead player, and it must **never** silently fall back to serving the un-edited `source.mp4` in place of an intended edit.
+
 ### Suggested decomposition (commit at each safe checkpoint)
 
 Refine this when execution starts; the goal is reviewable, individually-committable steps rather than one giant diff.
@@ -63,10 +87,24 @@ Refine this when execution starts; the goal is reviewable, individually-committa
 1. **Introduce `ctx.activeFile`** and route the existing downstream steps (variants, storyboard, metadata) through it — no behaviour change yet (active file is still `source.mp4` for every current path).
 2. **Add the run "mode"** (`recorded` | `uploaded` | `edit`) and the source/active-file production strategy, with `appliesTo` gates for `audio`/`suggested_edits`. Still no edit path wired in.
 3. **Adopt staging-swap as the shared rebuild primitive** for the forced from-HLS rebuild; delete `hold` + `resetRegeneratedSteps`; verify the incremental first-build still publishes early.
-4. **Route the edit commit through the unified pipeline** (apply-EDL strategy + edited-transcript captions step); `reconcile` + `runStep` own status + ledger.
+4. **Route the edit commit through the unified pipeline**: apply-EDL strategy producing the `edited_output` active-file step (validated, serving-gated per the model above) + the new captions step deriving the edited transcript; `reconcile` + `runStep` own status + ledger.
 5. **Delete `edit-pipeline.ts`'s parallel machinery** and shrink `recoverStrandedReprocessing`.
 
 Each step needs tests; the editor end-to-end (record → commit a trim → quality menu stays consistent) is the key regression to guard.
+
+### [P3.2] Only expect `chapter_titles` when chapters were recorded during recording
+
+**Problem:** the `chapter_titles` external step's `appliesTo` is just `source === "recorded"`, so *every* recorded video shows "Chapter titles" as ❌ (and a `ready` video's badge reads "awaiting chapter titles") until the Mac sends suggestions — even when no chapter markers were ever recorded, in which case the Mac will *never* send them. The step should only be *expected* when the macOS app actually recorded chapter markers during the session (those are what trigger the Mac's suggested-title pass); otherwise it should read "—" (not applicable), not ❌.
+
+This is specifically about chapters **recorded during recording** — *not* chapters a user adds/edits later in the editor. Those are a separate, post-processing-independent concern; the Mac only suggests titles for markers that existed at recording time.
+
+**The data already exists — no new on-disk file generation is needed:**
+- `chapters.json` is written at `/complete` from `recording.json` *only when `extractChaptersFromTimeline` finds markers* (`routes/api/videos.ts:240-246`), so its mere presence already implies recorded markers.
+- Better still, each `Chapter` carries a `createdDuringRecording: boolean` flag (`lib/chapters.ts:21`), which cleanly distinguishes recorded markers from editor-added ones — so an editor-added chapter on an otherwise marker-less recording won't wrongly re-trigger the expectation.
+
+**Direction:** gate `chapter_titles` applicability on "at least one chapter with `createdDuringRecording === true`." Because `appliesTo(ctx)` is synchronous, thread the boolean into `StepContext` (e.g. `ctx.hasRecordedChapters`), populated where the applicability context is built for the **readiness UI** (`computeReadiness`) and **backfill** (`inferStepsFromDisk`) — both already async, so they can `readChapters()` first. The live pipeline never evaluates this step (it's external), so its context can leave the field undefined. Then `chapter_titles.appliesTo = ctx.source === "recorded" && ctx.hasRecordedChapters === true`.
+
+Folded into Phase 3 because it's exactly the `appliesTo` + context-threading work the unification is already doing (decision 1); it can land as an early, self-contained commit. **Where:** `lib/processing/registry.ts` (the `chapter_titles` step + `StepContext` + `applicabilityContext`), `lib/processing/readiness.ts`, `lib/processing/backfill.ts`.
 
 ---
 

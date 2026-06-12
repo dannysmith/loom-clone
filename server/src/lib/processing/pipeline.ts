@@ -9,8 +9,8 @@
 // disk — unless `force` is set. So re-running the pipeline IS "resume from where
 // it failed", which is what the manual reprocess button relies on.
 
-import { mkdir, rm } from "fs/promises";
-import { join } from "path";
+import { mkdir, readdir, rename, rm } from "fs/promises";
+import { basename, join } from "path";
 import type { ProcessingStepKind } from "../../db/schema";
 import { derivativesDir, probeMetadata } from "../derivatives";
 import { logEvent } from "../events";
@@ -22,6 +22,7 @@ import {
   REQUIRED_KINDS,
   RUNNABLE_STEPS,
   type StepContext,
+  type StepRunResult,
   stepByKind,
 } from "./registry";
 import { clearRunActive, markRunActive } from "./run-lock";
@@ -29,7 +30,6 @@ import {
   fileSizeBytes,
   getStep,
   markStepFailed,
-  markStepPending,
   markStepReady,
   markStepSkipped,
 } from "./steps-store";
@@ -168,55 +168,28 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
 
   const started = Date.now();
   const produced: string[] = [];
-  const heightState = { probed: false };
 
-  // A forced FULL rebuild (force, no `only`) regenerates the expected outputs
-  // in place. Reset their ledger rows up front so the serving gate stops
-  // offering the soon-to-be-stale variants (the viewer falls back to the
-  // freshly-restitched source only during the window) and the readiness UI
-  // shows them regenerating. `hold` then keeps the video out of `ready` until
-  // the whole set re-validates at the end. A single-artifact `only` regenerate
-  // is already atomic (tmp→rename) and skips this.
-  const forcedFullRebuild = (opts.force ?? false) && !opts.only;
-  if (forcedFullRebuild) await resetRegeneratedSteps(videoId, ctx);
-
-  for (const step of RUNNABLE_STEPS) {
-    if (opts.only && step.kind !== opts.only) continue;
-
-    // Probe the active file's height once it exists, so resolution-gated steps
-    // (variants) see the real value even on a fresh run where video.height was
-    // still null.
-    if (!heightState.probed && ctx.height === 0) {
-      if (await Bun.file(ctx.activeFile).exists()) {
-        heightState.probed = true;
-        const meta = await probeMetadata(ctx.activeFile);
-        if (meta) {
-          ctx.height = meta.height;
-          // Reused by the metadata step (extractMetadata) so the active file is
-          // probed once per run, not twice.
-          ctx.scratch.sourceMeta = meta;
-        }
-      }
+  // A forced rebuild of an already-served (`ready`) video regenerates the served
+  // set, so it runs into a staging dir and swaps the whole validated set into
+  // place atomically — the previous outputs keep serving until the swap, and a
+  // failed run leaves them (and the ledger and status) untouched. Everything else
+  // writes in place: the first build, a heal re-stitch (status `healing` — still
+  // serving HLS, not replacing a served MP4 set, so a failed stitch should
+  // surface as a failed `source`), a resumable run, and single-artifact `only`
+  // regenerates are all additive or non-destructive (each step is atomic
+  // tmp→rename).
+  const staged = !opts.only && (opts.force ?? false) && video.status === "ready";
+  if (staged) {
+    try {
+      await runStepsStaged(videoId, ctx, produced);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[pipeline] ${videoId} staged rebuild failed (previous outputs kept):`, msg);
+      await logStep(videoId, "source", "failed", `staged rebuild: ${msg}`);
+      return; // leave the previous served set, ledger, and status intact
     }
-
-    if (!step.appliesTo(ctx)) continue;
-    if (!(await inputsSatisfied(videoId, step, ctx))) continue;
-
-    // reconcile only reads the mandatory (source/metadata) step states, so a
-    // reconcile after a non-mandatory step (audio/variant/…) can't change the
-    // status — run it only after the mandatory ones (reaching `ready` the moment
-    // they validate) plus the final settle below.
-    const reconcileNow = REQUIRED_KINDS.includes(step.kind);
-
-    // Skip-if-ready resumability.
-    if (!ctx.force && (await isAlreadyDone(videoId, step, ctx))) {
-      produced.push(`${step.kind}*`);
-      if (reconcileNow) await reconcile(videoId, { running: true, hold: forcedFullRebuild });
-      continue;
-    }
-
-    await runStep(videoId, step, ctx, produced);
-    if (reconcileNow) await reconcile(videoId, { running: true, hold: forcedFullRebuild });
+  } else {
+    await runStepsInPlace(videoId, ctx, opts, produced);
   }
 
   // Single-artifact regenerate (`only`) touches just that step — skip the
@@ -224,6 +197,7 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   if (!opts.only) {
     // Editor storyboard: dense frames for the editing timeline. Not part of the
     // public checklist (no step row), regenerated only from the original source.
+    // Written to the real dir (not part of the served set, so not staged).
     if (ctx.duration >= 5) {
       try {
         await generateEditorStoryboard(dir, ctx.duration);
@@ -252,6 +226,149 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   } catch {
     // DB may be gone in tests — don't let event logging crash the pipeline.
   }
+}
+
+// In-place run: first build / heal / resumable / single-artifact regenerate.
+// Each step writes atomically (tmp→rename) into the real derivatives dir, and we
+// reconcile after each mandatory step so the video reaches `ready` the moment
+// source + metadata validate — independent of the slower expected steps.
+async function runStepsInPlace(
+  videoId: string,
+  ctx: StepContext,
+  opts: RunOpts,
+  produced: string[],
+): Promise<void> {
+  const heightState = { probed: false };
+
+  for (const step of RUNNABLE_STEPS) {
+    if (opts.only && step.kind !== opts.only) continue;
+
+    // Probe the active file's height once it exists, so resolution-gated steps
+    // (variants) see the real value even on a fresh run where video.height was
+    // still null.
+    if (!heightState.probed && ctx.height === 0) {
+      if (await Bun.file(ctx.activeFile).exists()) {
+        heightState.probed = true;
+        const meta = await probeMetadata(ctx.activeFile);
+        if (meta) {
+          ctx.height = meta.height;
+          // Reused by the metadata step (extractMetadata) so the active file is
+          // probed once per run, not twice.
+          ctx.scratch.sourceMeta = meta;
+        }
+      }
+    }
+
+    if (!step.appliesTo(ctx)) continue;
+    if (!(await inputsSatisfied(videoId, step, ctx))) continue;
+
+    // reconcile only reads the mandatory (source/metadata) step states, so a
+    // reconcile after a non-mandatory step can't change the status — run it only
+    // after the mandatory ones (reaching `ready` the moment they validate) plus
+    // the final settle.
+    const reconcileNow = REQUIRED_KINDS.includes(step.kind);
+
+    // Skip-if-ready resumability.
+    if (!ctx.force && (await isAlreadyDone(videoId, step, ctx))) {
+      produced.push(`${step.kind}*`);
+      if (reconcileNow) await reconcile(videoId, { running: true });
+      continue;
+    }
+
+    await runStep(videoId, step, ctx, produced);
+    if (reconcileNow) await reconcile(videoId, { running: true });
+  }
+}
+
+// Staged run: regenerate the served set atomically. Every applicable step
+// produces + validates into a staging dir; ANY failure throws and aborts the
+// whole run (leaving the previous outputs, ledger, and status untouched — a
+// failed rebuild can't demote a working video). Only once the full set is built
+// do we swap it into place and mark the ledger — so there's never a window where
+// a freshly-regenerated file sits beside a stale one. Status is withheld until
+// the caller's final reconcile.
+async function runStepsStaged(
+  videoId: string,
+  ctx: StepContext,
+  produced: string[],
+): Promise<void> {
+  const realDir = ctx.dir;
+  const stagingDir = join(realDir, ".staging");
+  await rm(stagingDir, { recursive: true, force: true });
+  await mkdir(stagingDir, { recursive: true });
+
+  // Outputs go to staging; the active file lives there too. Inputs are read from
+  // their real locations (a precondition like source.mp4, or — for a from-HLS
+  // rebuild — the freshly staged source, which is still present in realDir as
+  // the old copy until the swap), so input checks use the real-dir `ctx`.
+  const stagedCtx: StepContext = {
+    ...ctx,
+    dir: stagingDir,
+    activeFile: join(stagingDir, basename(ctx.activeFile)),
+  };
+  const heightState = { probed: false };
+  const outcomes: Array<{ step: ProcessingStep; result: StepRunResult }> = [];
+
+  try {
+    for (const step of RUNNABLE_STEPS) {
+      if (!heightState.probed && stagedCtx.height === 0) {
+        if (await Bun.file(stagedCtx.activeFile).exists()) {
+          heightState.probed = true;
+          const meta = await probeMetadata(stagedCtx.activeFile);
+          if (meta) {
+            stagedCtx.height = meta.height;
+            stagedCtx.scratch.sourceMeta = meta;
+          }
+        }
+      }
+
+      if (!step.appliesTo(stagedCtx)) continue;
+      if (!(await inputsSatisfied(videoId, step, ctx))) continue;
+
+      const result = await step.run!(stagedCtx);
+      if (result !== "skipped") {
+        const valid = step.validate ? await step.validate(stagedCtx) : true;
+        if (!valid) throw new Error(`staged ${step.kind} produced an invalid artifact`);
+      }
+      outcomes.push({ step, result });
+    }
+
+    // Swap the validated set into place. Per-file renames within the same
+    // filesystem (staging is a subdir of the derivatives dir) are atomic. Files
+    // the run didn't regenerate (e.g. an edit leaves the thumbnail/peaks) stay
+    // in realDir untouched.
+    const stagedFiles = (await readdir(stagingDir)).filter((f) => !f.endsWith(".tmp"));
+    for (const f of stagedFiles) await rename(join(stagingDir, f), join(realDir, f));
+    console.log(`[pipeline] ${videoId} swapped ${stagedFiles.length} staged output(s)`);
+
+    // Mark the ledger now the files are in their real home (artifact paths
+    // resolve against the real-dir `ctx`).
+    for (const { step, result } of outcomes) {
+      await markStagedStep(videoId, step, ctx, result, produced);
+    }
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// Ledger marking for a staged step, post-swap. Mirrors finishReady/runStep's
+// "skipped but artifact present is really ready" rule.
+async function markStagedStep(
+  videoId: string,
+  step: ProcessingStep,
+  ctx: StepContext,
+  result: StepRunResult,
+  produced: string[],
+): Promise<void> {
+  const path = step.artifact?.(ctx);
+  if (result === "skipped" && !(path && (await Bun.file(path).exists()))) {
+    await markStepSkipped(videoId, step.kind);
+    await logStep(videoId, step.kind, "skipped");
+    return;
+  }
+  await markStepReady(videoId, step.kind, { sizeBytes: path ? fileSizeBytes(path) : null });
+  await logStep(videoId, step.kind, "ready");
+  produced.push(step.kind);
 }
 
 async function runStep(
@@ -338,20 +455,6 @@ async function isAlreadyDone(
   const path = step.artifact?.(ctx);
   if (path && !(await Bun.file(path).exists())) return false;
   return true;
-}
-
-// Reset the expected, file-producing step rows to `pending` before a forced
-// full rebuild regenerates them. The required steps (source/metadata) and audio
-// (no served artifact, mutates source.mp4 in place) are left alone, so the
-// source MP4 keeps serving — atomically swapped — while only the variants are
-// withheld until regenerated. The files on disk are untouched; `force` re-runs
-// each step regardless of row state.
-async function resetRegeneratedSteps(videoId: string, ctx: StepContext): Promise<void> {
-  for (const step of RUNNABLE_STEPS) {
-    if (step.tier !== "expected" || !step.artifact) continue;
-    if (!step.appliesTo(ctx)) continue;
-    await markStepPending(videoId, step.kind);
-  }
 }
 
 async function maybeDeleteUpload(videoId: string): Promise<void> {

@@ -23,6 +23,7 @@ import { DATA_DIR, getVideo, setVideoStatus, upsertTranscript } from "../store";
 import { generateEditorStoryboard } from "../storyboard";
 import { reconcile } from "./reconcile";
 import {
+  isServable,
   type ProcessingStep,
   REQUIRED_KINDS,
   RUNNABLE_STEPS,
@@ -454,36 +455,32 @@ async function finishReady(
   produced.push(step.kind);
 }
 
-// All declared inputs must be `ready` AND (for file-producing inputs) present
-// on disk before a step can run. A missing input leaves this step untouched.
+// All declared inputs must be servable (`ready` AND, for file-producing inputs,
+// present on disk) before a step can run. A missing input leaves this step
+// untouched.
 async function inputsSatisfied(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
 ): Promise<boolean> {
   for (const inputKind of step.inputs) {
-    const row = await getStep(videoId, inputKind);
-    if (row?.state !== "ready") return false;
-    const path = stepByKind(inputKind)?.artifact?.(ctx);
-    if (path && !(await Bun.file(path).exists())) return false;
+    const inputStep = stepByKind(inputKind);
+    if (!inputStep) return false;
+    if (!(await isServable(inputStep, ctx, await getStep(videoId, inputKind)))) return false;
   }
   return true;
 }
 
-// A step is "already done" when its row is ready/skipped and (for ready
-// file-producing steps) the artifact is still on disk. Drives resumability.
+// A step is "already done" when its row is skipped, or it's servable (`ready`
+// and, for file-producing steps, still on disk). Drives resumability.
 async function isAlreadyDone(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
 ): Promise<boolean> {
   const row = await getStep(videoId, step.kind);
-  if (!row) return false;
-  if (row.state === "skipped") return true;
-  if (row.state !== "ready") return false;
-  const path = step.artifact?.(ctx);
-  if (path && !(await Bun.file(path).exists())) return false;
-  return true;
+  if (row?.state === "skipped") return true;
+  return isServable(step, ctx, row);
 }
 
 // Edit-specific finalisation, run after the validated staged swap: derive the

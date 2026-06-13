@@ -6,7 +6,7 @@
 // resumability and dependency-aware regeneration fall out naturally.
 
 import { join } from "path";
-import type { ProcessingStepKind, Video } from "../../db/schema";
+import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
 import {
   derivativesDir,
   extractMetadata,
@@ -339,6 +339,27 @@ export const REGENERABLE_KINDS = new Set<ProcessingStepKind>([
 
 export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined {
   return PROCESSING_STEPS.find((s) => s.kind === kind);
+}
+
+// The central "is this step's output servable right now?" predicate: its ledger
+// row is `ready` AND (for file-producing steps) the artifact is still present on
+// disk. This is the load-bearing invariant of the "ledger is a receipt, not an
+// inventory" design — a `ready` row alone never authorises serving; the disk
+// stat is what catches a hand-deleted, never-swapped-in, or cleaned-up file so
+// the viewer falls back gracefully instead of serving a phantom. It was inlined
+// in ~5 places (pipeline input/skip checks, the readiness UI, viewer serving,
+// stale-file cleanup); each copy was a place to forget the disk check and
+// reintroduce the phantom-file bug, so it lives here once. `row` is passed in
+// (rather than fetched) so callers with a preloaded step map don't re-scan.
+export async function isServable(
+  step: ProcessingStep,
+  ctx: StepContext,
+  row: VideoProcessingStep | undefined,
+): Promise<boolean> {
+  if (row?.state !== "ready") return false;
+  const path = step.artifact?.(ctx);
+  if (path && !(await Bun.file(path).exists())) return false;
+  return true;
 }
 
 // Builds a StepContext from a stored video row, for applicability/artifact

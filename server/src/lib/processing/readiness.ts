@@ -11,6 +11,7 @@ import { RECONCILE_OWNED } from "../status";
 import { DATA_DIR } from "../store";
 import {
   applicabilityContext,
+  isServable,
   PROCESSING_STEPS,
   REGENERABLE_KINDS,
   type StepTier,
@@ -118,15 +119,16 @@ export async function computeReadiness(video: Video): Promise<Readiness> {
   const steps = await getStepStates(video.id);
   const reprocess = await reprocessability(video, steps);
 
-  // Resolve the on-disk presence checks for `ready` file-producing rows in
-  // parallel up front, rather than awaiting each inside the loop.
-  const present = new Map<ProcessingStepKind, boolean>();
+  // Resolve servability (the on-disk presence check behind a `ready` row) for
+  // every applicable `ready` step in parallel up front, rather than awaiting
+  // each inside the loop. Same predicate the pipeline and viewer serving use.
+  const servable = new Map<ProcessingStepKind, boolean>();
   await Promise.all(
-    PROCESSING_STEPS.filter(
-      (s) => s.appliesTo(ctx) && steps.get(s.kind)?.state === "ready" && s.artifact,
-    ).map(async (s) => {
-      present.set(s.kind, await Bun.file(s.artifact!(ctx)).exists());
-    }),
+    PROCESSING_STEPS.filter((s) => s.appliesTo(ctx) && steps.get(s.kind)?.state === "ready").map(
+      async (s) => {
+        servable.set(s.kind, await isServable(s, ctx, steps.get(s.kind)));
+      },
+    ),
   );
 
   const items: ReadinessItem[] = [];
@@ -147,7 +149,7 @@ export async function computeReadiness(video: Video): Promise<Readiness> {
       icon = "ready"; // terminal-good: deliberately not produced, nothing missing
     } else if (row?.state === "ready") {
       // Ready in the ledger, but only servable if the file is still on disk.
-      icon = !step.artifact || present.get(step.kind) ? "ready" : "missing";
+      icon = servable.get(step.kind) ? "ready" : "missing";
     } else if (row?.state === "failed") {
       icon = "missing";
     } else if (step.tier === "external") {

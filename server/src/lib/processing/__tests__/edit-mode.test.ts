@@ -4,13 +4,14 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { mkdir } from "fs/promises";
+import { mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
+import { probeDuration } from "../../derivatives";
 import { createVideo, DATA_DIR, getTranscript, getVideo, upsertTranscript } from "../../store";
-import { _drainInFlight, scheduleEdit } from "../pipeline";
+import { _drainInFlight, scheduleEdit, scheduleReprocess } from "../pipeline";
 import { getStepStates, markStepReady } from "../steps-store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
@@ -111,6 +112,38 @@ describe("edit mode through the unified pipeline", () => {
       // source.mp4 is preserved and its row stays ready.
       expect(steps.get("source")?.state).toBe("ready");
       expect(await Bun.file(join(dir, "source.mp4")).exists()).toBe(true);
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "edit-aware single-artifact regen rebuilds a variant from the edited cut",
+    async () => {
+      const { id, dir } = await readyEditable();
+      scheduleEdit(id, "recorded");
+      await _drainInFlight();
+
+      // The edit produced an edited cut (~2s) and its 720p variant.
+      const editedDuration = (await getVideo(id))?.durationSeconds ?? 0;
+      expect(editedDuration).toBeGreaterThan(1.5);
+      expect(editedDuration).toBeLessThan(2.5);
+
+      // Drop the variant and regenerate it standalone (the "↻" path).
+      await rm(join(dir, "720p.mp4"), { force: true });
+      scheduleReprocess(id, { source: "recorded", force: true, only: "variant_720" });
+      await _drainInFlight();
+
+      // The regenerated variant matches the EDITED cut's duration (~2s), proving
+      // it was cut from the edited 1080p.mp4 — not the full 3s source.mp4. The
+      // edit is still intact (lastEditedAt + edited_output preserved).
+      expect(await Bun.file(join(dir, "720p.mp4")).exists()).toBe(true);
+      const variantDuration = (await probeDuration(join(dir, "720p.mp4"))) ?? 0;
+      expect(Math.abs(variantDuration - editedDuration)).toBeLessThan(0.6);
+
+      const after = await getVideo(id);
+      expect(after?.status).toBe("ready");
+      expect(after?.lastEditedAt).not.toBeNull();
+      expect((await getStepStates(id)).get("edited_output")?.state).toBe("ready");
     },
     60_000,
   );

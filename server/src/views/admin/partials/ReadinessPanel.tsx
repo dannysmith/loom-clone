@@ -82,7 +82,7 @@ export function ReadinessPanel({
       <table class="readiness-table">
         <tbody>
           {readiness.items.map((item) => (
-            <ReadinessRow video={video} item={item} reprocessable={reprocessable} edited={edited} />
+            <ReadinessRow video={video} item={item} reprocessable={reprocessable} />
           ))}
         </tbody>
       </table>
@@ -94,19 +94,17 @@ function ReadinessRow({
   video,
   item,
   reprocessable,
-  edited,
 }: {
   video: Video;
   item: ReadinessItem;
   reprocessable: boolean;
-  edited: boolean;
 }) {
   // Offer a per-artifact regenerate when the step is regenerable, source is
   // valid (encoded in item.regenerable), the video is reprocessable, and it
-  // isn't already mid-generation. Hidden for edited videos: a single-artifact
-  // regen from the full source would mismatch the edited active file, so an
-  // edited video is only reprocessed via the global (edit-resetting) controls.
-  const showRegen = reprocessable && item.regenerable && item.icon !== "pending" && !edited;
+  // isn't already mid-generation. Shown for edited videos too: the regen is
+  // edit-aware — variants/storyboard/metadata rebuild from the edited cut, the
+  // source-based artifacts (thumbnail, peaks) from the preserved source.mp4.
+  const showRegen = reprocessable && item.regenerable && item.icon !== "pending";
   return (
     <tr class={`readiness-row readiness-row--${item.icon}`}>
       <td class="readiness-cell-glyph" aria-hidden="true">
@@ -118,7 +116,7 @@ function ReadinessRow({
           <form
             method="post"
             action={`/admin/videos/${video.id}/reprocess/${item.kind}`}
-            hx-confirm={`Regenerate ${item.label.toLowerCase()} from source.mp4?`}
+            hx-confirm={`Regenerate ${item.label.toLowerCase()}?`}
           >
             <button
               type="submit"

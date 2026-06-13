@@ -12,6 +12,12 @@
  * `source` step `ready` (so they keep serving the MP4) and simply lack the
  * segment-derived steps. Idempotent — safe to re-run.
  *
+ * Also backfills the `edited_output` step (added in the Phase 3 pipeline
+ * unification) for videos edited before it existed: resolve.ts now gates an
+ * edited video's served cut on that step being servable, so a legacy edited
+ * video stops serving its MP4 until this runs (it falls back to HLS until then).
+ * Re-run this once after deploying the gate to keep such videos serving.
+ *
  * Usage:
  *   bun run videos:backfill-processing-steps
  */

@@ -116,18 +116,36 @@ describe("cleanupStaleFiles", () => {
     expect(await Bun.file(candidate).exists()).toBe(true);
   });
 
-  test("removes HLS for an edited video when its active {H}p.mp4 is present", async () => {
+  test("removes HLS for an edited video when its edited_output is validated ready", async () => {
     const { id, hls } = await makeStaleReadyVideo();
     await markStepReady(id, "source");
     await getDb()
       .update(videos)
       .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
       .where(eq(videos.id, id));
-    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // active file present
+    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // active cut present
+    await markStepReady(id, "edited_output"); // validated, the bar resolve.ts serves on
 
     await cleanupStaleFiles();
 
     for (const f of hls) expect(await Bun.file(f).exists()).toBe(false);
+  });
+
+  test("does NOT remove HLS for an edited video with no edited_output row (legacy safety)", async () => {
+    // An edited video predating the edited_output step: its cut is on disk but
+    // there's no validated ledger row, so resolve.ts won't serve the MP4 until
+    // the backfill runs. Keep the HLS fallback rather than stranding the viewer.
+    const { id, hls } = await makeStaleReadyVideo();
+    await markStepReady(id, "source");
+    await getDb()
+      .update(videos)
+      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
+      .where(eq(videos.id, id));
+    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // cut present, no row
+
+    await cleanupStaleFiles();
+
+    for (const f of hls) expect(await Bun.file(f).exists()).toBe(true);
   });
 });
 

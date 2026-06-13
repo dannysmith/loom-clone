@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { mkdir, rename } from "fs/promises";
 import { Hono } from "hono";
 import { raw } from "hono/html";
 import { join } from "path";
@@ -102,12 +103,11 @@ editor.put(
     const edl = c.req.valid("json");
 
     const derivDir = join(DATA_DIR, result.id, "derivatives");
-    const { mkdir, rename: fsRename } = await import("fs/promises");
     await mkdir(derivDir, { recursive: true });
     const tmpPath = join(derivDir, "edits.json.tmp");
     const finalPath = join(derivDir, "edits.json");
     await Bun.write(tmpPath, JSON.stringify(edl, null, 2));
-    await fsRename(tmpPath, finalPath);
+    await rename(tmpPath, finalPath);
 
     return c.json({ ok: true });
   },

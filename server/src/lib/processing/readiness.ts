@@ -99,7 +99,10 @@ const LABELS: Record<ProcessingStepKind, string> = {
 // A run is "in progress" (so not-yet-produced server steps show ⏳ rather than
 // ❌) while the video is processing/reprocessing, or while a `ready` video is
 // still being enriched (the run reaches `ready` the moment source+metadata
-// validate, before the slower expected steps finish).
+// validate, before the slower expected steps finish). This `ready`-but-still-
+// enriching nuance is the same one reconcile() encodes when it promotes to
+// `ready` on the mandatory set alone — see the promote-to-`ready` branch there;
+// computeBadge below turns it into the "enriching (N left)" rollup.
 function couldStillProduce(status: Video["status"], tier: StepTier): boolean {
   if (status === "processing" || status === "reprocessing") return true;
   if (status === "ready" && tier === "expected") return true;

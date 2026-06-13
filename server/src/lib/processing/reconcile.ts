@@ -52,7 +52,10 @@ export async function reconcile(videoId: string, opts: { running: boolean }): Pr
 
   // Promote to `ready` once the mandatory steps validate. (Forced rebuilds and
   // edits regenerate atomically via the staging swap, so there's no longer a
-  // mid-run window to hold status open for.)
+  // mid-run window to hold status open for.) Note this publishes `ready` while
+  // the slower EXPECTED steps may still be running — the readiness UI reflects
+  // that "ready but still enriching" state (see couldStillProduce / computeBadge
+  // in readiness.ts), so the two stay in sync on what `ready` means mid-run.
   if (rollup === "ready") {
     await markVideoReady(videoId);
     return;

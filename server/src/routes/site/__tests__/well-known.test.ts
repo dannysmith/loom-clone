@@ -43,6 +43,29 @@ describe("GET /", () => {
     expect(body.toLowerCase()).not.toContain("loom-clone");
     expect(body.toLowerCase()).not.toContain("loom clone");
   });
+
+  test("serves the llms.txt index as markdown for Accept: text/markdown", async () => {
+    const res = await wellKnown.request("/", {
+      headers: { Accept: "text/markdown" },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("vary")).toBe("Accept");
+    const body = await res.text();
+    expect(body).toContain(`# ${siteConfig.name}`);
+    expect(body).toContain("## How to Use This Site");
+  });
+
+  test("still 302-redirects when Accept does not include text/markdown", async () => {
+    const res = await wellKnown.request("/", {
+      headers: { Accept: "text/html" },
+      redirect: "manual",
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(siteConfig.authorUrl);
+  });
 });
 
 describe("GET /robots.txt", () => {

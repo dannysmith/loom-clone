@@ -7,6 +7,7 @@ import { agentTextCacheControl } from "../../lib/cache-control";
 import { siteConfig } from "../../lib/site-config";
 import { PUBLIC_ROOT } from "../../lib/static-assets";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
+import { buildLlmsTxt } from "./feeds";
 
 // Root + well-known files. Open, no auth.
 const wellKnown = new Hono();
@@ -15,7 +16,20 @@ const wellKnown = new Hono();
 // rendered by browsers (they follow the Location header) but IS displayed
 // by curl (without -L), wget --max-redirect=0, and AI agents — giving
 // them pointers to /llms.txt and the feeds before they follow the redirect.
-wellKnown.get("/", (c) => {
+wellKnown.get("/", async (c) => {
+  // The root is just a redirect hub. For agents asking for markdown, the most
+  // useful "site as markdown" is the llms.txt index, so serve that directly
+  // instead of the 302 + HTML. The CDN edge rule bypasses cache on this
+  // Accept header; `no-store` + `Vary` keep shared caches from mixing it with
+  // the HTML response.
+  if ((c.req.header("accept") ?? "").includes("text/markdown")) {
+    return c.text(await buildLlmsTxt(), 200, {
+      "content-type": "text/markdown; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      Vary: "Accept",
+    });
+  }
+
   const body = [
     "<!DOCTYPE html>",
     '<html lang="en">',
@@ -44,6 +58,7 @@ wellKnown.get("/", (c) => {
     Location: siteConfig.authorUrl,
     "content-type": "text/html; charset=utf-8",
     Link: `</feed.xml>; rel="alternate"; type="application/rss+xml"; title="${siteConfig.name}"`,
+    Vary: "Accept",
   });
 });
 

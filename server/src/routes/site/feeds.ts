@@ -97,7 +97,10 @@ feeds.get("/feed.json", async (c) => {
 // llms.txt
 // ---------------------------------------------------------------------------
 
-feeds.get("/llms.txt", async (c) => {
+// Builds the llms.txt body (llmstxt.org format). Exported so the root handler
+// can serve the same content as the markdown representation of `/` when an
+// agent sends `Accept: text/markdown`.
+export async function buildLlmsTxt(): Promise<string> {
   const rows = await listPublicVideos();
   const base = getPublicBaseUrl();
 
@@ -153,10 +156,14 @@ feeds.get("/llms.txt", async (c) => {
     ].join("\n"),
   );
 
-  return c.text(`${sections.join("\n\n")}\n`, 200, {
+  return `${sections.join("\n\n")}\n`;
+}
+
+feeds.get("/llms.txt", async (c) =>
+  c.text(await buildLlmsTxt(), 200, {
     "content-type": "text/plain; charset=utf-8",
     "Cache-Control": agentTextCacheControl(),
-  });
-});
+  }),
+);
 
 export default feeds;

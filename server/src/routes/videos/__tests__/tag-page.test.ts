@@ -71,6 +71,16 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     expect(res.headers.get("x-robots-tag")).toBeNull();
   });
 
+  test("serves a generic OG image for social sharing", async () => {
+    await makePublicTag("og-tag", "OG Tag");
+    const res = await videos.request("/og-tag");
+    const html = await res.text();
+    expect(html).toContain('property="og:image" content="');
+    expect(html).toContain("/static/images/og-default.png");
+    expect(html).toContain('name="twitter:card" content="summary_large_image"');
+    expect(html).toContain('name="twitter:image"');
+  });
+
   test("exposes agent affordances: Link header, markdown alternate, directive, Vary", async () => {
     await makePublicTag("agenty");
     const res = await videos.request("/agenty");

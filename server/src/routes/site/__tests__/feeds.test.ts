@@ -7,6 +7,7 @@ import {
   updateVideo,
   upsertTranscript,
 } from "../../../lib/store";
+import { createTag, updateTag } from "../../../lib/tags";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import feeds from "../feeds";
 
@@ -387,5 +388,34 @@ describe("GET /llms.txt", () => {
     const body = await res.text();
     expect(body.toLowerCase()).not.toContain("loom-clone");
     expect(body.toLowerCase()).not.toContain("loom clone");
+  });
+
+  test("lists public tags with per-tag feed docs", async () => {
+    const tag = await createTag("Tutorials");
+    await updateTag(tag.id, {
+      visibility: "public",
+      slug: "tutorials",
+      description: "How-to videos",
+    });
+
+    const res = await feeds.request("/llms.txt");
+    const body = await res.text();
+    expect(body).toContain("## Tags");
+    expect(body).toContain("/<tag>/feed.xml");
+    expect(body).toContain("/<tag>/feed.json");
+    expect(body).toContain("[Tutorials](");
+    expect(body).toContain("/tutorials");
+    expect(body).toContain("How-to videos");
+  });
+
+  test("omits Tags section when no public tags exist", async () => {
+    // An unlisted tag has a public surface but must not appear in llms.txt.
+    const tag = await createTag("Internal");
+    await updateTag(tag.id, { visibility: "unlisted", slug: "internal" });
+
+    const res = await feeds.request("/llms.txt");
+    const body = await res.text();
+    expect(body).not.toContain("## Tags");
+    expect(body).not.toContain("internal");
   });
 });

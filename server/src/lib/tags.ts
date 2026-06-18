@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+} from "drizzle-orm";
 import { getDb } from "../db/client";
 import {
   TAG_COLORS,
@@ -58,6 +69,17 @@ export async function createTag(name: string, color?: TagColor): Promise<Tag> {
 
 export async function listTags(): Promise<Tag[]> {
   return getDb().select().from(tags).orderBy(tags.name);
+}
+
+// Public tags that have an indexable public surface: visibility public AND a
+// non-null slug. Shared by the sitemap and llms.txt so tag discovery stays in
+// sync across both. Ordered by name.
+export async function listPublicTags(): Promise<Tag[]> {
+  return getDb()
+    .select()
+    .from(tags)
+    .where(and(eq(tags.visibility, "public"), isNotNull(tags.slug)))
+    .orderBy(tags.name);
 }
 
 export async function getTag(id: number): Promise<Tag | undefined> {

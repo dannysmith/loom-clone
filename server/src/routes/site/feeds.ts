@@ -11,6 +11,7 @@ import {
 } from "../../lib/feed-items";
 import { formatDuration } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
+import { listPublicTags } from "../../lib/tags";
 import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
 
 // Public feeds: RSS, JSON Feed, llms.txt. No auth.
@@ -101,7 +102,7 @@ feeds.get("/feed.json", async (c) => {
 // can serve the same content as the markdown representation of `/` when an
 // agent sends `Accept: text/markdown`.
 export async function buildLlmsTxt(): Promise<string> {
-  const rows = await listPublicVideos();
+  const [rows, tagRows] = await Promise.all([listPublicVideos(), listPublicTags()]);
   const base = getPublicBaseUrl();
 
   const sections: string[] = [];
@@ -142,6 +143,31 @@ export async function buildLlmsTxt(): Promise<string> {
     });
 
     sections.push(["## Public Videos", "", ...videoLines].join("\n"));
+  }
+
+  // Tags — public topic pages grouping related videos. Each tag page also
+  // exposes markdown and feed representations, mirroring the per-video
+  // conventions above.
+  if (tagRows.length > 0) {
+    const tagLines = tagRows.map((t) => {
+      const url = absoluteUrl(`/${t.slug}`);
+      const suffix = t.description ? ` — ${t.description}` : "";
+      return `- [${t.name}](${url})${suffix}`;
+    });
+
+    sections.push(
+      [
+        "## Tags",
+        "",
+        "Videos are grouped into public topic pages. Each tag at `/<tag>` also supports:",
+        "",
+        "- `/<tag>.md` — tag metadata as markdown",
+        "- `/<tag>/feed.xml` — RSS 2.0 + Media RSS feed of videos with this tag",
+        "- `/<tag>/feed.json` — JSON Feed 1.1 of videos with this tag",
+        "",
+        ...tagLines,
+      ].join("\n"),
+    );
   }
 
   // Links

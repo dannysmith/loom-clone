@@ -1,11 +1,12 @@
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { join } from "path";
 import { getDb } from "../../db/client";
-import { tags, videos } from "../../db/schema";
+import { videos } from "../../db/schema";
 import { agentTextCacheControl } from "../../lib/cache-control";
 import { siteConfig } from "../../lib/site-config";
 import { PUBLIC_ROOT } from "../../lib/static-assets";
+import { listPublicTags } from "../../lib/tags";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
 import { buildLlmsTxt } from "./feeds";
 
@@ -109,11 +110,7 @@ wellKnown.get("/sitemap.xml", async (c) => {
         and(eq(videos.visibility, "public"), eq(videos.status, "ready"), isNull(videos.trashedAt)),
       )
       .orderBy(desc(videos.createdAt)),
-    getDb()
-      .select()
-      .from(tags)
-      .where(and(eq(tags.visibility, "public"), isNotNull(tags.slug)))
-      .orderBy(desc(tags.createdAt)),
+    listPublicTags(),
   ]);
 
   const tagEntries = tagRows

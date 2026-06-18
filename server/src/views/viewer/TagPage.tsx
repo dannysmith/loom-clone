@@ -3,6 +3,7 @@ import { marked } from "marked";
 import type { Tag, Video } from "../../db/schema";
 import { formatDate, formatDurationShort } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
+import { staticUrl } from "../../lib/static-assets";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 import { AgentDirective } from "./AgentDirective";
@@ -25,6 +26,9 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
   const ogDescription =
     description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
   const noindex = tag.visibility !== "public";
+  // Generic site OG image — tag pages have no per-tag artwork. Absolute URL
+  // because OG/Twitter consumers don't resolve relative paths.
+  const ogImage = absoluteUrl(staticUrl("images/og-default.png"));
 
   return (
     <ViewerLayout
@@ -40,10 +44,12 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
           <meta property="og:title" content={tag.name} />
           <meta property="og:url" content={canonicalUrl} />
           {ogDescription && <meta property="og:description" content={ogDescription} />}
+          <meta property="og:image" content={ogImage} />
 
-          <meta name="twitter:card" content="summary" />
+          <meta name="twitter:card" content="summary_large_image" />
           <meta name="twitter:title" content={tag.name} />
           {ogDescription && <meta name="twitter:description" content={ogDescription} />}
+          <meta name="twitter:image" content={ogImage} />
 
           {/* Markdown alternate for agents */}
           <link rel="alternate" type="text/markdown" href={`/${tag.slug}.md`} title={tag.name} />

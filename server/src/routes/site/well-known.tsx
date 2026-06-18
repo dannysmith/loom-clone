@@ -38,6 +38,7 @@ wellKnown.get("/", async (c) => {
     `  <title>Redirecting to ${siteConfig.authorUrl.replace(/^https?:\/\//, "")}</title>`,
     `  <link rel="alternate" type="application/rss+xml" title="${siteConfig.name}" href="/feed.xml">`,
     `  <link rel="alternate" type="application/feed+json" title="${siteConfig.name}" href="/feed.json">`,
+    `  <link rel="alternate" type="text/markdown" title="${siteConfig.name}" href="/llms.txt">`,
     "</head>",
     "<body>",
     `  <h1>${siteConfig.name}</h1>`,

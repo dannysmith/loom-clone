@@ -112,6 +112,28 @@ describe("inferStepsFromDisk", () => {
     },
   );
 
+  // The edited cut ({H}p.mp4) is the file an edited video serves. resolve.ts +
+  // cleanup gate it on a `ready` edited_output step (P4.8), and duplicateVideo
+  // re-derives its ledger via inferStepsFromDisk — so a backfilled or duplicated
+  // edited video must gain a ready edited_output row to keep serving its cut.
+  test.skipIf(!ffmpegAvailable)(
+    "an edited video's cut is inferred as a ready edited_output step",
+    async () => {
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeRealMp4(join(dir, "source.mp4")); // preserved original
+      await writeRealMp4(join(dir, "240p.mp4")); // the edited cut (active file)
+      await getDb()
+        .update(videos)
+        .set({ durationSeconds: 2, lastEditedAt: new Date().toISOString(), height: 240 })
+        .where(eq(videos.id, video.id));
+
+      await inferStepsFromDisk(video.id);
+      expect((await getStepStates(video.id)).get("edited_output")?.state).toBe("ready");
+    },
+  );
+
   test.skipIf(!ffmpegAvailable)(
     "an unedited video's source.mp4 IS duration-checked (mismatch → failed)",
     async () => {

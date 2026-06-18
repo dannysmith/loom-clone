@@ -21,8 +21,10 @@ import { logEvent } from "../events";
 import { nowIso } from "../format";
 import { DATA_DIR, getVideo, setVideoStatus, upsertTranscript } from "../store";
 import { generateEditorStoryboard } from "../storyboard";
+import { activeRawFilename } from "../url";
 import { reconcile } from "./reconcile";
 import {
+  isServable,
   type ProcessingStep,
   REQUIRED_KINDS,
   RUNNABLE_STEPS,
@@ -152,12 +154,13 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
 
   const mode: "build" | "edit" = opts.mode ?? "build";
 
-  // Reprocess chokepoint: a BUILD reprocess of an edited video washes the edit
-  // away first and rebuilds a consistent UNEDITED video from source.mp4 (the
-  // build steps consume source.mp4, not the edited cut). An edit run skips this —
-  // it re-applies the new EDL to the preserved source.mp4. Per-artifact `only`
-  // regens are rejected for edited videos at the route. (Dynamic import avoids an
-  // import cycle: edit-reset pulls in store, which pulls in this module.)
+  // Reprocess chokepoint: a full BUILD reprocess of an edited video washes the
+  // edit away first and rebuilds a consistent UNEDITED video from source.mp4
+  // (the build steps consume source.mp4, not the edited cut). An edit run skips
+  // this — it re-applies the new EDL to the preserved source.mp4. A per-artifact
+  // `only` regen also skips it: it's edit-aware (activeFile resolves to the
+  // edited cut below), so the edit is preserved. (Dynamic import avoids an import
+  // cycle: edit-reset pulls in store, which pulls in this module.)
   if (!opts.only && mode !== "edit" && video.lastEditedAt) {
     const { resetAllEdits } = await import("../edit-reset");
     await resetAllEdits(videoId);
@@ -179,9 +182,16 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     source: opts.source,
     mode,
     dir,
-    // The active served file: source.mp4 for a build, the resolution-named EDL
-    // cut for an edit (source.mp4 is preserved as the original).
-    activeFile: mode === "edit" ? join(dir, `${video.height}p.mp4`) : join(dir, "source.mp4"),
+    // The active served file that downstream steps (variants, storyboard,
+    // metadata) consume. For an edit it's the resolution-named EDL cut being
+    // produced. Otherwise it's the video's CURRENT active file — source.mp4 for
+    // an unedited build, but the existing edited cut for a single-artifact regen
+    // of an already-edited video, so the regen runs from the edited output
+    // rather than the full source (a forced full rebuild resets the edit first,
+    // so `video` is unedited here and this resolves to source.mp4). source.mp4
+    // is always preserved as the original.
+    activeFile:
+      mode === "edit" ? join(dir, `${video.height}p.mp4`) : join(dir, activeRawFilename(video)),
     duration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
     force: opts.force ?? false,
@@ -454,36 +464,32 @@ async function finishReady(
   produced.push(step.kind);
 }
 
-// All declared inputs must be `ready` AND (for file-producing inputs) present
-// on disk before a step can run. A missing input leaves this step untouched.
+// All declared inputs must be servable (`ready` AND, for file-producing inputs,
+// present on disk) before a step can run. A missing input leaves this step
+// untouched.
 async function inputsSatisfied(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
 ): Promise<boolean> {
   for (const inputKind of step.inputs) {
-    const row = await getStep(videoId, inputKind);
-    if (row?.state !== "ready") return false;
-    const path = stepByKind(inputKind)?.artifact?.(ctx);
-    if (path && !(await Bun.file(path).exists())) return false;
+    const inputStep = stepByKind(inputKind);
+    if (!inputStep) return false;
+    if (!(await isServable(inputStep, ctx, await getStep(videoId, inputKind)))) return false;
   }
   return true;
 }
 
-// A step is "already done" when its row is ready/skipped and (for ready
-// file-producing steps) the artifact is still on disk. Drives resumability.
+// A step is "already done" when its row is skipped, or it's servable (`ready`
+// and, for file-producing steps, still on disk). Drives resumability.
 async function isAlreadyDone(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
 ): Promise<boolean> {
   const row = await getStep(videoId, step.kind);
-  if (!row) return false;
-  if (row.state === "skipped") return true;
-  if (row.state !== "ready") return false;
-  const path = step.artifact?.(ctx);
-  if (path && !(await Bun.file(path).exists())) return false;
-  return true;
+  if (row?.state === "skipped") return true;
+  return isServable(step, ctx, row);
 }
 
 // Edit-specific finalisation, run after the validated staged swap: derive the

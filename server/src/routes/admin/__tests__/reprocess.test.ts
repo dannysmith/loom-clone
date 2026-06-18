@@ -131,7 +131,7 @@ describe("POST /admin/videos/:id/reprocess/:kind", () => {
     expect(res.status).toBe(400);
   });
 
-  test("refused for an edited video (per-artifact regen is edit-unaware)", async () => {
+  test("accepted for an edited video (edit-aware single-artifact regen)", async () => {
     const app = createApp();
     const video = await createVideo();
     await completeVideo(video.id); // → ready
@@ -142,8 +142,9 @@ describe("POST /admin/videos/:id/reprocess/:kind", () => {
       .where(eq(videos.id, video.id));
 
     const res = await app.request(`/admin/videos/${video.id}/reprocess/thumbnail`, POST);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("edited video");
+    expect(res.status).toBe(302);
+    const events = await listEvents(video.id);
+    expect(events.map((e) => e.type)).toContain("reprocess_requested");
   });
 });
 

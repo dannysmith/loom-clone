@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { _variantsForHeight, generateVariants } from "../derivatives";
+import { generateVariant } from "../derivatives";
 
-// generateVariants probes with ffprobe (probeMetadata), so require both tools.
+// generateVariant shells out to ffmpeg, and the assertions probe with ffprobe.
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
+
+// Which variant heights apply to a given source height (the `ctx.height >
+// height` gate in the registry's variantStep) is covered by readiness.test.ts;
+// here we exercise generateVariant's actual encode output (dimensions/aspect).
 
 let env: TestEnv;
 
@@ -15,48 +19,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await teardownTestEnv(env);
-});
-
-// --- variantsForHeight (pure logic) ---
-
-describe("variantsForHeight", () => {
-  // Assert the heights selected (highest-first); the canonical VARIANTS entries
-  // also carry `kind`/`crf`, which these cases don't need to pin.
-  const heights = (h: number) => _variantsForHeight(h).map((v) => v.height);
-
-  test("720p source generates nothing", () => {
-    expect(heights(720)).toEqual([]);
-  });
-
-  test("1080p source generates only 720p", () => {
-    expect(heights(1080)).toEqual([720]);
-  });
-
-  test("1440p source generates both 1080p and 720p", () => {
-    expect(heights(1440)).toEqual([1080, 720]);
-  });
-
-  test("4K source generates both 1080p and 720p", () => {
-    expect(heights(2160)).toEqual([1080, 720]);
-  });
-
-  test("480p source generates nothing", () => {
-    expect(heights(480)).toEqual([]);
-  });
-
-  test("1081p source generates both variants", () => {
-    expect(heights(1081)).toEqual([1080, 720]);
-  });
-
-  test("721p source generates only 720p", () => {
-    expect(heights(721)).toEqual([720]);
-  });
-
-  test("the 720p variant uses a higher CRF than 1080p (smaller file)", () => {
-    const v = _variantsForHeight(1440);
-    const crf = (h: number) => v.find((x) => x.height === h)?.crf;
-    expect(crf(720)).toBeGreaterThan(crf(1080)!);
-  });
 });
 
 // --- End-to-end variant generation ---
@@ -118,26 +80,27 @@ async function probeDimensions(filePath: string): Promise<{ width: number; heigh
   return { width: data.streams?.[0]?.width ?? 0, height: data.streams?.[0]?.height ?? 0 };
 }
 
-describe("generateVariants (end-to-end)", () => {
+describe("generateVariant (end-to-end)", () => {
   test.skipIf(!ffmpegAvailable)(
-    "1440p source generates both 1080p and 720p variants",
+    "downscales a 1440p source to both 1080p and 720p with the right dimensions",
     async () => {
       // 2560x1440 is 16:9
       const dir = join("data", "test-variants-1440p");
       await generateTestSource(dir, "2560x1440");
+      const source = join(dir, "source.mp4");
 
-      await generateVariants(dir);
+      await generateVariant(dir, 1080, source);
+      await generateVariant(dir, 720, source);
 
-      // 1080p variant
+      // 1080p variant — width preserves the 16:9 aspect ratio (1920).
       const f1080 = Bun.file(join(dir, "1080p.mp4"));
       expect(await f1080.exists()).toBe(true);
       expect(f1080.size).toBeGreaterThan(0);
       const dims1080 = await probeDimensions(join(dir, "1080p.mp4"));
       expect(dims1080.height).toBe(1080);
-      // Width should preserve aspect ratio: 1920 for 16:9
       expect(dims1080.width).toBe(1920);
 
-      // 720p variant
+      // 720p variant — 1280 wide for 16:9.
       const f720 = Bun.file(join(dir, "720p.mp4"));
       expect(await f720.exists()).toBe(true);
       expect(f720.size).toBeGreaterThan(0);
@@ -146,40 +109,5 @@ describe("generateVariants (end-to-end)", () => {
       expect(dims720.width).toBe(1280);
     },
     120_000,
-  );
-
-  test.skipIf(!ffmpegAvailable)(
-    "1080p source generates only 720p variant",
-    async () => {
-      const dir = join("data", "test-variants-1080p");
-      await generateTestSource(dir, "1920x1080");
-
-      await generateVariants(dir);
-
-      // 720p should exist
-      const f720 = Bun.file(join(dir, "720p.mp4"));
-      expect(await f720.exists()).toBe(true);
-      const dims720 = await probeDimensions(join(dir, "720p.mp4"));
-      expect(dims720.height).toBe(720);
-      expect(dims720.width).toBe(1280);
-
-      // 1080p should NOT exist (source is already 1080p)
-      expect(await Bun.file(join(dir, "1080p.mp4")).exists()).toBe(false);
-    },
-    120_000,
-  );
-
-  test.skipIf(!ffmpegAvailable)(
-    "720p source generates no variants",
-    async () => {
-      const dir = join("data", "test-variants-720p");
-      await generateTestSource(dir, "1280x720");
-
-      await generateVariants(dir);
-
-      expect(await Bun.file(join(dir, "720p.mp4")).exists()).toBe(false);
-      expect(await Bun.file(join(dir, "1080p.mp4")).exists()).toBe(false);
-    },
-    60_000,
   );
 });

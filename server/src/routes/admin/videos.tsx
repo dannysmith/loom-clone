@@ -539,19 +539,14 @@ videoRoutes.post("/:id/reprocess/:kind", async (c) => {
   if (!canReprocess(result)) {
     return c.text(`Cannot reprocess a video with status "${result.status}"`, 400);
   }
-  // Per-artifact regen is edit-unaware (it would rebuild from the full source
-  // while the active file stays the edited cut), so it's disabled for edited
-  // videos — the UI hides the button; reject a direct POST too. Use the global
-  // "Re-run post-processing" (which resets the edit) instead.
-  if (result.lastEditedAt) {
-    return c.text(
-      "Per-artifact regeneration is disabled for edited videos — use Re-run post-processing instead",
-      400,
-    );
-  }
   if (!REGENERABLE_KINDS.has(kind)) {
     return c.text(`"${kind}" cannot be regenerated standalone`, 400);
   }
+  // Edit-aware: for an edited video the pipeline runs this regen from the edited
+  // cut (variants/storyboard/metadata) while source-based artifacts (thumbnail,
+  // peaks) still derive from the preserved source.mp4 — so a single-artifact
+  // regen stays consistent with the edited active file. source must still be
+  // valid (the edited cut and the source-based artifacts both depend on it).
   const { sourceValid } = await reprocessability(result);
   if (!sourceValid) {
     return c.text("Cannot regenerate — source.mp4 is missing or invalid", 400);

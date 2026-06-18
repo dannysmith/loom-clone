@@ -1,5 +1,16 @@
 # Pipeline-Unification Cleanup (Phase 4)
 
+> **✅ DONE** on branch `task-phase-4-pipeline-cleanup` (`bun run check && bun run typecheck && bun test` green, 712 pass). All items shipped:
+> - **[P4.1]** `generateVariants`/`variantsForHeight` deleted (`derivatives.ts`) — confirmed dead since the edit-pipeline was removed in Phase 3; `generateVariant` (singular) + the registry's `appliesTo` are the live path. Tests reworked onto `generateVariant`.
+> - **[P4.2]** One `isServable(step, ctx, row)` predicate in `registry.ts`, wired into `inputsSatisfied`/`isAlreadyDone` (pipeline), `computeReadiness` (readiness), `resolve.ts`, and `cleanup.ts`.
+> - **[P4.4]** `resolve.ts` uses `REQUIRED_KINDS.every(...)` for the mandatory-set bar instead of a hand-copied `source`+`metadata` check.
+> - **[P4.5]** The three mid-function `import("fs/promises")` calls (`api/videos.ts`, `admin/editor.ts`) are now static.
+> - **[P4.6]** Cross-reference comments link reconcile's promote-to-`ready` branch with readiness's `couldStillProduce`/`computeBadge`.
+> - **[P4.7]** Edit-aware single-artifact regen: build-mode `activeFile` resolves to the video's current active file (`activeRawFilename`), so a per-artifact regen of an edited video runs from the edited cut (variants/storyboard/metadata) while thumbnail/peaks stay source-based. Route rejection + `!edited` UI guard dropped; "↻" surfaced on edited videos.
+> - **[P4.8]** `resolve.ts` + `cleanup.ts` gate the active served file on its producing step (`source` unedited, `edited_output` edited) via `isServable`. Per the agreed decision, legacy edited videos predating `edited_output` are backfilled by re-running `videos:backfill-processing-steps` (its header documents this) — no auto-backfill added.
+>
+> Both untested Phase-3 scenarios were verified: **duplicating an edited video** (`inferStepsFromDisk` infers a ready `edited_output` — new test in `backfill.test.ts`) and **rebuild-from-HLS on an edited video** (`resetAllEdits` already skips `edited_output` + clears `lastEditedAt`, so serving falls to the `source` gate).
+
 ## Lineage
 
 This is **Phase 4** of the [post-processing pipeline unification](../tasks-done/task-2026-06-11-1-post-processing-pipeline-unification.md). It is **pure cleanup fallout from [Phase 3](../tasks-done/task-2026-06-12-1-pipeline-unification-phase-3.md)** — no behaviour change, *except* [P4.7], which is a small feature folded in from [#46](https://github.com/dannysmith/loom-clone/issues/46) item 2.

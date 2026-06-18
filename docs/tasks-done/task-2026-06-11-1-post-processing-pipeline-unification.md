@@ -1,7 +1,7 @@
 # Post-Processing & Admin Pipeline — Unify the Pipelines, Fix Concurrency & Correctness Edges
 
 > **✅ COMPLETE (Phases 1–2).** This doc has done its job: it captured the #48 review and delivered the independent correctness fixes (Phase 1, incl. the live editor-lock bug) and the SSOT prep (Phase 2). The two remaining phases were spun out into their own docs and continue from here:
-> [Phase 3 — unify the pipelines](../tasks-todo/task-1-pipeline-unification-phase-3.md) and [Phase 4 — cleanup](../tasks-todo/task-x-pipeline-unification-cleanup.md).
+> [Phase 3 — unify the pipelines](./task-2026-06-12-1-pipeline-unification-phase-3.md) and [Phase 4 — cleanup](./task-2026-06-14-x-pipeline-unification-cleanup.md).
 > It is kept as the record of Phases 1–2 plus the original analysis (core problem, agreed design decisions, what's good, explicitly-not-doing).
 
 ## Why this task exists
@@ -136,7 +136,7 @@ Cheap, mostly mechanical, and they de-risk the Phase 3 refactor by removing dupl
 The big refactor and its cleanup were split out of this doc once Phases 1–2 shipped (they are too large to track inline, per the original "break it into its own sub-task doc(s) at execution time" note):
 
 - **Phase 3 — unify the pipelines (the centrepiece):** [`task-1-pipeline-unification-phase-3.md`](../tasks-todo/task-1-pipeline-unification-phase-3.md). Eliminate the parallel edit-pipeline so there is one parameterised pipeline, `reconcile` is the only post-footage status writer, `runStep` is the only ledger writer, and staging-swap is the single rebuild atomicity primitive. Subsumes #46 item 1. Carries the agreed design decisions forward as requirements.
-- **Phase 4 — cleanup fallout:** [`task-x-pipeline-unification-cleanup.md`](../tasks-todo/task-x-pipeline-unification-cleanup.md). Pure polish that depends on Phase 3 (plus the small #46-item-2 feature, P4.7). Unprioritised until Phase 3 lands.
+- **Phase 4 — cleanup fallout:** [`task-2026-06-14-x-pipeline-unification-cleanup.md`](./task-2026-06-14-x-pipeline-unification-cleanup.md). Pure polish that depended on Phase 3 (plus the small #46-item-2 feature, P4.7). ✅ Done.
 
 The "Agreed design decisions", "Explicitly NOT doing", and "What's good — do not disturb" sections below are reproduced (and kept current) in the Phase 3 doc.
 

@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { readdir, rm } from "fs/promises";
+import { mkdir, readdir, rename, rm } from "fs/promises";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { join, resolve } from "path";
@@ -320,12 +320,10 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
 
   // Write to derivatives/ atomically (tmp → rename).
   const derivDir = join(DATA_DIR, id, "derivatives");
-  const { mkdir } = await import("fs/promises");
   await mkdir(derivDir, { recursive: true });
   const tmpPath = join(derivDir, `${extension}.tmp`);
   const finalPath = join(derivDir, extension);
   await Bun.write(tmpPath, body);
-  const { rename } = await import("fs/promises");
   await rename(tmpPath, finalPath);
 
   // Parse to plain text and upsert into DB + FTS.
@@ -372,13 +370,12 @@ videos.put("/:id/words", bodyLimit({ maxSize: 10 * 1024 * 1024 }), async (c) => 
 
   // Write to derivatives/ atomically (tmp → rename).
   const derivDir = join(DATA_DIR, id, "derivatives");
-  const { mkdir, rename: fsRename } = await import("fs/promises");
   await mkdir(derivDir, { recursive: true });
   const tmpPath = join(derivDir, "words.json.tmp");
   const finalPath = join(derivDir, "words.json");
   const serialized = JSON.stringify(words);
   await Bun.write(tmpPath, serialized);
-  await fsRename(tmpPath, finalPath);
+  await rename(tmpPath, finalPath);
 
   // Pass the payload so sizeBytes is recorded, consistent with the transcript step.
   await recordExternalStep(id, "words", { payload: serialized });

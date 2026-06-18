@@ -1,9 +1,16 @@
 import { join } from "path";
+import type { ProcessingStepKind } from "../../db/schema";
 import { chaptersExist } from "../../lib/chapters";
 import { VARIANTS } from "../../lib/derivatives";
+import {
+  applicabilityContext,
+  isServable,
+  REQUIRED_KINDS,
+  stepByKind,
+} from "../../lib/processing/registry";
 import { getStepStates } from "../../lib/processing/steps-store";
 import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
-import { activeRawFilename, urlsForVideo, type VideoUrls } from "../../lib/url";
+import { urlsForVideo, type VideoUrls } from "../../lib/url";
 
 // VARIANTS (from lib/derivatives) is highest-first, which is the order the
 // player sees them in <source> children — biasing its initial pick.
@@ -12,9 +19,9 @@ import { activeRawFilename, urlsForVideo, type VideoUrls } from "../../lib/url";
 // to offer. Gated on the video_processing_steps table (state `ready`) AND the
 // file still being present on disk, NOT bare file presence: a byte-complete but
 // semantically-broken or hand-deleted MP4 is never served, so the viewer falls
-// back to HLS automatically. The primary check follows the ACTIVE raw file
-// (source.mp4 for unedited videos, {height}p.mp4 for edited ones) but keys
-// readiness off the validated `source` step that produced it.
+// back to HLS automatically. The active raw file (source.mp4 for unedited
+// videos, {height}p.mp4 for edited ones) is gated on the validated step that
+// PRODUCED it — `source` for recorded/uploaded, `edited_output` for edited.
 async function derivativeFlags(video: Video): Promise<{
   hasSource: boolean;
   variantHeights: number[];
@@ -23,29 +30,42 @@ async function derivativeFlags(video: Video): Promise<{
 }> {
   const dir = join(DATA_DIR, video.id, "derivatives");
   const steps = await getStepStates(video.id);
+  const ctx = applicabilityContext(video);
 
   // Gate MP4 serving on the full mandatory set — the same bar reconcile uses to
-  // reach `ready` — plus the active raw file on disk. Checking metadata too (not
-  // just source) means a processing_failed video whose metadata step failed
-  // serves HLS, instead of an MP4 with no dimensions.
-  const mandatoryReady =
-    steps.get("source")?.state === "ready" && steps.get("metadata")?.state === "ready";
+  // reach `ready` (REQUIRED_KINDS, so a future third required kind can't drift).
+  // Checking metadata too (not just source) means a processing_failed video
+  // whose metadata step failed serves HLS, instead of an MP4 with no dimensions.
+  const mandatoryReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
 
-  // This runs on every viewer request, so fan the independent file-existence
-  // checks out in parallel rather than awaiting each in turn. Variant presence
-  // is only checked for variants whose step row is already `ready`.
-  const readyVariants = VARIANTS.filter((v) => steps.get(v.kind)?.state === "ready");
-  const [activePresent, variantPresence, hasThumb, hasCaptionsSrt, hasCaptionsVtt] =
+  // The active raw file is gated on ITS producing step being servable: `source`
+  // for unedited/uploaded videos, `edited_output` for edited ones — so the
+  // edited cut gets the same validated-serving guarantee as a recorded source
+  // rather than bare disk-presence. (Edited videos predating the edited_output
+  // step have no such row, so they need `videos:backfill-processing-steps` run
+  // once to keep serving — see that script.)
+  const activeProducerKind: ProcessingStepKind = video.lastEditedAt ? "edited_output" : "source";
+  const activeProducer = stepByKind(activeProducerKind)!;
+
+  // This runs on every viewer request, so fan the independent checks out in
+  // parallel. Variant servability is only checked for variants whose row is
+  // already `ready`.
+  const readyVariants = VARIANTS.map((v) => ({ v, step: stepByKind(v.kind)! })).filter(
+    ({ v }) => steps.get(v.kind)?.state === "ready",
+  );
+  const [activeServable, variantServable, hasThumb, hasCaptionsSrt, hasCaptionsVtt] =
     await Promise.all([
-      Bun.file(join(dir, activeRawFilename(video))).exists(),
-      Promise.all(readyVariants.map((v) => Bun.file(join(dir, `${v.height}p.mp4`)).exists())),
+      isServable(activeProducer, ctx, steps.get(activeProducerKind)),
+      Promise.all(readyVariants.map(({ step }) => isServable(step, ctx, steps.get(step.kind)))),
       Bun.file(join(dir, "thumbnail.jpg")).exists(),
       Bun.file(join(dir, "captions.srt")).exists(),
       Bun.file(join(dir, "captions.vtt")).exists(),
     ]);
 
-  const hasSource = mandatoryReady && activePresent;
-  const variantHeights = readyVariants.filter((_, i) => variantPresence[i]).map((v) => v.height);
+  const hasSource = mandatoryReady && activeServable;
+  const variantHeights = readyVariants
+    .filter((_, i) => variantServable[i])
+    .map(({ v }) => v.height);
 
   return { hasSource, variantHeights, hasThumb, hasCaptions: hasCaptionsSrt || hasCaptionsVtt };
 }

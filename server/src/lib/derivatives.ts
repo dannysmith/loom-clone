@@ -514,12 +514,6 @@ export const VARIANTS: ReadonlyArray<{ kind: ProcessingStepKind; height: number;
   { kind: "variant_720", height: 720, crf: 23 },
 ];
 
-// Determine which variants to generate based on source height.
-// ≤720p: nothing. 721–1080p: 720p only. ≥1081p: 1080p and 720p.
-function variantsForHeight(sourceHeight: number): Array<{ height: number; crf: number }> {
-  return VARIANTS.filter((v) => sourceHeight > v.height);
-}
-
 // Build the ffmpeg argument list for a single variant encode.
 //
 // `-fps_mode passthrough` is load-bearing. Our HLS-origin source.mp4 is
@@ -604,19 +598,5 @@ export async function generateVariant(
   console.log(`[derivatives] ${outFile} generated (${Date.now() - started}ms)`);
 }
 
-// Generate all downsampled MP4 variants needed for a source. When inputPath is
-// provided (e.g. an edited output) variants come from that file instead of
-// source.mp4. Used by the edit-pipeline's atomic regeneration; the main
-// post-recording pipeline drives variants per-height via the step registry.
-export async function generateVariants(dir: string, inputPath?: string): Promise<void> {
-  const sourcePath = inputPath ?? join(dir, "source.mp4");
-  const meta = await probeMetadata(sourcePath);
-  if (!meta) return;
-
-  for (const variant of variantsForHeight(meta.height)) {
-    await generateVariant(dir, variant.height, sourcePath);
-  }
-}
-
 // Test-only: expose for direct testing.
-export { parseLoudnormJson as _parseLoudnormJson, variantsForHeight as _variantsForHeight };
+export { parseLoudnormJson as _parseLoudnormJson };

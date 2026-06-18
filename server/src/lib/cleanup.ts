@@ -2,11 +2,11 @@ import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
-import { videoSegments, videos } from "../db/schema";
+import { type ProcessingStepKind, videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
+import { applicabilityContext, isServable, stepByKind } from "./processing/registry";
 import { getStep } from "./processing/steps-store";
-import { DATA_DIR } from "./store";
-import { activeRawFilename } from "./url";
+import { DATA_DIR, getVideo } from "./store";
 
 const STALE_DAYS = 10;
 
@@ -27,11 +27,7 @@ export async function cleanupStaleFiles(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   const candidates = await getDb()
-    .select({
-      id: videos.id,
-      lastEditedAt: videos.lastEditedAt,
-      height: videos.height,
-    })
+    .select({ id: videos.id })
     .from(videos)
     .where(
       and(
@@ -44,23 +40,33 @@ export async function cleanupStaleFiles(): Promise<void> {
 
   let cleaned = 0;
 
-  for (const video of candidates) {
-    const { id } = video;
+  for (const { id } of candidates) {
     const videoDir = join(DATA_DIR, id);
-    const derivDir = join(videoDir, "derivatives");
-    const sourcePath = join(derivDir, "source.mp4");
 
-    // Require the source step validated good AND the file still present before
-    // removing the HLS segments it was built from. Either missing → skip.
-    const sourceStep = await getStep(id, "source");
-    if (sourceStep?.state !== "ready") continue;
-    if (!(await Bun.file(sourcePath).exists())) continue;
+    const video = await getVideo(id, { includeTrashed: true });
+    if (!video) continue;
+    const ctx = applicabilityContext(video);
 
-    // Also require the file the viewer is ACTUALLY served — for an edited video
-    // that's the {H}p.mp4 cut, not source.mp4. If it's gone we must keep the HLS
-    // fallback (resolve.ts would otherwise have nothing to serve).
-    const activePath = join(derivDir, activeRawFilename(video));
-    if (!(await Bun.file(activePath).exists())) continue;
+    // Require the `source` step validated good AND source.mp4 still present
+    // before removing the HLS segments it was built from — source.mp4 is the
+    // validated fallback that must outlive the HLS. (Same isServable predicate
+    // the viewer serves on.)
+    if (!(await isServable(stepByKind("source")!, ctx, await getStep(id, "source")))) continue;
+
+    // Also require the file the viewer is ACTUALLY served to be servable — for
+    // an edited video that's the {H}p.mp4 cut produced by `edited_output`, not
+    // source.mp4. If its producer isn't servable we must keep the HLS fallback
+    // (resolve.ts would otherwise have nothing to serve).
+    const activeProducerKind: ProcessingStepKind = video.lastEditedAt ? "edited_output" : "source";
+    if (
+      !(await isServable(
+        stepByKind(activeProducerKind)!,
+        ctx,
+        await getStep(id, activeProducerKind),
+      ))
+    ) {
+      continue;
+    }
 
     let filesRemoved = 0;
 

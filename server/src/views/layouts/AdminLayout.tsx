@@ -2,6 +2,7 @@ import { raw } from "hono/html";
 import type { Child, PropsWithChildren } from "hono/jsx";
 import { staticUrl } from "../../lib/static-assets";
 import { IconDashboard, IconSettings, IconTrash } from "../admin/components/Icons";
+import { FaviconLinks } from "./FaviconLinks";
 
 type ActivePage = "dashboard" | "settings" | "trash";
 
@@ -40,6 +41,7 @@ export function AdminLayout({ title, activePage, head, children }: Props) {
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>{title} · Admin</title>
+          <FaviconLinks />
           <link rel="stylesheet" href={staticUrl("styles/app.css")} />
           <link rel="stylesheet" href="/static/styles/admin.css" />
           {head}

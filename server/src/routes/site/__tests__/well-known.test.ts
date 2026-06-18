@@ -87,9 +87,22 @@ describe("GET /robots.txt", () => {
 });
 
 describe("GET /favicon.ico", () => {
-  test("returns 204 No Content", async () => {
+  test("serves the icon file", async () => {
     const res = await wellKnown.request("/favicon.ico");
-    expect(res.status).toBe(204);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/x-icon");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=604800");
+    expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+});
+
+describe("GET /site.webmanifest", () => {
+  test("serves the manifest with the correct content-type", async () => {
+    const res = await wellKnown.request("/site.webmanifest");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/manifest+json");
+    const manifest = await res.json();
+    expect(manifest.icons.length).toBeGreaterThan(0);
   });
 });
 

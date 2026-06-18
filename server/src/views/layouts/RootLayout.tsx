@@ -1,6 +1,7 @@
 import { raw } from "hono/html";
 import type { Child, PropsWithChildren } from "hono/jsx";
 import { staticUrl } from "../../lib/static-assets";
+import { FaviconLinks } from "./FaviconLinks";
 
 type Props = PropsWithChildren<{
   title: string;
@@ -29,6 +30,7 @@ export function RootLayout({
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>{title}</title>
+          <FaviconLinks />
           <link rel="stylesheet" href={staticUrl(stylesheet)} />
           {head}
         </head>

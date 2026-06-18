@@ -74,9 +74,29 @@ wellKnown.get("/robots.txt", async (c) => {
   });
 });
 
-// 204 No Content is a valid response. Browsers cache it and stop asking,
-// without us having to ship a binary placeholder.
-wellKnown.get("/favicon.ico", (c) => c.body(null, 204));
+// Browsers, RSS readers, and link-preview bots request /favicon.ico directly
+// (independent of the <link> tags). Serve the real icon from the static file.
+// Versioned copies under /static/ are linked from page heads; this bare path
+// gets a one-week cache since it carries no version query.
+wellKnown.get("/favicon.ico", async (c) => {
+  const bytes = await Bun.file(join(PUBLIC_ROOT, "images/favicon/favicon.ico")).bytes();
+  return c.body(bytes, 200, {
+    "content-type": "image/x-icon",
+    "Cache-Control": "public, max-age=604800",
+  });
+});
+
+// Web app manifest. Served from the static file (like robots.txt) so it stays
+// editable without touching code, but through a route so it gets the correct
+// application/manifest+json type rather than serveStatic's generic default.
+// Lives at the conventional root path; its icon srcs are absolute /static/ URLs.
+wellKnown.get("/site.webmanifest", async (c) => {
+  const body = await Bun.file(join(PUBLIC_ROOT, "site.webmanifest")).text();
+  return c.body(body, 200, {
+    "content-type": "application/manifest+json; charset=utf-8",
+    "Cache-Control": "public, max-age=604800",
+  });
+});
 
 wellKnown.get("/sitemap.xml", async (c) => {
   // Only public, complete, non-trashed videos appear in the sitemap. Public

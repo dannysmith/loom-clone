@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { join } from "path";
+import { agentTextCacheControl } from "../../lib/cache-control";
 import { formatDate, formatDuration } from "../../lib/format";
 import { DATA_DIR, getTranscript, resolveSlug, type Video } from "../../lib/store";
 import { absoluteUrl, activeRawFilename, urlsForVideo } from "../../lib/url";
@@ -68,6 +69,7 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
   const transcript = await getTranscript(video.id);
   const sources = await listSources(video);
   const hasStoryboard = (video.durationSeconds ?? 0) >= 60;
+  c.header("Cache-Control", agentTextCacheControl(video.visibility));
   return c.json({
     id: video.id,
     slug: video.slug,
@@ -119,9 +121,14 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
   const embedUrl = absoluteUrl(`/${video.slug}/embed`);
   const jsonUrl = absoluteUrl(`/${video.slug}.json`);
 
-  // Sections joined by blank lines. Optional sections (description, meta,
-  // transcript) are only included when present, so the output stays clean.
-  const sections: string[] = [`# ${heading}`];
+  // Sections joined by blank lines. A leading blockquote points agents at the
+  // site index (see agentdocsspec.com — llms-txt-directive-md). Optional
+  // sections (description, meta, transcript) are only included when present,
+  // so the output stays clean.
+  const sections: string[] = [
+    "> For a machine-readable index of all videos on this site, see [llms.txt](/llms.txt).",
+    `# ${heading}`,
+  ];
   if (video.description) sections.push(video.description);
   if (meta) sections.push(meta);
   sections.push(`[Watch](${pageUrl})`);
@@ -143,5 +150,6 @@ export async function handleMdMetadata(c: Context, slug: string): Promise<Respon
 
   return c.text(`${sections.join("\n\n")}\n`, 200, {
     "content-type": "text/markdown; charset=utf-8",
+    "Cache-Control": agentTextCacheControl(video.visibility),
   });
 }

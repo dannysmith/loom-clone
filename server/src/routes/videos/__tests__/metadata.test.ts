@@ -72,6 +72,15 @@ describe("GET /:slug.json", () => {
     expect(body.urls.mp4).toContain(".mp4");
   });
 
+  test("sets a short Cache-Control scoped to visibility", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { visibility: "public" });
+    const res = await videos.request(`/${video.slug}.json`);
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
+  });
+
   test("includes width/height/aspectRatio when set on the video", async () => {
     const video = await createVideo();
     await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 120 });
@@ -215,6 +224,31 @@ describe("GET /:slug.md", () => {
     expect(md).toContain(`# ${video.slug}`);
   });
 
+  test("opens with an llms.txt directive blockquote", async () => {
+    const video = await createVideo();
+    const res = await videos.request(`/${video.slug}.md`);
+    const md = await res.text();
+    expect(md).toStartWith("> ");
+    expect(md).toContain("[llms.txt](/llms.txt)");
+  });
+
+  test("sets a short Cache-Control scoped to visibility", async () => {
+    const pub = await createVideo();
+    await updateVideo(pub.id, { visibility: "public" });
+    const r1 = await videos.request(`/${pub.slug}.md`);
+    expect(r1.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
+
+    // Unlisted resolves (private 404s by design) and gets the `private` scope
+    // so shared caches never store it.
+    const unlisted = await createVideo(); // defaults to unlisted
+    const r2 = await videos.request(`/${unlisted.slug}.md`);
+    expect(r2.headers.get("cache-control")).toBe(
+      "private, max-age=300, stale-while-revalidate=3600",
+    );
+  });
+
   test("old slug 301-redirects to canonical .md URL", async () => {
     const video = await createVideo();
     const oldSlug = video.slug;
@@ -222,5 +256,36 @@ describe("GET /:slug.md", () => {
     const res = await videos.request(`/${oldSlug}.md`, { redirect: "manual" });
     expect(res.status).toBe(301);
     expect(res.headers.get("location")).toBe("/docs-intro.md");
+  });
+});
+
+describe("content negotiation (Accept: text/markdown) on /:slug", () => {
+  test("returns markdown for a video bare slug, not HTML", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { title: "Negotiated" });
+    const res = await videos.request(`/${video.slug}`, {
+      headers: { Accept: "text/markdown" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    const md = await res.text();
+    expect(md).toContain("# Negotiated");
+  });
+
+  test("negotiated markdown is uncacheable at shared caches and varies on Accept", async () => {
+    const video = await createVideo();
+    const res = await videos.request(`/${video.slug}`, {
+      headers: { Accept: "text/markdown" },
+    });
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("vary")).toBe("Accept");
+  });
+
+  test("does not serve markdown when Accept omits text/markdown", async () => {
+    const video = await createVideo();
+    const res = await videos.request(`/${video.slug}`, {
+      headers: { Accept: "text/html" },
+    });
+    expect(res.headers.get("content-type")).not.toContain("text/markdown");
   });
 });

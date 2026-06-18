@@ -30,6 +30,13 @@ describe("GET /feed.xml", () => {
     expect(body).toContain("</channel>");
   });
 
+  test("sets a short Cache-Control", async () => {
+    const res = await feeds.request("/feed.xml");
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
+  });
+
   test("includes site config metadata in channel", async () => {
     const res = await feeds.request("/feed.xml");
     const body = await res.text();
@@ -184,6 +191,13 @@ describe("GET /feed.json", () => {
     expect(body.items).toBeArray();
   });
 
+  test("sets a short Cache-Control", async () => {
+    const res = await feeds.request("/feed.json");
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
+  });
+
   test("includes info_for_llms key", async () => {
     const res = await feeds.request("/feed.json");
     const body = await res.json();
@@ -282,6 +296,13 @@ describe("GET /llms.txt", () => {
     const body = await res.text();
     expect(body).toContain(`# ${siteConfig.name}`);
     expect(body).toContain(siteConfig.tagline);
+  });
+
+  test("sets a short Cache-Control so the index stays fresh", async () => {
+    const res = await feeds.request("/llms.txt");
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
   });
 
   test("includes How to Use section with endpoint docs", async () => {

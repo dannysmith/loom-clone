@@ -265,6 +265,8 @@ Includes below the player: title (if set), formatted duration + date, descriptio
 
 **SEO/meta**: canonical link, `og:title`, `og:description`, `og:image`, `og:video` (embed URL), `og:type=video.other`, Twitter Card (`player` type), and oEmbed discovery `<link>`. Unlisted videos get `<meta name="robots" content="noindex">` and `X-Robots-Tag: noindex` header.
 
+**Agent affordances**: a `<link rel="alternate" type="text/markdown" href="/:slug.md">`, a visually-hidden directive (`.agent-directive`) pointing agents at `/llms.txt` and the `.md` variant, a `Link: </llms.txt>; rel="describedby"` response header, and `Vary: Accept`. Requests with `Accept: text/markdown` (Claude Code, Cursor, OpenCode) get the `.md` body instead of HTML — these negotiated responses are returned `Cache-Control: private, no-store` so a shared cache never serves markdown to a browser. The same affordances apply to tag pages (see `/:slug.md`).
+
 ### `/:slug/embed`
 
 Chromeless player for iframe embeds. Same MP4-vs-HLS selection, no page chrome. Full-viewport dark background. Used by the oEmbed `html` field and OG/Twitter player tags.
@@ -317,7 +319,7 @@ Convenience redirect. **302** to the "active" raw MP4 — `source.mp4` for unedi
 
 ### `/:slug.json`
 
-JSON metadata for programmatic/LLM consumption. All URLs are absolute.
+JSON metadata for programmatic/LLM consumption. All URLs are absolute. Video-only (tags have no `.json`). Sent with `Cache-Control: public|private, max-age=300, stale-while-revalidate=3600` (scoped to visibility) so a freshly edited video is never served stale for long behind the CDN.
 
 ```json
 {
@@ -333,7 +335,9 @@ JSON metadata for programmatic/LLM consumption. All URLs are absolute.
 
 ### `/:slug.md`
 
-Markdown metadata. Includes heading (title or slug), description, formatted duration + date, watch link, and a "Links" section with bulleted URLs (page, MP4 download, embed, JSON). Includes a "Transcript" section with the full plain text when a transcript exists. All URLs absolute.
+Markdown metadata. Opens with a blockquote directive pointing agents at `/llms.txt`, then heading (title or slug), description, formatted duration + date, watch link, and a "Links" section with bulleted URLs (page, MP4 download, embed, JSON). Includes a "Transcript" section with the full plain text when a transcript exists. All URLs absolute. Same `Cache-Control` as `/:slug.json`.
+
+If the slug is not a video, `.md` falls back to a **tag** markdown page: a blockquote directive, the tag name + description, video count, a "Videos" list (linked, with duration · date), and a "Links" section (tag RSS/JSON feeds + site index). This is also what `Accept: text/markdown` content negotiation returns for a tag slug.
 
 ## Back-compat redirects
 
@@ -348,9 +352,11 @@ Markdown metadata. Includes heading (title or slug), description, formatted dura
 | `/rss`         | 301 redirect to `/feed.xml`                                                          |
 | `/feed.json`   | JSON Feed 1.1. Includes `info_for_llms` top-level key, truncated transcript excerpts (~200 words), per-video `_urls` map, media attachments. Served as `application/feed+json`. |
 | `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, and links to feeds/sitemap/author website. |
-| `/robots.txt`  | Disallows `/admin` and `/api`                                                        |
+| `/robots.txt`  | Served from the static file `public/robots.txt`. Content signals + disallows `/admin` and `/api` + `Sitemap:` directive. |
 | `/favicon.ico` | 204 No Content (placeholder)                                                         |
 | `/sitemap.xml` | Video sitemap (public + `ready` + non-trashed only, with `<video:video>` extension) |
+
+`/feed.xml`, `/feed.json`, `/llms.txt`, `/sitemap.xml`, and `/robots.txt` are all sent with `Cache-Control: public, max-age=300, stale-while-revalidate=3600` (see `lib/cache-control.ts`). Without this BunnyCDN applies its 30-day default, so a newly published video could be missing from the index for weeks.
 
 ### `GET /oembed`
 

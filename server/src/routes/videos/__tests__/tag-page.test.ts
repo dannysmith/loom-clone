@@ -71,6 +71,17 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     expect(res.headers.get("x-robots-tag")).toBeNull();
   });
 
+  test("exposes agent affordances: Link header, markdown alternate, directive, Vary", async () => {
+    await makePublicTag("agenty");
+    const res = await videos.request("/agenty");
+    expect(res.headers.get("link")).toContain('</llms.txt>; rel="describedby"');
+    expect(res.headers.get("vary")).toBe("Accept");
+    const html = await res.text();
+    expect(html).toContain('rel="alternate" type="text/markdown" href="/agenty.md"');
+    expect(html).toContain('class="agent-directive"');
+    expect(html).toContain("/llms.txt");
+  });
+
   test("excludes private videos from the grid", async () => {
     const tag = await makePublicTag("mix");
     const pub = await makePublishedVideo("public");
@@ -116,6 +127,55 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     await updateTag(t.id, { visibility: "unlisted", slug: "u-cache" });
     const r2 = await videos.request("/u-cache");
     expect(r2.headers.get("cache-control")).toBe("private, max-age=60, stale-while-revalidate=300");
+  });
+});
+
+describe("GET /:slug.md — tag markdown", () => {
+  test("returns markdown for a public tag with its videos", async () => {
+    const tag = await makePublicTag("md-tag", "Markdown Tag");
+    const v = await makePublishedVideo("public");
+    await updateVideo(v.id, { title: "Listed Vid" });
+    await addTagToVideo(v.id, tag.id);
+
+    const res = await videos.request("/md-tag.md");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
+    const md = await res.text();
+    expect(md).toStartWith("> ");
+    expect(md).toContain("[llms.txt](/llms.txt)");
+    expect(md).toContain("# Markdown Tag");
+    expect(md).toContain("## Videos");
+    expect(md).toContain("[Listed Vid]");
+  });
+
+  test("404 when neither a video nor a tag matches", async () => {
+    const res = await videos.request("/nope.md");
+    expect(res.status).toBe(404);
+  });
+
+  test("301-redirects an old tag slug to the canonical .md URL", async () => {
+    const tag = await createTag("demo");
+    await updateTag(tag.id, { visibility: "public", slug: "md-old" });
+    await updateTag(tag.id, { slug: "md-new" });
+
+    const res = await videos.request("/md-old.md", { redirect: "manual" });
+    expect(res.status).toBe(301);
+    expect(res.headers.get("location")).toBe("/md-new.md");
+  });
+
+  test("content negotiation: Accept: text/markdown on a tag slug returns markdown", async () => {
+    await makePublicTag("neg-tag", "Negotiated Tag");
+    const res = await videos.request("/neg-tag", {
+      headers: { Accept: "text/markdown" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const md = await res.text();
+    expect(md).toContain("# Negotiated Tag");
   });
 });
 

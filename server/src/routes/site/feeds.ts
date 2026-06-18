@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { getDb } from "../../db/client";
 import { type Video, videos } from "../../db/schema";
+import { agentTextCacheControl } from "../../lib/cache-control";
 import {
   buildJsonFeedItem,
   escapeXml,
@@ -57,7 +58,10 @@ feeds.get("/feed.xml", async (c) => {
     "",
   ].join("\n");
 
-  return c.body(xml, 200, { "content-type": "application/rss+xml; charset=utf-8" });
+  return c.body(xml, 200, {
+    "content-type": "application/rss+xml; charset=utf-8",
+    "Cache-Control": agentTextCacheControl(),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -83,7 +87,10 @@ feeds.get("/feed.json", async (c) => {
     items,
   };
 
-  return c.json(feed, 200, { "content-type": "application/feed+json; charset=utf-8" });
+  return c.json(feed, 200, {
+    "content-type": "application/feed+json; charset=utf-8",
+    "Cache-Control": agentTextCacheControl(),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,6 +155,7 @@ feeds.get("/llms.txt", async (c) => {
 
   return c.text(`${sections.join("\n\n")}\n`, 200, {
     "content-type": "text/plain; charset=utf-8",
+    "Cache-Control": agentTextCacheControl(),
   });
 });
 

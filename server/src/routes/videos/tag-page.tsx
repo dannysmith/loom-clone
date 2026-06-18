@@ -25,6 +25,11 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
   const cacheScope = tag.visibility === "public" ? "public" : "private";
   c.header("Cache-Control", `${cacheScope}, max-age=60, stale-while-revalidate=300`);
 
+  // Point agents at the site index, and signal that this URL also serves
+  // markdown via `Accept` content negotiation.
+  c.header("Link", '</llms.txt>; rel="describedby"');
+  c.header("Vary", "Accept");
+
   return c.html(
     <TagPage
       tag={tag}

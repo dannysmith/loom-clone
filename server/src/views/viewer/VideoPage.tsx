@@ -7,6 +7,7 @@ import type { Video } from "../../lib/store";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { ViewerLayout } from "../layouts/ViewerLayout";
+import { AgentDirective } from "./AgentDirective";
 import { CalendarIcon, ClockIcon, SettingsIcon, TagIcon } from "./icons";
 import { SiteFooter } from "./SiteFooter";
 
@@ -133,6 +134,9 @@ export function VideoPage({
           {/* Structured data */}
           <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
 
+          {/* Markdown alternate for agents */}
+          <link rel="alternate" type="text/markdown" href={`/${video.slug}.md`} title={pageTitle} />
+
           {/* oEmbed discovery */}
           <link
             rel="alternate"
@@ -167,6 +171,8 @@ export function VideoPage({
         </>
       }
     >
+      <AgentDirective mdUrl={`/${video.slug}.md`} />
+
       {adminUrl && (
         <a href={adminUrl} class="viewer-admin-link">
           <SettingsIcon size={14} />

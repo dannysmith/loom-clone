@@ -1,8 +1,11 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Hono } from "hono";
+import { join } from "path";
 import { getDb } from "../../db/client";
 import { tags, videos } from "../../db/schema";
+import { agentTextCacheControl } from "../../lib/cache-control";
 import { siteConfig } from "../../lib/site-config";
+import { PUBLIC_ROOT } from "../../lib/static-assets";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
 
 // Root + well-known files. Open, no auth.
@@ -44,11 +47,16 @@ wellKnown.get("/", (c) => {
   });
 });
 
-wellKnown.get("/robots.txt", (c) =>
-  c.text("User-agent: *\nDisallow: /admin\nDisallow: /api\n", 200, {
+// Served from the static file at public/robots.txt so it's editable without
+// touching code. PUBLIC_ROOT is resolved absolutely, so this works regardless
+// of the process cwd (including under test chdirs).
+wellKnown.get("/robots.txt", async (c) => {
+  const body = await Bun.file(join(PUBLIC_ROOT, "robots.txt")).text();
+  return c.text(body, 200, {
     "content-type": "text/plain; charset=utf-8",
-  }),
-);
+    "Cache-Control": agentTextCacheControl(),
+  });
+});
 
 // 204 No Content is a valid response. Browsers cache it and stop asking,
 // without us having to ship a binary placeholder.
@@ -121,7 +129,10 @@ wellKnown.get("/sitemap.xml", async (c) => {
     "",
   ].join("\n");
 
-  return c.body(xml, 200, { "content-type": "application/xml; charset=utf-8" });
+  return c.body(xml, 200, {
+    "content-type": "application/xml; charset=utf-8",
+    "Cache-Control": agentTextCacheControl(),
+  });
 });
 
 function escapeXml(s: string): string {

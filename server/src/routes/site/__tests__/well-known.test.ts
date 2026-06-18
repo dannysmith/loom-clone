@@ -54,6 +54,13 @@ describe("GET /robots.txt", () => {
     expect(body).toContain("Disallow: /admin");
     expect(body).toContain("Disallow: /api");
   });
+
+  test("includes a Sitemap directive", async () => {
+    const res = await wellKnown.request("/robots.txt");
+    const body = await res.text();
+    expect(body).toContain("Sitemap:");
+    expect(body).toContain("/sitemap.xml");
+  });
 });
 
 describe("GET /favicon.ico", () => {
@@ -68,6 +75,10 @@ describe("GET /sitemap.xml", () => {
     const res = await wellKnown.request("/sitemap.xml");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/xml");
+    // Short cache so a new video reaches agents/CDN promptly (not Bunny's 30d default).
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=3600",
+    );
     const body = await res.text();
     expect(body).toContain("<urlset");
     expect(body).toContain("</urlset>");

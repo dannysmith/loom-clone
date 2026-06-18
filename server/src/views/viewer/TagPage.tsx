@@ -5,6 +5,7 @@ import { formatDate, formatDurationShort } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
+import { AgentDirective } from "./AgentDirective";
 import { RssIcon } from "./icons";
 import { SiteFooter } from "./SiteFooter";
 
@@ -44,6 +45,9 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
           <meta name="twitter:title" content={tag.name} />
           {ogDescription && <meta name="twitter:description" content={ogDescription} />}
 
+          {/* Markdown alternate for agents */}
+          <link rel="alternate" type="text/markdown" href={`/${tag.slug}.md`} title={tag.name} />
+
           {/* Feed discovery — both the tag's own feeds and the site feeds. */}
           <link
             rel="alternate"
@@ -75,6 +79,8 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
         </>
       }
     >
+      <AgentDirective mdUrl={`/${tag.slug}.md`} />
+
       <header class="tag-header">
         <h1 class="tag-title">
           <span

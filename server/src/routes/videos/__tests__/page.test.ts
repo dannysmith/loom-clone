@@ -164,6 +164,17 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     expect(html).toContain('rel="alternate" type="application/json+oembed"');
   });
 
+  test("exposes agent affordances: Link header, markdown alternate, directive, Vary", async () => {
+    const video = await createVideo();
+    const res = await videos.request(`/${video.slug}`);
+    expect(res.headers.get("link")).toContain('</llms.txt>; rel="describedby"');
+    expect(res.headers.get("vary")).toBe("Accept");
+    const html = await res.text();
+    expect(html).toContain(`rel="alternate" type="text/markdown" href="/${video.slug}.md"`);
+    expect(html).toContain('class="agent-directive"');
+    expect(html).toContain("/llms.txt");
+  });
+
   test("unlisted video gets noindex meta and header", async () => {
     const video = await createVideo();
     // Default visibility is "unlisted"

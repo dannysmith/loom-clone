@@ -90,13 +90,3 @@ Admin bearer tokens provide the same access as a logged-in session, for use case
 **Lifecycle**: tokens are created and revoked from the admin UI (Settings > API Keys). The plaintext is shown once at creation. `lastUsedAt` is tracked. Bearer-authenticated requests skip CSRF checks (bearer tokens are inherently CSRF-safe).
 
 **Usage**: `Authorization: Bearer lca_...` on any `/admin/*` route. Invalid tokens get a 401 JSON response; requests with no `Authorization` header and no valid session cookie are redirected to the login page.
-
-### Where the code lives
-
-| Concern | File |
-|---|---|
-| Admin config, sessions, `requireAdmin()` middleware | `src/lib/admin-auth.ts` |
-| Admin token CRUD (create, verify, revoke, list) | `src/lib/admin-tokens.ts` |
-| CSRF middleware | `src/routes/admin/index.tsx` |
-| Login/logout routes | `src/routes/admin/index.tsx` |
-| Admin token management UI | Settings > API Keys pane |

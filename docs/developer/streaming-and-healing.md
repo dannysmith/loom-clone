@@ -152,18 +152,6 @@ UUIDs never appear in viewer-facing URLs. All media is served under the slug nam
 - **Init segment.** `init.mp4` is never in `timeline.segments` (the timeline only tracks media segments). The server's diff adds it implicitly — a missing `init.mp4` would break playback silently otherwise.
 - **Heal is idempotent.** Running the same heal twice is safe. Every HTTP call the heal makes is designed to be replayable.
 
-## Where the code lives (quick map)
+## See also
 
-- Live upload queue and `/complete` call: `app/LoomClone/Pipeline/UploadActor.swift`
-- Heal work (both entry points + the core loop): `app/LoomClone/Pipeline/HealAgent.swift`
-- Transcription (WhisperKit inference, SRT gen, upload): `app/LoomClone/Pipeline/TranscribeAgent.swift` — see [Transcription](transcription.md)
-- Transcription model status (observable, gates all transcription): `app/LoomClone/Helpers/TranscriptionModelStatus.swift`
-- Timeline schema: `app/LoomClone/Models/RecordingTimeline.swift`
-- Segment / complete / delete / transcript routes: `server/src/routes/api/videos.ts`
-- Video record persistence (DB-backed): `server/src/lib/store.ts`, schema in `server/src/db/schema.ts`
-- SRT parsing: `server/src/lib/srt.ts`
-- Playlist builder: `server/src/lib/playlist.ts`
-- Derivative generation (recipes, promise cache, ffmpeg): `server/src/lib/derivatives.ts`
-- Viewer page (MP4-vs-HLS selection, captions): `server/src/routes/videos/page.tsx`
-- Media serving (raw, stream, poster, captions): `server/src/routes/videos/media.ts`
-- URL builders: `server/src/lib/url.ts`
+- [Transcription](transcription.md) — how WhisperKit inference, SRT generation, and transcript upload work (the source of the `.transcribed` sidecar and the `TranscribeAgent` referenced above).

@@ -30,12 +30,11 @@ These are the real-world situations this tool needs to serve:
 
 ## Architecture Overview
 
-Three components exist today, plus a diagnostic tool:
+Three components exist today:
 
 - **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
 - **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). Public feeds (RSS, JSON Feed, llms.txt) are served by the site module. `server/data/` holds per-video directories.
 - **CDN Layer** — BunnyCDN pull zone in front of the Hetzner origin. `v.danny.is` CNAMEs to BunnyCDN; `origin.v.danny.is` is the direct-to-Hetzner hostname used as the pull zone origin. BunnyCDN caches all viewer-facing routes (video pages, media files, feeds) and bypasses cache for `/api/*` and `/admin/*`. Cache purging on video state changes is handled by `server/src/lib/cdn.ts` via the BunnyCDN purge API. See `docs/tasks-todo/task-1-view-layer.md` for the full setup.
-- **Test Harness** (`app/TestHarness/`, `test-runs/`) — diagnostic tool for probing AVFoundation/VideoToolbox/Metal configurations in isolation, without going through the real recording pipeline. Separate Xcode target (`LoomCloneTestHarness`), not a shipping component. Has its own `README.md` and `CLAUDE.md` with detailed usage instructions.
 
 ## Developer Docs
 
@@ -55,7 +54,6 @@ A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to
 
 - `make build` — build the main app (Debug)
 - `make test` — run unit tests
-- `make build-harness` — build the test harness (Debug)
 - `make regen` — regenerate Xcode project from `project.yml`
 - `make format` — run SwiftFormat on all Swift files
 - `make lint` / `make lint-fix` — run SwiftLint / auto-fix violations
@@ -64,7 +62,6 @@ Direct commands (for reference or when you need different flags):
 
 - **macOS app**: `xcodebuild -project app/LoomClone.xcodeproj -scheme LoomClone -configuration Debug -destination 'platform=macOS' build`. Do NOT run `bun run dev` or start the dev server unless explicitly asked.
 - **Server**: see `server/CLAUDE.md` for scripts (lint, format, typecheck, test, dev) and testing conventions. `cd server && bun run dev` runs the hot-reload server on `http://localhost:3000`.
-- **Test harness**: `xcodebuild -project app/LoomClone.xcodeproj -target LoomCloneTestHarness -configuration Debug build`. See `app/TestHarness/README.md` for usage.
 - **Xcode project**: `app/project.yml` (XcodeGen) is the source of truth. After editing it, run `cd app && xcodegen generate` (or `make regen`) to regenerate `LoomClone.xcodeproj`. **Also run `make regen` after adding or removing any `.swift` file** — sources are discovered at generate time, not at build time, so xcodebuild won't find them otherwise.
 - **USB camera AV sync in debug builds**: Running from Xcode with the ZV-1 (or other UVC cameras) causes CMIO synchronizer log spam that creates I/O back-pressure, dropping video frames and causing AV desync. This does NOT happen in production builds or when running the debug `.app` directly from Finder. Test recording quality with the production build, not from Xcode.
 
@@ -85,13 +82,6 @@ Direct commands (for reference or when you need different flags):
 │   │   ├── Models/                       #   recording timeline, presets, modes
 │   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, TranscribeAgent, APIClient
 │   │   └── UI/                           #   SwiftUI views, overlay window, popover, SettingsView
-│   ├── TestHarness/                      # diagnostic tool (separate Xcode target)
-│   │   ├── Scripts/                      #   tier runner scripts + test-configs/
-│   │   ├── Sources/                      #   synthetic frame sources
-│   │   ├── Compositor/                   #   isolated CIContext compositor
-│   │   ├── Writers/                      #   isolated writer implementations
-│   │   ├── Observability/                #   event log, watchdog, system snapshots
-│   │   └── README.md                     #   full usage docs
 │   ├── LoomCloneTests/                   # XCTest unit tests for pure-logic layers
 │   ├── LoomClone.xcodeproj/             # generated — do not edit directly
 │   └── project.yml                       # XcodeGen source of truth
@@ -121,7 +111,6 @@ Direct commands (for reference or when you need different flags):
 │   ├── tasks-done/                       # completed task write-ups
 │   ├── research/                         # historical: initial research (pre-prototype)
 │   └── archive/                          # incident records, completed audits, original requirements
-├── test-runs/                            # test harness output (gitignored except *.md summaries)
 ├── AGENTS.md                             # this file (also referenced by CLAUDE.md)
 └── CLAUDE.md                             # points at AGENTS.md
 ```

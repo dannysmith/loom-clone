@@ -127,14 +127,6 @@ Validation: non-empty, 4+ words, ≤280 characters, not a refusal, and a runtime
 
 Title and description are independent. If title generation fails, description still runs (with no title hint). If description fails, the title is unaffected. Both failures are silent.
 
-### Where the code lives
-
-| Concern | File |
-|---|---|
-| Description suggestion generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/DescriptionSuggestion.swift` |
-| Wiring (called after title suggestion) | `app/LoomClone/Pipeline/TranscribeAgent.swift` (`suggestDescription(...)`) |
-| Suggest-description endpoint | `server/src/routes/api/videos.ts` |
-
 ## AI chapter title suggestion
 
 After title and description suggestion finish, `TranscribeAgent` runs a third Foundation Models pass — but only if at least one `chapter.marker` event exists in `recording.json`. Chapters added later via the admin editor never trigger this pass; per the original issue, AI may only ever **rename** existing markers, never create them.
@@ -156,28 +148,3 @@ Chapter event `t` is in the logical recording timeline (zero at commit). Whisper
 ### Server-side application
 
 `PUT /api/videos/:id/chapters/:chapterId/suggest-title` finds the chapter in `chapters.json` and applies the title **only if** the chapter still exists and its current title is `null`. Otherwise it returns `{ applied: false, reason }` with `reason ∈ { "user_set", "not_found", "no_chapters" }`. The user always wins — a concurrent rename or delete via the admin is never overwritten by the AI guess.
-
-### Where the code lives
-
-| Concern | File |
-|---|---|
-| Chapter title generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/ChapterTitleSuggestion.swift` |
-| Wiring (called after title + description) | `app/LoomClone/Pipeline/TranscribeAgent.swift` (`suggestChapterTitles(...)`) |
-| Suggest-chapter-title endpoint | `server/src/routes/api/videos.ts` |
-
-## Where the code lives
-
-| Concern | File |
-|---|---|
-| TranscribeAgent (inference + upload + title suggestion) | `app/LoomClone/Pipeline/TranscribeAgent.swift` |
-| Title suggestion generator (@Generable, prompt, validation) | `app/LoomClone/Pipeline/TitleSuggestion.swift` |
-| Recording context preamble builder | `app/LoomClone/Helpers/RecordingContextBuilder.swift` |
-| Model status (observable, gates transcription) | `app/LoomClone/Helpers/TranscriptionModelStatus.swift` |
-| Transcript upload endpoint | `server/src/routes/api/videos.ts` |
-| Suggest-title endpoint | `server/src/routes/api/videos.ts` |
-| SRT parsing (cues → plain text) | `server/src/lib/srt.ts` |
-| Transcript DB access (upsert, query) | `server/src/lib/store.ts` |
-| Captions serving (/:slug/captions.*) | `server/src/routes/videos/media.ts` |
-| Viewer page (track element) | `server/src/routes/videos/page.tsx` |
-| Metadata routes (transcript field) | `server/src/routes/videos/metadata.ts` |
-| Admin transcript tab | `server/src/routes/admin/videos.tsx` |

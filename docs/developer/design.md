@@ -469,29 +469,3 @@ Vanilla CSS only, no preprocessor. The following features are used freely:
 - **`@supports (appearance: base-select)`** to opt into Chrome 135+'s customisable select picker without breaking older engines.
 
 Browser target: a single user on a current macOS / current Chrome, Safari, Firefox. All of the above are Baseline.
-
----
-
-## File map
-
-| Concern | File |
-| --- | --- |
-| Token values | `server/public/styles/tokens.css` |
-| Reset | `server/public/styles/reset.css` |
-| Element-level base styles | `server/public/styles/base.css` |
-| Admin entry (foundation) | `server/public/styles/app.css` |
-| Admin component classes | `server/public/styles/admin.css` |
-| Viewer entry | `server/public/styles/viewer-app.css` |
-| Viewer component classes | `server/public/styles/viewer.css` |
-| Embed entry | `server/public/styles/embed-app.css` |
-| Embed-specific styles | `server/public/styles/embed.css` |
-| Vidstack player theming | `server/public/styles/player.css` |
-| Editor (video) styles | `server/editor/src/styles/editor.css` |
-| Cover editor styles | `server/editor/src/cover/styles.css` |
-| Admin icon set | `server/src/views/admin/components/Icons.tsx` |
-| Viewer icon set | `server/src/views/viewer/icons.tsx` |
-| Shared site footer | `server/src/views/viewer/SiteFooter.tsx` |
-| Site metadata + socials | `server/src/lib/site-config.ts` |
-| Status/visibility/tag enums | `server/src/db/schema.ts` |
-| Static-asset cache busting | `server/src/lib/static-assets.ts` |
-| Layouts | `server/src/views/layouts/{RootLayout,AdminLayout,ViewerLayout}.tsx` |

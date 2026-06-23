@@ -537,38 +537,3 @@ derivatives/
 **Why not always generate a resolution-named file:** Most videos are never edited. For an unedited 1080p video, creating `1080p.mp4` as an exact copy of `source.mp4` would waste disk space. The resolution file at the source's own height is only created when edits are committed — its existence on disk is a consequence of editing, not a prerequisite.
 
 **Editor-specific files are never regenerated during editing:** `peaks.json` and `editor-storyboard.*` always reflect `source.mp4` because the editor always plays the original. Viewer-facing derivatives (storyboard, captions, resolution variants) are regenerated from the edited output.
-
-## Where the code lives
-
-| Concern                                   | File                             |
-| ----------------------------------------- | -------------------------------- |
-| App factory + module mounting             | `src/app.ts`                     |
-| API module (health + videos)              | `src/routes/api/index.ts`        |
-| Video CRUD routes                         | `src/routes/api/videos.ts`       |
-| Admin module (routes, auth, CSRF)         | `src/routes/admin/index.tsx`     |
-| Site (root, well-known)                   | `src/routes/site/well-known.tsx` |
-| Feeds (RSS, JSON Feed, llms.txt)          | `src/routes/site/feeds.ts`       |
-| oEmbed endpoint                           | `src/routes/site/oembed.ts`      |
-| CDN cache purge helpers                    | `src/lib/cdn.ts`                 |
-| Site-level metadata config                | `src/lib/site-config.ts`         |
-| Viewer HTML page                          | `src/routes/videos/page.tsx`     |
-| Embed page                                | `src/routes/videos/embed.tsx`    |
-| Viewer slug resolution + derivatives      | `src/routes/videos/resolve.ts`   |
-| Media serving (raw, stream, poster, .mp4) | `src/routes/videos/media.ts`     |
-| Metadata (.json, .md)                     | `src/routes/videos/metadata.ts`  |
-| Videos module aggregator + /v/ redirects  | `src/routes/videos/index.ts`     |
-| Error codes + helper                      | `src/lib/errors.ts`              |
-| Range-aware file serving                  | `src/lib/file-serve.ts`          |
-| URL builders + `activeRawFilename()`      | `src/lib/url.ts`                 |
-| Edit pipeline (ffmpeg trim/cut + post-edit) | `src/lib/edit-pipeline.ts`     |
-| Edit transcript derivation                | `src/lib/edit-transcript.ts`     |
-| Audio peaks for editor waveform           | `src/lib/peaks.ts`               |
-| Admin editor routes (EDL, commit, media)  | `src/routes/admin/editor.ts`     |
-| Editor UI (Vite + React)                  | `editor/` (separate sub-project) |
-| API key middleware                        | `src/lib/auth.ts`                |
-| Admin auth (sessions, middleware)         | `src/lib/admin-auth.ts`          |
-| Admin token CRUD                          | `src/lib/admin-tokens.ts`        |
-| Slug validation + store                   | `src/lib/store.ts`               |
-| Thumbnail candidates + admin picker       | `src/lib/thumbnails.ts`          |
-| Storyboard sprite sheet + VTT            | `src/lib/storyboard.ts`          |
-| Display formatting (duration, date)       | `src/lib/format.ts`              |

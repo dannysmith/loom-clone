@@ -132,14 +132,6 @@ bun run audio:bench --synthetic
 
 Outputs land in a `bench-<basename>/` directory next to the input — one `out-<chain>.mp4` per variant plus `bench-results.json`. The synthetic variant generates `bench-synthetic.mp4` in the current directory.
 
-## Where the code lives
-
-- Pipeline wiring: `server/src/lib/derivatives.ts` (`processAudio`, `profileNoiseFloor`, `audioFilterChain`, `parseLoudnormJson`).
-- Model file: `server/assets/audio-models/cb.rnnn`.
-- Model docs: `server/assets/audio-models/README.md`.
-- Tests: `server/src/lib/__tests__/audio-processing.test.ts`.
-- Bench tool: `server/scripts/audio-bench.ts`.
-
 ## Silence detection (suggested edits)
 
 The derivatives pipeline runs ffmpeg's `silencedetect` filter against the raw `source.mp4` **before** audio processing and writes `derivatives/suggested-edits.json` if any silences ≥ 3 s are found. Running on the raw audio is critical — after the chain runs, the gate has driven non-speech regions below the silence threshold and the dynamic range is compressed, making silence indistinguishable from quiet speech. Pre-processing, true silence is -50 dB or lower, so the -30 dB threshold cleanly separates pauses from speech. These pre-populate the editor with trim/cut suggestions the first time a video is opened.

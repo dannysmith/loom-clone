@@ -21,6 +21,10 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
   if (!tag.slug) return c.text("Not found", 404); // should never happen post-resolve
 
   const videos = await getVideosForTag(tag.id, tag.videoSort);
+  const videosWithPosters = await postersOnDisk(videos);
+  // The OG image is the first tile's poster (not the newest video's) so a shared
+  // link previews as the page actually looks under any tag sort order.
+  const [firstVideo] = videos;
 
   if (tag.visibility !== "public") {
     c.header("X-Robots-Tag", "noindex");
@@ -38,7 +42,12 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
     <TagPage
       tag={tag}
       videos={videos}
-      ogImage={await tagOgImage(videos[0])}
+      videosWithPosters={videosWithPosters}
+      ogImage={
+        firstVideo && videosWithPosters.has(firstVideo.id)
+          ? absoluteUrl(`/${firstVideo.slug}/poster.jpg`)
+          : absoluteUrl(staticUrl("images/og-default.png"))
+      }
       canonicalUrl={absoluteUrl(`/${tag.slug}`)}
       feedXmlUrl={`/${tag.slug}/feed.xml`}
       feedJsonUrl={`/${tag.slug}/feed.json`}
@@ -46,15 +55,14 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
   );
 }
 
-// OG image for a tag page: the poster of the first video in the grid, so a
-// shared tag link previews with real artwork rather than the generic site card.
-// Existence-checked — social scrapers cache what they fetch, so a 404 image is
-// worse than the fallback. Uses the first tile (not the newest video) so the
-// preview matches what the page actually looks like under any tag sort order.
-async function tagOgImage(first: Video | undefined): Promise<string> {
-  if (first) {
-    const poster = join(derivativesDir(first.id), "thumbnail.jpg");
-    if (await Bun.file(poster).exists()) return absoluteUrl(`/${first.slug}/poster.jpg`);
-  }
-  return absoluteUrl(staticUrl("images/og-default.png"));
+// Which of these videos actually have a poster on disk. `ready` doesn't imply
+// one — the thumbnail step is `expected`, not `required` — so both the OG image
+// and the JSON-LD thumbnails are gated on a real file rather than assumed. A
+// social scraper caches what it fetches, and a 404 in a VideoObject is a
+// structured-data error, so publishing a hopeful URL is worse than omitting it.
+async function postersOnDisk(videos: Video[]): Promise<Set<string>> {
+  const present = await Promise.all(
+    videos.map((v) => Bun.file(join(derivativesDir(v.id), "thumbnail.jpg")).exists()),
+  );
+  return new Set(videos.filter((_, i) => present[i]).map((v) => v.id));
 }

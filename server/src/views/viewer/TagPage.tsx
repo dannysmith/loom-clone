@@ -2,6 +2,7 @@ import { raw } from "hono/html";
 import { marked } from "marked";
 import type { Tag, Video } from "../../db/schema";
 import { formatDate, formatDurationIso, formatDurationShort } from "../../lib/format";
+import { jsonLdScript } from "../../lib/json-ld";
 import { siteConfig } from "../../lib/site-config";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
@@ -14,6 +15,10 @@ marked.setOptions({ breaks: true });
 type Props = {
   tag: Tag;
   videos: Video[];
+  // IDs of videos with a poster on disk. `ready` doesn't imply one — the
+  // thumbnail step is `expected`, not `required` — so the route handler checks
+  // and the page never publishes a thumbnail URL that would 404.
+  videosWithPosters: Set<string>;
   // Absolute URL — OG/Twitter consumers don't resolve relative paths. Chosen
   // by the route handler (first video's poster, else the site default).
   ogImage: string;
@@ -22,7 +27,15 @@ type Props = {
   feedJsonUrl: string;
 };
 
-export function TagPage({ tag, videos, ogImage, canonicalUrl, feedXmlUrl, feedJsonUrl }: Props) {
+export function TagPage({
+  tag,
+  videos,
+  videosWithPosters,
+  ogImage,
+  canonicalUrl,
+  feedXmlUrl,
+  feedJsonUrl,
+}: Props) {
   const pageTitle = `${tag.name} · ${siteConfig.name}`;
   const description = tag.description ?? undefined;
   const ogDescription =
@@ -50,9 +63,9 @@ export function TagPage({ tag, videos, ogImage, canonicalUrl, feedXmlUrl, feedJs
             "@type": "VideoObject",
             name: v.title ?? siteConfig.defaultVideoTitle(v.slug),
             url: absoluteUrl(`/${v.slug}`),
-            // Unconditional, like the tile <img> — these are all `ready`
-            // videos, so a poster exists.
-            thumbnailUrl: absoluteUrl(`/${v.slug}/poster.jpg`),
+            ...(videosWithPosters.has(v.id) && {
+              thumbnailUrl: absoluteUrl(`/${v.slug}/poster.jpg`),
+            }),
             uploadDate: v.completedAt ?? v.createdAt,
             ...(isoDuration && { duration: isoDuration }),
             embedUrl: absoluteUrl(`/${v.slug}/embed`),
@@ -84,7 +97,7 @@ export function TagPage({ tag, videos, ogImage, canonicalUrl, feedXmlUrl, feedJs
           <meta name="twitter:image" content={ogImage} />
 
           {/* Structured data */}
-          <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
+          <script type="application/ld+json">{raw(jsonLdScript(jsonLd))}</script>
 
           {/* Markdown alternate for agents */}
           <link rel="alternate" type="text/markdown" href={`/${tag.slug}.md`} title={tag.name} />

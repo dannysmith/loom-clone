@@ -2,6 +2,7 @@ import { raw } from "hono/html";
 import { marked } from "marked";
 import type { Tag } from "../../db/schema";
 import { formatDate, formatDuration, formatDurationIso } from "../../lib/format";
+import { jsonLdScript } from "../../lib/json-ld";
 import { siteConfig } from "../../lib/site-config";
 import type { Video } from "../../lib/store";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
@@ -136,7 +137,7 @@ export function VideoPage({
           />
 
           {/* Structured data */}
-          <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
+          <script type="application/ld+json">{raw(jsonLdScript(jsonLd))}</script>
 
           {/* Markdown alternate for agents */}
           <link rel="alternate" type="text/markdown" href={`/${video.slug}.md`} title={pageTitle} />

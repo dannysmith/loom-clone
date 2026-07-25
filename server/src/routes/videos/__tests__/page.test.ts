@@ -88,18 +88,28 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
   });
 
-  test("emits rel=preload as=video for the default <source> when MP4 derivative exists", async () => {
+  test("emits rel=preload as=image for the poster when a thumbnail exists", async () => {
     const video = await createVideo();
-    await writeDerivative(video, "source.mp4");
+    await writeDerivative(video, "thumbnail.jpg");
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
     expect(html).toContain(
-      `rel="preload" as="video" fetchpriority="high" href="/${video.slug}/raw/source.mp4"`,
+      `rel="preload" as="image" fetchpriority="high" href="/${video.slug}/poster.jpg"`,
     );
   });
 
-  test("no rel=preload as=video during HLS healing window (no MP4 derivative yet)", async () => {
+  test("no poster preload before the thumbnail has been generated", async () => {
     const video = await createVideo();
+    const res = await videos.request(`/${video.slug}`);
+    const html = await res.text();
+    expect(html).not.toContain('as="image"');
+  });
+
+  // as="video" is spec-legal but unimplemented everywhere — Chrome logs it as
+  // an unsupported `as` value, so the page must not emit it.
+  test("never emits a rel=preload as=video hint", async () => {
+    const video = await createVideo();
+    await writeDerivative(video, "source.mp4");
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
     expect(html).not.toContain('as="video"');

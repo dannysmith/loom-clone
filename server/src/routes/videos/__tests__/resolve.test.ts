@@ -134,7 +134,7 @@ describe("resolveForViewer — <source> ordering", () => {
     ]);
   });
 
-  test("source > 1080p: 1080p.mp4 first (default playback), source.mp4 second, 720p.mp4 third", async () => {
+  test("source > 1080p: source.mp4 first (default playback), then 1080p, then 720p", async () => {
     const video = await createVideo();
     await setDimensions(video.id, 2560, 1440);
     await writeDerivative(video, "source.mp4");
@@ -143,13 +143,35 @@ describe("resolveForViewer — <source> ordering", () => {
 
     const v = asViewer(await resolveForViewer(video.slug));
     expect(v.sources?.map((s) => s.src)).toEqual([
-      `/${video.slug}/raw/1080p.mp4`,
       `/${video.slug}/raw/source.mp4`,
+      `/${video.slug}/raw/1080p.mp4`,
       `/${video.slug}/raw/720p.mp4`,
     ]);
   });
 
-  test("source > 1080p: leading 1080p variant carries data-width/height for the Quality menu", async () => {
+  test("edited 1440p: the edited cut leads, then 1080p, then 720p", async () => {
+    const video = await createVideo();
+    await setDimensions(video.id, 2560, 1440);
+    await writeDerivative(video, "source.mp4");
+    await writeDerivative(video, "1080p.mp4");
+    await writeDerivative(video, "720p.mp4");
+    // The edit run's output: the source-resolution cut, gated on edited_output.
+    await writeDerivative(video, "1440p.mp4");
+    await markStepReady(video.id, "edited_output");
+    await getDb()
+      .update(videosTable)
+      .set({ lastEditedAt: new Date().toISOString() })
+      .where(eq(videosTable.id, video.id));
+
+    const v = asViewer(await resolveForViewer(video.slug));
+    expect(v.sources?.map((s) => s.src)).toEqual([
+      `/${video.slug}/raw/1440p.mp4`,
+      `/${video.slug}/raw/1080p.mp4`,
+      `/${video.slug}/raw/720p.mp4`,
+    ]);
+  });
+
+  test("source > 1080p: every entry carries data-width/height for the Quality menu", async () => {
     const video = await createVideo();
     // 16:9 4K source
     await setDimensions(video.id, 3840, 2160);
@@ -158,13 +180,13 @@ describe("resolveForViewer — <source> ordering", () => {
     await writeDerivative(video, "720p.mp4");
 
     const v = asViewer(await resolveForViewer(video.slug));
+    // source.mp4 leads at its native dimensions
     const first = v.sources?.[0];
-    expect(first?.height).toBe(1080);
+    expect(first?.width).toBe(3840);
+    expect(first?.height).toBe(2160);
     // 1080 × (3840/2160) = 1920, rounded to even
-    expect(first?.width).toBe(1920);
-    // source.mp4 (2nd) keeps its native dimensions
     const second = v.sources?.[1];
-    expect(second?.width).toBe(3840);
-    expect(second?.height).toBe(2160);
+    expect(second?.width).toBe(1920);
+    expect(second?.height).toBe(1080);
   });
 });

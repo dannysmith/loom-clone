@@ -160,19 +160,11 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
         return entry;
       });
 
-    // Default playback should be at most 1080p. Browsers pick the first
-    // compatible <source> as the default, so when a 1080p variant exists
-    // (i.e. source > 1080p) we promote it to first. Otherwise the source
-    // entry leads — it is already ≤1080p in that case. Vidstack's Quality
-    // menu sorts by data-width/height internally, so the visible menu
-    // order is unchanged regardless of DOM order.
-    const variant1080 = variantEntries.find((e) => e.height === 1080);
-    if (variant1080) {
-      const others = variantEntries.filter((e) => e !== variant1080);
-      sources = [variant1080, sourceEntry, ...others];
-    } else {
-      sources = [sourceEntry, ...variantEntries];
-    }
+    // Highest resolution first. Browsers pick the first compatible <source>
+    // as the default, so the source-resolution entry always leads and the
+    // downscales follow in VARIANTS order — a viewer gets the best available
+    // quality unless they pick another from the player's Quality menu.
+    sources = [sourceEntry, ...variantEntries];
   } else if (video.source === "uploaded") {
     // An uploaded video with no servable source.mp4 means its (limited)
     // post-processing failed. It has no HLS to fall back to, so serve the

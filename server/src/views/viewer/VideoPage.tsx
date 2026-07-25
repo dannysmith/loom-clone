@@ -45,7 +45,6 @@ export function VideoPage({
   const rawFilename = activeRawFilename(video);
   const rawUrl = `/${video.slug}/raw/${rawFilename}`;
   const contentUrl = sources?.find((s) => s.src === rawUrl)?.src ?? sources?.[0]?.src ?? src;
-  const defaultSourceUrl = sources?.[0]?.src ?? null;
   const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;
   const ogDescription =
@@ -86,9 +85,14 @@ export function VideoPage({
         <>
           <link rel="preconnect" href="https://cdn.vidstack.io" />
           <link rel="modulepreload" href="https://cdn.vidstack.io/player" />
-          {defaultSourceUrl && (
-            <link rel="preload" as="video" fetchpriority="high" href={defaultSourceUrl} />
-          )}
+          {/* The poster is rendered by <media-poster>, so without this hint its
+              fetch waits on the Vidstack module downloading from a third-party
+              CDN — and it's the first thing a viewer sees. No equivalent hint
+              exists for the video itself: `as="video"` is a legal fetch
+              destination but no browser implements preload for it (Chrome logs
+              it as an unsupported `as` value). Forward buffering is handled by
+              preload="auto" + load="eager" on the player instead. */}
+          {poster && <link rel="preload" as="image" fetchpriority="high" href={poster} />}
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />

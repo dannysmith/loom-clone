@@ -37,7 +37,6 @@ export function EmbedPage({
   const pageTitle = title ?? siteConfig.defaultVideoTitle(slug);
   const ogDescription =
     description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
-  const defaultSourceUrl = sources?.[0]?.src ?? null;
   return (
     <RootLayout
       title={pageTitle}
@@ -47,9 +46,8 @@ export function EmbedPage({
         <>
           <link rel="preconnect" href="https://cdn.vidstack.io" />
           <link rel="modulepreload" href="https://cdn.vidstack.io/player" />
-          {defaultSourceUrl && (
-            <link rel="preload" as="video" fetchpriority="high" href={defaultSourceUrl} />
-          )}
+          {/* Poster preload — see the note in VideoPage.tsx. */}
+          {poster && <link rel="preload" as="image" fetchpriority="high" href={poster} />}
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
           <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
           <script type="module" src="https://cdn.vidstack.io/player" />

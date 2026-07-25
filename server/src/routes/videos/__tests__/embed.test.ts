@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createVideo, trashVideo, updateSlug } from "../../../lib/store";
+import { mkdir } from "fs/promises";
+import { join } from "path";
+import { createVideo, DATA_DIR, trashVideo, updateSlug } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import embed from "../embed";
 
@@ -41,6 +43,19 @@ describe("GET /:slug/embed", () => {
     const res = await embed.request(`/${video.slug}/embed`);
     const html = await res.text();
     expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
+  });
+
+  test("emits rel=preload as=image for the poster, never as=video", async () => {
+    const video = await createVideo();
+    const dir = join(DATA_DIR, video.id, "derivatives");
+    await mkdir(dir, { recursive: true });
+    await Bun.write(join(dir, "thumbnail.jpg"), "stub");
+    const res = await embed.request(`/${video.slug}/embed`);
+    const html = await res.text();
+    expect(html).toContain(
+      `rel="preload" as="image" fetchpriority="high" href="/${video.slug}/poster.jpg"`,
+    );
+    expect(html).not.toContain('as="video"');
   });
 
   test("Cache-Control is set with private/public scope by visibility", async () => {

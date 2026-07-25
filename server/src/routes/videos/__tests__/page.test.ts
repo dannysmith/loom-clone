@@ -91,6 +91,21 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
   });
 
+  // A title containing "</script>" must not be able to close the JSON-LD block
+  // and inject markup — see jsonLdScript() in lib/json-ld.ts.
+  test("escapes markup in JSON-LD so a hostile title can't break out", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { title: "</script><img src=x onerror=alert(1)>" });
+    const res = await videos.request(`/${video.slug}`);
+    const html = await res.text();
+    expect(html).not.toContain("</script><img");
+    // Escaping "<" alone is enough — "</script" can't form without it.
+    expect(html).toContain("\\u003c/script>\\u003cimg");
+    const match = /<script type="application\/ld\+json">(.+?)<\/script>/s.exec(html);
+    const jsonLd = JSON.parse(match?.[1] ?? "{}");
+    expect(jsonLd.name).toBe("</script><img src=x onerror=alert(1)>");
+  });
+
   test("renders duration and date as machine-readable <time> elements", async () => {
     const video = await createVideo();
     await updateVideo(video.id, { title: "Timed" });

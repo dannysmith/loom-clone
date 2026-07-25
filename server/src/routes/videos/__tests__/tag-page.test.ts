@@ -22,6 +22,12 @@ async function makePublicTag(slug: string, name = "demo") {
   return updateTag(tag.id, { visibility: "public", slug });
 }
 
+// Gives a video a poster on disk — `ready` alone doesn't imply one.
+async function writePoster(videoId: string) {
+  await mkdir(join(DATA_DIR, videoId, "derivatives"), { recursive: true });
+  await Bun.write(join(DATA_DIR, videoId, "derivatives", "thumbnail.jpg"), "stub");
+}
+
 async function makePublishedVideo(visibility: "public" | "unlisted" | "private" = "public") {
   const v = await createVideo();
   await updateVideo(v.id, { visibility });
@@ -85,14 +91,15 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     expect(html).toContain("/static/images/og-default.png");
     expect(html).toContain('name="twitter:card" content="summary_large_image"');
     expect(html).toContain('name="twitter:image"');
+    // And the JSON-LD omits thumbnailUrl rather than publishing a 404.
+    expect(html).not.toContain("thumbnailUrl");
   });
 
   test("uses the first video's poster as the OG image when it exists", async () => {
     const tag = await makePublicTag("postered", "Postered");
     const v = await makePublishedVideo("public");
     await addTagToVideo(v.id, tag.id);
-    await mkdir(join(DATA_DIR, v.id, "derivatives"), { recursive: true });
-    await Bun.write(join(DATA_DIR, v.id, "derivatives", "thumbnail.jpg"), "stub");
+    await writePoster(v.id);
 
     const res = await videos.request("/postered");
     const html = await res.text();
@@ -100,11 +107,33 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     expect(html).not.toContain("og-default.png");
   });
 
+  // A title containing "</script>" must not be able to close the JSON-LD block
+  // and inject markup — see jsonLdScript() in lib/json-ld.ts.
+  test("escapes markup in JSON-LD so a hostile title can't break out", async () => {
+    const tag = await makePublicTag("escaped", "Escaped");
+    const v = await makePublishedVideo("public");
+    await updateVideo(v.id, { title: "</script><img src=x onerror=alert(1)>" });
+    await addTagToVideo(v.id, tag.id);
+
+    const res = await videos.request("/escaped");
+    const html = await res.text();
+    expect(html).not.toContain("</script><img");
+    // Escaping "<" alone is enough — "</script" can't form without it.
+    expect(html).toContain("\\u003c/script>\\u003cimg");
+    // Still valid JSON, and the title survives intact once parsed.
+    const match = /<script type="application\/ld\+json">(.+?)<\/script>/s.exec(html);
+    const jsonLd = JSON.parse(match?.[1] ?? "{}");
+    expect(jsonLd.mainEntity.itemListElement[0].item.name).toBe(
+      "</script><img src=x onerror=alert(1)>",
+    );
+  });
+
   test("emits CollectionPage JSON-LD listing the tagged videos", async () => {
     const tag = await makePublicTag("structured", "Structured");
     const v = await makePublishedVideo("public");
     await updateVideo(v.id, { title: "Indexed Video" });
     await addTagToVideo(v.id, tag.id);
+    await writePoster(v.id);
 
     const res = await videos.request("/structured");
     const html = await res.text();

@@ -1,4 +1,8 @@
 import type { Context } from "hono";
+import { join } from "path";
+import { derivativesDir } from "../../lib/derivatives";
+import { staticUrl } from "../../lib/static-assets";
+import type { Video } from "../../lib/store";
 import { getVideosForTag, resolveTagSlug } from "../../lib/tags";
 import { absoluteUrl } from "../../lib/url";
 import { TagPage } from "../../views/viewer/TagPage";
@@ -34,9 +38,23 @@ export async function handleTagPage(c: Context, slug: string): Promise<Response>
     <TagPage
       tag={tag}
       videos={videos}
+      ogImage={await tagOgImage(videos[0])}
       canonicalUrl={absoluteUrl(`/${tag.slug}`)}
       feedXmlUrl={`/${tag.slug}/feed.xml`}
       feedJsonUrl={`/${tag.slug}/feed.json`}
     />,
   );
+}
+
+// OG image for a tag page: the poster of the first video in the grid, so a
+// shared tag link previews with real artwork rather than the generic site card.
+// Existence-checked — social scrapers cache what they fetch, so a 404 image is
+// worse than the fallback. Uses the first tile (not the newest video) so the
+// preview matches what the page actually looks like under any tag sort order.
+async function tagOgImage(first: Video | undefined): Promise<string> {
+  if (first) {
+    const poster = join(derivativesDir(first.id), "thumbnail.jpg");
+    if (await Bun.file(poster).exists()) return absoluteUrl(`/${first.slug}/poster.jpg`);
+  }
+  return absoluteUrl(staticUrl("images/og-default.png"));
 }

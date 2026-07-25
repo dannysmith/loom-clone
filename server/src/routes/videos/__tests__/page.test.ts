@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import { getDb } from "../../../db/client";
 import type { ProcessingStepKind } from "../../../db/schema";
+import { videos as videosTable } from "../../../db/schema";
 import { markStepReady } from "../../../lib/processing/steps-store";
 import { createVideo, DATA_DIR, updateSlug, updateVideo, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
@@ -86,6 +89,20 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
     expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
+  });
+
+  test("renders duration and date as machine-readable <time> elements", async () => {
+    const video = await createVideo();
+    await updateVideo(video.id, { title: "Timed" });
+    await getDb()
+      .update(videosTable)
+      .set({ durationSeconds: 90, completedAt: "2026-04-17T09:30:00.000Z" })
+      .where(eq(videosTable.id, video.id));
+
+    const res = await videos.request(`/${video.slug}`);
+    const html = await res.text();
+    expect(html).toContain('<time class="viewer-meta-item" datetime="PT1M30S">');
+    expect(html).toContain('<time class="viewer-meta-item" datetime="2026-04-17T09:30:00.000Z">');
   });
 
   test("emits rel=preload as=image for the poster when a thumbnail exists", async () => {

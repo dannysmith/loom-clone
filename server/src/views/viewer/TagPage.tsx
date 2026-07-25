@@ -1,9 +1,8 @@
 import { raw } from "hono/html";
 import { marked } from "marked";
 import type { Tag, Video } from "../../db/schema";
-import { formatDate, formatDurationShort } from "../../lib/format";
+import { formatDate, formatDurationIso, formatDurationShort } from "../../lib/format";
 import { siteConfig } from "../../lib/site-config";
-import { staticUrl } from "../../lib/static-assets";
 import { absoluteUrl } from "../../lib/url";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 import { AgentDirective } from "./AgentDirective";
@@ -15,20 +14,53 @@ marked.setOptions({ breaks: true });
 type Props = {
   tag: Tag;
   videos: Video[];
+  // Absolute URL — OG/Twitter consumers don't resolve relative paths. Chosen
+  // by the route handler (first video's poster, else the site default).
+  ogImage: string;
   canonicalUrl: string;
   feedXmlUrl: string;
   feedJsonUrl: string;
 };
 
-export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: Props) {
+export function TagPage({ tag, videos, ogImage, canonicalUrl, feedXmlUrl, feedJsonUrl }: Props) {
   const pageTitle = `${tag.name} · ${siteConfig.name}`;
   const description = tag.description ?? undefined;
   const ogDescription =
     description && description.length > 200 ? `${description.slice(0, 197)}...` : description;
   const noindex = tag.visibility !== "public";
-  // Generic site OG image — tag pages have no per-tag artwork. Absolute URL
-  // because OG/Twitter consumers don't resolve relative paths.
-  const ogImage = absoluteUrl(staticUrl("images/og-default.png"));
+
+  // JSON-LD: the tag as a collection of its videos, so search engines and
+  // agents can read the list without scraping tiles. Mirrors the per-video
+  // VideoObject on the video page, trimmed to what a listing needs.
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: tag.name,
+    url: canonicalUrl,
+    ...(description && { description }),
+    mainEntity: {
+      "@type": "ItemList",
+      numberOfItems: videos.length,
+      itemListElement: videos.map((v, i) => {
+        const isoDuration = formatDurationIso(v.durationSeconds);
+        return {
+          "@type": "ListItem",
+          position: i + 1,
+          item: {
+            "@type": "VideoObject",
+            name: v.title ?? siteConfig.defaultVideoTitle(v.slug),
+            url: absoluteUrl(`/${v.slug}`),
+            // Unconditional, like the tile <img> — these are all `ready`
+            // videos, so a poster exists.
+            thumbnailUrl: absoluteUrl(`/${v.slug}/poster.jpg`),
+            uploadDate: v.completedAt ?? v.createdAt,
+            ...(isoDuration && { duration: isoDuration }),
+            embedUrl: absoluteUrl(`/${v.slug}/embed`),
+          },
+        };
+      }),
+    },
+  };
 
   return (
     <ViewerLayout
@@ -50,6 +82,9 @@ export function TagPage({ tag, videos, canonicalUrl, feedXmlUrl, feedJsonUrl }: 
           <meta name="twitter:title" content={tag.name} />
           {ogDescription && <meta name="twitter:description" content={ogDescription} />}
           <meta name="twitter:image" content={ogImage} />
+
+          {/* Structured data */}
+          <script type="application/ld+json">{raw(JSON.stringify(jsonLd))}</script>
 
           {/* Markdown alternate for agents */}
           <link rel="alternate" type="text/markdown" href={`/${tag.slug}.md`} title={tag.name} />

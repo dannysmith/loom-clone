@@ -190,17 +190,17 @@ export function VideoPage({
         {(duration || date || tags.length > 0) && (
           <div class="viewer-meta-row">
             {duration && (
-              <span class="viewer-meta-item">
+              <time class="viewer-meta-item" datetime={isoDuration ?? undefined}>
                 <ClockIcon size={14} />
                 {duration}
-              </span>
+              </time>
             )}
             {duration && date && <span class="viewer-meta-separator">·</span>}
             {date && (
-              <span class="viewer-meta-item">
+              <time class="viewer-meta-item" datetime={uploadDate}>
                 <CalendarIcon size={14} />
                 {date}
-              </span>
+              </time>
             )}
             {tags.length > 0 && (
               <>

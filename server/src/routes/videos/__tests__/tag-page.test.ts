@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { completeVideo, createVideo, updateVideo } from "../../../lib/store";
+import { mkdir } from "fs/promises";
+import { join } from "path";
+import { completeVideo, createVideo, DATA_DIR, updateVideo } from "../../../lib/store";
 import { addTagToVideo, createTag, updateTag } from "../../../lib/tags";
+import { absoluteUrl } from "../../../lib/url";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
 
@@ -71,14 +74,52 @@ describe("GET /:slug — tag fallback after no video matches", () => {
     expect(res.headers.get("x-robots-tag")).toBeNull();
   });
 
-  test("serves a generic OG image for social sharing", async () => {
-    await makePublicTag("og-tag", "OG Tag");
+  test("falls back to the generic OG image when there's no usable poster", async () => {
+    const tag = await makePublicTag("og-tag", "OG Tag");
+    // A video in the grid, but its thumbnail step hasn't produced a poster yet.
+    const v = await makePublishedVideo("public");
+    await addTagToVideo(v.id, tag.id);
     const res = await videos.request("/og-tag");
     const html = await res.text();
     expect(html).toContain('property="og:image" content="');
     expect(html).toContain("/static/images/og-default.png");
     expect(html).toContain('name="twitter:card" content="summary_large_image"');
     expect(html).toContain('name="twitter:image"');
+  });
+
+  test("uses the first video's poster as the OG image when it exists", async () => {
+    const tag = await makePublicTag("postered", "Postered");
+    const v = await makePublishedVideo("public");
+    await addTagToVideo(v.id, tag.id);
+    await mkdir(join(DATA_DIR, v.id, "derivatives"), { recursive: true });
+    await Bun.write(join(DATA_DIR, v.id, "derivatives", "thumbnail.jpg"), "stub");
+
+    const res = await videos.request("/postered");
+    const html = await res.text();
+    expect(html).toContain(`property="og:image" content="${absoluteUrl(`/${v.slug}/poster.jpg`)}"`);
+    expect(html).not.toContain("og-default.png");
+  });
+
+  test("emits CollectionPage JSON-LD listing the tagged videos", async () => {
+    const tag = await makePublicTag("structured", "Structured");
+    const v = await makePublishedVideo("public");
+    await updateVideo(v.id, { title: "Indexed Video" });
+    await addTagToVideo(v.id, tag.id);
+
+    const res = await videos.request("/structured");
+    const html = await res.text();
+    const match = /<script type="application\/ld\+json">(.+?)<\/script>/s.exec(html);
+    expect(match).not.toBeNull();
+    const jsonLd = JSON.parse(match?.[1] ?? "{}");
+    expect(jsonLd["@type"]).toBe("CollectionPage");
+    expect(jsonLd.name).toBe("Structured");
+    expect(jsonLd.mainEntity.numberOfItems).toBe(1);
+    const [first] = jsonLd.mainEntity.itemListElement;
+    expect(first.position).toBe(1);
+    expect(first.item["@type"]).toBe("VideoObject");
+    expect(first.item.name).toBe("Indexed Video");
+    expect(first.item.url).toBe(absoluteUrl(`/${v.slug}`));
+    expect(first.item.thumbnailUrl).toBe(absoluteUrl(`/${v.slug}/poster.jpg`));
   });
 
   test("exposes agent affordances: Link header, markdown alternate, directive, Vary", async () => {

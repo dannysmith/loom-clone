@@ -6,6 +6,7 @@ import { jsonLdScript } from "../../lib/json-ld";
 import { siteConfig } from "../../lib/site-config";
 import type { Video } from "../../lib/store";
 import { absoluteUrl, activeRawFilename } from "../../lib/url";
+import { playerAssets } from "../../lib/vite-manifest";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { ViewerLayout } from "../layouts/ViewerLayout";
 import { AgentDirective } from "./AgentDirective";
@@ -84,19 +85,19 @@ export function VideoPage({
       title={pageTitle}
       head={
         <>
-          <link rel="preconnect" href="https://cdn.vidstack.io" />
-          <link rel="modulepreload" href="https://cdn.vidstack.io/player" />
+          <link rel="modulepreload" href={playerAssets().js} />
           {/* The poster is rendered by <media-poster>, so without this hint its
-              fetch waits on the Vidstack module downloading from a third-party
-              CDN — and it's the first thing a viewer sees. No equivalent hint
-              exists for the video itself: `as="video"` is a legal fetch
-              destination but no browser implements preload for it (Chrome logs
-              it as an unsupported `as` value). Forward buffering is handled by
+              fetch waits on the Vidstack module downloading — and it's the
+              first thing a viewer sees. No equivalent hint exists for the
+              video itself: `as="video"` is a legal fetch destination but no
+              browser implements preload for it (Chrome logs it as an
+              unsupported `as` value). Forward buffering is handled by
               preload="auto" + load="eager" on the player instead. */}
           {poster && <link rel="preload" as="image" fetchpriority="high" href={poster} />}
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-          <script type="module" src="https://cdn.vidstack.io/player" />
+          {playerAssets().css.map((href) => (
+            <link rel="stylesheet" href={href} />
+          ))}
+          <script type="module" src={playerAssets().js} />
 
           {/* Canonical + robots */}
           <link rel="canonical" href={canonicalUrl} />

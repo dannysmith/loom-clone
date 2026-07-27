@@ -89,7 +89,9 @@ Direct commands (for reference or when you need different flags):
 │   ├── CLAUDE.md                         #   scripts, layout, testing conventions
 │   ├── biome.json                        #   lint + format config
 │   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
+│   │   ├── player/                       #     committed Vidstack player bundle (built from server/player/)
 │   │   └── styles/                       #     vanilla CSS with @layer + custom properties
+│   ├── player/                           #   Vite build for the self-hosted Vidstack player (pinned vidstack + hls.js)
 │   └── src/
 │       ├── index.ts                      #   entry — initDb() + boots createApp()
 │       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)

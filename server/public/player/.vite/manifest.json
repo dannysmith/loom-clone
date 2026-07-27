@@ -1,0 +1,210 @@
+{
+  "_prod-BNyZug0w.js": {
+    "file": "assets/prod-BNyZug0w.js",
+    "name": "prod",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts"
+    ],
+    "dynamicImports": [
+      "node_modules/media-captions/dist/prod/srt-parser.js",
+      "node_modules/media-captions/dist/prod/ssa-parser.js",
+      "node_modules/media-captions/dist/prod/errors.js"
+    ]
+  },
+  "_vidstack-CI5oafcm-6taXHaSa.js": {
+    "file": "assets/vidstack-CI5oafcm-6taXHaSa.js",
+    "name": "vidstack-CI5oafcm",
+    "imports": [
+      "src/player.ts"
+    ]
+  },
+  "_vidstack-CceZzgm4-BeWXbzWg.js": {
+    "file": "assets/vidstack-CceZzgm4-BeWXbzWg.js",
+    "name": "vidstack-CceZzgm4",
+    "imports": [
+      "src/player.ts"
+    ]
+  },
+  "_vidstack-DUnfBERX2-StX4B6nY.js": {
+    "file": "assets/vidstack-DUnfBERX2-StX4B6nY.js",
+    "name": "vidstack-DUnfBERX2",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts"
+    ],
+    "dynamicImports": [
+      "node_modules/vidstack/prod/providers/vidstack-google-cast.js"
+    ]
+  },
+  "node_modules/hls.js/dist/hls.mjs": {
+    "file": "assets/hls-C9Q5Rbpk.js",
+    "name": "hls",
+    "src": "node_modules/hls.js/dist/hls.mjs",
+    "isDynamicEntry": true
+  },
+  "node_modules/media-captions/dist/prod/errors.js": {
+    "file": "assets/errors-BPn3WakL.js",
+    "name": "errors",
+    "src": "node_modules/media-captions/dist/prod/errors.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_prod-BNyZug0w.js",
+      "src/player.ts"
+    ]
+  },
+  "node_modules/media-captions/dist/prod/srt-parser.js": {
+    "file": "assets/srt-parser-BThUR5O9.js",
+    "name": "srt-parser",
+    "src": "node_modules/media-captions/dist/prod/srt-parser.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_prod-BNyZug0w.js",
+      "src/player.ts"
+    ]
+  },
+  "node_modules/media-captions/dist/prod/ssa-parser.js": {
+    "file": "assets/ssa-parser-CP5H-WHT.js",
+    "name": "ssa-parser",
+    "src": "node_modules/media-captions/dist/prod/ssa-parser.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_prod-BNyZug0w.js"
+    ],
+    "dynamicImports": [
+      "node_modules/media-captions/dist/prod/errors.js"
+    ]
+  },
+  "node_modules/vidstack/prod/chunks/vidstack-BEi14iNw2.js": {
+    "file": "assets/vidstack-BEi14iNw2-BWtEQlLL.js",
+    "name": "vidstack-BEi14iNw2",
+    "src": "node_modules/vidstack/prod/chunks/vidstack-BEi14iNw2.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts"
+    ]
+  },
+  "node_modules/vidstack/prod/chunks/vidstack-CXo4cwSP2.js": {
+    "file": "assets/vidstack-CXo4cwSP2-CsqF5yYa.js",
+    "name": "vidstack-CXo4cwSP2",
+    "src": "node_modules/vidstack/prod/chunks/vidstack-CXo4cwSP2.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts"
+    ]
+  },
+  "node_modules/vidstack/prod/chunks/vidstack-IMa-zkAV.js": {
+    "file": "assets/vidstack-IMa-zkAV-D1JhMDQw.js",
+    "name": "vidstack-IMa-zkAV",
+    "src": "node_modules/vidstack/prod/chunks/vidstack-IMa-zkAV.js",
+    "isDynamicEntry": true
+  },
+  "node_modules/vidstack/prod/chunks/vidstack-q-9soyHT.js": {
+    "file": "assets/vidstack-q-9soyHT-cl_EEhe2.js",
+    "name": "vidstack-q-9soyHT",
+    "src": "node_modules/vidstack/prod/chunks/vidstack-q-9soyHT.js",
+    "isDynamicEntry": true
+  },
+  "node_modules/vidstack/prod/providers/vidstack-audio.js": {
+    "file": "assets/vidstack-audio-BHYxk0rj.js",
+    "name": "vidstack-audio",
+    "src": "node_modules/vidstack/prod/providers/vidstack-audio.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_vidstack-CI5oafcm-6taXHaSa.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-dash.js": {
+    "file": "assets/vidstack-dash-CdTEs-xO.js",
+    "name": "vidstack-dash",
+    "src": "node_modules/vidstack/prod/providers/vidstack-dash.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "node_modules/vidstack/prod/providers/vidstack-video.js",
+      "_vidstack-CI5oafcm-6taXHaSa.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-google-cast.js": {
+    "file": "assets/vidstack-google-cast-h43L5Ahz.js",
+    "name": "vidstack-google-cast",
+    "src": "node_modules/vidstack/prod/providers/vidstack-google-cast.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_vidstack-DUnfBERX2-StX4B6nY.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-hls.js": {
+    "file": "assets/vidstack-hls-BzZ14pmC.js",
+    "name": "vidstack-hls",
+    "src": "node_modules/vidstack/prod/providers/vidstack-hls.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "node_modules/vidstack/prod/providers/vidstack-video.js",
+      "_vidstack-CI5oafcm-6taXHaSa.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-video.js": {
+    "file": "assets/vidstack-video-BJJk9sAs.js",
+    "name": "vidstack-video",
+    "src": "node_modules/vidstack/prod/providers/vidstack-video.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_vidstack-CI5oafcm-6taXHaSa.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-vimeo.js": {
+    "file": "assets/vidstack-vimeo-C2Pq03_i.js",
+    "name": "vidstack-vimeo",
+    "src": "node_modules/vidstack/prod/providers/vidstack-vimeo.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_vidstack-CceZzgm4-BeWXbzWg.js",
+      "node_modules/vidstack/prod/chunks/vidstack-q-9soyHT.js"
+    ]
+  },
+  "node_modules/vidstack/prod/providers/vidstack-youtube.js": {
+    "file": "assets/vidstack-youtube-Csd0eD7K.js",
+    "name": "vidstack-youtube",
+    "src": "node_modules/vidstack/prod/providers/vidstack-youtube.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "src/player.ts",
+      "_vidstack-CceZzgm4-BeWXbzWg.js",
+      "node_modules/vidstack/prod/chunks/vidstack-IMa-zkAV.js"
+    ]
+  },
+  "src/player.ts": {
+    "file": "assets/player-5q_kBel3.js",
+    "name": "player",
+    "src": "src/player.ts",
+    "isEntry": true,
+    "dynamicImports": [
+      "_prod-BNyZug0w.js",
+      "_prod-BNyZug0w.js",
+      "node_modules/vidstack/prod/providers/vidstack-audio.js",
+      "node_modules/vidstack/prod/providers/vidstack-video.js",
+      "node_modules/vidstack/prod/providers/vidstack-hls.js",
+      "node_modules/vidstack/prod/providers/vidstack-dash.js",
+      "node_modules/vidstack/prod/providers/vidstack-vimeo.js",
+      "node_modules/vidstack/prod/chunks/vidstack-q-9soyHT.js",
+      "node_modules/vidstack/prod/providers/vidstack-youtube.js",
+      "node_modules/vidstack/prod/chunks/vidstack-IMa-zkAV.js",
+      "_vidstack-DUnfBERX2-StX4B6nY.js",
+      "node_modules/vidstack/prod/chunks/vidstack-CXo4cwSP2.js",
+      "_prod-BNyZug0w.js",
+      "_prod-BNyZug0w.js",
+      "node_modules/vidstack/prod/chunks/vidstack-BEi14iNw2.js",
+      "node_modules/hls.js/dist/hls.mjs"
+    ],
+    "css": [
+      "assets/player-Csx2uHbF.css"
+    ]
+  }
+}

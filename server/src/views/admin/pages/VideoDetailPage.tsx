@@ -5,6 +5,7 @@ import { formatDate, formatDateTime, formatDuration } from "../../../lib/format"
 import type { Readiness } from "../../../lib/processing/readiness";
 import type { ThumbnailCandidate } from "../../../lib/thumbnails";
 import { activeRawFilename } from "../../../lib/url";
+import { playerAssets } from "../../../lib/vite-manifest";
 import { AdminLayout } from "../../layouts/AdminLayout";
 import {
   FileTypeIcon,
@@ -72,9 +73,10 @@ export function VideoDetailPage({
       title={title}
       head={
         <>
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-          <script type="module" src="https://cdn.vidstack.io/player" />
+          {playerAssets().css.map((href) => (
+            <link rel="stylesheet" href={href} />
+          ))}
+          <script type="module" src={playerAssets().js} />
           <link
             rel="stylesheet"
             href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css"

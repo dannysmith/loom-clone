@@ -1,5 +1,6 @@
 node_modules/
 editor/node_modules/
+player/node_modules/
 public/editor/
 data/
 .env

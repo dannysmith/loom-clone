@@ -1,5 +1,6 @@
 import { raw } from "hono/html";
 import { siteConfig } from "../../lib/site-config";
+import { playerAssets } from "../../lib/vite-manifest";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { RootLayout } from "../layouts/RootLayout";
 
@@ -44,13 +45,13 @@ export function EmbedPage({
       stylesheet="styles/embed-app.css"
       head={
         <>
-          <link rel="preconnect" href="https://cdn.vidstack.io" />
-          <link rel="modulepreload" href="https://cdn.vidstack.io/player" />
+          <link rel="modulepreload" href={playerAssets().js} />
           {/* Poster preload — see the note in VideoPage.tsx. */}
           {poster && <link rel="preload" as="image" fetchpriority="high" href={poster} />}
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-          <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-          <script type="module" src="https://cdn.vidstack.io/player" />
+          {playerAssets().css.map((href) => (
+            <link rel="stylesheet" href={href} />
+          ))}
+          <script type="module" src={playerAssets().js} />
 
           {/* Canonical points at the main video page, not the embed */}
           <link rel="canonical" href={canonicalUrl} />

@@ -1,7 +1,7 @@
-// Loads the script/CSS tags for a Vite-built entry point under
-// `server/public/editor/`. In production the Vite manifest is present and
-// we read the hashed asset filenames from it; in dev the manifest is absent
-// and we point at the Vite dev server (HMR) instead.
+// Loads the script/CSS tags for Vite-built entry points under
+// `server/public/`. In production the Vite manifest is present and
+// we read the hashed asset filenames from it; for the editor in dev the
+// manifest is absent and we point at the Vite dev server (HMR) instead.
 //
 // `entryName` is the manifest key — e.g. `"index.html"` or `"cover.html"` —
 // which matches the per-entry `rollupOptions.input` map in vite.config.ts.
@@ -12,6 +12,41 @@ import { PUBLIC_ROOT } from "./static-assets";
 
 type ManifestEntry = { file: string; css?: string[] };
 type Manifest = Record<string, ManifestEntry>;
+
+// --- Player (self-hosted Vidstack) ---
+//
+// Unlike the editor, `public/player/` is a committed build artefact with no
+// dev-server mode — a missing manifest is a hard error, not a fall-through.
+// URLs are Vite content-hashed filenames, deliberately NOT `staticUrl()`:
+// STATIC_VERSION hashes all of `public/`, so a CSS tweak elsewhere would
+// otherwise bust the ~300 KB player bundle.
+
+export type PlayerAssets = { js: string; css: string[] };
+
+let playerAssetsCache: PlayerAssets | null = null;
+
+export function playerAssets(): PlayerAssets {
+  if (playerAssetsCache) return playerAssetsCache;
+
+  const manifestPath = join(PUBLIC_ROOT, "player", ".vite", "manifest.json");
+  if (!existsSync(manifestPath)) {
+    throw new Error(
+      "Player manifest missing. Run `bun run player:build` in server/ (the output in public/player/ is committed — this should never happen on a clean checkout).",
+    );
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Manifest;
+  const entry = manifest["src/player.ts"];
+  if (!entry?.file) {
+    throw new Error('Player manifest is missing the "src/player.ts" entry.');
+  }
+  playerAssetsCache = {
+    js: `/static/player/${entry.file}`,
+    css: (entry.css ?? []).map((f) => `/static/player/${f}`),
+  };
+  return playerAssetsCache;
+}
+
+// --- Editor ---
 
 export function loadEntryAssets(entryName: string): { scripts: string } {
   const manifestPath = join(PUBLIC_ROOT, "editor", ".vite", "manifest.json");

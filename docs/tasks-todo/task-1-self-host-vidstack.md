@@ -162,7 +162,7 @@ Confirm in the network panel that `hls.min.js` is served from our origin and onl
 
 ### [P4.2] Definition of done
 
-- No `cdn.vidstack.io` or `cdn.jsdelivr.net` reference remains in `server/src/` (grep is the check).
+- No `cdn.vidstack.io` reference remains in `server/src/`, and no `cdn.jsdelivr.net` reference on any **public** surface (grep is the check). Admin surfaces keep pre-existing, version-pinned jsDelivr deps that were never in this task's scope: highlight.js on `VideoDetailPage.tsx` and htmx in `AdminLayout.tsx`. Self-hosting those is a possible follow-up, not part of #54.
 - A rendered video page makes zero third-party requests other than Simple Analytics, verified in a browser network panel with the cache disabled — both the MP4 path and the HLS path.
 - Eager player payload is one JS request and one CSS request, ~77 KB brotli.
 - Player theming is visually unchanged: brand colour, slider tints, the coral paused-state play icon.

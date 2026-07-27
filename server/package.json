@@ -15,6 +15,7 @@
     "test:watch": "bun test --watch",
     "editor:dev": "cd editor && npx vite",
     "editor:build": "cd editor && npx vite build",
+    "player:build": "cd player && npx vite build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

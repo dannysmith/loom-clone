@@ -84,11 +84,21 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     expect(html).toContain('load="eager"');
   });
 
-  test("head includes modulepreload for the Vidstack JS module", async () => {
+  test("head includes modulepreload for the self-hosted player module", async () => {
     const video = await createVideo();
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
-    expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
+    expect(html).toContain('rel="modulepreload" href="/static/player/');
+  });
+
+  // The player is self-hosted (issue #54) — a third-party CDN reference
+  // reappearing anywhere in the viewer HTML is a regression.
+  test("viewer HTML references no third-party player CDN", async () => {
+    const video = await createVideo();
+    const res = await videos.request(`/${video.slug}`);
+    const html = await res.text();
+    expect(html).not.toContain("cdn.vidstack.io");
+    expect(html).not.toContain("cdn.jsdelivr.net");
   });
 
   // A title containing "</script>" must not be able to close the JSON-LD block

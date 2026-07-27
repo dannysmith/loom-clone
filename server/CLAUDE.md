@@ -58,7 +58,12 @@ Four modules in `src/routes/`, each with its own auth profile. Full route refere
 
 ## Views & Static Assets
 
-Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. No build step; Bun handles `.tsx` natively, browsers fetch CSS as-is.
+Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. The server itself has no build step — Bun handles `.tsx` natively, browsers fetch CSS as-is. Two Vite builds produce static assets, with opposite commit policies:
+
+- `editor/` → `public/editor/` — the admin React editor. **Gitignored**, built by the Dockerfile at deploy time.
+- `player/` → `public/player/` — the self-hosted Vidstack player bundle (viewer, embed, and admin video pages). **Committed to git**, deliberately: a deploy must never depend on the npm registry being up or `vidstack@1.15.6` still being published. That durability is the reason the player is self-hosted at all (issue #54).
+
+**Upgrading Vidstack**: bump the exact pin in `player/package.json`, `bun install` + `bun run player:build` (from `server/`), verify a video page in the browser, commit source + built output together. Trap: vidstack's npm `latest` dist-tag points at a stale 2023 build (0.6.15) — real releases ship under the `next` tag, so always pin an explicit version, never `bun add vidstack` bare. `hls.js` is pinned in the same package and bundled as a lazy chunk (fetched only for `.m3u8` sources, via the `provider-change` hook in `player/src/player.ts`).
 
 **Layout**:
 
@@ -70,6 +75,7 @@ src/views/
              plus components/Icons.tsx (Lucide set), components/VideoCard
 public/
   styles/    CSS — see below
+  player/    committed Vidstack build (see above) — hashed filenames read via playerAssets() in src/lib/vite-manifest.ts, not staticUrl()
 ```
 
 - **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.

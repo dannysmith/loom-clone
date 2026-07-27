@@ -378,6 +378,8 @@ Editor semantic colours:
 
 Themed via Vidstack's own CSS custom properties in `server/public/styles/player.css`. The mapping at a glance: `--media-brand` = coral; `--media-controls-color` = white; slider track/fill/thumb tinted accent; `--video-load-button-bg` = coral; tooltips use brand background. A small extra rule keeps the play-icon coral whenever the player is paused.
 
+The player's own base CSS (theme + video layout) is self-hosted: it ships inside the committed bundle in `server/public/player/` (built from `server/player/`, see `server/CLAUDE.md`), not from Vidstack's CDN. Cascade note: layouts link the page stylesheet _before_ the `head` slot, so Vidstack's CSS loads _after_ `viewer-app.css`/`embed-app.css` — our `player.css` overrides win on specificity, not source order. Keep it that way when touching the head slots.
+
 ---
 
 ## Rules

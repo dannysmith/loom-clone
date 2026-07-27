@@ -1,0 +1,16 @@
+{
+  "name": "loom-clone-player",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "hls.js": "1.6.16",
+    "vidstack": "1.15.6"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vite": "^6.3.0"
+  }
+}

@@ -38,11 +38,21 @@ describe("GET /:slug/embed", () => {
     expect(html).toContain('load="eager"');
   });
 
-  test("head includes modulepreload for the Vidstack JS module", async () => {
+  test("head includes modulepreload for the self-hosted player module", async () => {
     const video = await createVideo();
     const res = await embed.request(`/${video.slug}/embed`);
     const html = await res.text();
-    expect(html).toContain('rel="modulepreload" href="https://cdn.vidstack.io/player"');
+    expect(html).toContain('rel="modulepreload" href="/static/player/');
+  });
+
+  // The player is self-hosted (issue #54) — a third-party CDN reference
+  // reappearing anywhere in the embed HTML is a regression.
+  test("embed HTML references no third-party player CDN", async () => {
+    const video = await createVideo();
+    const res = await embed.request(`/${video.slug}/embed`);
+    const html = await res.text();
+    expect(html).not.toContain("cdn.vidstack.io");
+    expect(html).not.toContain("cdn.jsdelivr.net");
   });
 
   test("emits rel=preload as=image for the poster, never as=video", async () => {

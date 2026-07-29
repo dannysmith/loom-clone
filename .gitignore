@@ -26,3 +26,5 @@ buildServer.json
 .DS_Store
 
 .playwright-cli
+
+docs/tasks-todo/temporary/

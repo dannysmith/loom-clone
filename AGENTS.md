@@ -53,10 +53,13 @@ Three components exist today:
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 
 - `make build` — build the main app (Debug)
+- `make agent-build` — sandbox-compatible build for AI agents (see below)
 - `make test` — run unit tests
 - `make regen` — regenerate Xcode project from `project.yml`
 - `make format` — run SwiftFormat on all Swift files
 - `make lint` / `make lint-fix` — run SwiftLint / auto-fix violations
+
+To build the Mac app as an agent, use `cd app && make agent-build` — it's sandbox-compatible (disables SwiftPM's nested sandbox, which the outer sandbox makes redundant, and skips codesigning, so products are Debug-unsigned). Signed/runnable builds are Danny's, via Xcode. If package resolution fails after a dependency change, `xcodebuild -resolvePackageDependencies` may need one approved unsandboxed run.
 
 Direct commands (for reference or when you need different flags):
 

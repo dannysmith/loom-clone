@@ -50,6 +50,8 @@ Three components exist today:
 
 ## Building & Running
 
+`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck, tests — same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
+
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 
 - `make build` — build the main app (Debug)
@@ -59,7 +61,7 @@ A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to
 - `make format` — run SwiftFormat on all Swift files
 - `make lint` / `make lint-fix` — run SwiftLint / auto-fix violations
 
-To build the Mac app as an agent, use `cd app && make agent-build` — it's sandbox-compatible (disables SwiftPM's nested sandbox, which the outer sandbox makes redundant, and skips codesigning, so products are Debug-unsigned). Signed/runnable builds are Danny's, via Xcode. If package resolution fails after a dependency change, `xcodebuild -resolvePackageDependencies` may need one approved unsandboxed run.
+To build the Mac app as an agent, use `cd app && make agent-build` — it's sandbox-compatible (disables SwiftPM's nested sandbox, which the outer sandbox makes redundant, and skips codesigning, so products are Debug-unsigned). Signed/runnable builds are Danny's, via Xcode. If package resolution fails after a dependency change, `xcodebuild -resolvePackageDependencies` may need one approved unsandboxed run. `make agent-test` is the test-running equivalent, but `xcodebuild test` talks to `testmanagerd`, which the bash sandbox blocks — expect to need an unsandboxed run for the test step itself.
 
 Direct commands (for reference or when you need different flags):
 

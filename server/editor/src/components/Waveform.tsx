@@ -160,6 +160,7 @@ export function Waveform({
   }, [duration]);
 
   // Initialize wavesurfer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: init runs once per video/duration; callbacks read the latest state via refs.
   useEffect(() => {
     if (!containerRef.current || duration <= 0) return;
 
@@ -242,10 +243,10 @@ export function Waveform({
       regionsRef.current = null;
       setReady(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoId, duration]);
 
   // Re-sync regions when edits or suggestions change (after wavesurfer is ready).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: edl.edits and suggestions are the triggers — syncRegions reads them via refs.
   useEffect(() => {
     if (ready) {
       syncRegions();
@@ -268,7 +269,10 @@ export function Waveform({
       const time = x * duration;
       const cutStart = Math.max(0, time - 1);
       const cutEnd = Math.min(duration, time + 1);
-      const newEdits = [...edl.edits, { type: "cut" as const, startTime: cutStart, endTime: cutEnd }];
+      const newEdits = [
+        ...edl.edits,
+        { type: "cut" as const, startTime: cutStart, endTime: cutEnd },
+      ];
       onEditsChange(newEdits);
     },
     [duration, edl.edits, onEditsChange],
@@ -308,6 +312,7 @@ export function Waveform({
         const label = s.type === "trim" ? "Trim" : "Suggested cut";
         return (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: suggestions never reorder; index is stable.
             key={`s-${i}`}
             className="editor-suggestion-overlay"
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}

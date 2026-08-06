@@ -1,16 +1,16 @@
-import { toPng, toJpeg } from 'html-to-image';
-import { CANVAS } from './preview/constants';
+import { toJpeg, toPng } from "html-to-image";
+import { CANVAS } from "./preview/constants";
 
 // html-to-image's types are written for HTMLElement but at runtime the
 // implementation handles SVGSVGElement fine. Cast at the boundary.
 type Rasterizable = Parameters<typeof toPng>[0];
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const XLINK_NS = 'http://www.w3.org/1999/xlink';
+const SVG_NS = "http://www.w3.org/2000/svg";
+const XLINK_NS = "http://www.w3.org/1999/xlink";
 const PIXEL_RATIO = 2;
 
 const GOOGLE_FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400&family=Inter:wght@200;300;700;800;900&display=swap';
+  "https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400&family=Inter:wght@200;300;700;800;900&display=swap";
 
 // PNG — html-to-image rasterizes via canvas. Returns a data URL.
 export async function exportPng(svg: SVGSVGElement): Promise<string> {
@@ -30,7 +30,7 @@ export async function exportJpeg(svg: SVGSVGElement): Promise<string> {
     height: CANVAS.height,
     pixelRatio: PIXEL_RATIO,
     quality: 0.95,
-    backgroundColor: '#2f3437',
+    backgroundColor: "#2f3437",
     cacheBust: true,
   });
 }
@@ -39,23 +39,23 @@ export async function exportJpeg(svg: SVGSVGElement): Promise<string> {
 // file is fully self-contained when opened standalone.
 export async function exportSvg(svg: SVGSVGElement): Promise<string> {
   const cloned = svg.cloneNode(true) as SVGSVGElement;
-  cloned.setAttribute('xmlns', SVG_NS);
-  cloned.setAttribute('xmlns:xlink', XLINK_NS);
-  cloned.setAttribute('width', String(CANVAS.width));
-  cloned.setAttribute('height', String(CANVAS.height));
+  cloned.setAttribute("xmlns", SVG_NS);
+  cloned.setAttribute("xmlns:xlink", XLINK_NS);
+  cloned.setAttribute("width", String(CANVAS.width));
+  cloned.setAttribute("height", String(CANVAS.height));
   stripEditorAttributes(cloned);
 
   await inlineImagesWithDedup(cloned);
 
   // Embed fonts as a <style> at the top of the SVG.
   const fontsCss = await buildEmbeddedFontsCss();
-  const styleEl = document.createElementNS(SVG_NS, 'style');
-  styleEl.setAttribute('type', 'text/css');
+  const styleEl = document.createElementNS(SVG_NS, "style");
+  styleEl.setAttribute("type", "text/css");
   styleEl.textContent = fontsCss;
   cloned.insertBefore(styleEl, cloned.firstChild);
 
   const serialized = new XMLSerializer().serializeToString(cloned);
-  const xml = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' + serialized;
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n${serialized}`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
 }
 
@@ -66,23 +66,23 @@ export async function exportSvg(svg: SVGSVGElement): Promise<string> {
 //   - pointer-events="none" (set on non-draggable layers to let drags
 //     through; meaningless once the SVG is static)
 function stripEditorAttributes(root: SVGSVGElement) {
-  root.removeAttribute('class');
+  root.removeAttribute("class");
 
-  const all: Element[] = [root, ...Array.from(root.querySelectorAll('*'))];
+  const all: Element[] = [root, ...Array.from(root.querySelectorAll("*"))];
   for (const el of all) {
-    if (el.getAttribute('pointer-events') === 'none') {
-      el.removeAttribute('pointer-events');
+    if (el.getAttribute("pointer-events") === "none") {
+      el.removeAttribute("pointer-events");
     }
-    const style = el.getAttribute('style');
+    const style = el.getAttribute("style");
     if (!style) continue;
     const filtered = style
-      .split(';')
+      .split(";")
       .map((s) => s.trim())
       .filter((s) => s.length > 0 && !/^(cursor|touch-action)\s*:/i.test(s));
     if (filtered.length === 0) {
-      el.removeAttribute('style');
+      el.removeAttribute("style");
     } else {
-      el.setAttribute('style', filtered.join('; '));
+      el.setAttribute("style", filtered.join("; "));
     }
   }
 }
@@ -94,36 +94,34 @@ function stripEditorAttributes(root: SVGSVGElement) {
 // several viewers when the same symbol was instantiated at different
 // sizes; inlining directly is universally reliable.
 async function inlineImagesWithDedup(svg: SVGSVGElement) {
-  const images = Array.from(svg.querySelectorAll('image')) as SVGImageElement[];
+  const images = Array.from(svg.querySelectorAll("image")) as SVGImageElement[];
 
   // Fetch unique external URLs once.
   const dataUrls = new Map<string, string>();
   for (const img of images) {
-    const href =
-      img.getAttribute('href') || img.getAttributeNS(XLINK_NS, 'href') || '';
-    if (!href || href.startsWith('data:')) continue;
-    if (!dataUrls.has(href)) dataUrls.set(href, '');
+    const href = img.getAttribute("href") || img.getAttributeNS(XLINK_NS, "href") || "";
+    if (!href || href.startsWith("data:")) continue;
+    if (!dataUrls.has(href)) dataUrls.set(href, "");
   }
   await Promise.all(
     [...dataUrls.keys()].map(async (href) => {
       try {
         dataUrls.set(href, await fetchAsDataUrl(href));
       } catch (err) {
-        console.warn('Failed to inline image during SVG export:', href, err);
+        console.warn("Failed to inline image during SVG export:", href, err);
       }
-    })
+    }),
   );
 
   // Substitute the data URL into each <image> element.
   for (const img of images) {
-    const href =
-      img.getAttribute('href') || img.getAttributeNS(XLINK_NS, 'href') || '';
-    if (!href || href.startsWith('data:')) continue;
+    const href = img.getAttribute("href") || img.getAttributeNS(XLINK_NS, "href") || "";
+    if (!href || href.startsWith("data:")) continue;
     const dataUrl = dataUrls.get(href);
     if (dataUrl) {
-      img.setAttribute('href', dataUrl);
+      img.setAttribute("href", dataUrl);
       // Strip any legacy xlink:href so the file doesn't carry two hrefs.
-      img.removeAttributeNS(XLINK_NS, 'href');
+      img.removeAttributeNS(XLINK_NS, "href");
     }
   }
 }
@@ -149,10 +147,10 @@ async function buildEmbeddedFontsCss(): Promise<string> {
   // us which subset each block represents; we only want latin.
   const blocks = css.match(/@font-face\s*\{[^}]+\}/g) ?? [];
   const latin = blocks.filter((block) => {
-    const range = /unicode-range\s*:\s*([^;]+);/i.exec(block)?.[1] ?? '';
+    const range = /unicode-range\s*:\s*([^;]+);/i.exec(block)?.[1] ?? "";
     // The "latin" subset starts at U+0000. Blocks without a unicode-range
     // (rare here) are kept too since they cover everything.
-    return range === '' || /U\+0000/.test(range);
+    return range === "" || /U\+0000/.test(range);
   });
 
   if (latin.length === 0) return fallback;
@@ -170,9 +168,9 @@ async function buildEmbeddedFontsCss(): Promise<string> {
       try {
         urlToData.set(url, await fetchAsDataUrl(url));
       } catch (err) {
-        console.warn('Failed to embed font url:', url, err);
+        console.warn("Failed to embed font url:", url, err);
       }
-    })
+    }),
   );
 
   // If we couldn't fetch any, fall back rather than ship a broken CSS.
@@ -187,7 +185,7 @@ async function buildEmbeddedFontsCss(): Promise<string> {
     return out;
   });
 
-  return embedded.join('\n');
+  return embedded.join("\n");
 }
 
 async function fetchAsDataUrl(url: string): Promise<string> {
@@ -206,7 +204,7 @@ async function fetchAsDataUrl(url: string): Promise<string> {
 
 // Trigger a browser download for a data URL.
 export function downloadDataUrl(dataUrl: string, filename: string) {
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = dataUrl;
   a.download = filename;
   document.body.appendChild(a);

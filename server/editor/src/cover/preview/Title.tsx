@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type Props = {
   text: string;
@@ -25,13 +25,14 @@ export function Title({ text, mediaEnabled }: Props) {
   const [fontsReady, setFontsReady] = useState(false);
 
   useEffect(() => {
-    if (typeof document === 'undefined' || !document.fonts) {
+    if (typeof document === "undefined" || !document.fonts) {
       setFontsReady(true);
       return;
     }
     document.fonts.ready.then(() => setFontsReady(true));
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text and fontsReady are re-measure triggers — the effect measures the DOM they change.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -76,25 +77,25 @@ export function Title({ text, mediaEnabled }: Props) {
     >
       <div
         style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
         }}
       >
         <div
           ref={ref}
           style={{
-            width: '100%',
-            color: '#ffffff',
-            fontFamily: 'Inter, sans-serif',
+            width: "100%",
+            color: "#ffffff",
+            fontFamily: "Inter, sans-serif",
             fontSize: `${fontSize}px`,
             fontWeight: 800,
             lineHeight: `${fontSize * LINE_HEIGHT_RATIO}px`,
             letterSpacing: `${fontSize * LETTER_SPACING_RATIO}px`,
-            textTransform: 'uppercase',
-            wordBreak: 'break-word',
-            whiteSpace: 'pre-line',
+            textTransform: "uppercase",
+            wordBreak: "break-word",
+            whiteSpace: "pre-line",
           }}
         >
           {text}

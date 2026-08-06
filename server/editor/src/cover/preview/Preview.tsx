@@ -1,12 +1,12 @@
-import { Background } from './Background';
-import { Blobs } from './Blobs';
-import { Title } from './Title';
-import { Footer } from './Footer';
-import { MediaSlot } from './MediaSlot';
-import { QrCode } from './QrCode';
-import { Avatar } from './Avatar';
-import { CANVAS } from './constants';
-import type { CoverState } from '../state';
+import type { CoverState } from "../state";
+import { Avatar } from "./Avatar";
+import { Background } from "./Background";
+import { Blobs } from "./Blobs";
+import { CANVAS } from "./constants";
+import { Footer } from "./Footer";
+import { MediaSlot } from "./MediaSlot";
+import { QrCode } from "./QrCode";
+import { Title } from "./Title";
 
 type Props = {
   state: CoverState;
@@ -17,8 +17,7 @@ type Props = {
 export function Preview({ state, setState, svgRef }: Props) {
   const onMediaMove = (x: number, y: number) =>
     setState((s) => ({ ...s, media: { ...s.media, x, y } }));
-  const onQrMove = (x: number, y: number) =>
-    setState((s) => ({ ...s, qr: { ...s.qr, x, y } }));
+  const onQrMove = (x: number, y: number) => setState((s) => ({ ...s, qr: { ...s.qr, x, y } }));
 
   return (
     <svg

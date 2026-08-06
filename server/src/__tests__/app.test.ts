@@ -12,7 +12,7 @@ afterEach(async () => {
   await teardownTestEnv(env);
 });
 
-// End-to-end checks for the wiring done in Phase 4. Verifies that the
+// End-to-end checks for the app factory's wiring. Verifies that the
 // static asset pipeline and the admin shell are reachable through the
 // real factory, not just in isolation.
 
@@ -54,6 +54,28 @@ describe("createApp", () => {
     const app = createApp();
     const res = await app.request("/api/health");
     expect(res.status).toBe(200);
+  });
+});
+
+describe("site routes vs the slug catch-all", () => {
+  // The videos module's `/:slug` catch-all is mounted last in app.ts, and
+  // that order is load-bearing: Hono does not prefer more specific routes
+  // across sub-router mounts, so mounted first, the catch-all swallows
+  // these paths (a nonexistent-slug 404 instead of the site handler).
+  test("static site routes resolve to the site module through createApp()", async () => {
+    const app = createApp();
+    const expected = [
+      ["/robots.txt", "text/plain"],
+      ["/feed.xml", "application/rss+xml"],
+      ["/feed.json", "application/feed+json"],
+      ["/sitemap.xml", "application/xml"],
+      ["/llms.txt", "text/plain"],
+    ] as const;
+    for (const [path, contentType] of expected) {
+      const res = await app.request(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain(contentType);
+    }
   });
 });
 

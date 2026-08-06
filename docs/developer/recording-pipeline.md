@@ -99,7 +99,7 @@ CompositionActor is stateless between frames — it holds the CIContext and pixe
 
 - **screenOnly:** Scale screen to output dimensions (Lanczos for large downscales, affine otherwise). Center-crop to target aspect ratio.
 - **cameraOnly:** Scale camera to output dimensions, apply camera adjustments (temperature/tint + exposure) if non-default.
-- **screenAndCamera:** Scale screen as above. Scale camera to overlay diameter (240px at 1080p, proportional at other presets). Apply circle mask. Composite camera circle in bottom-right corner over screen.
+- **screenAndCamera:** Scale screen as above. Scale camera to overlay diameter (240px at 1080p, proportional at other presets). Apply circle mask. Composite camera circle over the screen in one of four corner positions (`PipPosition`) — bottom-right by default, movable during recording by dragging the overlay window; position changes are recorded in the timeline.
 
 Camera adjustments (white balance, exposure) are applied at the composition layer, not at capture. This means the raw `camera.mp4` safety-net file contains unmodified source footage — adjustments only affect the composited HLS stream that viewers watch.
 
@@ -124,12 +124,7 @@ Segments are delivered via AVAssetWriterDelegate into an `AsyncStream`. A single
 
 ### Audio timestamp adjustment
 
-Audio needs special handling because of AAC encoder priming (the encoder emits a few "priming" samples that precede the first real audio). WriterActor owns a `TimestampAdjuster` that:
-
-1. Tracks priming offset (set as `initialSegmentStartTime` on the writer so HLS players know where audio actually starts).
-2. Applies the pause accumulator so audio PTS values skip over pauses.
-
-Video PTS comes from the metronome with pauses already subtracted, so it bypasses the adjuster entirely.
+Audio needs special handling because of AAC encoder priming (the encoder emits a few "priming" samples that precede the first real audio). `TimestampAdjuster` (in `Helpers/`) is just the shared priming-offset constant; all actual retiming lives in RecordingActor's frame handlers, which stamp every buffer with `primingOffset + (sourcePTS − recordingStartTime) − pauseAccumulator` before handoff. WriterActor is a pure sink: its only timestamp involvement is reading the priming offset for `initialSegmentStartTime` (so HLS players know where audio actually starts) and the writer session start. Video takes the same retiming path as audio.
 
 ## Upload and retry
 

@@ -13,7 +13,7 @@ The server is split into four route modules, each with its own auth profile:
 | `site`   | `/`        | Open                                          | Root redirect, well-known files, feeds (RSS/JSON/llms.txt), oEmbed |
 | `videos` | `/` (last) | Open                                          | Viewer-facing `/:slug` surface, catch-all        |
 
-Modules are mounted in the order above in `app.ts`. The `videos` module is deliberately last since its `/:slug` catch-all would swallow anything more specific if it went first. In practice Hono's trie router matches by specificity regardless of mount order, but the ordering documents intent.
+Modules are mounted in the order above in `app.ts`, and the ordering matters: Hono does not prefer more specific routes across sub-router mounts, so `videos` must stay mounted last — mounted first, its `/:slug` catch-all swallows `/feed.xml`, `/robots.txt`, `/sitemap.xml`, etc. A test in `src/__tests__/app.test.ts` pins this.
 
 `/static/*` is served via `serveStatic` middleware directly in `app.ts` (not a route module). It serves `server/public/` — CSS, fonts, future client assets.
 
@@ -21,7 +21,7 @@ Modules are mounted in the order above in `app.ts`. The `videos` module is delib
 
 **Success**: the resource directly (e.g. `{ id, slug, ... }`), or `{ ok: true }` for action endpoints with no meaningful return value.
 
-**Error**: always `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Error codes are defined in `src/lib/errors.ts`; use the `apiError(c, status, message, code)` helper to build error responses.
+**Error**: always `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Error codes are defined in `src/lib/errors.ts` (except `CONFLICT`, which is emitted inline by the api module's `onError` handler in `routes/api/index.ts`); use the `apiError(c, status, message, code)` helper to build error responses.
 
 Error codes:
 
@@ -108,11 +108,6 @@ Single video by id.
   "durationSeconds": 42.5,
   "width": 1920,
   "height": 1080,
-  "aspectRatio": 1.7778,
-  "fileBytes": 17000000,
-  "cameraName": "FaceTime HD Camera",
-  "microphoneName": "MacBook Pro Microphone",
-  "recordingHealth": "null | gpu_wobble | terminal_failure",
   "source": "recorded | uploaded",
   "createdAt": "ISO",
   "updatedAt": "ISO",
@@ -183,7 +178,7 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 
 When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate); otherwise it moves to `"healing"`. There is no `"complete"` status.
 
-**Error** `404`: `VIDEO_NOT_FOUND`
+**Errors**: `400` `VALIDATION_ERROR` (unparseable `application/json` body) | `404` `VIDEO_NOT_FOUND`
 
 ### `PUT /api/videos/:id/transcript`
 
@@ -198,6 +193,20 @@ Upload a transcript (SRT or VTT). Idempotent — re-uploading replaces the file 
 **Errors**: `400` `VALIDATION_ERROR` (empty body) | `404` `VIDEO_NOT_FOUND`
 
 **Side effects**: writes `data/<id>/derivatives/captions.srt` (or `.vtt`), parses to plain text, upserts into `video_transcripts` table + FTS index, logs `transcript_uploaded` event.
+
+### `PUT /api/videos/:id/words`
+
+Upload word-level timestamps (JSON array from WhisperKit), used by the admin editor for word-level cutting. Idempotent — re-uploading replaces.
+
+**Body**: raw JSON array. 10 MB limit.
+
+**Content-Type**: `application/json` required — anything else returns `400` `VALIDATION_ERROR` ("Content-Type must be application/json"). Malformed JSON → `400` `VALIDATION_ERROR` ("Malformed JSON body"); a non-array or empty array → `400` `VALIDATION_ERROR` ("Expected non-empty JSON array").
+
+**Response** `200`: `{ "ok": true }`
+
+**Errors**: `400` `VALIDATION_ERROR` | `404` `VIDEO_NOT_FOUND`
+
+**Side effects**: atomic write (tmp → rename) of `data/<id>/derivatives/words.json`, records external step `words`, logs `words_uploaded` event with `{ wordCount }`.
 
 ### `PUT /api/videos/:id/suggest-title`
 
@@ -259,13 +268,15 @@ All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonica
 
 ### `/:slug`
 
-HTML video page. Prefers the MP4 derivative (`/:slug/raw/<active file>`) when the `source` (or active-file) processing step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted MP4 never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses Vidstack player (CDN-hosted via jsDelivr).
+HTML video page. Prefers the MP4 derivative (`/:slug/raw/<active file>`) when the `source` (or active-file) processing step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted MP4 never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses the self-hosted Vidstack player — a committed bundle served from `/static/player/*`, with hashed filenames resolved via the Vite manifest in `src/lib/vite-manifest.ts`.
 
 Includes below the player: title (if set), formatted duration + date, description, and attribution link.
 
 **SEO/meta**: canonical link, `og:title`, `og:description`, `og:image`, `og:video` (embed URL), `og:type=video.other`, Twitter Card (`player` type), and oEmbed discovery `<link>`. Unlisted videos get `<meta name="robots" content="noindex">` and `X-Robots-Tag: noindex` header.
 
 **Agent affordances**: a `<link rel="alternate" type="text/markdown" href="/:slug.md">`, a visually-hidden directive (`.agent-directive`) pointing agents at `/llms.txt` and the `.md` variant, a `Link: </llms.txt>; rel="describedby"` response header, and `Vary: Accept`. Requests with `Accept: text/markdown` (Claude Code, Cursor, OpenCode) get the `.md` body instead of HTML — these negotiated responses are returned `Cache-Control: private, no-store` so a shared cache never serves markdown to a browser. The same affordances apply to tag pages (see `/:slug.md`).
+
+**Tag fallback**: when the slug is not a video, the catch-all falls back to the **tag** HTML page (`tag-page.tsx`). Same resolution semantics: 404 for unknown/private tags, 301 for renamed tag slugs via `tag_slug_redirects`. Non-public tags get `X-Robots-Tag: noindex`. Sent with `Vary: Accept` and `Cache-Control: <public|private>, max-age=60, stale-while-revalidate=300` (scoped to tag visibility).
 
 ### `/:slug/embed`
 
@@ -313,6 +324,14 @@ Chapter timestamps in `chapters.json` are stored in the **original recording tim
 
 Vidstack picks this up via a conditional `<track kind="chapters" srclang="en" default />` rendered into `<media-provider>` on the viewer + embed pages whenever the underlying file exists.
 
+### `/:slug/feed.xml` (tags)
+
+Per-tag RSS 2.0 + Media RSS feed — `:slug` here is a **tag** slug (videos don't expose `/feed.*` sub-paths). Items ordered per the tag's `videoSort`. `Content-Type: application/rss+xml`. 301 to the canonical slug for renamed tags; 404 for unknown tags or tags without a slug. Lives in `routes/videos/tag-feeds.ts`, mounted in the videos sub-router so it shares its wildcard CORS. Same `X-Robots-Tag`/`Cache-Control` rules as the tag page.
+
+### `/:slug/feed.json` (tags)
+
+Per-tag JSON Feed 1.1 with `info_for_llms` top-level key. Served as `application/feed+json`. Same 301/404 rules and headers as `/:slug/feed.xml`.
+
 ### `/:slug.mp4`
 
 Convenience redirect. **302** to the "active" raw MP4 — `source.mp4` for unedited videos, or the resolution-named edited file (e.g. `1080p.mp4`) when edits have been applied. Uses `activeRawFilename()` from `lib/url.ts`. 302 (not 301) because the target changes when edits are committed or reverted.
@@ -326,12 +345,17 @@ JSON metadata for programmatic/LLM consumption. All URLs are absolute. Video-onl
   "id": "uuid", "slug": "...", "status": "...", "visibility": "...",
   "title": "...", "description": "...", "durationSeconds": 42.5,
   "durationFormatted": "42s", "source": "recorded",
+  "width": 1920, "height": 1080, "aspectRatio": 1.7778,
+  "sources": [{ "height": 720, "width": 1280, "type": "video/mp4", "url": "..." }],
   "transcript": "Plain text transcript or null",
   "createdAt": "ISO", "updatedAt": "ISO", "completedAt": "ISO",
   "url": "https://example.com/my-slug",
-  "urls": { "page", "raw", "hls", "poster", "embed", "json", "md", "mp4" }
+  "urls": { "page", "raw", "hls", "poster", "embed", "json", "md", "mp4",
+            "captions", "storyboard", "storyboardImage" }
 }
 ```
+
+`urls.captions` is null when no transcript exists; `urls.storyboard` and `urls.storyboardImage` are null for videos under 60s.
 
 ### `/:slug.md`
 
@@ -347,13 +371,14 @@ If the slug is not a video, `.md` falls back to a **tag** markdown page: a block
 
 | Path           | Response                                                                             |
 | -------------- | ------------------------------------------------------------------------------------ |
-| `/`            | 302 redirect to `https://danny.is`. HTML body contains feed/llms.txt hints for curl and AI agents. `Link` header for RSS autodiscovery. |
+| `/`            | 302 redirect to `https://danny.is`. HTML body contains feed/llms.txt hints for curl and AI agents. `Link` header for RSS autodiscovery. Requests with `Accept: text/markdown` instead get 200 with the llms.txt body (`text/markdown`, `Cache-Control: private, no-store`, `Vary: Accept`). |
 | `/feed.xml`    | RSS 2.0 + Media RSS feed of all public, `ready`, non-trashed videos. Includes `<enclosure>`, `<media:content>`, `<media:thumbnail>` per item. |
 | `/rss`         | 301 redirect to `/feed.xml`                                                          |
 | `/feed.json`   | JSON Feed 1.1. Includes `info_for_llms` top-level key, truncated transcript excerpts (~200 words), per-video `_urls` map, media attachments. Served as `application/feed+json`. |
 | `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, and links to feeds/sitemap/author website. |
 | `/robots.txt`  | Served from the static file `public/robots.txt`. Content signals + disallows `/admin` and `/api` + `Sitemap:` directive. |
-| `/favicon.ico` | 204 No Content (placeholder)                                                         |
+| `/favicon.ico` | Real icon bytes from `public/images/favicon/favicon.ico`. 200, `image/x-icon`, `Cache-Control: public, max-age=604800`. |
+| `/site.webmanifest` | Web app manifest from `public/site.webmanifest`, served via a route (not `serveStatic`) so it gets `application/manifest+json`. `Cache-Control: public, max-age=604800`. |
 | `/sitemap.xml` | Video sitemap (public + `ready` + non-trashed only, with `<video:video>` extension) |
 
 `/feed.xml`, `/feed.json`, `/llms.txt`, `/sitemap.xml`, and `/robots.txt` are all sent with `Cache-Control: public, max-age=300, stale-while-revalidate=3600` (see `lib/cache-control.ts`). Without this BunnyCDN applies its 30-day default, so a newly published video could be missing from the index for weeks.
@@ -387,7 +412,7 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
 
 ## Admin routes
 
-Auth: session cookie (`lc_session`, signed, 2-week expiry) or `Authorization: Bearer lca_...` admin token. All routes except `GET/POST /admin/login` require auth. CSRF protection on all mutations.
+Auth: session cookie (`lc_session`, signed, 2-week expiry) or `Authorization: Bearer lca_...` admin token. All routes except `GET/POST /admin/login` require auth. CSRF protection applies to cookie-authenticated mutations only — bearer requests skip the Origin check (the token is explicitly attached, not auto-sent by the browser). Every admin response gets `Cache-Control: no-store` from middleware so authenticated HTML is never served from a shared cache.
 
 In production, `ADMIN_PASSWORD` is required — the server refuses to start without it. Locally (`NODE_ENV` unset), an unset `ADMIN_PASSWORD` lets you iterate without logging in.
 
@@ -423,7 +448,14 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | GET | `/admin/videos/:id/partials/description` | Description display partial |
 | GET | `/admin/videos/:id/partials/description/edit` | Description edit form |
 | PATCH | `/admin/videos/:id/description` | Save description |
+| GET | `/admin/videos/:id/partials/notes` | Notes display partial |
+| GET | `/admin/videos/:id/partials/notes/edit` | Notes edit form |
+| PATCH | `/admin/videos/:id/notes` | Save notes (empty → null) |
+| GET | `/admin/videos/:id/partials/visibility` | Visibility display partial |
+| GET | `/admin/videos/:id/partials/visibility/edit` | Visibility edit form |
 | PATCH | `/admin/videos/:id/visibility` | Change visibility |
+| GET | `/admin/videos/:id/partials/tabs?tab=` | Re-render tab section (`events`, `files`, `transcript`, `processing`) |
+| GET | `/admin/videos/:id/partials/file-preview?path=` | Highlighted preview of a file under `data/<id>/`. 400 invalid path (empty, `..`, leading `/`), 404 missing |
 | POST | `/admin/videos/:id/tags` | Add tag to video |
 | DELETE | `/admin/videos/:id/tags/:tagId` | Remove tag from video |
 
@@ -435,13 +467,33 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | PUT  | `/admin/videos/:id/chapters` | Bulk replace. Body: `{ version: 1, chapters: [{ id, title \| null, t }] }` (max 100). Server reverse-maps `t` from viewer-timeline back to the recording timeline before persisting. Preserves `createdDuringRecording` on existing rows. Logs `chapters_updated`. Purges CDN. |
 | GET  | `/admin/videos/:id/media/chapters.vtt` | Admin variant of the public `/:slug/chapters.vtt`. Same on-the-fly generation, but bypasses slug resolution so trashed videos and admin previews still get markers. `no-store` cache. |
 
+### Editor
+
+Routes in `routes/admin/editor.ts`, mounted at `/admin/videos`. See [Admin Editor](admin-editor.md) for the full editor architecture.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin/videos/:id/editor` | React editor shell (Vite build) with `data-video-*` attrs. 400 if status ≠ `ready` or trashed; 409 while a processing run is in flight |
+| GET | `/admin/videos/:id/editor/edl` | Load the EDL. Returns `{ version: 1, source: "source.mp4", edits: [] }` when `edits.json` is absent |
+| PUT | `/admin/videos/:id/editor/edl` | Save EDL without committing. Zod-validated `{ version: 1, source, edits: [{ type: "trim"\|"cut", startTime, endTime }] }`. 400 on schema failure — plain `{ error }`, not the `{ error, code }` envelope |
+| POST | `/admin/videos/:id/editor/commit` | Commit edits, schedule the edit pipeline. Returns `{ ok: true, status: "reprocessing" }`. 400 trashed / not `ready` / no `edits.json`; 409 already reprocessing or run in flight |
+| GET | `/admin/videos/:id/editor/media/:file` | Editor-only derivatives. Allowlist: `editor-storyboard.(jpg\|vtt)`, `peaks.json`, `words.json`, `edits.json`, `suggested-edits.json`. Range-aware, short cache. 404 for non-allowlisted files |
+
+### Cover generator
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/admin/videos/:id/cover` | React cover-image generator shell (Vite `cover.html` entry). 400 for trashed videos |
+
 ### Thumbnail picker
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/admin/videos/:id/partials/thumbnails` | Thumbnail picker partial |
 | POST | `/admin/videos/:id/thumbnail/promote` | Promote a candidate to active thumbnail |
-| POST | `/admin/videos/:id/thumbnail/upload` | Upload custom JPEG, auto-promotes |
+| POST | `/admin/videos/:id/thumbnail/upload` | Upload custom JPEG or PNG (max 5 MB, max 3840px wide), auto-promotes |
+| POST | `/admin/videos/:id/thumbnail/add-candidate` | Save uploaded JPEG/PNG as a candidate **without** promoting (used by the cover generator). Same size/width limits, JSON responses: `{ ok: true, candidateId }` or `{ error }` 400 |
+| DELETE | `/admin/videos/:id/thumbnail/candidates/:candidateId` | Delete a candidate. 400 invalid id, 404 not found, 409 if it's the active thumbnail or the last candidate |
 
 ### Video actions
 
@@ -451,6 +503,13 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | POST | `/admin/videos/:id/untrash` | Restore, redirect to video detail |
 | POST | `/admin/videos/:id/delete-permanently` | Hard-delete trashed video (files + DB), redirect to trash |
 | POST | `/admin/videos/:id/duplicate` | Full copy (files + DB), redirect to duplicate |
+
+### Reprocessing
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/admin/videos/:id/reprocess` | Re-run the post-processing pipeline (resumable — steps that already succeeded are skipped). Form `rebuild=hls` forces a full from-HLS re-stitch. 302 → `/admin/videos/:id?tab=processing&reprocessed=<started\|queued\|skipped>`. 400 if the status can't be reprocessed, or `rebuild=hls` when the HLS segments are gone. Logs `reprocess_requested` |
+| POST | `/admin/videos/:id/reprocess/:kind` | Regenerate a single derivative (`kind` must be in `REGENERABLE_KINDS`). Same 302. 400 on bad status, non-regenerable kind, or missing/invalid `source.mp4` |
 
 ### Admin media (session-gated, serves by video ID regardless of visibility)
 
@@ -470,8 +529,10 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | GET | `/admin/settings/tags/:id/display` | Tag display partial |
 | PATCH | `/admin/settings/tags/:id` | Update tag name/color |
 | DELETE | `/admin/settings/tags/:id` | Delete tag |
-| POST | `/admin/settings/keys` | Create API key (shows token once) |
-| POST | `/admin/settings/keys/:id/revoke` | Revoke API key |
+| POST | `/admin/settings/keys/recording` | Create recording API key (`lck_`), form `name`; token shown once |
+| POST | `/admin/settings/keys/recording/:id/revoke` | Revoke recording API key |
+| POST | `/admin/settings/keys/admin` | Create admin token (`lca_`), form `name`; token shown once |
+| POST | `/admin/settings/keys/admin/:id/revoke` | Revoke admin token |
 
 ## Content types
 
@@ -488,6 +549,8 @@ In production, `ADMIN_PASSWORD` is required — the server refuses to start with
 | `.vtt`    | `text/vtt`                      | storyboard.vtt, captions.vtt |
 | `.srt`    | `application/x-subrip`          | captions.srt               |
 | `.md`     | `text/markdown`                 | /:slug.md                  |
+| `.webmanifest` | `application/manifest+json` | /site.webmanifest        |
+| `.ico`    | `image/x-icon`                  | /favicon.ico               |
 
 ## Range support
 

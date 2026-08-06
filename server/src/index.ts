@@ -23,8 +23,9 @@ getAdminConfig();
 const app = createApp();
 
 // Bind to loopback by default — bearer tokens travel in plaintext over
-// HTTP locally, so don't expose them on the LAN. Override with HOST=0.0.0.0
-// only after task-x3 lands HTTPS termination in front of the server.
+// HTTP locally, so don't expose them on the LAN. In production the compose
+// file sets HOST=0.0.0.0 inside the container, where Caddy terminates TLS
+// in front of it.
 const port = Number(Bun.env.PORT ?? 3000);
 const hostname = Bun.env.HOST ?? "127.0.0.1";
 

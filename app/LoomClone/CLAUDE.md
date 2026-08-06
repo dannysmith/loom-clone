@@ -12,11 +12,11 @@ For the full narrative walkthrough of the recording pipeline (actors, timing, mo
 
 ## Recording pipeline
 
-Four actors, each owning one concern:
+Four core actors, each owning one concern (HealAgent, TranscribeAgent, and the raw-master RawStreamWriter live alongside them):
 
-- **RecordingActor** — orchestrates everything. Owns the metronome (emit loop at the target rate, 30 or 60fps), the camera frame queue, the recording clock anchor, pause/resume state. Entry point for all capture callbacks. Split across extensions: `+Metronome` (drift-corrected emit loop), `+FrameHandling` (capture callbacks, PTS retiming, metronome frame emission), `+CompositionRecovery` (GPU failure handling and terminal escalation).
+- **RecordingActor** — orchestrates everything. Owns the metronome (emit loop at the target rate, 30 or 60fps), the camera frame queue, the recording clock anchor, pause/resume state, and all PTS retiming. Entry point for all capture callbacks. Split across nine extensions: `+Prepare` (two-phase start), `+Metronome` (drift-corrected emit loop + the 2 Hz health task), `+FrameHandling` (capture callbacks, PTS retiming, metronome frame emission), `+Stop` (stop/teardown ordering), `+SourceHealth` / `+QualityHealth` (staleness and quality warnings), `+CompositionRecovery` (GPU failure handling and terminal escalation), `+Diagnostics` / `+FrameDiagnostics` (diagnostics.json and frame-level counters).
 - **CompositionActor** — Metal/CIContext rendering. Takes a screen buffer + camera buffer + mode, returns a composited pixel buffer. Stateless between frames except for the CIContext itself.
-- **WriterActor** — AVAssetWriter in HLS fMP4 mode. Receives composited video + audio, cuts segments, reports them back for upload. Owns the AAC timestamp adjuster (priming offset + pause accumulator).
+- **WriterActor** — AVAssetWriter in HLS fMP4 mode. Receives composited video + audio, cuts segments, reports them back for upload. A pure sink with no timing knowledge: RecordingActor stamps every buffer (priming offset + pause accumulator) before handoff.
 - **UploadActor** — streams segments to the server during recording, retries on failure, hands off to HealAgent for post-stop recovery.
 
 ## Two-phase start

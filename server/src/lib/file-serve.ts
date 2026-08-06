@@ -3,10 +3,7 @@ import type { Context } from "hono";
 // Range-aware static file serving. Hono's built-in `serveStatic` doesn't
 // honor HTTP Range, which breaks MP4 scrubbing in the browser (player asks
 // for a byte range to seek; server returns the whole file with 200; player
-// restarts from the beginning).
-//
-// `routes/site/data.ts` has its own copy of this logic that goes away in
-// Phase 6.5; the new slug-namespaced media routes use this helper.
+// restarts from the beginning). Used by the slug-namespaced media routes.
 
 export type CacheHint = "immutable" | "short" | "none";
 

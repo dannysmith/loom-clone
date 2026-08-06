@@ -23,7 +23,7 @@ export const ErrorCode = {
   // Videos (409) — DELETE refused because the video is processing/ready
   VIDEO_NOT_DELETABLE: "VIDEO_NOT_DELETABLE",
 
-  // Validation (400) — added in 6.13
+  // Validation (400)
   VALIDATION_ERROR: "VALIDATION_ERROR",
 
   // Slug conflict (409)

@@ -9,12 +9,13 @@ All scripts run from `server/`:
 - `bun run dev` — hot-reload dev server on `http://localhost:3000`. Do NOT start this unless explicitly asked.
 - `bun test` — run the full test suite (Bun's built-in runner, bun:test APIs)
 - `bun run test:watch` — re-run tests on file changes
-- `bun run check` — Biome lint + format check (read-only)
+- `bun run check` — Biome lint + format check (read-only; covers `src/`, `scripts/`, `editor/src/`, `player/src/` per `biome.json`)
 - `bun run check:fix` — auto-fix lint + format issues
-- `bun run check:all` — lint + format check, typecheck, and full test suite in one command (what CI runs)
+- `bun run check:all` — lint + format check, typecheck (server + editor + player), and full test suite in one command (what CI runs)
 - `bun run lint` / `bun run lint:fix` — lint only
 - `bun run format` / `bun run format:check` — format only
-- `bun run typecheck` — `tsc --noEmit`
+- `bun run typecheck` — `tsc --noEmit` on the server
+- `bun run typecheck:editor` / `bun run typecheck:player` — `tsc --noEmit` on the sub-packages (needs `bun install` run in `editor/` / `player/` once)
 - `bun run db:generate` — generate a new migration SQL file from `src/db/schema.ts` changes
 - `bun run db:migrate` — apply pending migrations to `data/app.db` (also applied automatically on server startup)
 - `bun run db:studio` — browse `data/app.db` in the Drizzle Studio web UI
@@ -61,10 +62,10 @@ Four modules in `src/routes/`, each with its own auth profile. Full route refere
 
 Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. The server itself has no build step — Bun handles `.tsx` natively, browsers fetch CSS as-is. Two Vite builds produce static assets, with opposite commit policies:
 
-- `editor/` → `public/editor/` — the admin React editor. **Gitignored**, built by the Dockerfile at deploy time.
+- `editor/` → `public/editor/` — the admin React editor. **Gitignored**, built in its own Dockerfile stage at deploy time (CI also builds it as a check). In local dev, set `EDITOR_DEV=1` on the Hono server to load the editor from the Vite dev server (`bun run editor:dev`) with HMR; without the flag a missing `public/editor/` build is a hard error. See `docs/developer/admin-editor.md`.
 - `player/` → `public/player/` — the self-hosted Vidstack player bundle (viewer, embed, and admin video pages). **Committed to git**, deliberately: serving the player must never depend on the npm registry being up or `vidstack@1.15.6` still being published. That durability is the reason the player is self-hosted at all (issue #54). (Deploys as a whole still hit the registry — the Dockerfile runs `bun install` for the server and editor — but the committed player bundle means the registry can't take the *viewer* surface hostage.)
 
-**Upgrading Vidstack**: bump the exact pin in `player/package.json`, `bun install` + `bun run player:build` (from `server/`), verify a video page in the browser, commit source + built output together. Trap: vidstack's npm `latest` dist-tag points at a stale 2023 build (0.6.15) — real releases ship under the `next` tag, so always pin an explicit version, never `bun add vidstack` bare. `hls.js` is pinned in the same package and bundled as a lazy chunk (fetched only for `.m3u8` sources, via the `provider-change` hook in `player/src/player.ts`).
+**Upgrading Vidstack**: bump the exact pin in `player/package.json`, `bun install` + `bun run player:build` (from `server/`), verify a video page in the browser, commit source + built output together — CI rebuilds the player and fails if `public/player/` doesn't match the source. Trap: vidstack's npm `latest` dist-tag points at a stale 2023 build (0.6.15) — real releases ship under the `next` tag, so always pin an explicit version, never `bun add vidstack` bare. `hls.js` is pinned in the same package and bundled as a lazy chunk (fetched only for `.m3u8` sources, via the `provider-change` hook in `player/src/player.ts`).
 
 **Layout**:
 

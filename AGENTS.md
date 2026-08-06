@@ -50,7 +50,7 @@ Three components exist today:
 
 ## Building & Running
 
-`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck, tests — same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
+`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck — including the `editor/` and `player/` sub-packages — and tests, same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
 
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 

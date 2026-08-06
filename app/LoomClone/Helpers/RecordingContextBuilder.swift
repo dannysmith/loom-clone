@@ -31,8 +31,6 @@ enum RecordingContextBuilder {
         let durationSeconds = session?["durationSeconds"] as? Double ?? 0
         let initialMode = session?["initialMode"] as? String ?? "screenOnly"
         let hasMicrophone = inputs?["microphone"] != nil && !(inputs?["microphone"] is NSNull)
-        let hasCamera = inputs?["camera"] != nil && !(inputs?["camera"] is NSNull)
-        let hasDisplay = inputs?["display"] != nil && !(inputs?["display"] is NSNull)
 
         // Count mode switches to detect mixed-mode recordings
         let modeSwitches = events.filter { ($0["kind"] as? String) == "mode.switched" }
@@ -40,8 +38,6 @@ enum RecordingContextBuilder {
         let durationLabel = formatDuration(durationSeconds)
         let modeLabel = describeModes(
             initialMode: initialMode,
-            hasCamera: hasCamera,
-            hasDisplay: hasDisplay,
             modeSwitches: modeSwitches
         )
         let audioLabel = hasMicrophone ? "with voiceover" : "silent"
@@ -62,8 +58,6 @@ enum RecordingContextBuilder {
 
     private static func describeModes(
         initialMode: String,
-        hasCamera _: Bool,
-        hasDisplay _: Bool,
         modeSwitches: [[String: Any]]
     ) -> String {
         // If there were mode switches, describe the recording as mixed

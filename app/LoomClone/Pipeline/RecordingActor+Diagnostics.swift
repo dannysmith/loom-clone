@@ -148,11 +148,6 @@ struct MetronomeDiagnostics {
     var noSourceTicks: Int64 = 0
     var compositionFailures: Int64 = 0
     var cameraOnlyPopBranch: Int64 = 0
-    /// Pre task-21 (PR #25): the synthetic-host-clock peek-with-repeat
-    /// path's fire count. Bug A removed this path; the counter is kept
-    /// for one release as a regression-detector — any non-zero value
-    /// after task-21 means the path silently re-emerged.
-    var cameraOnlyRepeatBranch: Int64 = 0
     var cameraOnlyNoSourceBranch: Int64 = 0
     var idleSleeps: Int64 = 0
     var driftPositiveSleep: Int64 = 0
@@ -255,7 +250,6 @@ struct MetronomeDiagnostics {
         let rejectMonotonicity: Int64
         let rejectNegElapsed: Int64
         let noSourceTicks: Int64
-        let cameraOnlyRepeatBranch: Int64
         let cameraFramesReceived: Int64
         let screenFramesReceived: Int64
         let cameraNonMonotonicPTS: Int64
@@ -448,7 +442,6 @@ struct MetronomeDiagnostics {
                 rejectMonotonicity: rejectMonotonicity,
                 rejectNegElapsed: rejectNegElapsed,
                 noSourceTicks: noSourceTicks,
-                cameraOnlyRepeatBranch: cameraOnlyRepeatBranch,
                 cameraFramesReceived: cameraFramesReceived,
                 screenFramesReceived: screenFramesReceived,
                 cameraNonMonotonicPTS: cameraNonMonotonicPTS
@@ -477,7 +470,7 @@ struct MetronomeDiagnostics {
         iters=\(iterations) emit=\(emitOK) \
         skipStale=\(skipsStale) keepAlive=\(keepAliveEmits) \
         mono=\(rejectMonotonicity) neg=\(rejectNegElapsed) noSrc=\(noSourceTicks) \
-        peek=\(cameraOnlyRepeatBranch) pop=\(cameraOnlyPopBranch) \
+        pop=\(cameraOnlyPopBranch) \
         camFrames=\(cameraFramesReceived) (~\(camRate)fps) \
         nonMonoPTS=\(cameraNonMonotonicPTS) rawSkip=\(cameraRawFramesSkipped) \
         scrFrames=\(screenFramesReceived) \
@@ -515,7 +508,6 @@ struct MetronomeDiagnostics {
                 noSourceTicks: noSourceTicks,
                 compositionFailures: compositionFailures,
                 cameraOnlyPopBranch: cameraOnlyPopBranch,
-                cameraOnlyRepeatBranch: cameraOnlyRepeatBranch,
                 cameraOnlyNoSourceBranch: cameraOnlyNoSourceBranch,
                 idleSleeps: idleSleeps,
                 driftPositiveSleep: driftPositiveSleep,
@@ -578,7 +570,6 @@ struct MetronomeDiagnostics {
         let noSourceTicks: Int64
         let compositionFailures: Int64
         let cameraOnlyPopBranch: Int64
-        let cameraOnlyRepeatBranch: Int64
         let cameraOnlyNoSourceBranch: Int64
         let idleSleeps: Int64
         let driftPositiveSleep: Int64

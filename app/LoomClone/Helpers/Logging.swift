@@ -24,10 +24,6 @@ struct LoomLogger {
         osLogger.notice("\(message, privacy: .public)")
     }
 
-    func debug(_ message: String) {
-        osLogger.debug("\(message, privacy: .public)")
-    }
-
     func error(_ message: String) {
         osLogger.error("\(message, privacy: .public)")
     }

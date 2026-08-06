@@ -1,4 +1,19 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { cp, mkdir, rm } from "fs/promises";
 import { humanId } from "human-id";
 import { join } from "path";
@@ -80,6 +95,8 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "logout",
   "auth",
   "signup",
+  // Live top-level routes
+  "oembed",
   // Currently slug sub-paths; reserved in case they ever go top-level
   "embed",
   "raw",
@@ -121,16 +138,12 @@ export function validateSlugFormat(slug: string): void {
 // The slug namespace is globally unique across videos and tags so the viewer
 // router has unambiguous dispatch at `/:slug`. Callers pass `exclude` to skip
 // the row that owns the slug today (e.g. when renaming a video's own slug).
-//
-// Signature note: older callers used the positional `excludeVideoId` form;
-// it's still accepted as a string for back-compat with existing test/route
-// code, but new callers should prefer the object form.
 export function checkSlugAvailable(
   slug: string,
-  exclude?: string | { videoId?: string; tagId?: number },
+  exclude?: { videoId?: string; tagId?: number },
 ): void {
-  const excludeVideoId = typeof exclude === "string" ? exclude : exclude?.videoId;
-  const excludeTagId = typeof exclude === "object" ? exclude?.tagId : undefined;
+  const excludeVideoId = exclude?.videoId;
+  const excludeTagId = exclude?.tagId;
   const db = getDb();
 
   // 1. Live video slug
@@ -500,38 +513,48 @@ function cursorCondition(sort: DashboardSort, c: CursorVideo): ReturnType<typeof
         gt(videos.createdAt, c.createdAt),
         and(eq(videos.createdAt, c.createdAt), gt(videos.id, c.id)),
       )!;
+    // For the nullable sort columns (duration, title), SQL comparisons
+    // against NULL are NULL (falsy), so NULL-valued rows need explicit
+    // branches or they silently vanish from every page after the first.
+    // SQLite sorts NULLs FIRST in ASC and LAST in DESC.
     case "duration-desc": {
-      const d = c.durationSeconds ?? 0;
+      if (c.durationSeconds === null) {
+        // Cursor is inside the trailing NULL block — only NULLs remain.
+        return and(isNull(videos.durationSeconds), lt(videos.id, c.id))!;
+      }
       return or(
-        lt(videos.durationSeconds, d),
-        and(eq(videos.durationSeconds, d), lt(videos.id, c.id)),
+        lt(videos.durationSeconds, c.durationSeconds),
+        and(eq(videos.durationSeconds, c.durationSeconds), lt(videos.id, c.id)),
+        isNull(videos.durationSeconds), // NULLs sort after all non-null values
       )!;
     }
     case "duration-asc": {
-      const d = c.durationSeconds ?? 0;
+      if (c.durationSeconds === null) {
+        // Cursor is inside the leading NULL block — rest of it, then everything else.
+        return or(
+          and(isNull(videos.durationSeconds), gt(videos.id, c.id)),
+          isNotNull(videos.durationSeconds),
+        )!;
+      }
       return or(
-        gt(videos.durationSeconds, d),
-        and(eq(videos.durationSeconds, d), gt(videos.id, c.id)),
-        // Nulls sort last in asc — include them after all non-null values
-        and(
-          sql`${videos.durationSeconds} IS NOT NULL`,
-          eq(videos.durationSeconds, d),
-          gt(videos.id, c.id),
-        ),
+        gt(videos.durationSeconds, c.durationSeconds),
+        and(eq(videos.durationSeconds, c.durationSeconds), gt(videos.id, c.id)),
       )!;
     }
     case "title-asc": {
-      const t = c.title ?? "";
-      return or(
-        sql`${videos.title} > ${t}`,
-        and(sql`${videos.title} = ${t}`, gt(videos.id, c.id)),
-      )!;
+      if (c.title === null) {
+        return or(and(isNull(videos.title), gt(videos.id, c.id)), isNotNull(videos.title))!;
+      }
+      return or(gt(videos.title, c.title), and(eq(videos.title, c.title), gt(videos.id, c.id)))!;
     }
     case "title-desc": {
-      const t = c.title ?? "";
+      if (c.title === null) {
+        return and(isNull(videos.title), lt(videos.id, c.id))!;
+      }
       return or(
-        sql`${videos.title} < ${t}`,
-        and(sql`${videos.title} = ${t}`, lt(videos.id, c.id)),
+        lt(videos.title, c.title),
+        and(eq(videos.title, c.title), lt(videos.id, c.id)),
+        isNull(videos.title),
       )!;
     }
     // Size sort uses in-memory pagination — cursor never reaches here.
@@ -694,7 +717,7 @@ export async function markVideoReady(id: string): Promise<Video> {
   return video;
 }
 
-// Convenience used by admin tooling and tests to drive a video straight to
+// Test convenience — no production callers. Drives a video straight to
 // `ready` without running the real ffmpeg pipeline: caches duration, stamps
 // completedAt, logs the completion event, and publishes feeds.
 export async function completeVideo(id: string): Promise<Video> {
@@ -782,7 +805,7 @@ export async function updateSlug(id: string, newSlug: string): Promise<Video> {
 
   // Format + reservation + uniqueness checks.
   validateSlugFormat(newSlug);
-  checkSlugAvailable(newSlug, id);
+  checkSlugAvailable(newSlug, { videoId: id });
 
   const oldSlug = existing.slug;
   const now = nowIso();

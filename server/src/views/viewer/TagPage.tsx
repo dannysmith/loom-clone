@@ -164,7 +164,7 @@ export function TagPage({
       ) : (
         <ul class="tag-video-grid">
           {videos.map((v) => (
-            <VideoTile video={v} />
+            <VideoTile video={v} hasPoster={videosWithPosters.has(v.id)} />
           ))}
         </ul>
       )}
@@ -174,18 +174,19 @@ export function TagPage({
   );
 }
 
-function VideoTile({ video }: { video: Video }) {
+function VideoTile({ video, hasPoster }: { video: Video; hasPoster: boolean }) {
   const title = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const duration = formatDurationShort(video.durationSeconds);
   const date = formatDate(video.completedAt ?? video.createdAt);
   const href = `/${video.slug}`;
-  const poster = `/${video.slug}/poster.jpg`;
 
   return (
     <li class="tag-video-tile">
       <a href={href} class="tag-video-link">
         <div class="tag-video-thumb">
-          <img src={poster} alt="" loading="lazy" />
+          {/* Posterless videos keep the container's background as a clean
+              placeholder instead of a broken image. */}
+          {hasPoster && <img src={`/${video.slug}/poster.jpg`} alt="" loading="lazy" />}
           {duration && <span class="tag-video-duration">{duration}</span>}
         </div>
         <div class="tag-video-body">
@@ -199,9 +200,4 @@ function VideoTile({ video }: { video: Video }) {
       </a>
     </li>
   );
-}
-
-// Build the absolute canonical URL for a tag page given its current slug.
-export function tagCanonicalUrl(slug: string): string {
-  return absoluteUrl(`/${slug}`);
 }

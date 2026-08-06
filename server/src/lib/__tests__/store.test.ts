@@ -944,6 +944,70 @@ describe("listVideosFiltered", () => {
     expect(new Set(allIds).size).toBe(3);
   });
 
+  // SQLite sorts NULLs FIRST in ASC and LAST in DESC. The cursor conditions
+  // need explicit NULL branches for the nullable sort columns (title,
+  // duration) — a plain comparison against NULL is NULL, which silently
+  // dropped NULL-valued rows from every page after the first.
+  async function collectAllPages(
+    sort: "title-asc" | "title-desc" | "duration-asc" | "duration-desc",
+  ): Promise<string[]> {
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const page = await listVideosFiltered({ sort, limit: 1, cursor });
+      seen.push(...page.items.map((v) => v.id));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return seen;
+  }
+
+  test("title sorts paginate NULL-titled videos without losing rows", async () => {
+    const untitled1 = await createVideo();
+    const untitled2 = await createVideo();
+    const alpha = await createVideo();
+    await updateVideo(alpha.id, { title: "Alpha" });
+    const bravo = await createVideo();
+    await updateVideo(bravo.id, { title: "Bravo" });
+    const untitledIds = new Set([untitled1.id, untitled2.id]);
+
+    const asc = await collectAllPages("title-asc");
+    expect(asc).toHaveLength(4);
+    expect(new Set(asc.slice(0, 2))).toEqual(untitledIds); // NULLs first in ASC
+    expect(asc.slice(2)).toEqual([alpha.id, bravo.id]);
+
+    const desc = await collectAllPages("title-desc");
+    expect(desc).toHaveLength(4);
+    expect(desc.slice(0, 2)).toEqual([bravo.id, alpha.id]);
+    expect(new Set(desc.slice(2))).toEqual(untitledIds); // NULLs last in DESC
+  });
+
+  test("duration sorts paginate NULL-duration videos without losing rows", async () => {
+    const pending1 = await createVideo(); // durationSeconds stays NULL
+    const pending2 = await createVideo();
+    const short = await createVideo();
+    const long = await createVideo();
+    await getDb()
+      .update(videosTable)
+      .set({ durationSeconds: 10 })
+      .where(eq(videosTable.id, short.id));
+    await getDb()
+      .update(videosTable)
+      .set({ durationSeconds: 60 })
+      .where(eq(videosTable.id, long.id));
+    const pendingIds = new Set([pending1.id, pending2.id]);
+
+    const asc = await collectAllPages("duration-asc");
+    expect(asc).toHaveLength(4);
+    expect(new Set(asc.slice(0, 2))).toEqual(pendingIds); // NULLs first in ASC
+    expect(asc.slice(2)).toEqual([short.id, long.id]);
+
+    const desc = await collectAllPages("duration-desc");
+    expect(desc).toHaveLength(4);
+    expect(desc.slice(0, 2)).toEqual([long.id, short.id]);
+    expect(new Set(desc.slice(2))).toEqual(pendingIds); // NULLs last in DESC
+  });
+
   test("multiple filters combine (AND logic)", async () => {
     const v1 = await createVideo();
     await updateVideo(v1.id, { title: "Public Recording", visibility: "public" });

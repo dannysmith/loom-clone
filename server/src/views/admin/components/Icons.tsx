@@ -91,14 +91,6 @@ export function IconArrowDown(props: IconProps) {
   );
 }
 
-export function IconFilter(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </Svg>
-  );
-}
-
 export function IconList(props: IconProps) {
   return (
     <Svg {...props}>
@@ -207,15 +199,6 @@ export function IconEllipsis(props: IconProps) {
       <circle cx="12" cy="12" r="1" />
       <circle cx="19" cy="12" r="1" />
       <circle cx="5" cy="12" r="1" />
-    </Svg>
-  );
-}
-
-export function IconEye(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-      <circle cx="12" cy="12" r="3" />
     </Svg>
   );
 }

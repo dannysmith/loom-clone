@@ -178,7 +178,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let url = coordinator.lastVideo?.url {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
-                Log.app.log("URL copied to clipboard: \(url)")
+                // Share URLs are sensitive for private/unlisted videos —
+                // log the event, not the URL (same rule as the stop flow).
+                Log.app.log("Share URL copied to clipboard")
             }
         }
     }

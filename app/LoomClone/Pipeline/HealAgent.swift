@@ -422,7 +422,6 @@ actor HealAgent {
 
     private struct CompleteResponse: Decodable {
         let url: String
-        let path: String?
         let slug: String
         let missing: [String]?
     }

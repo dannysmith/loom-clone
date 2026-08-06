@@ -23,7 +23,6 @@ import {
   getVideoTags,
   listTags,
   removeTagFromVideo,
-  renameTag,
   resolveTagSlug,
   updateTag,
 } from "../tags";
@@ -92,30 +91,6 @@ describe("listTags / getTag", () => {
     const tag = await createTag("tutorial");
     expect((await getTag(tag.id))?.name).toBe("tutorial");
     expect(await getTag(99999)).toBeUndefined();
-  });
-});
-
-describe("renameTag", () => {
-  test("updates the name", async () => {
-    const tag = await createTag("old");
-    const renamed = await renameTag(tag.id, "new");
-    expect(renamed.name).toBe("new");
-  });
-
-  test("is a no-op when name unchanged", async () => {
-    const tag = await createTag("same");
-    const result = await renameTag(tag.id, "same");
-    expect(result.name).toBe("same");
-  });
-
-  test("rejects conflicts with another existing tag name", async () => {
-    const tag = await createTag("first");
-    await createTag("second");
-    expect(renameTag(tag.id, "second")).rejects.toBeInstanceOf(ConflictError);
-  });
-
-  test("throws for unknown tag id", async () => {
-    expect(renameTag(999, "whatever")).rejects.toThrow();
   });
 });
 

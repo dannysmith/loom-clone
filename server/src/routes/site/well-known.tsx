@@ -61,6 +61,9 @@ wellKnown.get("/", async (c) => {
     "content-type": "text/html; charset=utf-8",
     Link: `</feed.xml>; rel="alternate"; type="application/rss+xml"; title="${siteConfig.name}"`,
     Vary: "Accept",
+    // Without an explicit value BunnyCDN applies its 30-day default to the
+    // redirect — same hazard as the feeds (see lib/cache-control.ts).
+    "Cache-Control": agentTextCacheControl(),
   });
 });
 

@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "check:server": "cd server && bun run check:all",
+    "check:app": "cd app && make lint && make test",
+    "check:all": "bun run check:server && bun run check:app"
+  },
   "dependencies": {
     "media-icons": "^0.10.0"
   }

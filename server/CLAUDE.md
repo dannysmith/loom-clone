@@ -11,6 +11,7 @@ All scripts run from `server/`:
 - `bun run test:watch` — re-run tests on file changes
 - `bun run check` — Biome lint + format check (read-only)
 - `bun run check:fix` — auto-fix lint + format issues
+- `bun run check:all` — lint + format check, typecheck, and full test suite in one command (what CI runs)
 - `bun run lint` / `bun run lint:fix` — lint only
 - `bun run format` / `bun run format:check` — format only
 - `bun run typecheck` — `tsc --noEmit`
@@ -18,7 +19,7 @@ All scripts run from `server/`:
 - `bun run db:migrate` — apply pending migrations to `data/app.db` (also applied automatically on server startup)
 - `bun run db:studio` — browse `data/app.db` in the Drizzle Studio web UI
 
-Before finishing a change, run `bun run check && bun run typecheck && bun test`.
+Before finishing a change, run `bun run check:all` (or the equivalent `bun run check && bun run typecheck && bun test`). CI runs the same `check:all` command, inside the same `oven/bun` image the production Dockerfile builds from, with ffmpeg installed — so the ffmpeg-gated media tests run at the deploy gate (only the two audio tests that need macOS `say` skip on Linux, and CI fails on any other skip).
 
 ## Database
 

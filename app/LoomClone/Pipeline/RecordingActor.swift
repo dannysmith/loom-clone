@@ -74,7 +74,7 @@ actor RecordingActor {
     // MARK: - Source Health Tracking
 
     /// Host-clock seconds when the last frame/sample was received from each source.
-    /// Updated by the frame handlers, read by the health check on each metronome tick.
+    /// Updated by the frame handlers, read by the ~2 Hz health task.
     var lastScreenFrameHostTime: Double?
     var lastCameraFrameHostTime: Double?
     var lastAudioSampleHostTime: Double?

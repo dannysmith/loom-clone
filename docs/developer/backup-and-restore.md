@@ -11,6 +11,8 @@ Per video, only the files that can't be regenerated from another backed-up file:
 | `derivatives/source.mp4` | Post-processed master. HLS segments (its source) are cleaned up after 10 days. |
 | `recording.json` | Timeline and composition metadata. Irreplaceable. |
 | `derivatives/thumbnail.jpg` | Promoted thumbnail. Tiny (~60 KB) and not worth distinguishing auto vs uploaded. |
+| `derivatives/edits.json` | User's edit decisions (EDL). Irreplaceable. |
+| `derivatives/words.json` | Word-level transcript timestamps from WhisperKit. Not regenerable server-side. |
 
 Plus the database:
 
@@ -18,7 +20,7 @@ Plus the database:
 | --- | --- |
 | `app.db.bak` | Point-in-time SQLite snapshot taken via `.backup` immediately before the restic run. The live `app.db` is never backed up directly. |
 
-Everything else (`720p.mp4`, `1080p.mp4`, storyboards, HLS segments, thumbnail candidates) is regenerable from `source.mp4` via the existing derivatives pipeline and is excluded from backups.
+Everything else (`720p.mp4`, `1080p.mp4`, storyboards, HLS segments, thumbnail candidates, peaks, captions) is regenerable from the backed-up files via the processing pipeline and is excluded from backups.
 
 ## Architecture
 
@@ -218,16 +220,18 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml down
 cp /tmp/restore/mnt/data/loom-clone/app.db.bak /mnt/data/loom-clone/app.db
 
 # Restore per-video files
-# This copies recording.json, derivatives/source.mp4, and derivatives/thumbnail.jpg
-# back into each video's directory, creating directories as needed.
+# This copies all five backed-up per-video files (recording.json plus
+# derivatives/source.mp4, thumbnail.jpg, edits.json, words.json) back into
+# each video's directory, creating directories as needed.
 cd /tmp/restore/mnt/data/loom-clone
 for dir in */; do
   vid_id=$(basename "$dir")
   [[ "$vid_id" =~ ^[0-9a-f-]{36}$ ]] || continue
   mkdir -p "/mnt/data/loom-clone/$vid_id/derivatives"
   cp -v "$dir"recording.json "/mnt/data/loom-clone/$vid_id/" 2>/dev/null || true
-  cp -v "$dir"derivatives/source.mp4 "/mnt/data/loom-clone/$vid_id/derivatives/" 2>/dev/null || true
-  cp -v "$dir"derivatives/thumbnail.jpg "/mnt/data/loom-clone/$vid_id/derivatives/" 2>/dev/null || true
+  for f in source.mp4 thumbnail.jpg edits.json words.json; do
+    cp -v "$dir"derivatives/"$f" "/mnt/data/loom-clone/$vid_id/derivatives/" 2>/dev/null || true
+  done
 done
 
 # Start the server
@@ -237,13 +241,17 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ### Regenerate derivatives
 
-After restore, videos will be viewable immediately (source.mp4 is in the backup). But variants (720p, 1080p), storyboards, and thumbnail candidates need regenerating. The server has a backfill script for this:
+Videos are viewable immediately after restore: serving is table-gated with per-file disk checks, so the restored `source.mp4` serves directly and missing variants/storyboards degrade gracefully rather than 404. To regenerate the missing files (variants, storyboards, captions, peaks), trigger a reprocess per video — a plain (non-forced) reprocess is resumable, so it skips steps whose artifacts survived and re-runs only the ones whose files are gone:
 
 ```bash
-docker exec loom-clone-server bun run scripts/backfill-metadata.ts
+# One video, via the admin panel: video page → Processing tab → Reprocess.
+# All videos, via the admin API with an lca_ bearer token:
+for id in $(sqlite3 /mnt/data/loom-clone/app.db "SELECT id FROM videos WHERE trashed_at IS NULL"); do
+  curl -fsS -X POST -H "Authorization: Bearer lca_..." \
+    "https://v.danny.is/admin/videos/$id/reprocess"
+  sleep 30   # pipeline runs are fire-and-forget; don't queue the whole library at once
+done
 ```
-
-This re-runs `extractMetadata` and `extractAndPromoteThumbnails` for every video. For full variant regeneration, you may need to trigger `scheduleDerivatives` per video (via the admin API or a one-off script).
 
 ### Clean up
 

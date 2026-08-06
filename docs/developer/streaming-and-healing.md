@@ -137,7 +137,7 @@ Properties worth keeping in mind:
 
 ## Viewer
 
-The playback page at `/:slug` checks `data/<id>/derivatives/source.mp4` on each request. If present, the Vidstack `<media-player>` `src` points to `/:slug/raw/source.mp4` and the `poster` attribute is set to `/:slug/poster.jpg` when the thumbnail also exists. If absent, the page falls back to `/:slug/stream/stream.m3u8` (the HLS playlist) with no poster. An embed variant at `/:slug/embed` provides a chromeless player for iframe use.
+The playback page at `/:slug` decides what to serve per request via `resolveForViewer` (`src/routes/videos/resolve.ts`). MP4 serving is table-gated, as described above: the mandatory steps must be `ready`, and the active raw file's producing step (`source` for recorded/uploaded videos, `edited_output` for edited ones) must be validated `ready` with the file still on disk. When that passes, the Vidstack `<media-player>` gets a `<source>` list — the source-resolution MP4 first (`/:slug/raw/source.mp4`, or the `{height}p.mp4` for edited videos), then any servable downscaled variants — plus the poster, captions, and chapters tracks when those exist. When it fails, the page falls back to `/:slug/stream/stream.m3u8` (the HLS playlist) — except uploaded videos, which have no HLS and serve the retained `upload.mp4` instead. An embed variant at `/:slug/embed` provides a chromeless player for iframe use.
 
 The check is per-request with no state tracked client-side: a freshly-stopped recording serves HLS for a second or two, then upgrades to MP4 on the next page load. A recording still healing stays on HLS for as long as healing takes and upgrades once derivatives land.
 

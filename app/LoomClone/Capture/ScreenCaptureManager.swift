@@ -120,7 +120,7 @@ final class ScreenCaptureManager: NSObject, @unchecked Sendable {
     }
 
     /// Native pixel dimensions of a given display. Used by the coordinator
-    /// to decide whether the 4K preset is offered, before recording starts.
+    /// to decide whether the 1440p preset is offered, before recording starts.
     static func nativePixelSize(for display: SCDisplay) -> CGSize {
         let scale = backingScaleFactor(for: display.displayID)
         return CGSize(

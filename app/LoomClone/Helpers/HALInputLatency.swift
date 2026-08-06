@@ -5,9 +5,9 @@ import CoreAudio
 /// device and returns the total input latency in seconds.
 ///
 /// The latency represents the time between an acoustic event hitting the
-/// mic and the corresponding sample buffer's PTS being stamped. Subtracting
-/// this from audio PTS aligns audio with the real-world moment the sound
-/// was produced, rather than when it was delivered to the host.
+/// mic and the corresponding sample buffer's PTS being stamped. The value
+/// is recorded in the timeline metadata (`halInputLatencyMs`) for
+/// diagnostics only — it is not currently applied to audio PTS anywhere.
 ///
 /// Reference: Cap's `crates/audio/src/latency.rs` (`compute_input_latency`).
 enum HALInputLatency {

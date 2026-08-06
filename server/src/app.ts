@@ -25,7 +25,7 @@ const publicCors = cors({
 // Module layout (each owns its own auth profile):
 //   api    — bearer auth on `/api/videos/*`, `/api/health` open
 //   admin  — session cookie or lca_ bearer token at the mount
-//   site   — root, well-known files, `/data/*` (open, drops in 6.5)
+//   site   — root, well-known files, feeds, oEmbed (open)
 //   videos — `/:slug{...}/*` viewer surface, mounted last as the catch-all
 export function createApp(): Hono {
   const app = new Hono();
@@ -80,11 +80,12 @@ export function createApp(): Hono {
   app.use("/sitemap.xml", publicCors);
   app.route("/", site);
 
-  // Mounted last as documentation of intent — the `/:slug` catch-all
-  // lives here and shouldn't be allowed to swallow more specific routes.
-  // (Hono's trie router prefers specific routes anyway, but order makes
-  // the policy explicit.) CORS for the videos surface is applied inside
-  // the videos sub-router so it only fires for requests routed there.
+  // Mounted last, and the order is load-bearing: the `/:slug` catch-all
+  // lives here, and Hono does NOT prefer more specific routes across
+  // sub-router mounts — mounted first, it swallows `/feed.xml`,
+  // `/robots.txt`, `/sitemap.xml`, etc. (app.test.ts pins this.) CORS for
+  // the videos surface is applied inside the videos sub-router so it only
+  // fires for requests routed there.
   app.route("/", videos);
 
   return app;

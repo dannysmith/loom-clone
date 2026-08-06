@@ -37,9 +37,11 @@ server/editor/              # Vite + React sub-project
   package.json              # separate dependencies (react, wavesurfer.js, vite)
   tsconfig.json             # React JSX config (not hono/jsx)
   vite.config.ts            # base="/static/editor/", builds to ../public/editor/
-  index.html                # Vite entry point template
+  index.html                # Vite entry point template (editor)
+  cover.html                # second Vite entry (cover-image tool)
   src/
     main.tsx                # React entry — reads data attributes from the HTML shell
+    main-cover.tsx          # React entry for the cover-image tool
     App.tsx                 # orchestrates all components and hooks
     api.ts                  # fetch helpers for EDL load/save/commit, chapters, media URLs
     types.ts                # shared types: Edit, Edl, PeaksData, Word, Chapter
@@ -58,6 +60,9 @@ server/editor/              # Vite + React sub-project
       ChaptersPanel.tsx     # chapter list editor (title/time/jump/delete + add)
     styles/
       editor.css            # dark theme, full-viewport layout
+    cover/                  # cover-image tool — its own mini-app (App, Editor,
+                            #   preview components, canvas export); shares no
+                            #   code with the editor beyond the Vite build
 ```
 
 ## Build and dev workflow
@@ -78,6 +83,8 @@ cd server && bun run dev
 # Terminal 2: Vite dev server with HMR
 cd server/editor && bun run editor:dev
 ```
+
+Dev-mode detection is a file check, not a flag: if `public/editor/.vite/manifest.json` exists (from any previous local `bun run build`), the server serves that stale build and HMR never engages. Delete `server/public/editor/` to get HMR back.
 
 The Hono route detects dev mode (no manifest file on disk) and loads scripts from `localhost:5173` for hot module replacement.
 
@@ -122,7 +129,7 @@ Generated server-side from ffmpeg's `silencedetect` filter (run after audio post
 
 **Lifecycle:**
 - Generated once during initial post-processing if `lastEditedAt` is null and no suggestions file already exists (idempotent — healing reruns of the derivatives pipeline don't regenerate).
-- Deleted on the first successful commit in `edit-pipeline.ts`, so suggestions never reappear once the user has committed any edit.
+- Deleted on the first successful commit (`finalizeEdit` in `lib/processing/pipeline.ts`), so suggestions never reappear once the user has committed any edit.
 - Suppressed in the editor UI if `edits.json` already contains user edits (e.g. an in-progress saved-but-not-committed edit), to avoid noise on a returning visit.
 
 **UI:**
@@ -155,6 +162,7 @@ Small amber flag markers render on the storyboard thumbnail strip at each chapte
 | I | Set trim start at playhead |
 | O | Set trim end at playhead |
 | X | Add a cut at the playhead |
+| D | Delete the cut under the playhead |
 | Left/Right | Step 1 second |
 | Shift+Left/Right | Step 5 seconds |
 | Cmd+Z | Undo |
@@ -163,7 +171,7 @@ Small amber flag markers render on the storyboard thumbnail strip at each chapte
 
 ## Processing pipeline
 
-When the user clicks Commit, the server-side edit pipeline (`lib/edit-pipeline.ts`) runs. It regenerates a **multi-file set** (the edited output + variants + storyboard + captions), so it builds the whole set in a staging directory and swaps it in atomically — this is why edits get their own `reprocessing` status (see [Status model](streaming-and-healing.md#status-model)):
+When the user clicks Commit, the server runs an `edit`-mode pass of the unified processing pipeline (`scheduleEdit` in `lib/processing/pipeline.ts`; the ffmpeg render itself lives in `lib/edit-render.ts`). It regenerates a **multi-file set** (the edited output + variants + storyboard + captions), so it builds the whole set in a staging directory and swaps it in atomically — this is why edits get their own `reprocessing` status (see [Status model](streaming-and-healing.md#status-model)):
 
 1. Sets video status to `"reprocessing"` (prevents concurrent edits)
 2. Reads `edits.json` and probes `source.mp4`

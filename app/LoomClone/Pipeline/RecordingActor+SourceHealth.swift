@@ -6,18 +6,20 @@ extension RecordingActor {
     // MARK: - Source Health Monitoring
 
     // Tracks the last time each source delivered data, and which warnings are
-    // currently active. The health check runs on each metronome tick (free —
-    // we're already awake) and fires warnings/timeline events on threshold
-    // breach. Each warning fires once; if the source recovers (delivers again)
-    // the warning clears and can re-fire on a subsequent stall.
+    // currently active. The health check runs on the dedicated ~2 Hz health
+    // task (see startHealthCheckTimer in +Metronome), decoupled from the
+    // timing-critical encode loop, and fires warnings/timeline events on
+    // threshold breach. Each warning fires once; if the source recovers
+    // (delivers again) the warning clears and can re-fire on a subsequent
+    // stall.
 
     // Thresholds (seconds since last delivery):
     static let screenStaleThreshold: Double = 2.0
     static let cameraStaleThreshold: Double = 1.0
     static let audioMissingThreshold: Double = 2.0
 
-    /// Run from the metronome tick. Checks each source against its freshness
-    /// threshold and fires/clears warnings as needed.
+    /// Run from the ~2 Hz health task. Checks each source against its
+    /// freshness threshold and fires/clears warnings as needed.
     func checkSourceHealth() {
         guard isRecording, !isStopping else { return }
         let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds

@@ -23,6 +23,14 @@ import videoRoutes from "./videos";
 
 const admin = new Hono<AdminEnv>();
 
+// Prevent CDN/proxy caching of any admin response — defense in depth on top
+// of BunnyCDN edge rules. Registered before the login routes so those are
+// covered too: authenticated HTML and login pages must never come from cache.
+admin.use("*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "no-store");
+});
+
 // --- Public routes (no auth) ---
 
 admin.get("/login", (c) => c.html(<LoginPage />));
@@ -44,13 +52,6 @@ admin.post("/login", async (c) => {
 });
 
 // --- Auth + CSRF on everything below ---
-
-// Prevent CDN/proxy caching of any admin response — defense in depth on top
-// of BunnyCDN edge rules. Authenticated HTML must never be served from cache.
-admin.use("*", async (c, next) => {
-  await next();
-  c.header("Cache-Control", "no-store");
-});
 
 admin.use("*", requireAdmin());
 

@@ -128,10 +128,7 @@ struct RecordingPanelContent: View {
                 .frame(height: 24)
 
             // Timer
-            Text(formattedTime)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(coordinator.state == .paused ? .secondary : .primary)
-                .frame(minWidth: 50, alignment: .trailing)
+            RecordingTimerLabel(coordinator: coordinator)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -143,6 +140,20 @@ struct RecordingPanelContent: View {
         } else if coordinator.state == .recording {
             coordinator.pauseRecording()
         }
+    }
+}
+
+/// Timer label isolated in its own view so its observable read
+/// (`elapsedSeconds`, updated 10×/sec) invalidates only this label rather
+/// than the whole toolbar — same pattern as ChapterMarkerButton below.
+private struct RecordingTimerLabel: View {
+    @Bindable var coordinator: RecordingCoordinator
+
+    var body: some View {
+        Text(formattedTime)
+            .font(.system(.body, design: .monospaced))
+            .foregroundStyle(coordinator.state == .paused ? .secondary : .primary)
+            .frame(minWidth: 50, alignment: .trailing)
     }
 
     private var formattedTime: String {

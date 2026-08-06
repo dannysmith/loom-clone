@@ -22,10 +22,20 @@ async function purgeUrl(url: string): Promise<void> {
   }
 }
 
-// Purge all cached content for a video (wildcard) + global feeds.
-export function purgeVideo(slug: string): void {
-  const base = getPublicBaseUrl();
+// The `/${slug}/*` wildcard covers sub-paths (raw, stream, embed, …) but NOT
+// the bare `/${slug}` page — the URL people actually share — nor the dotted
+// variants, so those are purged explicitly (same hazard purgeTag documents).
+function purgeVideoPaths(base: string, slug: string): void {
+  purgeUrl(`${base}/${slug}`);
   purgeUrl(`${base}/${slug}/*`);
+  purgeUrl(`${base}/${slug}.json`);
+  purgeUrl(`${base}/${slug}.md`);
+  purgeUrl(`${base}/${slug}.mp4`);
+}
+
+// Purge all cached content for a video + global feeds.
+export function purgeVideo(slug: string): void {
+  purgeVideoPaths(getPublicBaseUrl(), slug);
   purgeGlobalFeeds();
 }
 
@@ -40,8 +50,8 @@ export function purgeGlobalFeeds(): void {
 // Purge both old and new slug paths after a rename.
 export function purgeSlugRename(oldSlug: string, newSlug: string): void {
   const base = getPublicBaseUrl();
-  purgeUrl(`${base}/${oldSlug}/*`);
-  purgeUrl(`${base}/${newSlug}/*`);
+  purgeVideoPaths(base, oldSlug);
+  purgeVideoPaths(base, newSlug);
   purgeGlobalFeeds();
 }
 

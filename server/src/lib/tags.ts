@@ -215,12 +215,6 @@ export async function updateTag(id: number, patch: TagPatch): Promise<Tag> {
   return updated;
 }
 
-// Convenience alias — existing callers that only rename don't need to learn
-// the patch API. Delegates to updateTag.
-export async function renameTag(id: number, name: string): Promise<Tag> {
-  return updateTag(id, { name });
-}
-
 // Deletes a tag and, via FK cascade, removes all video_tag associations
 // and tag_slug_redirect rows. The affected videos are not touched.
 export async function deleteTag(id: number): Promise<void> {

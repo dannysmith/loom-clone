@@ -1,27 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  absoluteUrl,
-  activeRawFilename,
-  getPublicBaseUrl,
-  urlsForSlug,
-  urlsForVideo,
-} from "../url";
-
-describe("urlsForSlug", () => {
-  test("returns all viewer-facing paths for a slug", () => {
-    const urls = urlsForSlug("my-video");
-    expect(urls.page).toBe("/my-video");
-    expect(urls.raw).toBe("/my-video/raw/source.mp4");
-    expect(urls.hls).toBe("/my-video/stream/stream.m3u8");
-    expect(urls.poster).toBe("/my-video/poster.jpg");
-  });
-
-  test("handles single-character slug", () => {
-    const urls = urlsForSlug("a");
-    expect(urls.page).toBe("/a");
-    expect(urls.raw).toBe("/a/raw/source.mp4");
-  });
-});
+import { absoluteUrl, activeRawFilename, getPublicBaseUrl, urlsForVideo } from "../url";
 
 describe("activeRawFilename", () => {
   test("returns source.mp4 for unedited video", () => {

@@ -26,6 +26,15 @@ describe("createApp", () => {
     expect(body).toContain("@layer");
   });
 
+  test("/admin/login gets Cache-Control: no-store", async () => {
+    // The no-store middleware must be registered before the login routes —
+    // login responses are exactly the ones a shared cache must never hold.
+    const app = createApp();
+    const res = await app.request("/admin/login");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   test("/admin renders the admin shell", async () => {
     const app = createApp();
     const res = await app.request("/admin");

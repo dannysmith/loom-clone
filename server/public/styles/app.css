@@ -1,7 +1,6 @@
 /* Entry point. Declares the layer order once, then pulls in modular files. */
-@layer reset, tokens, base, components, admin, utilities;
+@layer reset, tokens, base, admin, utilities;
 
 @import url("./reset.css") layer(reset);
 @import url("./tokens.css") layer(tokens);
 @import url("./base.css") layer(base);
-@import url("./components.css") layer(components);

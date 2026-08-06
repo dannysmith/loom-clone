@@ -49,7 +49,7 @@ This separation is load-bearing. Changing one brand hue shifts dependent semanti
 
 | Surface | Entry | Composes |
 | --- | --- | --- |
-| Admin pages | `app.css` linked by `RootLayout` + `admin.css` linked by `AdminLayout`'s head slot | reset + tokens + base + components + admin |
+| Admin pages | `app.css` linked by `RootLayout` + `admin.css` linked by `AdminLayout`'s head slot | reset + tokens + base + admin |
 | Public viewer (`/:slug`, `/:tagslug`) | `viewer-app.css` (set via `ViewerLayout`'s `stylesheet` prop on `RootLayout`) | reset + tokens + base + viewer + player |
 | Embed (`/:slug/embed`) | `embed-app.css` | reset + tokens + base + embed + player |
 | Cover + video editors (Vite-bundled SPAs) | their own CSS + a `<link>` to `app.css` (so brand tokens resolve) | editor's own component styles |
@@ -61,7 +61,7 @@ Admin component CSS (`admin.css`) is never loaded by public visitors. `RootLayou
 `app.css`:
 
 ```css
-@layer reset, tokens, base, components, admin, utilities;
+@layer reset, tokens, base, admin, utilities;
 ```
 
 Viewer/embed entries declare the equivalent order with `viewer` / `embed` / `player` in place of `admin`. Reset.css selectors are wrapped in `:where()` so cascade priority is determined entirely by layer order, not by selector specificity.

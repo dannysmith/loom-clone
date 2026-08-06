@@ -30,20 +30,6 @@ actor UploadActor {
         self.reachability = ReachabilityMonitor()
     }
 
-    // MARK: - Read-only status (plumbing for future UI)
-
-    /// True if the network path is currently satisfied. Reflects only
-    /// physical reachability, not server availability.
-    func isReachable() -> Bool {
-        reachability.isOnline
-    }
-
-    /// True if the queue currently has work — either segments pending or
-    /// an in-flight upload.
-    func hasPendingUploads() -> Bool {
-        !pendingSegments.isEmpty || queueTask != nil
-    }
-
     // MARK: - Session Management
 
     /// Create a new video on the server, returning (id, slug).
@@ -181,19 +167,7 @@ actor UploadActor {
 
     // MARK: - Drain / Complete
 
-    /// Block until every enqueued segment has finished uploading (success or
-    /// non-retryable failure). No timeout — waits forever. Use only when you
-    /// have a reason to be certain the queue will drain (e.g. after the user
-    /// stops and network is healthy).
-    func drainQueue() async {
-        while let task = queueTask {
-            _ = await task.value
-            // Re-check: a post-cancellation enqueue could spawn a new task.
-            if queueTask == nil { break }
-        }
-    }
-
-    /// Drain variant used by the stop flow. Waits up to `timeoutSeconds` for
+    /// Drain used by the stop flow. Waits up to `timeoutSeconds` for
     /// the queue to empty naturally; if it doesn't, cancels the queue task so
     /// any pending segments are released and returns. Cancelled segments are
     /// left on local disk for Phase 2 healing to reconcile.
@@ -317,8 +291,6 @@ actor UploadActor {
     private struct CompleteResponse: Decodable {
         /// Absolute URL for the video page (e.g. "https://loom.example.com/my-video").
         let url: String
-        /// Path-only URL (e.g. "/my-video").
-        let path: String?
         let slug: String
         let title: String?
         let visibility: String?

@@ -244,8 +244,10 @@ extension RecordingCoordinator {
             }
 
             // Hand off to TranscribeAgent. Fire-and-forget — runs Whisper
-            // in the background and uploads the SRT when done.
-            if let result, let transcribe = self.transcribeAgent {
+            // in the background and uploads the SRT when done. The stop
+            // fallback returns an empty videoId when the upload session
+            // never got one — nothing to transcribe against in that case.
+            if let result, !result.videoId.isEmpty, let transcribe = self.transcribeAgent {
                 transcribe.scheduleTranscription(
                     videoId: result.videoId,
                     localDir: result.localDir
@@ -410,7 +412,8 @@ extension RecordingCoordinator {
                 )
             }
 
-            if let result, let transcribe = self.transcribeAgent {
+            // Same empty-videoId guard as the normal stop flow above.
+            if let result, !result.videoId.isEmpty, let transcribe = self.transcribeAgent {
                 transcribe.scheduleTranscription(
                     videoId: result.videoId,
                     localDir: result.localDir

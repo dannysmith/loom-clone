@@ -77,12 +77,6 @@ struct APIClient {
         return resolved
     }
 
-    /// Same as `url(path:)` but returns `nil` on failure. Used by callers
-    /// (UI) that want a best-effort string conversion.
-    func optionalURL(path: String) -> URL? {
-        try? url(path: path)
-    }
-
     /// Build an unauthenticated URLRequest. Used for `/api/health`.
     func request(path: String, timeout: TimeInterval? = nil) throws -> URLRequest {
         var req = try URLRequest(url: url(path: path))

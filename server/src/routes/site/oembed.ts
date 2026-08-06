@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { apiError, ErrorCode } from "../../lib/errors";
 import { siteConfig } from "../../lib/site-config";
 import { resolveSlug } from "../../lib/store";
 import { absoluteUrl, getPublicBaseUrl } from "../../lib/url";
@@ -10,7 +11,7 @@ const oembed = new Hono();
 
 oembed.get("/oembed", async (c) => {
   const url = c.req.query("url");
-  if (!url) return c.json({ error: "Missing url parameter" }, 400);
+  if (!url) return apiError(c, 400, "Missing url parameter", ErrorCode.VALIDATION_ERROR);
 
   // Extract slug from the URL. Accept both path-only and absolute forms.
   const base = getPublicBaseUrl();
@@ -21,15 +22,21 @@ oembed.get("/oembed", async (c) => {
     pathname = url;
   }
   const slugMatch = /^\/([a-z0-9](?:-?[a-z0-9])*)$/.exec(pathname);
-  if (!slugMatch?.[1]) return c.json({ error: "Not found" }, 404);
+  if (!slugMatch?.[1]) return apiError(c, 404, "Not found", ErrorCode.VIDEO_NOT_FOUND);
 
   const resolved = await resolveSlug(slugMatch[1]);
-  if (!resolved) return c.json({ error: "Not found" }, 404);
+  if (!resolved) return apiError(c, 404, "Not found", ErrorCode.VIDEO_NOT_FOUND);
   const { video } = resolved;
 
+  // Non-numeric or non-positive maxwidth/maxheight fall back to the defaults
+  // rather than propagating NaN into the response.
+  const parseDim = (value: string | undefined, fallback: number): number => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
   const { width: defW, height: defH } = siteConfig.defaultOgEmbedDimensions;
-  const maxwidth = Math.min(Number(c.req.query("maxwidth") ?? defW), defW);
-  const maxheight = Math.min(Number(c.req.query("maxheight") ?? defH), defH);
+  const maxwidth = Math.min(parseDim(c.req.query("maxwidth"), defW), defW);
+  const maxheight = Math.min(parseDim(c.req.query("maxheight"), defH), defH);
   // Maintain 16:9 aspect ratio within the constraints.
   const width = Math.min(maxwidth, Math.round(maxheight * (16 / 9)));
   const height = Math.round(width * (9 / 16));

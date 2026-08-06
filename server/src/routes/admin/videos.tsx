@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { join, resolve, sep } from "path";
 import type { ProcessingStepKind } from "../../db/schema";
 import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
@@ -14,6 +15,7 @@ import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
   checkSlugAvailable,
+  DATA_DIR,
   duplicateVideo,
   getTranscript,
   permanentlyDeleteVideo,
@@ -128,9 +130,11 @@ videoRoutes.get("/:id/partials/title/edit", async (c) => {
 });
 
 videoRoutes.patch("/:id/title", async (c) => {
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const body = await c.req.parseBody();
   const title = String(body.title ?? "").trim() || null;
-  const video = await updateVideo(c.req.param("id"), { title });
+  const video = await updateVideo(result.id, { title });
   c.header("HX-Trigger", "video-updated");
   return c.html(<TitleDisplay video={video} />);
 });
@@ -154,7 +158,7 @@ videoRoutes.get("/:id/partials/slug/check", async (c) => {
   if (!slug || slug === result.slug) return c.body(null);
   try {
     validateSlugFormat(slug);
-    checkSlugAvailable(slug, result.id);
+    checkSlugAvailable(slug, { videoId: result.id });
     return c.body(null);
   } catch (err) {
     const message =
@@ -200,10 +204,11 @@ videoRoutes.get("/:id/partials/description/edit", async (c) => {
 });
 
 videoRoutes.patch("/:id/description", async (c) => {
-  const id = c.req.param("id");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const body = await c.req.parseBody();
   const description = String(body.description ?? "").trim() || null;
-  const video = await updateVideo(id, { description });
+  const video = await updateVideo(result.id, { description });
   c.header("HX-Trigger", "video-updated");
   return c.html(<DescriptionDisplay video={video} />);
 });
@@ -221,10 +226,11 @@ videoRoutes.get("/:id/partials/notes/edit", async (c) => {
 });
 
 videoRoutes.patch("/:id/notes", async (c) => {
-  const id = c.req.param("id");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const body = await c.req.parseBody();
   const notes = String(body.notes ?? "").trim() || null;
-  const video = await updateVideo(id, { notes });
+  const video = await updateVideo(result.id, { notes });
   c.header("HX-Trigger", "video-updated");
   return c.html(<NotesDisplay video={video} />);
 });
@@ -242,12 +248,13 @@ videoRoutes.get("/:id/partials/visibility/edit", async (c) => {
 });
 
 videoRoutes.patch("/:id/visibility", async (c) => {
-  const id = c.req.param("id");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const body = await c.req.parseBody();
   const visibility = String(body.visibility ?? "") as "public" | "unlisted" | "private";
   if (!["public", "unlisted", "private"].includes(visibility))
     return c.text("Invalid visibility", 400);
-  const video = await updateVideo(id, { visibility });
+  const video = await updateVideo(result.id, { visibility });
   c.header("HX-Trigger", "video-updated");
   return c.html(<VisibilityDisplay video={video} />);
 });
@@ -290,12 +297,17 @@ const LANG_MAP: Record<string, string> = {
 };
 
 videoRoutes.get("/:id/partials/file-preview", async (c) => {
-  const id = c.req.param("id");
+  const result = await requireVideo(c);
+  if (result instanceof Response) return result;
   const filePath = c.req.query("path") ?? "";
-  if (!filePath || filePath.includes("..") || filePath.startsWith("/")) {
+  // Containment check by resolved path (allowlist), not a `..` denylist:
+  // whatever the query contains, the resolved target must stay inside the
+  // video's own directory.
+  const videoDir = resolve(DATA_DIR, result.id);
+  const fullPath = resolve(videoDir, filePath);
+  if (!filePath || !fullPath.startsWith(videoDir + sep)) {
     return c.text("Invalid path", 400);
   }
-  const fullPath = `data/${id}/${filePath}`;
   const file = Bun.file(fullPath);
   if (!(await file.exists())) return c.text("File not found", 404);
   const content = await file.text();
@@ -398,7 +410,13 @@ const MAX_UPLOAD_WIDTH = 3840;
 // saveCustomThumbnail will resize regardless). Writes a temp file because
 // ffprobe needs a path, not a buffer.
 async function probeImageWidth(videoId: string, imageData: ArrayBuffer): Promise<number | null> {
-  const tmpPath = `data/${videoId}/derivatives/thumbnail-candidates/_upload-check.tmp`;
+  const tmpPath = join(
+    DATA_DIR,
+    videoId,
+    "derivatives",
+    "thumbnail-candidates",
+    "_upload-check.tmp",
+  );
   await Bun.write(tmpPath, imageData);
   try {
     const data = (await probeJson([

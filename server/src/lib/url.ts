@@ -42,18 +42,6 @@ export function urlsForVideo(video: {
   };
 }
 
-// Slug-only URL builder for cases where we don't have video metadata.
-// Always points raw at source.mp4. Prefer urlsForVideo() when you have
-// the video object.
-export function urlsForSlug(slug: string): VideoUrls {
-  return {
-    page: `/${slug}`,
-    raw: `/${slug}/raw/source.mp4`,
-    hls: `/${slug}/stream/stream.m3u8`,
-    poster: `/${slug}/poster.jpg`,
-  };
-}
-
 // Returns the public base URL for constructing absolute URLs (clipboard,
 // API responses). Reads `PUBLIC_URL` from the environment; falls back to
 // `http://${HOST}:${PORT}` for local dev. Read at call time so `.env`

@@ -63,7 +63,12 @@ export function Toolbar({
       </div>
 
       <div className="editor-toolbar-center">
-        <button onClick={onPlayPause} className="editor-btn editor-btn-play" title="Play/Pause (Space)">
+        <button
+          type="button"
+          onClick={onPlayPause}
+          className="editor-btn editor-btn-play"
+          title="Play/Pause (Space)"
+        >
           {isPlaying ? "Pause" : "Play"}
         </button>
         <span className="editor-time">
@@ -72,17 +77,37 @@ export function Toolbar({
 
         <span className="editor-toolbar-divider" />
 
-        <button onClick={onSetTrimIn} className="editor-btn" title="Set trim start at playhead">
+        <button
+          type="button"
+          onClick={onSetTrimIn}
+          className="editor-btn"
+          title="Set trim start at playhead"
+        >
           Trim start <kbd>I</kbd>
         </button>
-        <button onClick={onSetTrimOut} className="editor-btn" title="Set trim end at playhead">
+        <button
+          type="button"
+          onClick={onSetTrimOut}
+          className="editor-btn"
+          title="Set trim end at playhead"
+        >
           Trim end <kbd>O</kbd>
         </button>
-        <button onClick={onAddCut} className="editor-btn editor-btn-cut" title="Add a cut at the playhead">
+        <button
+          type="button"
+          onClick={onAddCut}
+          className="editor-btn editor-btn-cut"
+          title="Add a cut at the playhead"
+        >
           Add cut <kbd>X</kbd>
         </button>
         {hasCutAtPlayhead && (
-          <button onClick={onDeleteCut} className="editor-btn editor-btn-delete-cut" title="Delete the cut under the playhead">
+          <button
+            type="button"
+            onClick={onDeleteCut}
+            className="editor-btn editor-btn-delete-cut"
+            title="Delete the cut under the playhead"
+          >
             Delete cut <kbd>D</kbd>
           </button>
         )}
@@ -90,10 +115,14 @@ export function Toolbar({
         {suggestionCount > 0 && (
           <>
             <span className="editor-toolbar-divider" />
-            <span className="editor-suggestion-count" title="Auto-detected from silences in the audio">
+            <span
+              className="editor-suggestion-count"
+              title="Auto-detected from silences in the audio"
+            >
               {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
             </span>
             <button
+              type="button"
               onClick={onAcceptAllSuggestions}
               className="editor-btn editor-btn-accept-all"
               title="Accept every suggested trim and cut"
@@ -101,6 +130,7 @@ export function Toolbar({
               Accept all
             </button>
             <button
+              type="button"
               onClick={onDismissAllSuggestions}
               className="editor-btn"
               title="Dismiss all suggestions for this session"
@@ -112,16 +142,39 @@ export function Toolbar({
       </div>
 
       <div className="editor-toolbar-right">
-        <button onClick={onUndo} disabled={!canUndo} className="editor-btn" title="Undo (Cmd+Z)">
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          className="editor-btn"
+          title="Undo (Cmd+Z)"
+        >
           Undo
         </button>
-        <button onClick={onRedo} disabled={!canRedo} className="editor-btn" title="Redo (Cmd+Shift+Z)">
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          className="editor-btn"
+          title="Redo (Cmd+Shift+Z)"
+        >
           Redo
         </button>
-        <button onClick={onSave} disabled={!isDirty && !saving} className="editor-btn" title="Save (Cmd+S)">
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!isDirty && !saving}
+          className="editor-btn"
+          title="Save (Cmd+S)"
+        >
           {saving ? "Saving..." : isDirty ? "Save" : "Saved"}
         </button>
-        <button onClick={onCommitClick} className="editor-btn editor-btn-commit" title="Apply edits to video">
+        <button
+          type="button"
+          onClick={onCommitClick}
+          className="editor-btn editor-btn-commit"
+          title="Apply edits to video"
+        >
           Commit
         </button>
       </div>

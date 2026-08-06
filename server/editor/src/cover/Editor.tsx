@@ -1,21 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { addToThumbnails } from './api';
+import { useEffect, useRef, useState } from "react";
+import { addToThumbnails } from "./api";
+import { dataUrlToBlob, downloadDataUrl, exportJpeg, exportPng, exportSvg } from "./export";
 import {
-  dataUrlToBlob,
-  downloadDataUrl,
-  exportJpeg,
-  exportPng,
-  exportSvg,
-} from './export';
-import {
+  type CoverState,
   MEDIA_DEFAULTS,
   QR_DEFAULTS,
   qrDefaultsFor,
   titleDefaultFor,
   urlDefaultFor,
-  type CoverState,
   type VideoInputs,
-} from './state';
+} from "./state";
 
 type Props = {
   inputs: VideoInputs;
@@ -27,10 +21,10 @@ type Props = {
 export function Editor({ inputs, state, setState, svgRef }: Props) {
   // Export panel — local UI state.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [working, setWorking] = useState<null | 'preview' | 'png' | 'jpeg' | 'svg' | 'upload'>(
+  const [working, setWorking] = useState<null | "preview" | "png" | "jpeg" | "svg" | "upload">(
     null,
   );
-  const [toast, setToast] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -39,7 +33,7 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
     };
   }, []);
 
-  const showToast = (kind: 'success' | 'error', message: string) => {
+  const showToast = (kind: "success" | "error", message: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToast({ kind, message });
     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
@@ -52,41 +46,46 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
   };
 
   const refreshPreview = async () => {
-    setWorking('preview');
+    setWorking("preview");
     try {
       const url = await withSvg(exportPng);
       if (url) setPreviewUrl(url);
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Preview failed');
+      showToast("error", err instanceof Error ? err.message : "Preview failed");
     } finally {
       setWorking(null);
     }
   };
 
-  const downloadAs = async (kind: 'png' | 'jpeg' | 'svg') => {
+  const downloadAs = async (kind: "png" | "jpeg" | "svg") => {
     setWorking(kind);
     try {
-      const url = await withSvg(kind === 'png' ? exportPng : kind === 'jpeg' ? exportJpeg : exportSvg);
+      const url = await withSvg(
+        kind === "png" ? exportPng : kind === "jpeg" ? exportJpeg : exportSvg,
+      );
       if (!url) return;
-      const ext = kind === 'jpeg' ? 'jpg' : kind;
+      const ext = kind === "jpeg" ? "jpg" : kind;
       downloadDataUrl(url, `cover.${ext}`);
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : `${kind.toUpperCase()} export failed`);
+      showToast(
+        "error",
+        err instanceof Error ? err.message : `${kind.toUpperCase()} export failed`,
+      );
     } finally {
       setWorking(null);
     }
   };
 
   const addToThumbnailsClick = async () => {
-    setWorking('upload');
+    setWorking("upload");
     try {
       const url = await withSvg(exportJpeg);
       if (!url) return;
       const blob = await dataUrlToBlob(url);
       await addToThumbnails(inputs.videoId, blob);
-      showToast('success', 'Added to thumbnails ✓');
+      showToast("success", "Added to thumbnails ✓");
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Upload failed');
+      showToast("error", err instanceof Error ? err.message : "Upload failed");
     } finally {
       setWorking(null);
     }
@@ -96,7 +95,7 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : null;
+      const dataUrl = typeof reader.result === "string" ? reader.result : null;
       if (!dataUrl) return;
       setState((s) => ({ ...s, media: { ...s.media, imageSrc: dataUrl } }));
     };
@@ -207,9 +206,7 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
               id="url-text"
               type="text"
               value={state.url.text}
-              onChange={(e) =>
-                setState((s) => ({ ...s, url: { ...s.url, text: e.target.value } }))
-              }
+              onChange={(e) => setState((s) => ({ ...s, url: { ...s.url, text: e.target.value } }))}
             />
             <button
               type="button"
@@ -386,9 +383,7 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
               type="text"
               placeholder="https://…"
               value={state.qr.url}
-              onChange={(e) =>
-                setState((s) => ({ ...s, qr: { ...s.qr, url: e.target.value } }))
-              }
+              onChange={(e) => setState((s) => ({ ...s, qr: { ...s.qr, url: e.target.value } }))}
             />
 
             <label className="inline-check">
@@ -465,9 +460,13 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
           type="button"
           className="ghost"
           onClick={refreshPreview}
-          disabled={working === 'preview'}
+          disabled={working === "preview"}
         >
-          {working === 'preview' ? 'Generating…' : previewUrl ? 'Refresh preview' : 'Generate preview'}
+          {working === "preview"
+            ? "Generating…"
+            : previewUrl
+              ? "Refresh preview"
+              : "Generate preview"}
         </button>
         {previewUrl && (
           <div className="export-preview" title="Drag to your desktop to save">
@@ -478,35 +477,35 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
           <button
             type="button"
             className="ghost"
-            onClick={() => downloadAs('png')}
-            disabled={working === 'png'}
+            onClick={() => downloadAs("png")}
+            disabled={working === "png"}
           >
-            {working === 'png' ? '…' : 'PNG'}
+            {working === "png" ? "…" : "PNG"}
           </button>
           <button
             type="button"
             className="ghost"
-            onClick={() => downloadAs('jpeg')}
-            disabled={working === 'jpeg'}
+            onClick={() => downloadAs("jpeg")}
+            disabled={working === "jpeg"}
           >
-            {working === 'jpeg' ? '…' : 'JPEG'}
+            {working === "jpeg" ? "…" : "JPEG"}
           </button>
           <button
             type="button"
             className="ghost"
-            onClick={() => downloadAs('svg')}
-            disabled={working === 'svg'}
+            onClick={() => downloadAs("svg")}
+            disabled={working === "svg"}
           >
-            {working === 'svg' ? '…' : 'SVG'}
+            {working === "svg" ? "…" : "SVG"}
           </button>
         </div>
         <button
           type="button"
           className="ghost"
           onClick={addToThumbnailsClick}
-          disabled={working === 'upload'}
+          disabled={working === "upload"}
         >
-          {working === 'upload' ? 'Adding…' : 'Add to thumbnails'}
+          {working === "upload" ? "Adding…" : "Add to thumbnails"}
         </button>
         {toast && (
           <span className={`toast toast--${toast.kind}`} role="status">
@@ -548,7 +547,7 @@ function Slider({
       />
       <span className="slider-value">
         {Number.isInteger(step) ? Math.round(value) : value.toFixed(2)}
-        {suffix ?? ''}
+        {suffix ?? ""}
       </span>
     </div>
   );

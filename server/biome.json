@@ -1,7 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
   "files": {
-    "includes": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts"]
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "scripts/**/*.ts",
+      "editor/src/**/*.ts",
+      "editor/src/**/*.tsx",
+      "player/src/**/*.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -33,6 +40,21 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["editor/src/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useMediaCaption": "off",
+            "useKeyWithClickEvents": "off",
+            "noStaticElementInteractions": "off",
+            "noSvgWithoutTitle": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

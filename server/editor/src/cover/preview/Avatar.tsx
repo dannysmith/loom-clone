@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId } from "react";
 
 // Avatar: circular image in the top-left, left-aligned with the title.
 // Sits above the title text and overlaps the top-left blob.
@@ -8,7 +8,7 @@ const AVATAR_Y = 60; // top edge — above the title region (y=200)
 const BORDER_WIDTH = 6;
 
 export function Avatar() {
-  const uid = useId().replace(/:/g, '');
+  const uid = useId().replace(/:/g, "");
   const clipId = `avatar-clip-${uid}`;
   const cx = AVATAR_X + AVATAR_SIZE / 2;
   const cy = AVATAR_Y + AVATAR_SIZE / 2;

@@ -67,9 +67,7 @@ export function App({ videoId, videoTitle, videoDuration }: Props) {
 
   const hasCutAtPlayhead = useMemo(() => {
     const t = playback.currentTime;
-    return edlState.edl.edits.some(
-      (e) => e.type === "cut" && t >= e.startTime && t <= e.endTime,
-    );
+    return edlState.edl.edits.some((e) => e.type === "cut" && t >= e.startTime && t <= e.endTime);
   }, [playback.currentTime, edlState.edl.edits]);
 
   const keyboardActions = useMemo(

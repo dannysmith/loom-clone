@@ -43,14 +43,14 @@ export function CommitDialog({ open, isCommitting, onConfirm, onCancel }: Props)
           <>
             <h3>Commit edits?</h3>
             <p>
-              This will re-process the video with your edits applied. The original source is preserved
-              and edits can be changed later.
+              This will re-process the video with your edits applied. The original source is
+              preserved and edits can be changed later.
             </p>
             <div className="editor-dialog-actions">
-              <button onClick={onCancel} className="editor-btn">
+              <button type="button" onClick={onCancel} className="editor-btn">
                 Cancel
               </button>
-              <button onClick={onConfirm} className="editor-btn editor-btn-commit">
+              <button type="button" onClick={onConfirm} className="editor-btn editor-btn-commit">
                 Commit
               </button>
             </div>

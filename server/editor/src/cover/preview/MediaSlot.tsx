@@ -1,7 +1,7 @@
-import { useEffect, useId, useState } from 'react';
-import type { MediaSlot as MediaSlotType } from '../state';
-import { MEDIA_BASE_WIDTH } from '../state';
-import { useSvgDrag } from './useSvgDrag';
+import { useEffect, useId, useState } from "react";
+import type { MediaSlot as MediaSlotType } from "../state";
+import { MEDIA_BASE_WIDTH } from "../state";
+import { useSvgDrag } from "./useSvgDrag";
 
 type Props = {
   slot: MediaSlotType;
@@ -16,7 +16,7 @@ type Props = {
 // useId() makes clipPath/filter ids unique per instance so multiple slots
 // (or remounts) can't collide.
 export function MediaSlot({ slot, onMove }: Props) {
-  const uid = useId().replace(/:/g, '');
+  const uid = useId().replace(/:/g, "");
   const clipId = `media-clip-${uid}`;
   const shadowId = `media-shadow-${uid}`;
 
@@ -65,17 +65,11 @@ export function MediaSlot({ slot, onMove }: Props) {
       <g
         transform={transform}
         {...drag.handlers}
-        style={{ cursor: drag.isDragging ? 'grabbing' : 'grab', touchAction: 'none' }}
+        style={{ cursor: drag.isDragging ? "grabbing" : "grab", touchAction: "none" }}
       >
         <defs>
           <clipPath id={clipId}>
-            <rect
-              x={-innerW / 2}
-              y={-innerH / 2}
-              width={innerW}
-              height={innerH}
-              rx={innerRadius}
-            />
+            <rect x={-innerW / 2} y={-innerH / 2} width={innerW} height={innerH} rx={innerRadius} />
           </clipPath>
           <filter
             id={shadowId}
@@ -90,14 +84,7 @@ export function MediaSlot({ slot, onMove }: Props) {
           </filter>
         </defs>
         <g filter={`url(#${shadowId})`}>
-          <rect
-            x={-w / 2}
-            y={-h / 2}
-            width={w}
-            height={h}
-            rx={outerRadius}
-            fill="#ffffff"
-          />
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={outerRadius} fill="#ffffff" />
           <image
             href={slot.imageSrc}
             x={-innerW / 2}
@@ -108,11 +95,7 @@ export function MediaSlot({ slot, onMove }: Props) {
             clipPath={`url(#${clipId})`}
           />
           {slot.videoOverlay && (
-            <VideoOverlay
-              innerW={innerW}
-              innerH={innerH}
-              clipPathId={clipId}
-            />
+            <VideoOverlay innerW={innerW} innerH={innerH} clipPathId={clipId} />
           )}
         </g>
       </g>
@@ -129,7 +112,7 @@ export function MediaSlot({ slot, onMove }: Props) {
     <g
       transform={transform}
       {...drag.handlers}
-      style={{ cursor: drag.isDragging ? 'grabbing' : 'grab', touchAction: 'none' }}
+      style={{ cursor: drag.isDragging ? "grabbing" : "grab", touchAction: "none" }}
     >
       <image
         href={slot.imageSrc}
@@ -165,8 +148,8 @@ function VideoOverlay({
     `M ${-tw / 2 + tx} ${-th / 2}`,
     `L ${-tw / 2 + tx} ${th / 2}`,
     `L ${tw / 2 + tx} 0`,
-    'Z',
-  ].join(' ');
+    "Z",
+  ].join(" ");
   return (
     <>
       <rect

@@ -1,8 +1,8 @@
-import { useId } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import type { QrSlot as QrSlotType } from '../state';
-import { QR_BASE_SIZE } from '../state';
-import { useSvgDrag } from './useSvgDrag';
+import { QRCodeSVG } from "qrcode.react";
+import { useId } from "react";
+import type { QrSlot as QrSlotType } from "../state";
+import { QR_BASE_SIZE } from "../state";
+import { useSvgDrag } from "./useSvgDrag";
 
 type Props = {
   slot: QrSlotType;
@@ -20,7 +20,7 @@ type Props = {
 // Level "H" gives ~30% error-correction; we mask ~6% of the QR area, so it
 // remains comfortably scannable without explicit excavation.
 export function QrCode({ slot, onMove }: Props) {
-  const uid = useId().replace(/:/g, '');
+  const uid = useId().replace(/:/g, "");
   const clipId = `qr-avatar-clip-${uid}`;
   const drag = useSvgDrag({ x: slot.x, y: slot.y, onMove });
 
@@ -30,7 +30,7 @@ export function QrCode({ slot, onMove }: Props) {
   // Outer slot (incl. pink + white border ring). Same diameter as before.
   const slotOuterRadius = (size * 0.28) / 2;
   // Visible avatar — smaller, so face sits comfortably inside the borders.
-  const avatarVisibleRadius = (size * 0.20) / 2;
+  const avatarVisibleRadius = (size * 0.2) / 2;
   const avatarBorderWidth = 5;
 
   const cx = size / 2;
@@ -42,13 +42,13 @@ export function QrCode({ slot, onMove }: Props) {
     <g
       transform={transform}
       {...drag.handlers}
-      style={{ cursor: drag.isDragging ? 'grabbing' : 'grab', touchAction: 'none' }}
+      style={{ cursor: drag.isDragging ? "grabbing" : "grab", touchAction: "none" }}
     >
       {/* Nested <svg> with x/y offset of -size/2 so the QR is centered on
           (0,0) before the outer transform applies. */}
       <svg x={-size / 2} y={-size / 2} width={size} height={size} overflow="visible">
         <QRCodeSVG
-          value={slot.url || ' '}
+          value={slot.url || " "}
           size={size}
           level="H"
           marginSize={2}

@@ -53,6 +53,7 @@ export function TranscriptOverlay({ videoId, currentTime, edits, onSeek }: Props
   }, [words, currentTime]);
 
   // Auto-scroll to keep the current word visible.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentWordIndex is the trigger — the ref moves to a new word when it changes.
   useEffect(() => {
     if (currentWordRef.current) {
       currentWordRef.current.scrollIntoView({
@@ -74,6 +75,7 @@ export function TranscriptOverlay({ videoId, currentTime, edits, onSeek }: Props
 
           return (
             <span
+              // biome-ignore lint/suspicious/noArrayIndexKey: transcript words never reorder; index is stable.
               key={i}
               ref={isCurrent ? currentWordRef : undefined}
               className={[

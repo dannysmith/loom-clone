@@ -1,4 +1,4 @@
-import { CANVAS, COLORS } from './constants';
+import { CANVAS, COLORS } from "./constants";
 
 export function Background() {
   return (

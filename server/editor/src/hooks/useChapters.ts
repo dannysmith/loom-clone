@@ -105,9 +105,7 @@ export function useChapters(videoId: string) {
 
   const updateTime = useCallback(
     (id: string, t: number) => {
-      const next = chapters
-        .map((c) => (c.id === id ? { ...c, t } : c))
-        .sort((a, b) => a.t - b.t);
+      const next = chapters.map((c) => (c.id === id ? { ...c, t } : c)).sort((a, b) => a.t - b.t);
       setChapters(next);
       flushSave(next);
     },

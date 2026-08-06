@@ -1,4 +1,4 @@
-import { BLOB1_PATH, BLOB2_PATH, BLOB3_PATH, COLORS } from './constants';
+import { BLOB1_PATH, BLOB2_PATH, BLOB3_PATH, COLORS } from "./constants";
 
 export function Blobs() {
   return (

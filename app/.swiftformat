@@ -3,6 +3,8 @@
 --wraparguments before-first
 --wrapcollections before-first
 --maxwidth 140
---disable redundantSelf
+# wrapIf*Bodies arrived enabled-by-default in SwiftFormat 0.62; the codebase
+# deliberately uses single-line `if x { return }` bodies throughout.
+--disable redundantSelf,wrapIfStatementBodies,wrapIfExpressionBodies
 --modifierorder nonisolated,override,private,fileprivate,internal,public,open,final,static,class,lazy,weak,required,optional,convenience,dynamic
 --exclude DerivedData,LoomClone.xcodeproj

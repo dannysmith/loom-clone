@@ -1,8 +1,9 @@
 # The CI test job runs in this same image so the deploy gate tests the exact
 # toolchain production runs — a bump here must be mirrored in
-# .github/workflows/deploy.yml. Pinned versions:
+# .github/workflows/deploy.yml. Digest-pinned so the tag can't drift
+# underneath us. Pinned versions:
 #   bun 1.3.14, Debian 13 (trixie), apt ffmpeg 7.1.x
-FROM oven/bun:1.3.14 AS base
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS base
 
 # ffmpeg comes from Debian stable, so it only moves within 7.1.x point releases
 # while the base image stays pinned. The audio chain (arnndn/afftdn/loudnorm)

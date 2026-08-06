@@ -261,6 +261,19 @@ async function generateMultiSegmentFixture(dir: string): Promise<string> {
   ]);
   if (wavExit !== 0) throw new Error(`speech transcode failed: ${wavErr}`);
 
+  // Sandboxed environments (e.g. an AI agent's bash sandbox) let `say` exit 0
+  // while writing an empty file — the speech-synthesis service is blocked.
+  // Without this guard that surfaces much later as a cryptic loudnorm
+  // "measured_I=-inf" failure in pass 2.
+  // An empty file makes volumedetect itself fail — treat that as silence too.
+  const speechVolume = await meanVolume(wavPath, 0, 5).catch(() => Number.NEGATIVE_INFINITY);
+  if (speechVolume < -60) {
+    throw new Error(
+      `say produced a silent file (mean ${speechVolume} dB) — speech synthesis is ` +
+        "probably blocked by a sandbox; run these tests unsandboxed",
+    );
+  }
+
   // 3. Build fixture: 3× speech split (one quiet, two loud) + 2× noise pads.
   const filterComplex = [
     "[1:a]asplit=3[s1][s2][s3]",

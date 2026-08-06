@@ -104,6 +104,7 @@ Preferences:
 - Prefer real filesystem + real `:memory:` SQLite over mocks (tests are fast and catch integration bugs).
 - Routes: integration-style tests using `app.request(path, init)`.
 - ffmpeg-dependent tests: gate on `Bun.which("ffmpeg") !== null` via `test.skipIf`.
+- The "processAudio (chain effects)" tests synthesise speech with macOS `say`, which silently produces an EMPTY file inside a bash sandbox (blocked speech-synthesis service) — the tests then fail with a cryptic loudnorm error. If they fail for you as an agent, run them unsandboxed before suspecting the audio chain.
 - Test-only helpers go on the module they test, prefixed with `_` (e.g. `_setDbForTests`, `_inFlightPromise`).
 
 ## Style

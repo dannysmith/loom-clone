@@ -35,8 +35,13 @@ jobs:
             exit 1
           }
 
+      # The editor and player sub-packages need their own installs: check:all
+      # typechecks both, and the build/verify steps below compile them.
       - name: Install dependencies
-        run: cd server && bun install --frozen-lockfile
+        run: |
+          cd server && bun install --frozen-lockfile
+          cd editor && bun install --frozen-lockfile
+          cd ../player && bun install --frozen-lockfile
 
       # Same command developers run locally (via `bun run check:all` at the
       # repo root, which adds the macOS app checks CI can't run).
@@ -44,6 +49,25 @@ jobs:
         run: |
           set -o pipefail
           cd server && bun run check:all 2>&1 | tee /tmp/checks.txt
+
+      # The editor is built by the production Dockerfile, so a broken build
+      # would otherwise first surface as a failed docker build on the VPS.
+      # Build it here so failures land in GitHub instead.
+      - name: Build editor
+        run: cd server && bun run editor:build
+
+      # public/player/ is a committed build artefact (see server/CLAUDE.md).
+      # Rebuild it and fail if the output differs from what's committed, so
+      # player/src and the committed bundle can't silently diverge.
+      - name: Verify committed player bundle matches source
+        run: |
+          cd server && bun run player:build
+          if [ -n "$(git status --porcelain -- public/player)" ]; then
+            echo "::error::public/player/ is out of sync with player/ source — run 'bun run player:build' in server/ and commit the result"
+            git status --porcelain -- public/player
+            git diff -- public/player | head -100
+            exit 1
+          fi
 
       # The media-pipeline tests skipIf ffmpeg is missing; a skip here means
       # the deploy gate isn't testing the code that guards footage.

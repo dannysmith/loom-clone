@@ -77,16 +77,14 @@ Output lands in `server/public/editor/` (gitignored). The Hono route reads the V
 
 **Development (two terminals):**
 ```sh
-# Terminal 1: Hono server
-cd server && bun run dev
+# Terminal 1: Hono server, with the editor in dev mode
+cd server && EDITOR_DEV=1 bun run dev
 
 # Terminal 2: Vite dev server with HMR
-cd server/editor && bun run editor:dev
+cd server && bun run editor:dev
 ```
 
-Dev-mode detection is a file check, not a flag: if `public/editor/.vite/manifest.json` exists (from any previous local `bun run build`), the server serves that stale build and HMR never engages. Delete `server/public/editor/` to get HMR back.
-
-The Hono route detects dev mode (no manifest file on disk) and loads scripts from `localhost:5173` for hot module replacement.
+Dev mode is an explicit opt-in: when `EDITOR_DEV=1` is set, the Hono route emits script tags pointing at the Vite dev server (`localhost:5173`) for hot module replacement — even if a local build exists. Without the flag, the route always serves the built assets from the Vite manifest, and a missing manifest is a hard error (run `bun run editor:build`, or set the flag). This replaced an older file-presence check that silently served dev script tags in production when the build was missing, and disabled HMR whenever a stale local build existed.
 
 ## How the Hono route serves the editor
 
@@ -96,8 +94,8 @@ The Hono route detects dev mode (no manifest file on disk) and loads scripts fro
 2. Guards against non-complete or trashed videos
 3. Returns an HTML shell with:
    - The video's ID, slug, duration, title, and height as `data-*` attributes on `#editor-root`
-   - In production: `<script>` and `<link>` tags resolved from the Vite manifest
-   - In dev: `<script>` tags pointing at the Vite dev server
+   - Normally: `<script>` and `<link>` tags resolved from the Vite manifest (missing manifest = hard error)
+   - With `EDITOR_DEV=1`: `<script>` tags pointing at the Vite dev server
 
 The React app reads the data attributes on mount and never needs a separate API call for video metadata.
 

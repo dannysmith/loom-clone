@@ -42,6 +42,13 @@
   },
   "overrides": [
     {
+      // The editor is a single-user internal tool driven by mouse + dedicated
+      // keyboard shortcuts (useKeyboard.ts). These four a11y rules encode
+      // requirements it deliberately doesn't have: captions for the preview
+      // <video>, titles on decorative cover SVGs, and per-element keyboard
+      // handlers on canvas-like drag surfaces (waveform, transcript scrubber).
+      // Everything else — including useButtonType and the rest of a11y —
+      // stays on.
       "includes": ["editor/src/**"],
       "linter": {
         "rules": {

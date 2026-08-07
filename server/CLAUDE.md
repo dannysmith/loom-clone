@@ -9,7 +9,7 @@ All scripts run from `server/`:
 - `bun run dev` — hot-reload dev server on `http://localhost:3000`. Do NOT start this unless explicitly asked.
 - `bun test` — run the full test suite (Bun's built-in runner, bun:test APIs)
 - `bun run test:watch` — re-run tests on file changes
-- `bun run check` — Biome lint + format check (read-only; covers `src/`, `scripts/`, `editor/src/`, `player/src/` per `biome.json`)
+- `bun run check` — Biome lint + format check (read-only; covers `src/`, `scripts/`, `editor/src/`, `player/src/` per `biome.jsonc`)
 - `bun run check:fix` — auto-fix lint + format issues
 - `bun run check:all` — lint + format check, typecheck (server + editor + player), and full test suite in one command (what CI runs)
 - `bun run lint` / `bun run lint:fix` — lint only

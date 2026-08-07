@@ -92,7 +92,7 @@ Direct commands (for reference or when you need different flags):
 │   └── project.yml                       # XcodeGen source of truth
 ├── server/                               # Hono + Bun server (see server/CLAUDE.md)
 │   ├── CLAUDE.md                         #   scripts, layout, testing conventions
-│   ├── biome.json                        #   lint + format config
+│   ├── biome.jsonc                       #   lint + format config
 │   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
 │   │   ├── player/                       #     committed Vidstack player bundle (built from server/player/)
 │   │   └── styles/                       #     vanilla CSS with @layer + custom properties

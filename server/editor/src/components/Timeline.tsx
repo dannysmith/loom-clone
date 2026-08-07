@@ -128,15 +128,12 @@ export function Timeline({
 
   // --- Chapter drag handlers ---
 
-  const handleChapterPointerDown = useCallback(
-    (e: React.PointerEvent, chapter: Chapter) => {
-      e.stopPropagation();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      dragStartRef.current = { clientX: e.clientX, originalT: chapter.t };
-      setDragState({ id: chapter.id, t: chapter.t, moved: false });
-    },
-    [],
-  );
+  const handleChapterPointerDown = useCallback((e: React.PointerEvent, chapter: Chapter) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartRef.current = { clientX: e.clientX, originalT: chapter.t };
+    setDragState({ id: chapter.id, t: chapter.t, moved: false });
+  }, []);
 
   const handleChapterPointerMove = useCallback(
     (e: React.PointerEvent) => {
@@ -211,6 +208,7 @@ export function Timeline({
       <div className="editor-timeline-strip">
         {cues.map((cue, i) => (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: storyboard cues never reorder; index is stable.
             key={i}
             className="editor-timeline-thumb"
             style={{

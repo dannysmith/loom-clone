@@ -170,8 +170,8 @@ export function ChaptersPanel({
 
       {chapters.length === 0 ? (
         <p className="editor-chapters-empty">
-          No chapters yet. Drop one with the bookmark button while recording, or add one here at
-          the current playhead.
+          No chapters yet. Drop one with the bookmark button while recording, or add one here at the
+          current playhead.
         </p>
       ) : (
         <ul className="editor-chapters-list">

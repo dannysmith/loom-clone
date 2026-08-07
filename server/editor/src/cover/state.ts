@@ -58,7 +58,7 @@ export type VideoInputs = {
 };
 
 // Placeholder shown when the video has no title set in the DB.
-export const TITLE_PLACEHOLDER = 'Untitled video';
+export const TITLE_PLACEHOLDER = "Untitled video";
 
 // Base widths for each kind at scale=1.0 (in viewBox px).
 export const MEDIA_BASE_WIDTH = {
@@ -69,14 +69,14 @@ export const MEDIA_BASE_WIDTH = {
 export const QR_BASE_SIZE = 220;
 
 // Defaults applied when a slot is reset.
-export const MEDIA_DEFAULTS: Omit<MediaSlot, 'enabled' | 'imageSrc' | 'framed' | 'videoOverlay'> = {
+export const MEDIA_DEFAULTS: Omit<MediaSlot, "enabled" | "imageSrc" | "framed" | "videoOverlay"> = {
   x: 1280,
   y: 435,
   scale: 1.0,
   rotation: 0,
 };
 
-export const QR_DEFAULTS: Omit<QrSlot, 'enabled' | 'url' | 'includeAvatar'> = {
+export const QR_DEFAULTS: Omit<QrSlot, "enabled" | "url" | "includeAvatar"> = {
   x: 1380,
   y: 620,
   scale: 1.0,
@@ -93,7 +93,7 @@ export function urlDefaultFor(inputs: VideoInputs): string {
   return inputs.publicUrl;
 }
 
-export function qrDefaultsFor(inputs: VideoInputs): Pick<QrSlot, 'url' | 'includeAvatar'> {
+export function qrDefaultsFor(inputs: VideoInputs): Pick<QrSlot, "url" | "includeAvatar"> {
   return {
     url: inputs.publicUrl,
     includeAvatar: true,

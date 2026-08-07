@@ -1,0 +1,73 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
+  "files": {
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "scripts/**/*.ts",
+      "editor/src/**/*.ts",
+      "editor/src/**/*.tsx",
+      "player/src/**/*.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "warn",
+        "noUnusedImports": "warn"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // The editor is a single-user internal tool driven by mouse + dedicated
+      // keyboard shortcuts (useKeyboard.ts). These four a11y rules encode
+      // requirements it deliberately doesn't have: captions for the preview
+      // <video>, titles on decorative cover SVGs, and per-element keyboard
+      // handlers on canvas-like drag surfaces (waveform, transcript scrubber).
+      // Everything else — including useButtonType and the rest of a11y —
+      // stays on.
+      "includes": ["editor/src/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useMediaCaption": "off",
+            "useKeyWithClickEvents": "off",
+            "noStaticElementInteractions": "off",
+            "noSvgWithoutTitle": "off"
+          }
+        }
+      }
+    }
+  ],
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

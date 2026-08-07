@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "hls.js": "1.6.16",

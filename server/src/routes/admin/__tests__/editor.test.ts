@@ -13,12 +13,21 @@ import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils
 const POST = { method: "POST", headers: { Origin: "http://localhost" } } as const;
 
 let env: TestEnv;
+const originalEditorDev = Bun.env.EDITOR_DEV;
 
 beforeEach(async () => {
   env = await setupTestEnv();
+  // The editor page needs either a built manifest or dev mode; tests must not
+  // depend on a local `editor:build` having run.
+  Bun.env.EDITOR_DEV = "1";
 });
 
 afterEach(async () => {
+  if (originalEditorDev === undefined) {
+    delete Bun.env.EDITOR_DEV;
+  } else {
+    Bun.env.EDITOR_DEV = originalEditorDev;
+  }
   await teardownTestEnv(env);
 });
 

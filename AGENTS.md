@@ -50,7 +50,7 @@ Three components exist today:
 
 ## Building & Running
 
-`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck, tests — same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
+`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck — including the `editor/` and `player/` sub-packages — and tests, same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
 
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 
@@ -92,7 +92,7 @@ Direct commands (for reference or when you need different flags):
 │   └── project.yml                       # XcodeGen source of truth
 ├── server/                               # Hono + Bun server (see server/CLAUDE.md)
 │   ├── CLAUDE.md                         #   scripts, layout, testing conventions
-│   ├── biome.json                        #   lint + format config
+│   ├── biome.jsonc                       #   lint + format config
 │   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
 │   │   ├── player/                       #     committed Vidstack player bundle (built from server/player/)
 │   │   └── styles/                       #     vanilla CSS with @layer + custom properties

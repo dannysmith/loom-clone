@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
-import { Editor } from './Editor';
-import { Preview } from './preview/Preview';
-import { buildInitialState, type CoverState, type VideoInputs } from './state';
+import { useRef, useState } from "react";
+import { Editor } from "./Editor";
+import { Preview } from "./preview/Preview";
+import { buildInitialState, type CoverState, type VideoInputs } from "./state";
 
 type Props = {
   inputs: VideoInputs;
@@ -17,9 +17,7 @@ export function App({ inputs }: Props) {
         <a className="cover-back-link" href={`/admin/videos/${inputs.videoId}`}>
           &larr; Back
         </a>
-        <span className="cover-page-title">
-          {inputs.title.trim() || inputs.slug}
-        </span>
+        <span className="cover-page-title">{inputs.title.trim() || inputs.slug}</span>
       </header>
       <div className="app">
         <div className="preview-wrap">

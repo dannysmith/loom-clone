@@ -24,8 +24,9 @@ import {
   videoTags,
 } from "../db/schema";
 import { purgeTag } from "./cdn";
+import { ConflictError, ValidationError } from "./errors";
 import { logEvent } from "./events";
-import { ConflictError, checkSlugAvailable, ValidationError, validateSlugFormat } from "./store";
+import { checkSlugAvailable, validateSlugFormat } from "./store";
 
 function validateColor(color: string): asserts color is TagColor {
   if (!TAG_COLORS.includes(color as TagColor)) {
@@ -54,7 +55,7 @@ function hasPublicSurface(tag: Pick<Tag, "visibility" | "slug">): boolean {
 // upstream. Throws ConflictError if the name already exists.
 export async function createTag(name: string, color?: TagColor): Promise<Tag> {
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Tag name cannot be empty");
+  if (!trimmed) throw new ValidationError("Tag name cannot be empty");
   if (color !== undefined) validateColor(color);
 
   // Use onConflictDoNothing to avoid the TOCTOU race of check-then-insert.
@@ -125,7 +126,7 @@ export async function updateTag(id: number, patch: TagPatch): Promise<Tag> {
   // Name
   if (patch.name !== undefined) {
     const trimmed = patch.name.trim();
-    if (!trimmed) throw new Error("Tag name cannot be empty");
+    if (!trimmed) throw new ValidationError("Tag name cannot be empty");
     if (trimmed !== existing.name) changes.name = trimmed;
   }
 

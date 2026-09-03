@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
+import { DATA_DIR } from "../../../lib/paths";
 import { searchVideoIds } from "../../../lib/search";
-import { DATA_DIR, getTranscript } from "../../../lib/store";
+import { getTranscript } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../videos";
 

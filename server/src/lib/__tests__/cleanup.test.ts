@@ -6,8 +6,9 @@ import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { cleanupStaleFiles, markStalledRecordingsIncomplete } from "../cleanup";
+import { DATA_DIR } from "../paths";
 import { markStepFailed, markStepReady } from "../processing/steps-store";
-import { addSegment, createVideo, DATA_DIR, getVideo } from "../store";
+import { addSegment, createVideo, getVideo } from "../store";
 
 let env: TestEnv;
 

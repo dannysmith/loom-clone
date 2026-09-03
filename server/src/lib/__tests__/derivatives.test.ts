@@ -6,12 +6,13 @@ import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { _variantFfmpegArgs, generateVariant } from "../derivatives";
+import { DATA_DIR } from "../paths";
 import {
   _inFlightPromise,
   scheduleDerivatives,
   scheduleUploadDerivatives,
 } from "../processing/pipeline";
-import { createVideo, DATA_DIR } from "../store";
+import { createVideo } from "../store";
 
 // Every ffmpeg-gated test in this file also shells out to ffprobe (directly or
 // via probeMetadata/extractMetadata), so require both tools to be present.

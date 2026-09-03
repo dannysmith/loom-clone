@@ -5,7 +5,8 @@ import { join } from "path";
 import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
-import { createVideo, DATA_DIR } from "../../store";
+import { DATA_DIR } from "../../paths";
+import { createVideo } from "../../store";
 import { inferStepsFromDisk } from "../backfill";
 import { getStepStates } from "../steps-store";
 

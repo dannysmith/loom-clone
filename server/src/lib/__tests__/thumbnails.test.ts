@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { createVideo, DATA_DIR } from "../store";
+import { DATA_DIR } from "../paths";
+import { createVideo } from "../store";
 import {
   buildCandidateTimestamps,
   candidatesDir,

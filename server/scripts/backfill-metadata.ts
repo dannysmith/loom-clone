@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { join } from "path";
+import { initDb } from "../src/db/client";
+import { extractMetadata } from "../src/lib/derivatives";
 /**
  * Backfill metadata for all existing videos. Runs the metadata extraction
  * step (ffprobe + recording.json) and thumbnail candidate generation against
@@ -7,10 +10,8 @@
  * Usage:
  *   bun run videos:backfill-metadata
  */
-import { join } from "path";
-import { initDb } from "../src/db/client";
-import { extractMetadata } from "../src/lib/derivatives";
-import { DATA_DIR, listVideos } from "../src/lib/store";
+import { DATA_DIR } from "../src/lib/paths";
+import { listVideos } from "../src/lib/store";
 import { extractAndPromoteThumbnails } from "../src/lib/thumbnails";
 
 async function main(): Promise<number> {

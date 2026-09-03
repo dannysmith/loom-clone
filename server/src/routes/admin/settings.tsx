@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { createAdminToken, listAdminTokens, revokeAdminToken } from "../../lib/admin-tokens";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
-import { ConflictError, ValidationError } from "../../lib/store";
+import { ConflictError, ValidationError } from "../../lib/errors";
 import { createTag, deleteTag, getTag, listTags, updateTag } from "../../lib/tags";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
 import { ApiKeysPane } from "../../views/admin/partials/ApiKeysPane";

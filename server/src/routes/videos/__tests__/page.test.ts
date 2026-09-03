@@ -5,8 +5,9 @@ import { join } from "path";
 import { getDb } from "../../../db/client";
 import type { ProcessingStepKind } from "../../../db/schema";
 import { videos as videosTable } from "../../../db/schema";
+import { DATA_DIR } from "../../../lib/paths";
 import { markStepReady } from "../../../lib/processing/steps-store";
-import { createVideo, DATA_DIR, updateSlug, updateVideo, type Video } from "../../../lib/store";
+import { createVideo, updateSlug, updateVideo, type Video } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../index";
 

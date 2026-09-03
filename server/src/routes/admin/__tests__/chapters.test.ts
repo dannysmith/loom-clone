@@ -6,7 +6,8 @@ import { createApp } from "../../../app";
 import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { readChapters, writeChapters } from "../../../lib/chapters";
-import { createVideo, DATA_DIR } from "../../../lib/store";
+import { DATA_DIR } from "../../../lib/paths";
+import { createVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 
 async function setDuration(videoId: string, seconds: number) {

@@ -6,8 +6,9 @@ import { createApp } from "../../../app";
 import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { listEvents } from "../../../lib/events";
+import { DATA_DIR } from "../../../lib/paths";
 import { markStepReady } from "../../../lib/processing/steps-store";
-import { completeVideo, createVideo, DATA_DIR } from "../../../lib/store";
+import { completeVideo, createVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 
 // Admin mutations are CSRF-protected; a matching Origin satisfies the check.

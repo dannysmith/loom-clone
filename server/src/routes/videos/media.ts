@@ -8,8 +8,9 @@ import {
   viewerDurationFromEdits,
 } from "../../lib/chapters";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
+import { DATA_DIR } from "../../lib/paths";
 import { srtToVtt } from "../../lib/srt";
-import { DATA_DIR, resolveSlug } from "../../lib/store";
+import { resolveSlug } from "../../lib/store";
 import { activeRawFilename } from "../../lib/url";
 
 // Loose-typed EDL shape — we only need the edits array. Avoids pulling an

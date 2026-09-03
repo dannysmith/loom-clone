@@ -2,6 +2,7 @@ import { join } from "path";
 import type { ProcessingStepKind } from "../../db/schema";
 import { chaptersExist } from "../../lib/chapters";
 import { VARIANTS } from "../../lib/derivatives";
+import { DATA_DIR } from "../../lib/paths";
 import {
   applicabilityContext,
   isServable,
@@ -9,7 +10,7 @@ import {
   stepByKind,
 } from "../../lib/processing/registry";
 import { getStepStates } from "../../lib/processing/steps-store";
-import { DATA_DIR, resolveSlug, type Video } from "../../lib/store";
+import { resolveSlug, type Video } from "../../lib/store";
 import { urlsForVideo, type VideoUrls } from "../../lib/url";
 
 // VARIANTS (from lib/derivatives) is highest-first, which is the order the

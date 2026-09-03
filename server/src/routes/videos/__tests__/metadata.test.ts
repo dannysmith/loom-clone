@@ -4,9 +4,9 @@ import { mkdir } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../../../db/client";
 import { videos as videosTable } from "../../../db/schema";
+import { DATA_DIR } from "../../../lib/paths";
 import {
   createVideo,
-  DATA_DIR,
   trashVideo,
   updateSlug,
   updateVideo,

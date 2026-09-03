@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
-import { DATA_DIR } from "../../../lib/store";
+import { DATA_DIR } from "../../../lib/paths";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos from "../videos";
 

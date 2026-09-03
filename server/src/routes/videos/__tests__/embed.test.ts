@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
-import { createVideo, DATA_DIR, trashVideo, updateSlug } from "../../../lib/store";
+import { DATA_DIR } from "../../../lib/paths";
+import { createVideo, trashVideo, updateSlug } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import embed from "../embed";
 

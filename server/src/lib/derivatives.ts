@@ -5,8 +5,8 @@ import { getDb } from "../db/client";
 import { type ProcessingStepKind, videos } from "../db/schema";
 import { spawnFfmpeg } from "./ffmpeg";
 import { hasAudioStream, probeJson } from "./ffprobe";
+import { DATA_DIR, derivativesDir } from "./paths";
 import { isProbablyPlayable } from "./processing/playable";
-import { DATA_DIR } from "./store";
 import type { Silence } from "./suggested-edits";
 
 // Resolved absolutely so it survives test chdir() calls.
@@ -18,10 +18,6 @@ const ARNNDN_MODEL = resolve(import.meta.dir, "../../assets/audio-models/cb.rnnn
 // half-written output. Orchestration (ordering, step tracking, status
 // reconciliation) lives in ./processing/pipeline.ts; this module only knows
 // how to produce individual files.
-
-export function derivativesDir(videoId: string): string {
-  return join(DATA_DIR, videoId, "derivatives");
-}
 
 // Cache the ffmpeg PATH lookup — no need to scan on every invocation.
 let ffmpegPath: string | null | undefined; // undefined = not checked yet

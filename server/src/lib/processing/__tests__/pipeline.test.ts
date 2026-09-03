@@ -3,7 +3,8 @@ import { mkdir } from "fs/promises";
 import { join } from "path";
 import { resolveForViewer } from "../../../routes/videos/resolve";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
-import { createVideo, DATA_DIR, getVideo, markFootageComplete } from "../../store";
+import { DATA_DIR } from "../../paths";
+import { createVideo, getVideo, markFootageComplete } from "../../store";
 import {
   _drainInFlight,
   _inFlightPromise,

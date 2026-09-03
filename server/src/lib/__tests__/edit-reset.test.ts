@@ -6,9 +6,10 @@ import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { resetAllEdits } from "../edit-reset";
+import { DATA_DIR } from "../paths";
 import { _drainInFlight, scheduleEdit } from "../processing/pipeline";
 import { markStepReady } from "../processing/steps-store";
-import { createVideo, DATA_DIR, getTranscript, getVideo } from "../store";
+import { createVideo, getTranscript, getVideo } from "../store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
 

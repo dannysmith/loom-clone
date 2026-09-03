@@ -493,7 +493,10 @@ extension RecordingCoordinator {
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
-                guard let self, self.state == .recording else { continue }
+                // A deallocated coordinator has no one left to cancel the
+                // task, so end the loop rather than sleeping at 10 Hz forever.
+                guard let self else { break }
+                guard self.state == .recording else { continue }
                 let elapsed = Date().timeIntervalSince(self.recordingStartDate ?? Date())
                 self.elapsedSeconds = self.accumulatedBeforePause + elapsed
             }

@@ -52,8 +52,6 @@ enum AppEnvironment {
     static let recentlyHiddenBundleIDsKey = "recentlyHiddenBundleIDs"
     static let hideDesktopIconsKey = "hideDesktopIcons"
 
-    // MARK: - Server URL
-
     // MARK: - App Exclusion
 
     /// Bundle IDs of recently-hidden apps, most-recent first. Capped at 5.

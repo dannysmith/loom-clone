@@ -40,6 +40,11 @@ extension RecordingActor {
         case .stallTimeout:
             kind = "stallTimeout"
             detail = "waitUntilCompleted exceeded 2s"
+        case .metalUnavailable:
+            // Rebuild will fail too (it asks for the same device), so this
+            // escalates to a terminal stop on the next line but one.
+            kind = "metalUnavailable"
+            detail = "MTLCreateSystemDefaultDevice returned nil"
         }
         timeline.recordCompositionFailure(kind: kind, t: t, detail: detail)
         Log.recording.log("Composition failure: \(kind) — \(detail). Attempting rebuild.")

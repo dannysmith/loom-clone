@@ -173,12 +173,12 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// actually expose?"
     private func logAdvertisedFormats(for device: AVCaptureDevice) {
         lastAdvertisedFormats = Self.snapshotAdvertisedFormats(for: device)
-        print("[camera-diag] \(device.localizedName) advertises \(lastAdvertisedFormats.count) format(s):")
+        Log.camera.log("\(device.localizedName) advertises \(lastAdvertisedFormats.count) format(s):")
         for (i, fmt) in lastAdvertisedFormats.enumerated() {
             let ranges = fmt.rateRanges
                 .map { String(format: "%.2f-%.2ffps", $0.minFrameRate, $0.maxFrameRate) }
                 .joined(separator: ", ")
-            print("[camera-diag]   [\(i)] \(fmt.width)x\(fmt.height) pf=\(fmt.pixelFormat) ranges=[\(ranges)]")
+            Log.camera.log("  [\(i)] \(fmt.width)x\(fmt.height) pf=\(fmt.pixelFormat) ranges=[\(ranges)]")
         }
     }
 

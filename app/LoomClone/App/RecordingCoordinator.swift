@@ -122,10 +122,9 @@ final class RecordingCoordinator {
     /// away), pick the first available mode. If none are available, leave
     /// `mode` alone — the record button is disabled separately.
     private func demoteModeIfUnavailable() {
-        let modes = availableModes
-        guard !modes.isEmpty else { return }
-        if !modes.contains(mode) {
-            mode = modes.first!
+        guard let first = availableModes.first else { return }
+        if !availableModes.contains(mode) {
+            mode = first
         }
     }
 
@@ -450,8 +449,8 @@ final class RecordingCoordinator {
         removeDeviceHotPlugObservers()
         let nc = NotificationCenter.default
         let names: [NSNotification.Name] = [
-            .AVCaptureDeviceWasConnected,
-            .AVCaptureDeviceWasDisconnected,
+            AVCaptureDevice.wasConnectedNotification,
+            AVCaptureDevice.wasDisconnectedNotification,
             NSApplication.didChangeScreenParametersNotification,
         ]
         deviceHotPlugObservers = names.map { name in

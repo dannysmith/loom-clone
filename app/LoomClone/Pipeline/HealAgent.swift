@@ -291,9 +291,10 @@ actor HealAgent {
         )
     }
 
+    /// Only the fields healing acts on. `/complete` returns more (slug,
+    /// title, visibility) — that's the stop flow's business, not this one's.
     private struct CompleteResponse: Decodable {
         let url: String
-        let slug: String
         let missing: [String]?
     }
 }

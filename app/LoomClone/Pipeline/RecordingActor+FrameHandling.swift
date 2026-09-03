@@ -207,7 +207,7 @@ extension RecordingActor {
     struct CompositeDecision {
         var output: CVPixelBuffer?
         var sourcePTS: CMTime
-        var branch: String // "pop" | "repeat" | "noSource" | "n/a"
+        var branch: CompositeBranch
         var queueDepthBefore: Int
         var compositeS: Double
         var compositionFailed: Bool
@@ -219,7 +219,7 @@ extension RecordingActor {
     struct ModeCompositeStep {
         let result: Result<CVPixelBuffer, CompositionError>?
         let sourcePTS: CMTime
-        let branch: String
+        let branch: CompositeBranch
         let compositeS: Double
     }
 
@@ -229,7 +229,7 @@ extension RecordingActor {
     ///
     /// Source-PTS freshness is enforced in the per-mode helpers: a tick whose
     /// source frame is not strictly newer than `lastEmittedSourcePTS` returns
-    /// with `branch = "skipStale"` and no composition is performed. This
+    /// with `branch = .skipStale` and no composition is performed. This
     /// replaces the encoder-level monotonicity rejection that previously
     /// fired on every static-screen tick and on every cameraOnly tick where
     /// the metronome over-ran the camera's delivery rate.
@@ -260,7 +260,7 @@ extension RecordingActor {
         )
 
         guard let result = step.result else {
-            if decision.branch == "n/a" { decision.branch = "noSource" }
+            if decision.branch == .notApplicable { decision.branch = .noSource }
             return decision
         }
         switch result {
@@ -279,10 +279,10 @@ extension RecordingActor {
 
     private func compositeScreenOnly() async -> ModeCompositeStep {
         guard let screen = latestScreenFrame else {
-            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: .noSource, compositeS: 0)
         }
         if isStaleSource(screen.capturePTS) {
-            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: "skipStale", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: .skipStale, compositeS: 0)
         }
         let startedAt = Date()
         let result = await composition.compositeFrame(
@@ -293,28 +293,28 @@ extension RecordingActor {
         return ModeCompositeStep(
             result: result,
             sourcePTS: screen.capturePTS,
-            branch: "n/a",
+            branch: .notApplicable,
             compositeS: -startedAt.timeIntervalSinceNow
         )
     }
 
     private func compositeScreenAndCamera() async -> ModeCompositeStep {
         guard let screen = latestScreenFrame else {
-            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: .noSource, compositeS: 0)
         }
         // Screen drives timing in screenAndCamera mode — it's the primary
         // content, camera is just a PiP overlay. Using screen PTS ensures
         // the output advances at the screen's delivery rate and lets a
         // static screen short-circuit through the stale-source check.
         if isStaleSource(screen.capturePTS) {
-            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: "skipStale", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: .skipStale, compositeS: 0)
         }
         let startedAt = Date()
         let result = await compositeScreenWithPiP(screen: screen)
         return ModeCompositeStep(
             result: result,
             sourcePTS: screen.capturePTS,
-            branch: "n/a",
+            branch: .notApplicable,
             compositeS: -startedAt.timeIntervalSinceNow
         )
     }
@@ -347,7 +347,7 @@ extension RecordingActor {
         // causing the encoder to reject every newly-arrived real frame).
         guard !cameraFrameQueue.isEmpty else {
             diagnostics.cameraOnlyNoSourceBranch += 1
-            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: "noSource", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: .noSource, compositeS: 0)
         }
         let popped = cameraFrameQueue.removeFirst()
         lastPoppedCameraFrame = popped
@@ -356,7 +356,7 @@ extension RecordingActor {
             // pause survive in the FIFO past the drain on a tight race) or
             // mode switch into cameraOnly (FIFO inherits stale frames from
             // screen-mode emits). Drop silently and wait for the next tick.
-            return ModeCompositeStep(result: nil, sourcePTS: popped.capturePTS, branch: "skipStale", compositeS: 0)
+            return ModeCompositeStep(result: nil, sourcePTS: popped.capturePTS, branch: .skipStale, compositeS: 0)
         }
         diagnostics.cameraOnlyPopBranch += 1
         MetronomeDiagnostics.bumpHistogram(
@@ -373,7 +373,7 @@ extension RecordingActor {
         return ModeCompositeStep(
             result: result,
             sourcePTS: popped.capturePTS,
-            branch: "pop",
+            branch: .pop,
             compositeS: -startedAt.timeIntervalSinceNow
         )
     }
@@ -401,7 +401,7 @@ extension RecordingActor {
         guard isRecording else {
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.notRecording,
+                action: .notRecording,
                 decision: nil,
                 ptsLogical: nil,
                 lastEmitLogical: nil
@@ -409,7 +409,7 @@ extension RecordingActor {
             return false
         }
         guard let start = recordingStartTime else {
-            recordTickRejection(iterIdx: iterIdx, action: MetronomeTickAction.noStart, decision: nil, ptsLogical: nil, lastEmitLogical: nil)
+            recordTickRejection(iterIdx: iterIdx, action: .noStart, decision: nil, ptsLogical: nil, lastEmitLogical: nil)
             return false
         }
 
@@ -426,7 +426,7 @@ extension RecordingActor {
         if decision.compositionFailed {
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.compositionFail,
+                action: .compositionFail,
                 decision: decision,
                 ptsLogical: nil,
                 lastEmitLogical: lastEmitLogical
@@ -466,7 +466,7 @@ extension RecordingActor {
             diagnostics.rejectSampleBuild += 1
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectSampleBuild,
+                action: .rejectSampleBuild,
                 decision: decision,
                 ptsLogical: elapsedLogical.seconds,
                 lastEmitLogical: lastEmitLogical
@@ -508,7 +508,7 @@ extension RecordingActor {
             diagnostics.rejectInvalidPTS += 1
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectInvalidPTS,
+                action: .rejectInvalidPTS,
                 decision: decision,
                 ptsLogical: nil,
                 lastEmitLogical: lastEmitLogical
@@ -524,7 +524,7 @@ extension RecordingActor {
             diagnostics.rejectNegElapsed += 1
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectNegElapsed,
+                action: .rejectNegElapsed,
                 decision: decision,
                 ptsLogical: logical.seconds,
                 lastEmitLogical: lastEmitLogical
@@ -590,7 +590,7 @@ extension RecordingActor {
         // screen / metronome over-ran camera" (skipStale, expected in
         // normal operation) from "no source ever arrived" (noSource,
         // real problem).
-        if decision.branch == "skipStale" {
+        if decision.branch == .skipStale {
             // Phase 3: in a long static run, emit a synthetic-PTS repeat
             // of the last cached source so AVAssetWriter's segment cutter
             // doesn't see >4s of dead air.
@@ -604,7 +604,7 @@ extension RecordingActor {
             diagnostics.skipsStale += 1
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.skipStale,
+                action: .skipStale,
                 decision: decision,
                 ptsLogical: nil,
                 lastEmitLogical: lastEmitLogical
@@ -613,7 +613,7 @@ extension RecordingActor {
             diagnostics.noSourceTicks += 1
             recordTickRejection(
                 iterIdx: iterIdx,
-                action: MetronomeTickAction.noSource,
+                action: .noSource,
                 decision: decision,
                 ptsLogical: nil,
                 lastEmitLogical: lastEmitLogical
@@ -649,19 +649,19 @@ extension RecordingActor {
         if diagnostics.rejectMonotonicity <= Self.monoRejectEventCap {
             timeline.recordMonotonicityRejected(
                 deltaMs: deltaMs,
-                branch: decision.branch,
+                branch: decision.branch.rawValue,
                 t: logicalElapsedSeconds()
             )
         } else if diagnostics.rejectMonotonicity == Self.monoRejectEventCap + 1 {
             timeline.recordMonotonicityRejectedSuppressed(
                 cap: Self.monoRejectEventCap,
-                branch: decision.branch,
+                branch: decision.branch.rawValue,
                 t: logicalElapsedSeconds()
             )
         }
         recordTickRejection(
             iterIdx: iterIdx,
-            action: MetronomeTickAction.rejectMonotonicity,
+            action: .rejectMonotonicity,
             decision: decision,
             ptsLogical: elapsedLogical.seconds,
             lastEmitLogical: lastEmitLogical
@@ -774,13 +774,13 @@ extension RecordingActor {
             emittedTickIdx: metronomeTickIdx,
             hostT: host,
             queueDepthBefore: cameraFrameQueue.count,
-            cameraBranch: "keepalive",
+            cameraBranch: CompositeBranch.keepalive.rawValue,
             sourcePTS: nil,
             elapsedLogical: elapsedLogical.seconds,
             emitPTS: elapsedLogical.seconds,
             lastEmitPTS: lastEmitLogical,
             compositeS: compositeS,
-            action: MetronomeTickAction.keepalive,
+            action: MetronomeTickAction.keepalive.rawValue,
             driftS: 0,
             sleepS: 0
         )

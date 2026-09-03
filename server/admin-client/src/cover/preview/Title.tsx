@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FONTS } from "./constants";
 
 type Props = {
   text: string;
@@ -88,7 +89,7 @@ export function Title({ text, mediaEnabled }: Props) {
           style={{
             width: "100%",
             color: "#ffffff",
-            fontFamily: "Inter, sans-serif",
+            fontFamily: FONTS.sans,
             fontSize: `${fontSize}px`,
             fontWeight: 800,
             lineHeight: `${fontSize * LINE_HEIGHT_RATIO}px`,

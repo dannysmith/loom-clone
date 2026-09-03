@@ -23,6 +23,9 @@ export const siteConfig = {
   name: "Danny's Videos",
   tagline: "Screen recordings and video messages by Danny Smith.",
   authorName: "Danny Smith",
+  // Bare handle, no leading "@" — surfaces render the sigil themselves (the
+  // cover generator styles it separately from the name).
+  authorHandle: "dannysmith",
   authorUrl: "https://danny.is",
   authorAvatar: "/static/images/avatar.jpg",
   defaultOgEmbedDimensions: { width: 1280, height: 720 },

@@ -1,9 +1,10 @@
 import { resolve } from "path";
 import { defineConfig } from "vite";
 
-// Builds the self-hosted Vidstack player bundle into public/player/, which
-// is COMMITTED to git (unlike public/editor/) so a deploy never depends on
-// the npm registry. See docs/tasks-todo/task-1-self-host-vidstack.md.
+// Builds the self-hosted Vidstack player bundle into public/player/, which is
+// COMMITTED to git (unlike public/admin-client/) so a deploy never depends on
+// the npm registry. Why this stays a package of its own, separate from the
+// admin client: docs/developer/admin-client.md.
 export default defineConfig({
   base: "/static/player/",
   build: {

@@ -3,6 +3,7 @@ import { mkdir } from "fs/promises";
 import { join } from "path";
 import { createApp } from "../../../app";
 import { DATA_DIR } from "../../../lib/paths";
+import { siteConfig } from "../../../lib/site-config";
 import { createVideo, trashVideo, updateVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 
@@ -10,18 +11,18 @@ const ffmpegAvailable = Bun.which("ffmpeg") !== null;
 const ORIGIN = "http://localhost";
 
 let env: TestEnv;
-const originalEditorDev = Bun.env.EDITOR_DEV;
+const originalDevFlag = Bun.env.ADMIN_CLIENT_DEV;
 beforeEach(async () => {
   env = await setupTestEnv();
-  // The cover page needs either a built editor manifest or dev mode; tests
-  // must not depend on a local `editor:build` having run.
-  Bun.env.EDITOR_DEV = "1";
+  // The cover page needs either a built admin-client manifest or dev mode;
+  // tests must not depend on a local `admin-client:build` having run.
+  Bun.env.ADMIN_CLIENT_DEV = "1";
 });
 afterEach(async () => {
-  if (originalEditorDev === undefined) {
-    delete Bun.env.EDITOR_DEV;
+  if (originalDevFlag === undefined) {
+    delete Bun.env.ADMIN_CLIENT_DEV;
   } else {
-    Bun.env.EDITOR_DEV = originalEditorDev;
+    Bun.env.ADMIN_CLIENT_DEV = originalDevFlag;
   }
   await teardownTestEnv(env);
 });
@@ -44,6 +45,16 @@ describe("GET /admin/videos/:id/cover", () => {
     expect(html).toMatch(new RegExp(`data-video-public-url="https?:\\/\\/[^"]+\\/${video.slug}"`));
     // current thumbnail URL points at the admin media route
     expect(html).toContain(`data-video-thumbnail-url="/admin/videos/${video.id}/media/poster.jpg"`);
+  });
+
+  test("passes the author identity from site-config, not hardcoded values", async () => {
+    const app = createApp();
+    const video = await createVideo();
+
+    const html = await (await app.request(`/admin/videos/${video.id}/cover`)).text();
+    expect(html).toContain(`data-author-name="${siteConfig.authorName}"`);
+    expect(html).toContain(`data-author-handle="${siteConfig.authorHandle}"`);
+    expect(html).toContain('data-author-avatar="/static/images/avatar.jpg?v=');
   });
 
   test("renders an empty title attr when the video has no title", async () => {

@@ -7,7 +7,7 @@ const AVATAR_X = 80; // left edge matches title's x
 const AVATAR_Y = 60; // top edge — above the title region (y=200)
 const BORDER_WIDTH = 6;
 
-export function Avatar() {
+export function Avatar({ src }: { src: string }) {
   const uid = useId().replace(/:/g, "");
   const clipId = `avatar-clip-${uid}`;
   const cx = AVATAR_X + AVATAR_SIZE / 2;
@@ -22,7 +22,7 @@ export function Avatar() {
         </clipPath>
       </defs>
       <image
-        href="/static/images/avatar.jpg"
+        href={src}
         x={AVATAR_X}
         y={AVATAR_Y}
         width={AVATAR_SIZE}

@@ -14,20 +14,20 @@ import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils
 const POST = { method: "POST", headers: { Origin: "http://localhost" } } as const;
 
 let env: TestEnv;
-const originalEditorDev = Bun.env.EDITOR_DEV;
+const originalDevFlag = Bun.env.ADMIN_CLIENT_DEV;
 
 beforeEach(async () => {
   env = await setupTestEnv();
   // The editor page needs either a built manifest or dev mode; tests must not
-  // depend on a local `editor:build` having run.
-  Bun.env.EDITOR_DEV = "1";
+  // depend on a local `admin-client:build` having run.
+  Bun.env.ADMIN_CLIENT_DEV = "1";
 });
 
 afterEach(async () => {
-  if (originalEditorDev === undefined) {
-    delete Bun.env.EDITOR_DEV;
+  if (originalDevFlag === undefined) {
+    delete Bun.env.ADMIN_CLIENT_DEV;
   } else {
-    Bun.env.EDITOR_DEV = originalEditorDev;
+    Bun.env.ADMIN_CLIENT_DEV = originalDevFlag;
   }
   await teardownTestEnv(env);
 });
@@ -77,5 +77,24 @@ describe("editor gate vs. in-flight post-processing run", () => {
     } finally {
       clearRunActive(video.id);
     }
+  });
+});
+
+describe("GET /admin/videos/:id/editor", () => {
+  test("serves the editor-root shell with the attributes the React app reads", async () => {
+    const app = createApp();
+    const video = await createVideo();
+    await setReady(video.id);
+    await getDb()
+      .update(videos)
+      .set({ title: 'Ship & "release"', durationSeconds: 42.5 })
+      .where(eq(videos.id, video.id));
+
+    const html = await (await app.request(`/admin/videos/${video.id}/editor`)).text();
+    expect(html).toContain('id="editor-root"');
+    expect(html).toContain(`data-video-id="${video.id}"`);
+    expect(html).toContain('data-video-duration="42.5"');
+    // Titles are attribute-escaped by the JSX renderer, not by hand.
+    expect(html).toContain('data-video-title="Ship &amp; &quot;release&quot;"');
   });
 });

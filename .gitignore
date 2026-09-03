@@ -11,7 +11,7 @@ server/.env.*
 
 # Build output
 server/dist/
-server/public/editor/
+server/public/admin-client/
 app/LoomClone.xcodeproj/
 # ...except the SwiftPM resolver state. The xcodeproj is generated, but
 # Package.resolved is the only record of which *transitive* versions the app

@@ -1,4 +1,8 @@
+import type { Author } from "../state";
+import { FONTS } from "./constants";
+
 type Props = {
+  author: Author;
   showAttribution: boolean;
   showUrl: boolean;
   urlText: string;
@@ -6,13 +10,13 @@ type Props = {
 };
 
 // Footer layout:
-//   When URL is off: single line of "@dannysmith • Copyright © {year} Danny Smith"
-//   When URL is on:  URL on its own line, with "@dannysmith • Copyright …" below it
+//   When URL is off: single line of "@handle • Copyright © {year} {name}"
+//   When URL is on:  URL on its own line, with "@handle • Copyright …" below it
 //
 // Content is top-aligned in a fixed foreignObject, so when the URL row is
 // added it pushes the wordmark row down rather than the wordmark row staying
 // put and the URL appearing above the canvas.
-export function Footer({ showAttribution, showUrl, urlText, showCopyright }: Props) {
+export function Footer({ author, showAttribution, showUrl, urlText, showCopyright }: Props) {
   if (!showAttribution && !showUrl && !showCopyright) return null;
 
   const year = new Date().getFullYear();
@@ -26,7 +30,7 @@ export function Footer({ showAttribution, showUrl, urlText, showCopyright }: Pro
           display: "flex",
           flexDirection: "column",
           gap: "20px",
-          fontFamily: "Inter, sans-serif",
+          fontFamily: FONTS.sans,
           lineHeight: 1,
         }}
       >
@@ -44,9 +48,9 @@ export function Footer({ showAttribution, showUrl, urlText, showCopyright }: Pro
         )}
         {showWordmarkRow && (
           <div style={{ display: "flex", alignItems: "baseline", whiteSpace: "nowrap" }}>
-            {showAttribution && <Attribution />}
+            {showAttribution && <Attribution handle={author.handle} />}
             {showAttribution && showCopyright && <Bullet />}
-            {showCopyright && <CopyrightText year={year} />}
+            {showCopyright && <CopyrightText year={year} name={author.name} />}
           </div>
         )}
       </div>
@@ -54,7 +58,7 @@ export function Footer({ showAttribution, showUrl, urlText, showCopyright }: Pro
   );
 }
 
-function Attribution() {
+function Attribution({ handle }: { handle: string }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "baseline" }}>
       <span
@@ -76,7 +80,7 @@ function Attribution() {
           marginLeft: "2px",
         }}
       >
-        dannysmith
+        {handle}
       </span>
     </span>
   );
@@ -88,7 +92,7 @@ function UrlText({ text }: { text: string }) {
       style={{
         color: "#ffd5d5",
         WebkitTextFillColor: "#ffd5d5",
-        fontFamily: '"Fira Code", ui-monospace, SFMono-Regular, monospace',
+        fontFamily: FONTS.mono,
         fontSize: "33px",
         fontWeight: 300,
       }}
@@ -98,7 +102,7 @@ function UrlText({ text }: { text: string }) {
   );
 }
 
-function CopyrightText({ year }: { year: number }) {
+function CopyrightText({ year, name }: { year: number; name: string }) {
   return (
     <span
       style={{
@@ -108,7 +112,7 @@ function CopyrightText({ year }: { year: number }) {
         fontWeight: 200,
       }}
     >
-      Copyright © {year} Danny Smith
+      Copyright © {year} {name}
     </span>
   );
 }

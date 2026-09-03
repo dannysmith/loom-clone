@@ -44,13 +44,14 @@ Three components exist today:
 - `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm). Model choice, skip conditions, performance. Read before changing anything in the audio processing step in `derivatives.ts`.
 - `docs/developer/transcription.md` — how subtitles are generated (WhisperKit on Mac, TranscribeAgent lifecycle, model management, server-side indexing). Read before touching `TranscribeAgent`, `TranscriptionModelStatus`, or the transcript endpoint.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
-- `docs/developer/admin-editor.md` — the web-based video editor: React app architecture, Vite build process, EDL format, ffmpeg edit pipeline, file layout after editing, keyboard shortcuts. Read before touching anything in `server/editor/`, `edit-render.ts`, `edit-transcript.ts`, the edit-mode paths in `lib/processing/`, or the editor admin routes.
+- `docs/developer/admin-client.md` — the admin's React package (`server/admin-client/`): layout, build and dev workflow, the Vite-manifest seam, the cover-image generator, why the player is a separate package, and the public-vs-admin dependency policy. Read before touching anything in `server/admin-client/`, `lib/vite-manifest.ts`, or the editor/cover admin routes.
+- `docs/developer/admin-editor.md` — the web-based video editor itself: React app architecture, EDL format, ffmpeg edit pipeline, file layout after editing, keyboard shortcuts. Read before touching anything in `server/admin-client/src/editor/`, `edit-render.ts`, `edit-transcript.ts`, or the edit-mode paths in `lib/processing/`.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
 - `docs/archive/` — incident records, completed research audits, and the original requirements doc. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
 
 ## Building & Running
 
-`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck — including the `editor/` and `player/` sub-packages — and tests, same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
+`bun run check:all` at the repo root runs every quality gate: the server's full suite (lint, format check, typecheck — including the `admin-client/` and `player/` sub-packages — and tests, same command CI runs) plus `make lint` and `make test` in `app/`. `check:server` / `check:app` run each half alone.
 
 A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to see all targets. Key ones:
 
@@ -93,6 +94,8 @@ Direct commands (for reference or when you need different flags):
 │   └── project.yml                       # XcodeGen source of truth
 ├── server/                               # Hono + Bun server (see server/CLAUDE.md)
 │   ├── CLAUDE.md                         #   scripts, layout, testing conventions
+│   ├── admin-client/                     #   Vite + React apps served in the admin panel
+│   │   └── src/                          #     editor/ (video editor), cover/ (cover generator)
 │   ├── biome.jsonc                       #   lint + format config
 │   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
 │   │   ├── player/                       #     committed Vidstack player bundle (built from server/player/)
@@ -114,6 +117,7 @@ Direct commands (for reference or when you need different flags):
 │   ├── developer/                        # living developer docs
 │   │   ├── streaming-and-healing.md      #   segment flow, healing, derivatives
 │   │   ├── server-routes-and-api.md      #   full route + API reference
+│   │   ├── admin-client.md               #   admin React package, build seam, dependency policy
 │   │   └── auth.md                       #   API keys + admin auth (sessions, bearer tokens)
 │   ├── tasks-todo/                       # active/upcoming work
 │   ├── tasks-done/                       # completed task write-ups

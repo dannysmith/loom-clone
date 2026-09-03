@@ -1,13 +1,14 @@
 import { useRef, useState } from "react";
 import { Editor } from "./Editor";
 import { Preview } from "./preview/Preview";
-import { buildInitialState, type CoverState, type VideoInputs } from "./state";
+import { type Author, buildInitialState, type CoverState, type VideoInputs } from "./state";
 
 type Props = {
   inputs: VideoInputs;
+  author: Author;
 };
 
-export function App({ inputs }: Props) {
+export function App({ inputs, author }: Props) {
   const [state, setState] = useState<CoverState>(() => buildInitialState(inputs));
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -22,10 +23,10 @@ export function App({ inputs }: Props) {
       <div className="app">
         <div className="preview-wrap">
           <div className="preview-frame">
-            <Preview state={state} setState={setState} svgRef={svgRef} />
+            <Preview state={state} setState={setState} svgRef={svgRef} author={author} />
           </div>
         </div>
-        <Editor inputs={inputs} state={state} setState={setState} svgRef={svgRef} />
+        <Editor inputs={inputs} author={author} state={state} setState={setState} svgRef={svgRef} />
       </div>
     </div>
   );

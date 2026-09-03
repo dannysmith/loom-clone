@@ -1,19 +1,14 @@
 import { zValidator } from "@hono/zod-validator";
 import { mkdir, rename } from "fs/promises";
 import { Hono } from "hono";
-import { raw } from "hono/html";
 import { join } from "path";
 import { z } from "zod";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/paths";
 import { scheduleEdit } from "../../lib/processing/pipeline";
 import { hasActiveRun } from "../../lib/processing/run-lock";
-import { loadEntryAssets } from "../../lib/vite-manifest";
+import { EditorPage } from "../../views/admin/pages/EditorPage";
 import { type AdminEnv, requireVideo } from "./helpers";
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
 
 const editor = new Hono<AdminEnv>();
 
@@ -39,31 +34,7 @@ editor.get("/:id/editor", async (c) => {
     return c.text("Post-processing is still running for this video — try again shortly", 409);
   }
 
-  const { scripts } = loadEntryAssets("index.html");
-
-  const title = escapeAttr(video.title || video.slug);
-
-  return c.html(
-    raw(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Editor &middot; ${title}</title>
-  <link rel="stylesheet" href="/static/styles/app.css">
-  ${scripts}
-</head>
-<body>
-  <div id="editor-root"
-    data-video-id="${video.id}"
-    data-video-slug="${escapeAttr(video.slug)}"
-    data-video-duration="${video.durationSeconds ?? 0}"
-    data-video-title="${title}"
-    data-video-height="${video.height ?? 0}"
-  ></div>
-</body>
-</html>`),
-  );
+  return c.html(<EditorPage video={video} />);
 });
 
 // --- Load EDL ---

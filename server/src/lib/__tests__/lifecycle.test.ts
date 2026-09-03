@@ -73,12 +73,12 @@ describe("permanentlyDeleteVideo", () => {
   });
 
   test("throws if video not found", async () => {
-    expect(permanentlyDeleteVideo("nonexistent")).rejects.toThrow("not found");
+    await expect(permanentlyDeleteVideo("nonexistent")).rejects.toThrow("not found");
   });
 
   test("throws if video is not trashed", async () => {
     const video = await createVideo();
-    expect(permanentlyDeleteVideo(video.id)).rejects.toThrow("not trashed");
+    await expect(permanentlyDeleteVideo(video.id)).rejects.toThrow("not trashed");
   });
 });
 

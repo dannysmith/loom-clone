@@ -131,7 +131,7 @@ describe("updateTag", () => {
     // ValidationError (not a bare Error) so the admin route renders the
     // failure inline on the edit row instead of 500ing.
     const tag = await createTag("demo");
-    expect(updateTag(tag.id, { name: "   " })).rejects.toBeInstanceOf(ValidationError);
+    await expect(updateTag(tag.id, { name: "   " })).rejects.toBeInstanceOf(ValidationError);
   });
 
   test("throws for unknown tag id", async () => {

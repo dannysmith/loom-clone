@@ -22,7 +22,17 @@ actor WriterActor {
     /// loop so that `finish()` can guarantee every segment has been fully
     /// processed downstream (timeline recorded, upload enqueued) before it
     /// returns. Making this `async` is load-bearing for stop-flow correctness.
-    var onSegmentReady: (@Sendable (Emission) async -> Void)?
+    private var onSegmentReady: (@Sendable (Emission) async -> Void)?
+
+    func setOnSegmentReady(_ handler: @escaping @Sendable (Emission) async -> Void) {
+        onSegmentReady = handler
+    }
+
+    /// Target duration of each HLS media segment. AVAssetWriter cuts on this
+    /// interval, and it doubles as the fallback duration when a segment
+    /// report doesn't carry one (`handlePendingSegment`) or when a heal has
+    /// no local record of a segment's duration (`HealAgent`).
+    static let segmentIntervalSeconds: Double = 4
 
     // MARK: - State
 
@@ -79,7 +89,7 @@ actor WriterActor {
         self.fps = fps
         let writer = AVAssetWriter(contentType: UTType.mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
-        writer.preferredOutputSegmentInterval = CMTime(seconds: 4, preferredTimescale: 600)
+        writer.preferredOutputSegmentInterval = CMTime(seconds: Self.segmentIntervalSeconds, preferredTimescale: 600)
         writer.initialSegmentStartTime = TimestampAdjuster.defaultPrimingOffset
 
         // Set up the segment stream: delegate yields, consumer drains.
@@ -214,12 +224,15 @@ actor WriterActor {
     /// Note: flushSegment() is only allowed when preferredOutputSegmentInterval
     /// is .indefinite. With automatic segmentation (4s), AVAssetWriter handles
     /// segment boundaries itself.
-    func pause(at _: CMTime) {
+    /// Takes no timestamp: every PTS the writer sees has already been
+    /// retimed against the actor's single `pauseAccumulator`, so the writer
+    /// has nothing to compute from a pause moment.
+    func pause() {
         isPaused = true
         Log.writer.log("Paused")
     }
 
-    func resume(at _: CMTime) {
+    func resume() {
         isPaused = false
         Log.writer.log("Resumed")
     }
@@ -306,7 +319,7 @@ actor WriterActor {
             )
             Log.writer.log("Init segment: \(pending.data.count) bytes")
         } else {
-            let duration = pending.duration ?? 4.0
+            let duration = pending.duration ?? Self.segmentIntervalSeconds
 
             // finishWriting() emits empty trailing segments with 0 duration — skip them
             if duration < 0.01 {

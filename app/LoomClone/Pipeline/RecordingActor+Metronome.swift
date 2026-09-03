@@ -35,20 +35,10 @@ extension RecordingActor {
 
                 // Periodically re-enumerate Finder browser windows when desktop
                 // icons are hidden, so newly-opened Finder windows are excepted
-                // from the exclusion. Every ~5 seconds (10 ticks × 500ms).
+                // from the exclusion. See `AppExclusionState.shouldRefreshFilter`.
                 await self.tickFilterRefresh()
             }
         }
-    }
-
-    /// Called from the health check timer. Refreshes the screen capture filter
-    /// every 10 ticks (~5 seconds) when desktop icon hiding is active, to pick
-    /// up newly-opened Finder browser windows.
-    private func tickFilterRefresh() async {
-        guard hideDesktopIcons else { return }
-        filterRefreshCounter += 1
-        guard filterRefreshCounter % 10 == 0 else { return }
-        await updateExcludedApps()
     }
 
     /// The encoding loop. Each tick composes one output frame using the
@@ -91,17 +81,23 @@ extension RecordingActor {
 
             metronomeTickIdx += 1
 
-            // Drift-corrected sleep: tick N fires at
-            //   recordingStartTime + pauseAccumulator + N × (1/fps)
-            // (`pauseAccumulator` is read for the current iteration only —
-            // pause/resume cancels and restarts the loop with tickIdx=0.)
-            guard let start = recordingStartTime else { continue }
-            let nextTarget = start
-                + pauseAccumulator
-                + CMTime(value: metronomeTickIdx, timescale: targetFrameRate)
+            // Drift-corrected sleep — see `RecordingClock.nextTickTarget`.
+            // A missing anchor can't happen here (we only get past
+            // `emitMetronomeFrame` returning true when one exists) but if it
+            // ever did, fall back to the fixed interval rather than spinning
+            // the loop at full tilt.
+            guard let start = recordingStartTime else {
+                try? await Task.sleep(for: .nanoseconds(sleepNanos))
+                continue
+            }
+            let nextTarget = RecordingClock.nextTickTarget(
+                start: start,
+                pauseAccumulator: pauseAccumulator,
+                tickIdx: metronomeTickIdx,
+                frameRate: targetFrameRate
+            )
             let now = CMClockGetTime(CMClockGetHostTimeClock())
-            let sleepSeconds = (nextTarget - now).seconds
-            if sleepSeconds > 0 {
+            if let sleepSeconds = RecordingClock.sleepSeconds(untilTarget: nextTarget, now: now) {
                 diagnostics.driftPositiveSleep += 1
                 try? await Task.sleep(for: .seconds(sleepSeconds))
             } else {

@@ -16,6 +16,11 @@ extension RecordingActor {
         case displayNotFound
     }
 
+    /// How far in the past the commit anchor may sit. Bounds the correction
+    /// for capture-pipeline latency (~40-80ms built-in, more over USB) so an
+    /// unusually stale cached frame can't push audio far ahead of video.
+    static let maxCommitAnchorAge = CMTime(value: 100, timescale: 1000)
+
     /// Phase 1: do all the slow setup. After this returns, every capture
     /// source's hardware is actually running and frames are flowing into the
     /// caches — but no PTS values have been assigned yet and the writer
@@ -34,8 +39,7 @@ extension RecordingActor {
 
         // Store exclusion state for mid-recording filter updates and
         // the focused-window warning check.
-        self.excludedBundleIDs = excludedBundleIDs
-        self.hideDesktopIcons = hideDesktopIcons
+        exclusion.configure(excludedBundleIDs: excludedBundleIDs, hideDesktopIcons: hideDesktopIcons)
 
         // 1. Resolve devices from identifiers
         let (display, ourApp) = try await resolveDisplay(displayID: displayID)
@@ -206,50 +210,26 @@ extension RecordingActor {
     /// Phase 2: anchor the recording clock and start the encoder.
     /// All capture hardware is already live; this is the moment T = 0.
     func commitRecording() async {
-        // Anchor the recording clock to the most recent cached source
-        // frame's hardware capture time — not CMClockGetTime() at commit.
-        //
-        // Why: camera capture has a pipeline latency (~40-80ms on built-in
-        // cameras, more on USB). The freshest cached camera frame at commit
-        // time has a capturePTS that's already ~40ms in the past. If we
-        // anchor to "now", that cached frame's elapsed is negative → it's
-        // rejected → the metronome has to wait for the next capture cycle
-        // before it can emit anything. Meanwhile audio's first sample has
-        // a hardware PTS very close to now, so it lands near t=0 on the
-        // timeline. Net effect: audio starts ~70ms before video in the
-        // output. Anchoring to the camera's capturePTS eliminates that
-        // wait — the cached frame is accepted immediately with elapsed=0.
+        // Anchor the recording clock to the most recent cached source frame's
+        // hardware capture time rather than to `now` — see
+        // `RecordingClock.commitAnchor` for why, and for the staleness clamp.
         let now = CMClockGetTime(CMClockGetHostTimeClock())
-        // Safety bound on how far "in the past" the anchor can be. If the
-        // cached source frame is unusually stale (e.g., USB camera hiccup
-        // right at commit), a very old capturePTS would make audio samples
-        // land far ahead of the anchor in the output — we'd swap an
-        // audio-leads-video bug for a video-leads-audio bug, potentially
-        // larger. Capping at ~100ms preserves the fix for the normal
-        // ~40-80ms capture-pipeline case while bounding the worst case.
-        let maxAnchorAge = CMTime(value: 100, timescale: 1000)
+        let maxAnchorAge = Self.maxCommitAnchorAge
         let cachedPTS: CMTime? = switch mode {
         case .screenOnly:
             latestScreenFrame?.capturePTS
         case .cameraOnly, .screenAndCamera:
             cameraFrameQueue.last?.capturePTS
         }
-        let anchor: CMTime
-        if let cachedPTS, cachedPTS.isValid, (now - cachedPTS) <= maxAnchorAge {
-            anchor = cachedPTS
-        } else {
-            anchor = now - maxAnchorAge
-            if let cachedPTS, cachedPTS.isValid {
-                let ageMS = (now - cachedPTS).seconds * 1000
-                let clampMS = maxAnchorAge.seconds * 1000
-                Log.recording.log(String(
-                    format: "Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms",
-                    ageMS,
-                    clampMS
-                ))
-            }
+        let anchor = RecordingClock.commitAnchor(now: now, cachedPTS: cachedPTS, maxAge: maxAnchorAge)
+        if anchor.clamped, let cachedPTS, cachedPTS.isValid {
+            Log.recording.log(String(
+                format: "Cached source frame was stale (%.1f ms) — clamping anchor to now-%.0fms",
+                (now - cachedPTS).seconds * 1000,
+                maxAnchorAge.seconds * 1000
+            ))
         }
-        recordingStartTime = anchor
+        recordingStartTime = anchor.time
         pauseAccumulator = .zero
         pauseStartHostTime = nil
         lastEmittedVideoPTS = .invalid
@@ -320,10 +300,8 @@ extension RecordingActor {
         metronomeTickIdx = 0
         terminalErrorFired = false
         rawWriterFailureReported.removeAll()
-        lastScreenFrameHostTime = nil
-        lastCameraFrameHostTime = nil
-        lastAudioSampleHostTime = nil
-        activeSourceWarnings.removeAll()
+        sourceHealth = SourceHealthTracker()
+        qualityWarningActive = false
         timeline = RecordingTimelineBuilder()
 
         // Diagnostics: reset all counters + buffers for the new recording.
@@ -352,57 +330,6 @@ extension RecordingActor {
             $0.processID == ProcessInfo.processInfo.processIdentifier
         }
         return (display, ourApp)
-    }
-
-    /// Build the full app and window exclusion lists for the screen capture filter.
-    /// Resolves user-selected bundle IDs and desktop icon windows from a fresh
-    /// SCShareableContent query.
-    private func resolveExclusions(
-        ourApp: SCRunningApplication?
-    ) async -> (apps: [SCRunningApplication], exceptingWindows: [SCWindow]) {
-        var appsToExclude: [SCRunningApplication] = []
-        if let ourApp { appsToExclude.append(ourApp) }
-
-        // No exclusions configured — skip the query
-        guard !excludedBundleIDs.isEmpty || hideDesktopIcons else {
-            return (appsToExclude, [])
-        }
-
-        let content: SCShareableContent
-        do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        } catch {
-            Log.exclusion.log("SCShareableContent query failed: \(error)")
-            return (appsToExclude, [])
-        }
-
-        // User-selected apps
-        for app in content.applications where excludedBundleIDs.contains(app.bundleIdentifier) {
-            appsToExclude.append(app)
-            Log.exclusion.log("Excluding \(app.bundleIdentifier) (pid: \(app.processID))")
-        }
-
-        var exceptingWindows: [SCWindow] = []
-
-        // Desktop icons: exclude Finder, but re-include its browser windows
-        if hideDesktopIcons {
-            if let finder = content.applications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                if !appsToExclude.contains(where: { $0.processID == finder.processID }) {
-                    appsToExclude.append(finder)
-                    Log.exclusion.log("Excluding Finder for desktop icons")
-                }
-                // Re-include Finder windows at normal window level (browser windows).
-                // Desktop icon windows sit at kCGDesktopIconWindowLevel and stay excluded.
-                exceptingWindows = content.windows.filter {
-                    $0.owningApplication?.processID == finder.processID && $0.windowLayer == 0
-                }
-                if !exceptingWindows.isEmpty {
-                    Log.exclusion.log("Excepting \(exceptingWindows.count) Finder browser window(s)")
-                }
-            }
-        }
-
-        return (appsToExclude, exceptingWindows)
     }
 
     /// Set up raw stream writers for screen and audio. Camera is deferred

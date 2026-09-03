@@ -84,18 +84,20 @@ extension RecordingActor {
 
         let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard originalPTS.isValid else { return }
-        let relativePTS = originalPTS - startTime
-
-        guard relativePTS >= .zero else { return }
+        guard (originalPTS - startTime) >= .zero else { return }
 
         let duration = CMSampleBufferGetDuration(sampleBuffer)
-        let logicalPTS = relativePTS - pauseAccumulator
+        let logicalPTS = RecordingClock.logicalPTS(
+            capturePTS: originalPTS,
+            start: startTime,
+            pauseAccumulator: pauseAccumulator
+        )
 
         // HLS path: skip while paused. The writer also guards isPaused as
         // defence-in-depth, but short-circuiting here avoids an unnecessary
         // sample buffer copy.
         if pauseStartHostTime == nil, logicalPTS >= .zero {
-            let hlsPTS = TimestampAdjuster.defaultPrimingOffset + logicalPTS
+            let hlsPTS = RecordingClock.encoderPTS(logical: logicalPTS)
             if let hlsOut = retimedCopy(of: sampleBuffer, pts: hlsPTS, duration: duration, label: "hls audio") {
                 await writer.appendAudio(hlsOut)
             }
@@ -112,6 +114,36 @@ extension RecordingActor {
                 }
             }
         }
+    }
+
+    /// Retime a sample buffer onto the recording's logical timeline so it
+    /// can be appended to a raw writer. Returns nil if the recording isn't
+    /// committed yet, the recording is paused, or the sample's PTS is
+    /// before the recording start anchor.
+    ///
+    /// Raw writers get the logical PTS with no priming offset — priming is an
+    /// HLS-only concern.
+    func retimedSampleForRawWriter(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        guard isRecording,
+              pauseStartHostTime == nil,
+              let startTime = recordingStartTime else { return nil }
+
+        let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard originalPTS.isValid else { return nil }
+
+        let relPTS = RecordingClock.logicalPTS(
+            capturePTS: originalPTS,
+            start: startTime,
+            pauseAccumulator: pauseAccumulator
+        )
+        guard relPTS >= .zero else { return nil }
+
+        return retimedCopy(
+            of: sampleBuffer,
+            pts: relPTS,
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            label: "raw writer"
+        )
     }
 
     /// Wrap CMSampleBufferCreateCopyWithNewTiming so failures are logged
@@ -277,30 +309,33 @@ extension RecordingActor {
         if isStaleSource(screen.capturePTS) {
             return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: "skipStale", compositeS: 0)
         }
-        let camera = cameraFrameQueue.last
-        let cameraAvailable = camera != nil
-            && !activeSourceWarnings.contains(.cameraFailed)
-            && !activeSourceWarnings.contains(.cameraStale)
         let startedAt = Date()
-        let result: Result<CVPixelBuffer, CompositionError>? = if cameraAvailable, let camera {
-            await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: camera.pixelBuffer,
-                mode: .screenAndCamera,
-                pipPosition: pipPosition
-            )
-        } else {
-            await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: nil,
-                mode: .screenOnly
-            )
-        }
+        let result = await compositeScreenWithPiP(screen: screen)
         return ModeCompositeStep(
             result: result,
             sourcePTS: screen.capturePTS,
             branch: "n/a",
             compositeS: -startedAt.timeIntervalSinceNow
+        )
+    }
+
+    /// Composite a screen frame with the most recent camera frame peeked (not
+    /// popped) as the PiP overlay, falling back to screen-only when the camera
+    /// isn't fit to render. Shared by the metronome's `screenAndCamera` branch
+    /// and the keep-alive path, which must produce a visually identical frame.
+    private func compositeScreenWithPiP(screen: CachedFrame) async -> Result<CVPixelBuffer, CompositionError>? {
+        guard let camera = cameraFrameQueue.last, !sourceHealth.cameraIsUnusable else {
+            return await composition.compositeFrame(
+                screenBuffer: screen.pixelBuffer,
+                cameraBuffer: nil,
+                mode: .screenOnly
+            )
+        }
+        return await composition.compositeFrame(
+            screenBuffer: screen.pixelBuffer,
+            cameraBuffer: camera.pixelBuffer,
+            mode: .screenAndCamera,
+            pipPosition: pipPosition
         )
     }
 
@@ -348,8 +383,7 @@ extension RecordingActor {
     /// `compositeForCurrentMode` to skip a tick before spending GPU time
     /// compositing content the encoder would only reject downstream.
     private func isStaleSource(_ capturePTS: CMTime) -> Bool {
-        guard lastEmittedSourcePTS.isValid else { return false }
-        return capturePTS <= lastEmittedSourcePTS
+        RecordingClock.isStaleSource(capturePTS: capturePTS, lastEmittedSourcePTS: lastEmittedSourcePTS)
     }
 
     /// Compose and append a single metronome frame. Returns true if a frame
@@ -387,9 +421,7 @@ extension RecordingActor {
 
         // Drift / sleep are bookkept by the outer loop; this rejects the
         // various ways `emitMetronomeFrame` can fail to produce a sample.
-        let lastEmitLogical: Double? = lastEmittedVideoPTS.isValid
-            ? (lastEmittedVideoPTS - TimestampAdjuster.defaultPrimingOffset).seconds
-            : nil
+        let lastEmitLogical = RecordingClock.logicalSeconds(fromEncoderPTS: lastEmittedVideoPTS)
 
         if decision.compositionFailed {
             recordTickRejection(
@@ -410,42 +442,15 @@ extension RecordingActor {
             )
         }
         let sourcePTS = decision.sourcePTS
+        guard let timing = emitTiming(
+            for: decision,
+            iterIdx: iterIdx,
+            start: start,
+            lastEmitLogical: lastEmitLogical
+        ) else { return false }
+        let elapsedLogical = timing.logical
+        let pts = timing.encoder
 
-        guard sourcePTS.isValid else {
-            diagnostics.rejectInvalidPTS += 1
-            recordTickRejection(
-                iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectInvalidPTS,
-                decision: decision,
-                ptsLogical: nil,
-                lastEmitLogical: lastEmitLogical
-            )
-            return false
-        }
-        let elapsedLogical = (sourcePTS - start) - pauseAccumulator
-        guard elapsedLogical >= .zero else {
-            diagnostics.rejectNegElapsed += 1
-            recordTickRejection(
-                iterIdx: iterIdx,
-                action: MetronomeTickAction.rejectNegElapsed,
-                decision: decision,
-                ptsLogical: elapsedLogical.seconds,
-                lastEmitLogical: lastEmitLogical
-            )
-            return false
-        }
-        let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
-
-        if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS {
-            handleMonotonicityRejection(
-                iterIdx: iterIdx,
-                pts: pts,
-                decision: decision,
-                elapsedLogical: elapsedLogical,
-                lastEmitLogical: lastEmitLogical
-            )
-            return false
-        }
         lastEmittedVideoPTS = pts
         lastEmittedSourcePTS = sourcePTS
         lastEmitHostTime = CMClockGetTime(CMClockGetHostTimeClock())
@@ -480,6 +485,64 @@ extension RecordingActor {
 
         await writer.appendVideo(outputSample)
         return true
+    }
+
+    /// A tick's PTS in both domains: `logical` for the timeline and trace
+    /// rows, `encoder` (logical + priming offset) for the HLS writer.
+    private struct EmitTiming {
+        let logical: CMTime
+        let encoder: CMTime
+    }
+
+    /// Derive a tick's PTS from its composited source frame, or reject the
+    /// tick. Returns nil — having already recorded which rejection it was —
+    /// when the source PTS is invalid, predates the recording anchor, or
+    /// would break strict monotonicity at the encoder.
+    private func emitTiming(
+        for decision: CompositeDecision,
+        iterIdx: Int64,
+        start: CMTime,
+        lastEmitLogical: Double?
+    ) -> EmitTiming? {
+        guard decision.sourcePTS.isValid else {
+            diagnostics.rejectInvalidPTS += 1
+            recordTickRejection(
+                iterIdx: iterIdx,
+                action: MetronomeTickAction.rejectInvalidPTS,
+                decision: decision,
+                ptsLogical: nil,
+                lastEmitLogical: lastEmitLogical
+            )
+            return nil
+        }
+        let logical = RecordingClock.logicalPTS(
+            capturePTS: decision.sourcePTS,
+            start: start,
+            pauseAccumulator: pauseAccumulator
+        )
+        guard logical >= .zero else {
+            diagnostics.rejectNegElapsed += 1
+            recordTickRejection(
+                iterIdx: iterIdx,
+                action: MetronomeTickAction.rejectNegElapsed,
+                decision: decision,
+                ptsLogical: logical.seconds,
+                lastEmitLogical: lastEmitLogical
+            )
+            return nil
+        }
+        let encoder = RecordingClock.encoderPTS(logical: logical)
+        guard !RecordingClock.breaksMonotonicity(pts: encoder, lastEmittedVideoPTS: lastEmittedVideoPTS) else {
+            handleMonotonicityRejection(
+                iterIdx: iterIdx,
+                pts: encoder,
+                decision: decision,
+                elapsedLogical: logical,
+                lastEmitLogical: lastEmitLogical
+            )
+            return nil
+        }
+        return EmitTiming(logical: logical, encoder: encoder)
     }
 
     /// Bookkeep a successful metronome emit: bump the inter-emit cadence
@@ -626,10 +689,11 @@ extension RecordingActor {
         start: CMTime,
         lastEmitLogical: Double?
     ) async -> Bool {
-        guard lastEmitHostTime.isValid else { return false }
         let nowHost = CMClockGetTime(CMClockGetHostTimeClock())
-        let staleDuration = (nowHost - lastEmitHostTime).seconds
-        guard staleDuration >= Self.keepAliveThresholdSeconds else { return false }
+        guard let staleDuration = RecordingClock.keepAliveStaleDuration(
+            now: nowHost,
+            lastEmitHostTime: lastEmitHostTime
+        ) else { return false }
 
         // Compose with peek-only access to the cached source frames —
         // cameraOnly uses `lastPoppedCameraFrame` rather than touching
@@ -648,24 +712,7 @@ extension RecordingActor {
             )
         case .screenAndCamera:
             guard let screen = latestScreenFrame else { return false }
-            let camera = cameraFrameQueue.last
-            let cameraAvailable = camera != nil
-                && !activeSourceWarnings.contains(.cameraFailed)
-                && !activeSourceWarnings.contains(.cameraStale)
-            if cameraAvailable, let camera {
-                composedResult = await composition.compositeFrame(
-                    screenBuffer: screen.pixelBuffer,
-                    cameraBuffer: camera.pixelBuffer,
-                    mode: .screenAndCamera,
-                    pipPosition: pipPosition
-                )
-            } else {
-                composedResult = await composition.compositeFrame(
-                    screenBuffer: screen.pixelBuffer,
-                    cameraBuffer: nil,
-                    mode: .screenOnly
-                )
-            }
+            composedResult = await compositeScreenWithPiP(screen: screen)
         case .cameraOnly:
             guard let last = lastPoppedCameraFrame else { return false }
             composedResult = await composition.compositeFrame(
@@ -682,14 +729,19 @@ extension RecordingActor {
             return false
         }
 
-        // Synthetic wall-clock-anchored PTS.
-        let elapsedLogical = (nowHost - start) - pauseAccumulator
+        // Synthetic wall-clock-anchored PTS: `nowHost` stands in for the
+        // source capture time the real path would use.
+        let elapsedLogical = RecordingClock.logicalPTS(
+            capturePTS: nowHost,
+            start: start,
+            pauseAccumulator: pauseAccumulator
+        )
         guard elapsedLogical >= .zero else { return false }
-        let pts = TimestampAdjuster.defaultPrimingOffset + elapsedLogical
+        let pts = RecordingClock.encoderPTS(logical: elapsedLogical)
 
         // Encoder monotonicity safety net. Host time only advances, so
         // this should always pass in practice — defensive only.
-        if lastEmittedVideoPTS.isValid, pts <= lastEmittedVideoPTS {
+        if RecordingClock.breaksMonotonicity(pts: pts, lastEmittedVideoPTS: lastEmittedVideoPTS) {
             return false
         }
 

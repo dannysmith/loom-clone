@@ -1,0 +1,225 @@
+import CoreMedia
+
+/// The recording's timing arithmetic, as pure functions.
+///
+/// There is exactly one clock anchoring a recording: `start`, the host-clock
+/// time at which output frame 0 sits. Everything else derives from it:
+///
+///     logical  = (sampleHostTime - start) - pauseAccumulator
+///     encoder  = primingOffset + logical
+///
+/// Audio uses each sample's own hardware PTS; video uses the capture PTS of
+/// the source frame it composited. Both therefore stamp content at the moment
+/// it hit the hardware, which is what keeps A/V aligned regardless of capture
+/// pipeline latency.
+///
+/// These used to be inline expressions woven through `RecordingActor`'s
+/// mutable state, which made the app's subtlest logic — the freshness gate,
+/// keep-alive decisions, pause accounting, the commit anchor's clamp — its
+/// least testable. Pulled out here they take their inputs explicitly, read no
+/// clock of their own, and are covered by `RecordingClockTests`.
+enum RecordingClock {
+    // MARK: - Logical time
+
+    /// Recording time in seconds: wall-clock elapsed minus time spent paused.
+    /// Returns 0 before the clock is anchored, so timeline events recorded
+    /// during prepare land at t=0 rather than at a garbage offset.
+    static func logicalElapsed(now: CMTime, start: CMTime?, pauseAccumulator: CMTime) -> Double {
+        guard let start else { return 0 }
+        return ((now - start) - pauseAccumulator).seconds
+    }
+
+    /// Variant that freezes at the moment the current pause began, so events
+    /// triggered *during* a pause land at the clock time the user can see
+    /// rather than advancing past it. Identical to `logicalElapsed` when not
+    /// paused.
+    static func userVisibleElapsed(
+        now: CMTime,
+        start: CMTime?,
+        pauseAccumulator: CMTime,
+        pauseStartHostTime: CMTime?
+    ) -> Double {
+        logicalElapsed(now: pauseStartHostTime ?? now, start: start, pauseAccumulator: pauseAccumulator)
+    }
+
+    // MARK: - Commit anchor
+
+    /// Where the recording clock should be anchored at commit, and whether
+    /// the cached frame had to be rejected as too old.
+    struct Anchor: Equatable {
+        let time: CMTime
+        /// True when the cached source frame was older than `maxAge` and the
+        /// anchor was clamped to `now - maxAge` instead. The caller logs the
+        /// measured age when this fires.
+        let clamped: Bool
+    }
+
+    /// Pick the commit anchor from the freshest cached source frame.
+    ///
+    /// Anchoring to the frame's capture PTS rather than to `now` absorbs the
+    /// capture pipeline's latency (~40-80ms built-in, more over USB). Anchored
+    /// at `now`, that already-captured frame has negative elapsed, gets
+    /// rejected, and the metronome waits a whole capture cycle before it can
+    /// emit — while audio's first sample lands near t=0. Net effect: audio
+    /// leads video by the pipeline latency.
+    ///
+    /// `maxAge` bounds the other direction. An unusually stale cached frame
+    /// (a USB hiccup right at commit) would push audio far *ahead* of the
+    /// anchor, trading an audio-leads bug for a potentially larger
+    /// video-leads one.
+    ///
+    /// A cached PTS *ahead* of `now` is rejected too. Capture sources stamp
+    /// against the host clock so it shouldn't happen — but a corrupt camera
+    /// timeline (the CMIO meltdown) can produce one, and an anchor in the
+    /// future makes every subsequent sample compute a negative elapsed and
+    /// get dropped, silently truncating the head of the recording.
+    static func commitAnchor(now: CMTime, cachedPTS: CMTime?, maxAge: CMTime) -> Anchor {
+        guard let cachedPTS, cachedPTS.isValid else {
+            return Anchor(time: now - maxAge, clamped: true)
+        }
+        let age = now - cachedPTS
+        guard age >= .zero, age <= maxAge else {
+            return Anchor(time: now - maxAge, clamped: true)
+        }
+        return Anchor(time: cachedPTS, clamped: false)
+    }
+
+    // MARK: - PTS derivation
+
+    /// Logical PTS for content captured at `capturePTS`. Negative when the
+    /// content predates the anchor, which callers reject.
+    static func logicalPTS(capturePTS: CMTime, start: CMTime, pauseAccumulator: CMTime) -> CMTime {
+        (capturePTS - start) - pauseAccumulator
+    }
+
+    /// Encoder-domain PTS for the HLS writer: logical time shifted by the AAC
+    /// priming offset so priming samples have a positive landing pad.
+    static func encoderPTS(logical: CMTime) -> CMTime {
+        TimestampAdjuster.defaultPrimingOffset + logical
+    }
+
+    /// Strip the priming offset back off an encoder PTS. Used for diagnostics
+    /// so every number in the trace is in recording-time seconds.
+    static func logicalSeconds(fromEncoderPTS pts: CMTime) -> Double? {
+        guard pts.isValid else { return nil }
+        return (pts - TimestampAdjuster.defaultPrimingOffset).seconds
+    }
+
+    // MARK: - Freshness gate
+
+    /// True when a source frame is not strictly newer than the last one that
+    /// produced a real emit — i.e. compositing it would only produce a frame
+    /// the encoder rejects downstream.
+    ///
+    /// This is the primary defence against non-monotonic video PTS; the
+    /// encoder-level check is a safety net behind it. An invalid watermark
+    /// means nothing has been emitted yet, so nothing can be stale.
+    static func isStaleSource(capturePTS: CMTime, lastEmittedSourcePTS: CMTime) -> Bool {
+        guard lastEmittedSourcePTS.isValid else { return false }
+        return capturePTS <= lastEmittedSourcePTS
+    }
+
+    /// True when `pts` would break strict monotonicity against the last PTS
+    /// handed to the encoder. An invalid watermark accepts anything.
+    static func breaksMonotonicity(pts: CMTime, lastEmittedVideoPTS: CMTime) -> Bool {
+        guard lastEmittedVideoPTS.isValid else { return false }
+        return pts <= lastEmittedVideoPTS
+    }
+
+    // MARK: - Keep-alive
+
+    /// How long the source must have been static before a keep-alive emit
+    /// fires. Much greater than a metronome tick (so we don't re-emit
+    /// duplicates constantly), much less than the writer's segment interval
+    /// (so a segment never sees enough dead air to come out empty).
+    static let keepAliveThresholdSeconds: Double = 1.0
+
+    /// Whether a keep-alive repeat is due, and how long the static run has
+    /// been going. `nil` means no — either nothing has been emitted yet, or
+    /// the last emit is too recent to count as a static run.
+    ///
+    /// A keep-alive's PTS is wall-clock-anchored (`now` substituted for the
+    /// source capture time) rather than derived from a source frame, which is
+    /// what holds A/V together through the run: audio keeps advancing at its
+    /// real cadence while video repeats the last frame.
+    static func keepAliveStaleDuration(now: CMTime, lastEmitHostTime: CMTime) -> Double? {
+        guard lastEmitHostTime.isValid else { return nil }
+        let staleDuration = (now - lastEmitHostTime).seconds
+        guard staleDuration >= keepAliveThresholdSeconds else { return nil }
+        return staleDuration
+    }
+
+    // MARK: - Pause accounting
+
+    /// The clock state produced by resuming at `now`.
+    struct Resumed: Equatable {
+        /// Total time spent paused across the whole recording so far.
+        let pauseAccumulator: CMTime
+        /// Duration of the pause that just ended, for the timeline event.
+        let pauseSeconds: Double
+        /// Source-PTS watermark bumped to `now`, so a frame captured *during*
+        /// the pause reads as stale. Without this a mid-pause screen frame
+        /// passes the freshness check (its capture PTS beats the pre-pause
+        /// emit's) and then computes an encoder PTS below the last emitted
+        /// one, tripping the monotonicity net.
+        let lastEmittedSourcePTS: CMTime
+        /// Keep-alive anchor restarted from the resume moment, so a long
+        /// pause doesn't look like a static run and fire a synthetic frame on
+        /// the first post-resume tick.
+        let lastEmitHostTime: CMTime
+    }
+
+    /// Fold a completed pause into the clock.
+    ///
+    /// Both watermarks are left untouched when invalid: an invalid watermark
+    /// means no real emit has happened yet, so `isStaleSource` already returns
+    /// false and the keep-alive path already short-circuits. Watermarks are
+    /// only ever initialised by a real emit, never by a pause path.
+    static func resume(
+        now: CMTime,
+        pauseStartHostTime: CMTime?,
+        pauseAccumulator: CMTime,
+        lastEmittedSourcePTS: CMTime,
+        lastEmitHostTime: CMTime
+    ) -> Resumed {
+        var accumulator = pauseAccumulator
+        var pauseSeconds: Double = 0
+        if let pauseStartHostTime {
+            let pauseDuration = now - pauseStartHostTime
+            accumulator = accumulator + pauseDuration // swiftlint:disable:this shorthand_operator
+            pauseSeconds = pauseDuration.seconds
+        }
+        return Resumed(
+            pauseAccumulator: accumulator,
+            pauseSeconds: pauseSeconds,
+            lastEmittedSourcePTS: lastEmittedSourcePTS.isValid
+                ? max(lastEmittedSourcePTS, now)
+                : lastEmittedSourcePTS,
+            lastEmitHostTime: lastEmitHostTime.isValid ? now : lastEmitHostTime
+        )
+    }
+
+    // MARK: - Metronome scheduling
+
+    /// Host-clock time tick `tickIdx` should fire at. Drift-corrected against
+    /// the recording anchor rather than accumulated from sleeps, so ticks
+    /// stay on a steady 1/fps grid however long each iteration took.
+    ///
+    /// `pauseAccumulator` is read for the current iteration only — pause and
+    /// resume cancel and restart the loop with `tickIdx` back at 0.
+    static func nextTickTarget(
+        start: CMTime,
+        pauseAccumulator: CMTime,
+        tickIdx: Int64,
+        frameRate: Int32
+    ) -> CMTime {
+        start + pauseAccumulator + CMTime(value: tickIdx, timescale: frameRate)
+    }
+
+    /// Seconds to sleep before the next tick, or nil when the loop is already
+    /// at or past its target and should run straight on.
+    static func sleepSeconds(untilTarget target: CMTime, now: CMTime) -> Double? {
+        let seconds = (target - now).seconds
+        return seconds > 0 ? seconds : nil
+    }
+}

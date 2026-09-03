@@ -55,33 +55,22 @@ actor RecordingActor {
 
     // MARK: - App Exclusion
 
-    /// Bundle IDs the user selected for exclusion. Stored so the health check
-    /// can detect when the focused window belongs to a hidden app, and so
-    /// mid-recording filter updates can re-resolve the full set.
-    var excludedBundleIDs: Set<String> = []
-
-    /// Whether Finder's desktop icon windows are excluded.
-    var hideDesktopIcons: Bool = false
-
-    /// Tracks the bundle ID of the last hidden app we warned about, so we
-    /// can update the warning message when focus moves between hidden apps.
-    var lastFocusedHiddenBundleID: String?
-
-    /// Counter for the health check timer. Used to throttle periodic filter
-    /// refreshes (Finder browser window re-enumeration) to every ~5 seconds.
-    var filterRefreshCounter: Int = 0
+    /// Which apps are hidden from the recording, plus the filter-refresh
+    /// throttle and focused-window warning state machine. See
+    /// `RecordingActor+Exclusion` for the ScreenCaptureKit side.
+    var exclusion = AppExclusionState()
 
     // MARK: - Source Health Tracking
 
-    /// Host-clock seconds when the last frame/sample was received from each source.
-    /// Updated by the frame handlers, read by the ~2 Hz health task.
-    var lastScreenFrameHostTime: Double?
-    var lastCameraFrameHostTime: Double?
-    var lastAudioSampleHostTime: Double?
+    /// Per-source staleness and failure bookkeeping, fed by the frame
+    /// handlers and evaluated by the ~2 Hz health task. See
+    /// `RecordingActor+SourceHealth` for the timeline/warning dispatch.
+    var sourceHealth = SourceHealthTracker()
 
-    /// Which source health warnings are currently active. Used for dedup — a
-    /// warning fires once, clears if the source recovers, then can re-fire.
-    var activeSourceWarnings: Set<RecordingWarning.Kind> = []
+    /// Whether the `.qualityDegraded` warning (a corrupt camera capture-PTS
+    /// timeline — see `cameraCadenceMonitor`) is currently on screen. Distinct
+    /// from `sourceHealth`: this failure doesn't go silent.
+    var qualityWarningActive = false
 
     /// Callback to notify the coordinator of warning changes. The Bool is true
     /// for add, false for remove.
@@ -212,14 +201,6 @@ actor RecordingActor {
     /// static run starts a new event.
     var keepAliveEventFiredForCurrentStaleRun: Bool = false
 
-    /// How long the source must have been static before a keep-alive emit
-    /// fires. Picked at 1s as a balance: much greater than the metronome
-    /// tick interval (so we don't constantly re-emit duplicates), much
-    /// less than AVAssetWriter's 4s segment interval (so segments never
-    /// see >4s of dead air and start producing empty / zero-duration
-    /// segments).
-    static let keepAliveThresholdSeconds: Double = 1.0
-
     /// Cap on per-recording `monotonicity.rejected` timeline events.
     /// Post task-21 the encoder-level safety net should never fire on
     /// the happy path — but if a regression makes it fire continuously,
@@ -340,60 +321,40 @@ actor RecordingActor {
         // The writer flips an internal `isPaused` flag for defence-in-depth;
         // all PTS math now lives on the actor (single pauseAccumulator), so
         // the writer is a pure sink.
-        await writer.pause(at: now)
+        await writer.pause()
     }
 
     func resume() async {
         let now = CMClockGetTime(CMClockGetHostTimeClock())
 
-        // Add the pause duration to our accumulator so subsequent video frames
-        // continue from the same logical time as the last pre-pause frame.
-        var pauseSeconds: Double = 0
-        if let pauseStart = pauseStartHostTime {
-            let pauseDuration = now - pauseStart
-            pauseAccumulator = pauseAccumulator + pauseDuration // swiftlint:disable:this shorthand_operator
-            pauseSeconds = pauseDuration.seconds
-        }
+        // Fold the completed pause into the clock: accumulate its duration,
+        // and bump both emit watermarks past it so mid-pause content reads as
+        // stale and the keep-alive run restarts from here. See
+        // `RecordingClock.resume` for why each bump is needed.
+        let resumed = RecordingClock.resume(
+            now: now,
+            pauseStartHostTime: pauseStartHostTime,
+            pauseAccumulator: pauseAccumulator,
+            lastEmittedSourcePTS: lastEmittedSourcePTS,
+            lastEmitHostTime: lastEmitHostTime
+        )
+        pauseAccumulator = resumed.pauseAccumulator
+        lastEmittedSourcePTS = resumed.lastEmittedSourcePTS
+        lastEmitHostTime = resumed.lastEmitHostTime
         pauseStartHostTime = nil
+        keepAliveEventFiredForCurrentStaleRun = false
 
         // Drop any camera frames that arrived during the pause. In cameraOnly
         // the metronome pops the *oldest* queued frame; without this drain it
         // would walk through pause-period frames one tick at a time
-        // (discarded by the freshness check below) before reaching fresh
-        // post-resume content. screenAndCamera peeks the latest frame so
-        // it's less affected, but draining keeps semantics consistent.
+        // (discarded by the freshness check) before reaching fresh post-resume
+        // content. screenAndCamera peeks the latest frame so it's less
+        // affected, but draining keeps semantics consistent.
         cameraFrameQueue.removeAll(keepingCapacity: true)
 
-        // Bump the source-PTS watermark forward to `now` so any frame
-        // captured during the pause window — `latestScreenFrame` will
-        // typically have been overwritten by an SCK update mid-pause — is
-        // treated as stale by `compositeForCurrentMode`. Without this, a
-        // mid-pause screen frame would pass the freshness check (its
-        // capturePTS is newer than the pre-pause emit's), then compute
-        // an encoder PTS below `lastEmittedVideoPTS` and trip the
-        // monotonicity safety net.
-        //
-        // The invalid-skip on both bumps below is deliberate: if either
-        // watermark is `.invalid`, no real emit has happened yet, so
-        // `isStaleSource` already returns false and `tryEmitKeepAlive`
-        // already short-circuits — nothing here to fix. We never
-        // initialise watermarks from a pause path; that's the first real
-        // emit's job.
-        if lastEmittedSourcePTS.isValid {
-            lastEmittedSourcePTS = max(lastEmittedSourcePTS, now)
-        }
+        timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: resumed.pauseSeconds)
 
-        // Restart the keep-alive threshold from resume — long pauses
-        // would otherwise look like a static run to `tryEmitKeepAlive`
-        // and fire a synthetic frame on the first post-resume tick.
-        if lastEmitHostTime.isValid {
-            lastEmitHostTime = now
-        }
-        keepAliveEventFiredForCurrentStaleRun = false
-
-        timeline.recordResumed(t: logicalElapsedSeconds(), pauseDuration: pauseSeconds)
-
-        await writer.resume(at: now)
+        await writer.resume()
         startMetronome()
     }
 
@@ -401,9 +362,11 @@ actor RecordingActor {
     /// Returns 0 before commit. Used for timeline event timestamps so events on
     /// the timeline line up with segment PTS values.
     func logicalElapsedSeconds() -> Double {
-        guard let start = recordingStartTime else { return 0 }
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-        return ((now - start) - pauseAccumulator).seconds
+        RecordingClock.logicalElapsed(
+            now: CMClockGetTime(CMClockGetHostTimeClock()),
+            start: recordingStartTime,
+            pauseAccumulator: pauseAccumulator
+        )
     }
 
     /// Variant of `logicalElapsedSeconds()` that freezes at the moment the
@@ -411,9 +374,12 @@ actor RecordingActor {
     /// the timeline at the user-visible (paused) clock time rather than
     /// advancing past it. Falls back to live elapsed when not paused.
     func userVisibleElapsedSeconds() -> Double {
-        guard let start = recordingStartTime else { return 0 }
-        let when = pauseStartHostTime ?? CMClockGetTime(CMClockGetHostTimeClock())
-        return ((when - start) - pauseAccumulator).seconds
+        RecordingClock.userVisibleElapsed(
+            now: CMClockGetTime(CMClockGetHostTimeClock()),
+            start: recordingStartTime,
+            pauseAccumulator: pauseAccumulator,
+            pauseStartHostTime: pauseStartHostTime
+        )
     }
 
     /// Append an anonymous chapter marker to the timeline at the current
@@ -461,62 +427,6 @@ actor RecordingActor {
             timeline.recordPipPositionChanged(from: previous, to: newPosition, t: logicalElapsedSeconds())
         }
         Log.recording.log("PiP position switched to: \(newPosition)")
-    }
-
-    // MARK: - App Exclusion Updates
-
-    /// Re-resolve excluded apps from SCShareableContent and update the live
-    /// stream filter. Called when an excluded app launches mid-recording, or
-    /// periodically to refresh Finder browser window exceptions.
-    func updateExcludedApps() async {
-        guard modeUsesScreen else { return }
-
-        let content: SCShareableContent
-        do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        } catch {
-            Log.exclusion.log("SCShareableContent query failed: \(error)")
-            return
-        }
-
-        var appsToExclude: [SCRunningApplication] = []
-
-        // Always exclude our own app
-        if let ourApp = content.applications.first(where: {
-            $0.processID == ProcessInfo.processInfo.processIdentifier
-        }) {
-            appsToExclude.append(ourApp)
-        }
-
-        // User-selected apps
-        for app in content.applications where excludedBundleIDs.contains(app.bundleIdentifier) {
-            appsToExclude.append(app)
-        }
-
-        var exceptingWindows: [SCWindow] = []
-
-        // Desktop icons: exclude Finder, but re-include its browser windows
-        if hideDesktopIcons {
-            if let finder = content.applications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                if !appsToExclude.contains(where: { $0.processID == finder.processID }) {
-                    appsToExclude.append(finder)
-                }
-                // Re-include Finder windows at normal window level (browser windows).
-                // Desktop icon windows are at kCGDesktopIconWindowLevel and stay excluded.
-                exceptingWindows = content.windows.filter {
-                    $0.owningApplication?.processID == finder.processID && $0.windowLayer == 0
-                }
-            }
-        }
-
-        do {
-            try await screenCapture.updateFilter(
-                excludingApps: appsToExclude,
-                exceptingWindows: exceptingWindows
-            )
-        } catch {
-            Log.exclusion.log("Filter update failed: \(error)")
-        }
     }
 
     // MARK: - Segment Handling
@@ -599,13 +509,5 @@ actor RecordingActor {
         )
 
         return sampleBuffer
-    }
-}
-
-// MARK: - WriterActor Extension for Callback
-
-extension WriterActor {
-    func setOnSegmentReady(_ handler: @escaping @Sendable (Emission) async -> Void) {
-        onSegmentReady = handler
     }
 }

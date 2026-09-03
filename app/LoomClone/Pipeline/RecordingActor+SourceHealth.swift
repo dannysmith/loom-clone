@@ -1,114 +1,95 @@
-import AppKit
 import AVFoundation
 import CoreMedia
 
 extension RecordingActor {
     // MARK: - Source Health Monitoring
 
-    // Tracks the last time each source delivered data, and which warnings are
-    // currently active. The health check runs on the dedicated ~2 Hz health
-    // task (see startHealthCheckTimer in +Metronome), decoupled from the
-    // timing-critical encode loop, and fires warnings/timeline events on
-    // threshold breach. Each warning fires once; if the source recovers
-    // (delivers again) the warning clears and can re-fire on a subsequent
-    // stall.
+    // Watches for a capture source going *silent*. `SourceHealthTracker` owns
+    // the thresholds and the fire-once / clear / re-fire bookkeeping; this file
+    // feeds it host-clock times from the frame handlers, evaluates it from the
+    // ~2 Hz health task (see `startHealthCheckTimer` in +Metronome, decoupled
+    // from the timing-critical encode loop), and turns each transition it
+    // reports into a timeline event plus a user-visible warning.
 
-    // Thresholds (seconds since last delivery):
-    static let screenStaleThreshold: Double = 2.0
-    static let cameraStaleThreshold: Double = 1.0
-    static let audioMissingThreshold: Double = 2.0
-
-    /// Run from the ~2 Hz health task. Checks each source against its
-    /// freshness threshold and fires/clears warnings as needed.
+    /// Run from the ~2 Hz health task. Checks each source the active mode
+    /// consumes against its freshness threshold.
     func checkSourceHealth() {
         guard isRecording, !isStopping else { return }
         let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
 
-        // Screen — skip the stale check if already known-failed
-        if modeUsesScreen, !activeSourceWarnings.contains(.screenFailed) {
-            if let last = lastScreenFrameHostTime {
-                let stale = now - last
-                if stale > Self.screenStaleThreshold, !activeSourceWarnings.contains(.screenStale) {
-                    activeSourceWarnings.insert(.screenStale)
-                    let t = logicalElapsedSeconds()
-                    timeline.recordSourceStale(source: "screen", t: t, staleDuration: stale)
-                    Log.health.log("Screen stale: \(String(format: "%.1f", stale))s since last frame")
-                    fireWarning(.init(
-                        id: .screenStale,
-                        severity: mode == .screenOnly ? .critical : .warning,
-                        message: "Screen capture stalled",
-                        dismissible: false
-                    ))
-                }
-            }
-        }
+        // Audio is always checked; screen and camera only while the active
+        // mode actually consumes them.
+        var activeSources: Set<SourceHealthTracker.Source> = [.audio]
+        if modeUsesScreen { activeSources.insert(.screen) }
+        if modeUsesCamera { activeSources.insert(.camera) }
 
-        // Camera — skip the stale check if the source is already known-failed
-        // (the failed warning is more specific and already visible).
-        if modeUsesCamera, !activeSourceWarnings.contains(.cameraFailed) {
-            if let last = lastCameraFrameHostTime {
-                let stale = now - last
-                if stale > Self.cameraStaleThreshold, !activeSourceWarnings.contains(.cameraStale) {
-                    activeSourceWarnings.insert(.cameraStale)
-                    let t = logicalElapsedSeconds()
-                    timeline.recordSourceStale(source: "camera", t: t, staleDuration: stale)
-                    Log.health.log("Camera stale: \(String(format: "%.1f", stale))s since last frame")
-                    fireWarning(.init(
-                        id: .cameraStale,
-                        severity: mode == .cameraOnly ? .critical : .warning,
-                        message: "Camera not delivering frames",
-                        dismissible: false
-                    ))
-                }
-            }
-        }
-
-        // Audio — skip if already known-failed
-        if !activeSourceWarnings.contains(.audioFailed) {
-            if let last = lastAudioSampleHostTime {
-                let stale = now - last
-                if stale > Self.audioMissingThreshold, !activeSourceWarnings.contains(.audioMissing) {
-                    activeSourceWarnings.insert(.audioMissing)
-                    let t = logicalElapsedSeconds()
-                    timeline.recordSourceStale(source: "audio", t: t, staleDuration: stale)
-                    Log.health.log("Audio missing: \(String(format: "%.1f", stale))s since last sample")
-                    fireWarning(.init(
-                        id: .audioMissing,
-                        severity: .warning,
-                        message: "No audio detected",
-                        dismissible: false
-                    ))
-                }
-            }
+        for transition in sourceHealth.evaluate(now: now, activeSources: activeSources) {
+            dispatch(transition)
         }
     }
 
-    /// Called when a frame/sample arrives to clear a stale warning if one was
-    /// active. Also updates the last-seen timestamp.
+    /// Called when a frame/sample arrives: updates the last-seen timestamp and
+    /// clears the source's stale warning if one was standing.
     func markScreenFrameReceived() {
-        lastScreenFrameHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        if activeSourceWarnings.remove(.screenStale) != nil {
-            timeline.recordSourceRecovered(source: "screen", t: logicalElapsedSeconds())
-            Log.health.log("Screen recovered")
-            clearWarning(.screenStale)
-        }
+        markReceived(.screen)
     }
 
     func markCameraFrameReceived() {
-        lastCameraFrameHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        if activeSourceWarnings.remove(.cameraStale) != nil {
-            timeline.recordSourceRecovered(source: "camera", t: logicalElapsedSeconds())
-            Log.health.log("Camera recovered")
-            clearWarning(.cameraStale)
-        }
+        markReceived(.camera)
     }
 
     func markAudioSampleReceived() {
-        lastAudioSampleHostTime = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        if activeSourceWarnings.remove(.audioMissing) != nil {
-            timeline.recordSourceRecovered(source: "audio", t: logicalElapsedSeconds())
-            Log.health.log("Audio recovered")
-            clearWarning(.audioMissing)
+        markReceived(.audio)
+    }
+
+    private func markReceived(_ source: SourceHealthTracker.Source) {
+        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        if let transition = sourceHealth.markReceived(source, now: now) {
+            dispatch(transition)
+        }
+    }
+
+    /// Turn one tracker transition into its timeline event, log line, and
+    /// warning fire/clear. The single place source-health severity is decided:
+    /// losing the *only* source in the current mode is critical, losing a
+    /// secondary one is a warning.
+    private func dispatch(_ transition: SourceHealthTracker.Transition) {
+        switch transition {
+        case let .wentStale(source, staleSeconds):
+            let t = logicalElapsedSeconds()
+            timeline.recordSourceStale(source: source.rawValue, t: t, staleDuration: staleSeconds)
+            Log.health.log("\(source.rawValue) stale: \(String(format: "%.1f", staleSeconds))s since last delivery")
+            fireWarning(.init(
+                id: source.staleWarning,
+                severity: severity(for: source),
+                message: staleMessage(for: source),
+                dismissible: false
+            ))
+        case let .recovered(source):
+            timeline.recordSourceRecovered(source: source.rawValue, t: logicalElapsedSeconds())
+            Log.health.log("\(source.rawValue) recovered")
+            clearWarning(source.staleWarning)
+        }
+    }
+
+    /// How loud to be about losing `source`: critical when it's the only
+    /// source the current mode has, a warning when something useful is still
+    /// being recorded without it.
+    private func severity(for source: SourceHealthTracker.Source) -> RecordingWarning.Severity {
+        switch source {
+        case .screen: mode == .screenOnly ? .critical : .warning
+        case .camera: mode == .cameraOnly ? .critical : .warning
+        // Audio never has a mode in which it's the only source, and a silent
+        // recording is still a usable one.
+        case .audio: .warning
+        }
+    }
+
+    private func staleMessage(for source: SourceHealthTracker.Source) -> String {
+        switch source {
+        case .screen: "Screen capture stalled"
+        case .camera: "Camera not delivering frames"
+        case .audio: "No audio detected"
         }
     }
 
@@ -116,54 +97,77 @@ extension RecordingActor {
 
     /// Called from the ScreenCaptureManager's SCStreamDelegate error callback.
     func handleScreenCaptureError(_ error: Error) {
-        guard isRecording, !isStopping else { return }
-        let t = logicalElapsedSeconds()
-        let desc = (error as NSError).localizedDescription
-        timeline.recordSourceFailed(source: "screen", error: desc, t: t)
-        Log.health.log("Screen capture failed: \(desc)")
-
-        activeSourceWarnings.insert(.screenFailed)
-        fireWarning(.init(
-            id: .screenFailed,
-            severity: mode == .screenOnly ? .critical : .warning,
-            message: "Screen capture failed",
-            dismissible: false
-        ))
+        recordSourceFailure(
+            .screen,
+            reason: (error as NSError).localizedDescription,
+            message: "Screen capture failed"
+        )
     }
 
     /// Called from the CameraCaptureManager's session error notification.
     func handleCameraSessionError(_ error: Error) {
-        guard isRecording, !isStopping else { return }
-        let t = logicalElapsedSeconds()
         let desc = (error as NSError).localizedDescription
-        timeline.recordSourceFailed(source: "camera", error: desc, t: t)
-        Log.health.log("Camera session error: \(desc)")
-
-        failoverSharedSessionAudio(reason: "camera session error: \(desc)", t: t)
-
-        activeSourceWarnings.insert(.cameraFailed)
-        fireWarning(.init(
-            id: .cameraFailed,
-            severity: mode == .cameraOnly ? .critical : .warning,
+        recordSourceFailure(
+            .camera,
+            reason: desc,
             message: "Camera disconnected",
-            dismissible: false
-        ))
+            audioFailoverReason: "camera session error: \(desc)"
+        )
     }
 
     /// Called from the CameraCaptureManager's session interruption notification.
     func handleCameraSessionInterrupted() {
+        recordSourceFailure(
+            .camera,
+            reason: "session interrupted",
+            message: "Camera interrupted",
+            audioFailoverReason: "camera session interrupted"
+        )
+    }
+
+    /// Called from the MicrophoneCaptureManager's session error notification.
+    func handleMicSessionError(_ error: Error) {
+        recordSourceFailure(
+            .audio,
+            reason: (error as NSError).localizedDescription,
+            message: "Microphone disconnected"
+        )
+    }
+
+    /// Called from the MicrophoneCaptureManager's session interruption notification.
+    func handleMicSessionInterrupted() {
+        recordSourceFailure(
+            .audio,
+            reason: "session interrupted",
+            message: "Microphone interrupted"
+        )
+    }
+
+    /// Shared body of the five capture-failure handlers: record it on the
+    /// timeline, mark the source failed (which suppresses its now-redundant
+    /// stale check), and raise the warning. `audioFailoverReason` covers the
+    /// one source-specific side effect any of them has — the camera's
+    /// shared-session audio failover.
+    private func recordSourceFailure(
+        _ source: SourceHealthTracker.Source,
+        reason: String,
+        message: String,
+        audioFailoverReason: String? = nil
+    ) {
         guard isRecording, !isStopping else { return }
         let t = logicalElapsedSeconds()
-        timeline.recordSourceFailed(source: "camera", error: "session interrupted", t: t)
-        Log.health.log("Camera session interrupted")
+        timeline.recordSourceFailed(source: source.rawValue, error: reason, t: t)
+        Log.health.log("\(source.rawValue) capture failed: \(reason)")
 
-        failoverSharedSessionAudio(reason: "camera session interrupted", t: t)
+        if let audioFailoverReason {
+            failoverSharedSessionAudio(reason: audioFailoverReason, t: t)
+        }
 
-        activeSourceWarnings.insert(.cameraFailed)
+        sourceHealth.markFailed(source)
         fireWarning(.init(
-            id: .cameraFailed,
-            severity: mode == .cameraOnly ? .critical : .warning,
-            message: "Camera interrupted",
+            id: source.failedWarning,
+            severity: severity(for: source),
+            message: message,
             dismissible: false
         ))
     }
@@ -174,44 +178,11 @@ extension RecordingActor {
     /// standalone mic session is still running. Flip the routing flag so
     /// `handleMicAudioSample` starts forwarding mic audio into the HLS
     /// path. No-op when the session wasn't shared in the first place.
-    private func failoverSharedSessionAudio(reason: String, t: Double) {
+    func failoverSharedSessionAudio(reason: String, t: Double) {
         guard sharedSessionAudioActive else { return }
         sharedSessionAudioActive = false
         timeline.recordAudioFailover(reason: reason, t: t)
         Log.health.log("Audio failover: shared session dead, routing standalone mic to HLS")
-    }
-
-    /// Called from the MicrophoneCaptureManager's session error notification.
-    func handleMicSessionError(_ error: Error) {
-        guard isRecording, !isStopping else { return }
-        let t = logicalElapsedSeconds()
-        let desc = (error as NSError).localizedDescription
-        timeline.recordSourceFailed(source: "audio", error: desc, t: t)
-        Log.health.log("Mic session error: \(desc)")
-
-        activeSourceWarnings.insert(.audioFailed)
-        fireWarning(.init(
-            id: .audioFailed,
-            severity: .warning,
-            message: "Microphone disconnected",
-            dismissible: false
-        ))
-    }
-
-    /// Called from the MicrophoneCaptureManager's session interruption notification.
-    func handleMicSessionInterrupted() {
-        guard isRecording, !isStopping else { return }
-        let t = logicalElapsedSeconds()
-        timeline.recordSourceFailed(source: "audio", error: "session interrupted", t: t)
-        Log.health.log("Mic session interrupted")
-
-        activeSourceWarnings.insert(.audioFailed)
-        fireWarning(.init(
-            id: .audioFailed,
-            severity: .warning,
-            message: "Microphone interrupted",
-            dismissible: false
-        ))
     }
 
     // MARK: - HLS Writer Health
@@ -258,67 +229,10 @@ extension RecordingActor {
 
     func clearWarning(_ kind: RecordingWarning.Kind) {
         if let callback = onWarningChanged {
-            // Send a dummy warning with the right id so the coordinator can
-            // identify which warning to remove.
+            // Send a placeholder warning with the right id so the coordinator
+            // can identify which warning to remove.
             let placeholder = RecordingWarning(id: kind, severity: .warning, message: "", dismissible: false)
             Task { await callback(placeholder, false) }
-        }
-    }
-
-    // MARK: - Focused Window Visibility
-
-    /// Check whether the currently focused window belongs to a hidden app.
-    /// Fires/clears the `.focusedWindowHidden` warning as needed. Must be
-    /// called from an async context since it hops to MainActor to read
-    /// NSWorkspace state.
-    func checkFocusedWindowVisibility() async {
-        guard isRecording, !isStopping, !excludedBundleIDs.isEmpty else {
-            // No apps excluded — clear any stale warning
-            if activeSourceWarnings.remove(.focusedWindowHidden) != nil {
-                lastFocusedHiddenBundleID = nil
-                clearWarning(.focusedWindowHidden)
-            }
-            return
-        }
-
-        let frontmost = await MainActor.run {
-            NSWorkspace.shared.frontmostApplication
-        }
-
-        guard let app = frontmost else { return }
-        let bundleID = app.bundleIdentifier ?? ""
-        let isHidden = excludedBundleIDs.contains(bundleID)
-
-        if isHidden {
-            // If focused app changed to a different hidden app, update the message
-            if lastFocusedHiddenBundleID != bundleID {
-                // Clear old warning first so the UI re-renders with new message
-                if activeSourceWarnings.contains(.focusedWindowHidden) {
-                    clearWarning(.focusedWindowHidden)
-                }
-                lastFocusedHiddenBundleID = bundleID
-                activeSourceWarnings.insert(.focusedWindowHidden)
-                let name = app.localizedName ?? "App"
-                fireWarning(.init(
-                    id: .focusedWindowHidden,
-                    severity: .warning,
-                    message: "\(name) is hidden from recording",
-                    dismissible: false
-                ))
-            } else if !activeSourceWarnings.contains(.focusedWindowHidden) {
-                // Same app, but warning was cleared somehow — re-fire
-                activeSourceWarnings.insert(.focusedWindowHidden)
-                let name = app.localizedName ?? "App"
-                fireWarning(.init(
-                    id: .focusedWindowHidden,
-                    severity: .warning,
-                    message: "\(name) is hidden from recording",
-                    dismissible: false
-                ))
-            }
-        } else if activeSourceWarnings.remove(.focusedWindowHidden) != nil {
-            lastFocusedHiddenBundleID = nil
-            clearWarning(.focusedWindowHidden)
         }
     }
 

@@ -27,7 +27,8 @@ extension RecordingActor {
         // the camera is actually in the composite. If the active mode no longer
         // uses the camera, clear any standing warning and stay quiet.
         guard modeUsesCamera else {
-            if activeSourceWarnings.remove(.qualityDegraded) != nil {
+            if qualityWarningActive {
+                qualityWarningActive = false
                 timeline.recordQualityRecovered(t: logicalElapsedSeconds())
                 Log.health.log("Quality warning cleared: mode no longer uses camera")
                 clearWarning(.qualityDegraded)
@@ -38,8 +39,8 @@ extension RecordingActor {
         let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         let degraded = cameraCadenceMonitor.evaluateHealth(now: now)
 
-        if degraded, !activeSourceWarnings.contains(.qualityDegraded) {
-            activeSourceWarnings.insert(.qualityDegraded)
+        if degraded, !qualityWarningActive {
+            qualityWarningActive = true
             let t = logicalElapsedSeconds()
             let count = cameraCadenceMonitor.windowedEventCount
             let fps = measuredCameraFps(atLogical: t)
@@ -51,8 +52,8 @@ extension RecordingActor {
                 message: "Recording quality may be degraded — check your camera",
                 dismissible: false
             ))
-        } else if !degraded, activeSourceWarnings.contains(.qualityDegraded) {
-            activeSourceWarnings.remove(.qualityDegraded)
+        } else if !degraded, qualityWarningActive {
+            qualityWarningActive = false
             timeline.recordQualityRecovered(t: logicalElapsedSeconds())
             Log.health.log("Quality recovered")
             clearWarning(.qualityDegraded)

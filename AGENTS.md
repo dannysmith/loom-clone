@@ -61,7 +61,7 @@ A Makefile at `app/Makefile` wraps common commands. Run `cd app && make help` to
 - `make format` — run SwiftFormat on all Swift files
 - `make lint` / `make lint-fix` — run SwiftLint / auto-fix violations
 
-To build the Mac app as an agent, use `cd app && make agent-build` — it's sandbox-compatible (disables SwiftPM's nested sandbox, which the outer sandbox makes redundant, and skips codesigning, so products are Debug-unsigned). Signed/runnable builds are Danny's, via Xcode. If package resolution fails after a dependency change, `xcodebuild -resolvePackageDependencies` may need one approved unsandboxed run. `make agent-test` is the test-running equivalent, but `xcodebuild test` talks to `testmanagerd`, which the bash sandbox blocks — expect to need an unsandboxed run for the test step itself.
+To build the Mac app as an agent, use `cd app && make agent-build` — it disables SwiftPM's nested sandbox (which the outer sandbox makes redundant) and skips codesigning, so products are Debug-unsigned. **It still needs the bash sandbox off**: Swift macro expansion runs `swift-plugin-server` as a subprocess, which the sandbox blocks, and the failure surfaces as a misleading `external macro implementation type 'ObservationMacros.ObservableMacro' could not be found … produced malformed response` on every `@Observable` type rather than as a permission error. Signed/runnable builds are Danny's, via Xcode. If package resolution fails after a dependency change, `xcodebuild -resolvePackageDependencies` may need one approved unsandboxed run. `make agent-test` is the test-running equivalent, but `xcodebuild test` talks to `testmanagerd`, which the bash sandbox blocks — expect to need an unsandboxed run for the test step itself.
 
 Direct commands (for reference or when you need different flags):
 
@@ -83,7 +83,8 @@ Direct commands (for reference or when you need different flags):
 │   ├── LoomClone/                        # macOS menubar app
 │   │   ├── App/                          #   coordinator, app entry, Settings scene
 │   │   ├── Capture/                      #   screen, camera, mic capture managers
-│   │   ├── Helpers/                      #   timestamp adjuster, preview managers, APIKeyStore, APIKeyStatus, TranscriptionModelStatus
+│   │   ├── Helpers/                      #   pure/testable logic (RecordingClock, SourceHealthTracker, AppExclusionState,
+│   │   │                                 #   CameraCadenceMonitor, SegmentLedger) + preview managers, APIKeyStore, APIKeyStatus
 │   │   ├── Models/                       #   recording timeline, presets, modes
 │   │   ├── Pipeline/                     #   RecordingActor (+extensions), WriterActor, CompositionActor, UploadActor, HealAgent, TranscribeAgent, APIClient
 │   │   └── UI/                           #   SwiftUI views, overlay window, popover, SettingsView

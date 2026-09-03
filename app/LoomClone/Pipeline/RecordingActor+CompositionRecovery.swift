@@ -44,7 +44,7 @@ extension RecordingActor {
             // Rebuild will fail too (it asks for the same device), so this
             // escalates to a terminal stop on the next line but one.
             kind = "metalUnavailable"
-            detail = "MTLCreateSystemDefaultDevice returned nil"
+            detail = "no Metal device or command queue at compositor init"
         }
         timeline.recordCompositionFailure(kind: kind, t: t, detail: detail)
         Log.recording.log("Composition failure: \(kind) — \(detail). Attempting rebuild.")

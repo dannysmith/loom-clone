@@ -183,9 +183,9 @@ final class SegmentLedgerTests: XCTestCase {
     }
 
     func testPatchPreservesUnknownFieldsInsideSegments() throws {
-        // Unknown *segment* fields don't survive — the array is round-tripped
-        // through the typed shape. Asserted so the limit is deliberate and a
-        // future field addition here is a conscious decision.
+        // A field added to the segment schema later must survive the first
+        // heal that touches the file — the patch edits the raw dictionaries
+        // rather than re-encoding the typed shape over them.
         var withExtra = segment("seg_000.m4s", index: 1, uploaded: false)
         withExtra["someFutureSegmentField"] = "keep me"
         let url = try write(["segments": [withExtra]])
@@ -193,8 +193,22 @@ final class SegmentLedgerTests: XCTestCase {
 
         let obj = try readBack()
         let segments = try XCTUnwrap(obj["segments"] as? [[String: Any]])
-        XCTAssertNil(segments[0]["someFutureSegmentField"])
+        XCTAssertEqual(segments[0]["someFutureSegmentField"] as? String, "keep me")
         XCTAssertEqual(segments[0]["filename"] as? String, "seg_000.m4s")
+        XCTAssertEqual(segments[0]["uploaded"] as? Bool, true)
+    }
+
+    func testPatchPreservesKnownFieldsItDoesNotWrite() throws {
+        // Everything except the two upload flags is read-only to the patcher.
+        let url = try writeTypicalRecording()
+        SegmentLedger.markAllUploaded(at: url)
+
+        let obj = try readBack()
+        let segments = try XCTUnwrap(obj["segments"] as? [[String: Any]])
+        XCTAssertEqual(segments[1]["index"] as? Int, 2)
+        XCTAssertEqual(segments[1]["bytes"] as? Int, 2048)
+        XCTAssertEqual(segments[1]["durationSeconds"] as? Double, 4.0)
+        XCTAssertEqual(segments[1]["emittedAt"] as? Double, 8.0)
     }
 
     func testNilFieldsStayAbsentOnRoundTrip() throws {

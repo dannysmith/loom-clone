@@ -41,9 +41,13 @@ final class RecordingCoordinator {
     /// `.stopped` is that cooldown: recording resources are already released,
     /// so a second recording can start immediately and the pending
     /// revert-to-idle Task no-ops once state moves on.
+    /// Screen permission only blocks recording when the screen is actually
+    /// involved. With permission denied and no display selected, the only
+    /// reachable mode is `.cameraOnly`, which doesn't need it — gating that
+    /// unconditionally left a camera-only recording impossible to start.
     var canStartRecording: Bool {
         (state == .idle || state == .stopped)
-            && !screenPermissionDenied
+            && !(screenPermissionDenied && selectedDisplay != nil)
             && !availableModes.isEmpty
             && serverReachable
             && APIKeyStatus.shared.hasKey

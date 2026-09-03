@@ -415,9 +415,12 @@ struct MetronomeDiagnostics {
         if metronomeTrace.count < Self.metronomeTraceCapacity {
             metronomeTrace.append(entry)
         } else {
-            // Index by iter modulo capacity. We post-process at dump time
-            // to put them back in order.
-            let idx = Int(entry.iter % Int64(Self.metronomeTraceCapacity))
+            // `iter` is 1-based (the counter is incremented before it's
+            // read), so the append phase above put iter=N at index N-1.
+            // The wrap has to use the same mapping or it recycles the wrong
+            // slot and leaves one stale row alive forever. `makeFullDump`'s
+            // `nextSlot` assumes this mapping too.
+            let idx = Int((entry.iter - 1) % Int64(Self.metronomeTraceCapacity))
             metronomeTrace[idx] = entry
         }
     }

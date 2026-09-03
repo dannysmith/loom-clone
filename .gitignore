@@ -13,6 +13,20 @@ server/.env.*
 server/dist/
 server/public/editor/
 app/LoomClone.xcodeproj/
+# ...except the SwiftPM resolver state. The xcodeproj is generated, but
+# Package.resolved is the only record of which *transitive* versions the app
+# was built against — project.yml pins argmax-oss-swift exactly, and this pins
+# everything underneath it (swift-transformers, swift-argument-parser, …).
+# Without it a clean checkout resolves the graph afresh.
+!app/LoomClone.xcodeproj/
+app/LoomClone.xcodeproj/*
+!app/LoomClone.xcodeproj/project.xcworkspace/
+app/LoomClone.xcodeproj/project.xcworkspace/*
+!app/LoomClone.xcodeproj/project.xcworkspace/xcshareddata/
+app/LoomClone.xcodeproj/project.xcworkspace/xcshareddata/*
+!app/LoomClone.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+app/LoomClone.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!app/LoomClone.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 app/build/
 
 # Xcode

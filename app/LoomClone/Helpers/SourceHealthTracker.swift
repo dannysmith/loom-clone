@@ -85,8 +85,14 @@ struct SourceHealthTracker {
 
     /// Record a hard failure (stream error, session error, interruption).
     /// Suppresses the source's stale check until it delivers again.
-    mutating func markFailed(_ source: Source) {
-        activeWarnings.insert(source.failedWarning)
+    ///
+    /// Returns true only the first time — AVFoundation can report the same
+    /// dead session repeatedly, and the stale path already fires once per
+    /// stall, so failures hold to the same contract rather than stacking
+    /// duplicate timeline events and warning fires.
+    @discardableResult
+    mutating func markFailed(_ source: Source) -> Bool {
+        activeWarnings.insert(source.failedWarning).inserted
     }
 
     // MARK: - Evaluate

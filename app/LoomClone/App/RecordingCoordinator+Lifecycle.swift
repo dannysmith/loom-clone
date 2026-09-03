@@ -240,8 +240,12 @@ extension RecordingCoordinator {
 
         enterStoppedState()
 
-        Task {
-            await self.recordingActor?.cancelRecording()
+        Task { [actor = recordingActor] in
+            await actor?.cancelRecording()
+            // A new recording can be started during `.stopped`, and the
+            // teardown above can take seconds (writer finish, server DELETE).
+            // Only clean up if this is still the run we tore down.
+            guard self.isCurrentRun(actor) else { return }
             self.recordingActor = nil
             self.lastVideo = nil
             self.state = .idle
@@ -373,8 +377,15 @@ extension RecordingCoordinator {
     /// Shared by the normal stop and the terminal-error stop; cancel doesn't
     /// use it because it deliberately throws the recording away.
     private func finishStopFlow() async {
-        let result = await recordingActor?.stopRecording()
-        recordingActor = nil
+        guard let actor = recordingActor else { return }
+        let result = await actor.stopRecording()
+
+        // `stopRecording` can take seconds — the writer finish, the upload
+        // drain's grace window, the `/complete` round trip — and `.stopped`
+        // is a state a new recording can start from. If one has, the actor
+        // reference now belongs to that run and clearing it would leave the
+        // new recording with no handle to pause or stop it.
+        if isCurrentRun(actor) { recordingActor = nil }
         guard let result else { return }
 
         lastVideo = LastVideoInfo(
@@ -414,6 +425,13 @@ extension RecordingCoordinator {
     private func revertToIdleAfterDelay() async {
         try? await Task.sleep(for: Self.stoppedToIdleDelay)
         if state == .stopped { state = .idle }
+    }
+
+    /// Whether `actor` is still the recording this coordinator is driving.
+    /// False once a later run has replaced it — the signal an async teardown
+    /// uses to keep its hands off the newer recording's state.
+    private func isCurrentRun(_ actor: RecordingActor?) -> Bool {
+        recordingActor === actor
     }
 
     // MARK: - Camera Overlay

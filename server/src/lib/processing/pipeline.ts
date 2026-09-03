@@ -17,6 +17,7 @@ import { type ProcessingStepKind, videos } from "../../db/schema";
 import { purgeVideo } from "../cdn";
 import { probeMetadata } from "../derivatives";
 import { deriveEditedCaptions } from "../edit-render";
+import { resetAllEdits } from "../edit-reset";
 import { logEvent } from "../events";
 import { nowIso } from "../format";
 import { DATA_DIR, derivativesDir } from "../paths";
@@ -160,10 +161,8 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   // (the build steps consume source.mp4, not the edited cut). An edit run skips
   // this — it re-applies the new EDL to the preserved source.mp4. A per-artifact
   // `only` regen also skips it: it's edit-aware (activeFile resolves to the
-  // edited cut below), so the edit is preserved. (Dynamic import avoids an import
-  // cycle: edit-reset pulls in store, which pulls in this module.)
+  // edited cut below), so the edit is preserved.
   if (!opts.only && mode !== "edit" && video.lastEditedAt) {
-    const { resetAllEdits } = await import("../edit-reset");
     await resetAllEdits(videoId);
     const reloaded = await getVideo(videoId, { includeTrashed: true });
     if (reloaded) video = reloaded;

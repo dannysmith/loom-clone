@@ -22,13 +22,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # ffmpeg so the media-pipeline tests run instead of skipIf-ing; build
-      # tools because better-sqlite3 (drizzle-kit's driver) compiles via
-      # node-gyp and the bare oven/bun image has no toolchain. The version
-      # assertion mirrors the guard in server/Dockerfile.
+      # ffmpeg so the media-pipeline tests run instead of skipIf-ing. The
+      # version assertion mirrors the guard in server/Dockerfile.
       - name: Install system deps
         run: |
-          apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg python3 make g++
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
           ffmpeg -version | head -1
           ffmpeg -version | head -1 | grep -q "ffmpeg version 7\." || {
             echo "::error::ffmpeg major version drifted from the pinned 7.x — keep in sync with server/Dockerfile"
@@ -37,9 +35,14 @@ jobs:
 
       # The editor and player sub-packages need their own installs: check:all
       # typechecks both, and the build/verify steps below compile them.
+      #
+      # --ignore-scripts on the server install: the only scripted dependency
+      # is better-sqlite3 (drizzle-kit's CLI driver), whose node-gyp build
+      # needs a node toolchain the oven/bun image doesn't have — and nothing
+      # in CI invokes drizzle-kit; the server and tests use bun:sqlite.
       - name: Install dependencies
         run: |
-          cd server && bun install --frozen-lockfile
+          cd server && bun install --frozen-lockfile --ignore-scripts
           cd editor && bun install --frozen-lockfile
           cd ../player && bun install --frozen-lockfile
 

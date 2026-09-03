@@ -23,10 +23,12 @@ extension RecordingActor {
         var appsToExclude: [SCRunningApplication] = []
         if let ourApp { appsToExclude.append(ourApp) }
 
-        // Nothing configured — the filter only needs our own app, so skip the
-        // query entirely. On the prepare path that saves a second
-        // `SCShareableContent` round-trip in the common case.
-        guard exclusion.isActive else { return (appsToExclude, []) }
+        // Nothing configured — the filter only needs our own app. Skip the
+        // query when the caller already handed us that (the prepare path
+        // always does), saving a second `SCShareableContent` round-trip in
+        // the common case. Without a handle we still have to query, or we'd
+        // hand back a filter that doesn't exclude LoomClone's own windows.
+        if !exclusion.isActive, ourApp != nil { return (appsToExclude, []) }
 
         let content: SCShareableContent
         do {

@@ -55,6 +55,13 @@ enum SegmentLedger {
     /// patched segments so callers can interrogate the post-write state, or
     /// nil if nothing was written — in which case the file on disk is
     /// untouched.
+    ///
+    /// The transform runs against the typed shape, but the *write* edits the
+    /// raw dictionaries in place: only the two mutable keys are touched, so
+    /// every other key — including any this type doesn't model — survives
+    /// verbatim. Re-encoding the typed values instead would silently strip a
+    /// field added to `RecordingTimeline.SegmentEntry` from every segment on
+    /// the first heal that touched the file.
     @discardableResult
     static func patchSegments(
         at url: URL,
@@ -62,21 +69,24 @@ enum SegmentLedger {
     ) -> [Segment]? {
         guard let data = try? Data(contentsOf: url),
               var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              var segments = readSegments(at: url)
+              var rawSegments = obj["segments"] as? [[String: Any]],
+              let segments = readSegments(at: url),
+              rawSegments.count == segments.count
         else { return nil }
 
+        var patched: [Segment] = []
+        patched.reserveCapacity(segments.count)
         for i in segments.indices {
-            segments[i] = transform(segments[i])
+            let out = transform(segments[i])
+            patched.append(out)
+            rawSegments[i]["uploaded"] = out.uploaded
+            if let uploadError = out.uploadError {
+                rawSegments[i]["uploadError"] = uploadError
+            } else {
+                rawSegments[i].removeValue(forKey: "uploadError")
+            }
         }
-
-        // Re-serialise the patched segments and splice them back into the
-        // outer object so unknown fields are preserved exactly.
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let patchedData = try? encoder.encode(segments),
-              let patchedAny = try? JSONSerialization.jsonObject(with: patchedData)
-        else { return nil }
-        obj["segments"] = patchedAny
+        obj["segments"] = rawSegments
 
         guard let out = try? JSONSerialization.data(
             withJSONObject: obj,
@@ -84,8 +94,12 @@ enum SegmentLedger {
         ) else { return nil }
 
         do {
-            try out.write(to: url)
-            return segments
+            // Atomic: a crash mid-write would otherwise leave a truncated
+            // file that no longer parses, and an unparseable ledger reads as
+            // "nothing to heal" — the startup scan would skip the recording
+            // forever rather than retry it.
+            try out.write(to: url, options: .atomic)
+            return patched
         } catch {
             Log.heal.log("failed to rewrite \(filename): \(error)")
             return nil

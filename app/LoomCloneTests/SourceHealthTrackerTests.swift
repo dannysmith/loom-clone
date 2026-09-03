@@ -147,6 +147,23 @@ final class SourceHealthTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.activeWarnings.contains(.screenStale))
     }
 
+    func testRepeatedFailureReportsOnlyOnce() {
+        // AVFoundation can report the same dead session more than once; only
+        // the first is news, so duplicates don't stack timeline events and
+        // warning fires.
+        var tracker = SourceHealthTracker()
+        XCTAssertTrue(tracker.markFailed(.camera))
+        XCTAssertFalse(tracker.markFailed(.camera))
+        XCTAssertFalse(tracker.markFailed(.camera))
+    }
+
+    func testFailuresOfDifferentSourcesEachReportOnce() {
+        var tracker = SourceHealthTracker()
+        XCTAssertTrue(tracker.markFailed(.camera))
+        XCTAssertTrue(tracker.markFailed(.audio))
+        XCTAssertFalse(tracker.markFailed(.camera))
+    }
+
     func testFailureOfOneSourceDoesNotSuppressAnother() {
         var tracker = SourceHealthTracker()
         tracker.markReceived(.screen, now: 0)

@@ -155,6 +155,10 @@ extension RecordingActor {
         audioFailoverReason: String? = nil
     ) {
         guard isRecording, !isStopping else { return }
+        // A dead session can report itself more than once; only the first
+        // report is news.
+        guard sourceHealth.markFailed(source) else { return }
+
         let t = logicalElapsedSeconds()
         timeline.recordSourceFailed(source: source.rawValue, error: reason, t: t)
         Log.health.log("\(source.rawValue) capture failed: \(reason)")
@@ -163,7 +167,6 @@ extension RecordingActor {
             failoverSharedSessionAudio(reason: audioFailoverReason, t: t)
         }
 
-        sourceHealth.markFailed(source)
         fireWarning(.init(
             id: source.failedWarning,
             severity: severity(for: source),

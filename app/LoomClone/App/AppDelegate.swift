@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Recording
 
     private func handleRecord() {
-        guard coordinator.state == .idle else { return }
+        guard coordinator.canStartRecording else { return }
         closePopover()
         coordinator.startRecording()
         showRecordingPanel()

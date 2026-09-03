@@ -56,7 +56,7 @@ final class KeyboardShortcutManager {
 
         switch event.keyCode {
         case Self.keyR:
-            if coordinator.state == .idle {
+            if coordinator.canStartRecording {
                 onToggleRecord?()
             } else if coordinator.state == .recording || coordinator.state == .paused {
                 onStop?()

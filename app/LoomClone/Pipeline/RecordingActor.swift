@@ -28,6 +28,51 @@ actor RecordingActor {
     var cameraRawWriter: RawStreamWriter?
     var audioRawWriter: RawStreamWriter?
 
+    /// Names the three raw writers so the paths that treat them uniformly —
+    /// failure reporting, parallel finish, teardown — can iterate instead of
+    /// carrying a copy of the same block per writer.
+    enum RawWriterSlot: String, CaseIterable {
+        case screen
+        case camera
+        case audio
+
+        /// Filename inside the session directory. Also the `file` field on
+        /// `raw.writer.*` timeline events.
+        var filename: String {
+            switch self {
+            case .screen: "screen.mov"
+            case .camera: "camera.mp4"
+            case .audio: "audio.m4a"
+            }
+        }
+    }
+
+    func rawWriter(_ slot: RawWriterSlot) -> RawStreamWriter? {
+        switch slot {
+        case .screen: screenRawWriter
+        case .camera: cameraRawWriter
+        case .audio: audioRawWriter
+        }
+    }
+
+    /// Drop every raw writer reference. The writers must already be finished.
+    func releaseRawWriters() {
+        screenRawWriter = nil
+        cameraRawWriter = nil
+        audioRawWriter = nil
+    }
+
+    /// Finish every raw writer and release it. Used by the two cancel paths,
+    /// where the files are either about to be deleted or were never started —
+    /// `RawStreamWriter.finish()` handles the unstarted case by removing the
+    /// empty file.
+    func finishAndReleaseRawWriters() async {
+        for slot in RawWriterSlot.allCases {
+            await rawWriter(slot)?.finish()
+        }
+        releaseRawWriters()
+    }
+
     /// Captured at prepare time so we can populate the timeline `rawStreams`
     /// block after `finish()`. Avoids re-resolving devices at stop time.
     /// Screen has no bitrate field — the raw screen writer uses ProRes
@@ -51,7 +96,7 @@ actor RecordingActor {
     var localSavePath: URL?
     /// Tracks which raw writers have already had a mid-recording failure
     /// reported to the timeline, to avoid duplicate events.
-    var rawWriterFailureReported: Set<String> = []
+    var rawWriterFailureReported: Set<RawWriterSlot> = []
 
     // MARK: - App Exclusion
 

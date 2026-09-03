@@ -181,11 +181,11 @@ extension RecordingActor {
         }
         await screenRawWriter?.startWriting()
         if screenRawWriter != nil {
-            timeline.recordRawWriterStarted(file: "screen.mov", t: timeline.now())
+            timeline.recordRawWriterStarted(file: RawWriterSlot.screen.filename, t: timeline.now())
         }
         await audioRawWriter?.startWriting()
         if audioRawWriter != nil {
-            timeline.recordRawWriterStarted(file: "audio.m4a", t: timeline.now())
+            timeline.recordRawWriterStarted(file: RawWriterSlot.audio.filename, t: timeline.now())
         }
 
         // 7. Wire capture callbacks. Frames that arrive now will populate the
@@ -246,7 +246,7 @@ extension RecordingActor {
         // frames.
         await cameraRawWriter?.startWriting()
         if cameraRawWriter != nil {
-            timeline.recordRawWriterStarted(file: "camera.mp4", t: timeline.now())
+            timeline.recordRawWriterStarted(file: RawWriterSlot.camera.filename, t: timeline.now())
         }
 
         // Start the metronome — emits frames from the cache at targetFrameRate
@@ -346,7 +346,7 @@ extension RecordingActor {
             let nativeSize = ScreenCaptureManager.nativePixelSize(for: display)
             let width = Int(nativeSize.width)
             let height = Int(nativeSize.height)
-            let url = localDir.appendingPathComponent("screen.mov")
+            let url = localDir.appendingPathComponent(RawWriterSlot.screen.filename)
             let w = RawStreamWriter(url: url, kind: .videoProRes(width: width, height: height))
             do {
                 try await w.configure()
@@ -362,7 +362,7 @@ extension RecordingActor {
             let bitrate = 192_000
             let sampleRate = 48000
             let channels = 2
-            let url = localDir.appendingPathComponent("audio.m4a")
+            let url = localDir.appendingPathComponent(RawWriterSlot.audio.filename)
             let w = RawStreamWriter(url: url, kind: .audio(bitrate: bitrate, sampleRate: sampleRate, channels: channels))
             do {
                 try await w.configure()
@@ -555,7 +555,7 @@ extension RecordingActor {
         }
         let bitrate = 12_000_000
         let fps = targetFrameRate
-        let url = localDir.appendingPathComponent("camera.mp4")
+        let url = localDir.appendingPathComponent(RawWriterSlot.camera.filename)
         let kind: RawStreamWriter.Kind = if withAudio {
             .videoH264WithAudio(
                 width: width, height: height, bitrate: bitrate, fps: fps,

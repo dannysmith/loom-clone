@@ -20,11 +20,7 @@ extension RecordingActor {
     }
 
     /// Finish results for the three raw writers, collected in parallel.
-    struct RawFinishResults {
-        var screen: RawStreamWriter.FinishResult?
-        var camera: RawStreamWriter.FinishResult?
-        var audio: RawStreamWriter.FinishResult?
-    }
+    typealias RawFinishResults = [RawWriterSlot: RawStreamWriter.FinishResult]
 
     /// Stop a committed recording. Cancels the metronome, stops captures,
     /// finishes the writer, completes the upload session.
@@ -54,23 +50,18 @@ extension RecordingActor {
         // the composited writer's finish flow. Each raw writer is independent
         // — finalising one doesn't block the others. We await them all
         // together below before snapshotting the timeline.
-        let screenW = screenRawWriter
-        let cameraW = cameraRawWriter
-        let audioW = audioRawWriter
+        let writers = RawWriterSlot.allCases.compactMap { slot in
+            rawWriter(slot).map { (slot, $0) }
+        }
 
-        let rawFinishTask = Task { [screenW, cameraW, audioW] in
-            await withTaskGroup(of: (String, RawStreamWriter.FinishResult).self) { group -> RawFinishResults in
-                if let w = screenW { group.addTask { await ("screen", w.finish()) } }
-                if let w = cameraW { group.addTask { await ("camera", w.finish()) } }
-                if let w = audioW { group.addTask { await ("audio", w.finish()) } }
+        let rawFinishTask = Task {
+            await withTaskGroup(of: (RawWriterSlot, RawStreamWriter.FinishResult).self) { group -> RawFinishResults in
+                for (slot, writer) in writers {
+                    group.addTask { await (slot, writer.finish()) }
+                }
                 var results = RawFinishResults()
-                for await (key, result) in group {
-                    switch key {
-                    case "screen": results.screen = result
-                    case "camera": results.camera = result
-                    case "audio": results.audio = result
-                    default: break
-                    }
+                for await (slot, result) in group {
+                    results[slot] = result
                 }
                 return results
             }
@@ -187,42 +178,30 @@ extension RecordingActor {
     /// Emit a `raw.writer.failed` timeline event for each raw writer that
     /// entered `.failed`. `t` is the frozen stop-time logical duration.
     private func recordRawWriterFailures(_ results: RawFinishResults, t: Double) {
-        if case let .failed(failure) = results.screen {
-            timeline.recordRawWriterFailed(
-                file: "screen.mov",
-                error: failure.description,
-                code: failure.code,
-                domain: failure.domain,
-                underlyingCode: failure.underlyingCode,
-                underlyingDomain: failure.underlyingDomain,
-                underlyingError: failure.underlyingDescription,
-                t: t
-            )
+        for slot in RawWriterSlot.allCases {
+            guard case let .failed(failure)? = results[slot] else { continue }
+            recordRawWriterFailure(slot, failure: failure, t: t)
         }
-        if case let .failed(failure) = results.camera {
-            timeline.recordRawWriterFailed(
-                file: "camera.mp4",
-                error: failure.description,
-                code: failure.code,
-                domain: failure.domain,
-                underlyingCode: failure.underlyingCode,
-                underlyingDomain: failure.underlyingDomain,
-                underlyingError: failure.underlyingDescription,
-                t: t
-            )
-        }
-        if case let .failed(failure) = results.audio {
-            timeline.recordRawWriterFailed(
-                file: "audio.m4a",
-                error: failure.description,
-                code: failure.code,
-                domain: failure.domain,
-                underlyingCode: failure.underlyingCode,
-                underlyingDomain: failure.underlyingDomain,
-                underlyingError: failure.underlyingDescription,
-                t: t
-            )
-        }
+    }
+
+    /// One `raw.writer.failed` event. Records the real AVAssetWriter error —
+    /// code, domain, and the underlying error beneath it — so an issue
+    /// investigation has Apple's diagnosis rather than our paraphrase.
+    private func recordRawWriterFailure(
+        _ slot: RawWriterSlot,
+        failure: RawStreamWriter.WriterFailure?,
+        t: Double
+    ) {
+        timeline.recordRawWriterFailed(
+            file: slot.filename,
+            error: failure?.description ?? "detected at segment boundary",
+            code: failure?.code,
+            domain: failure?.domain,
+            underlyingCode: failure?.underlyingCode,
+            underlyingDomain: failure?.underlyingDomain,
+            underlyingError: failure?.underlyingDescription,
+            t: t
+        )
     }
 
     /// Populate timeline raw stream metadata from the finished writers, then
@@ -239,7 +218,7 @@ extension RecordingActor {
             let observedBitrate = logicalDuration > 0.1
                 ? Int(Double(bytes) * 8.0 / logicalDuration)
                 : 0
-            let screenFailed = if case .failed = rawResults.screen { true } else { false }
+            let screenFailed = if case .failed? = rawResults[.screen] { true } else { false }
             timeline.setRawScreen(
                 filename: w.url.lastPathComponent,
                 width: dims.width,
@@ -251,7 +230,7 @@ extension RecordingActor {
             )
         }
         if let dims = rawCameraDims, let w = cameraRawWriter {
-            let cameraFailed = if case .failed = rawResults.camera { true } else { false }
+            let cameraFailed = if case .failed? = rawResults[.camera] { true } else { false }
             timeline.setRawCamera(
                 filename: w.url.lastPathComponent,
                 width: dims.width,
@@ -263,7 +242,7 @@ extension RecordingActor {
             )
         }
         if let cfg = rawAudioConfig, let w = audioRawWriter {
-            let audioFailed = if case .failed = rawResults.audio { true } else { false }
+            let audioFailed = if case .failed? = rawResults[.audio] { true } else { false }
             timeline.setRawAudio(
                 filename: w.url.lastPathComponent,
                 codec: "aac-lc",
@@ -274,9 +253,7 @@ extension RecordingActor {
                 failed: audioFailed
             )
         }
-        screenRawWriter = nil
-        cameraRawWriter = nil
-        audioRawWriter = nil
+        releaseRawWriters()
     }
 
     /// Check each raw writer for mid-recording failure and emit a timeline
@@ -287,47 +264,13 @@ extension RecordingActor {
     /// to record.
     func checkRawWriterStatus() async {
         let t = logicalElapsedSeconds()
-        if let w = screenRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("screen") {
-            rawWriterFailureReported.insert("screen")
-            let failure = await w.lastFailure
-            timeline.recordRawWriterFailed(
-                file: "screen.mov",
-                error: failure?.description ?? "detected at segment boundary",
-                code: failure?.code,
-                domain: failure?.domain,
-                underlyingCode: failure?.underlyingCode,
-                underlyingDomain: failure?.underlyingDomain,
-                underlyingError: failure?.underlyingDescription,
-                t: t
-            )
-        }
-        if let w = cameraRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("camera") {
-            rawWriterFailureReported.insert("camera")
-            let failure = await w.lastFailure
-            timeline.recordRawWriterFailed(
-                file: "camera.mp4",
-                error: failure?.description ?? "detected at segment boundary",
-                code: failure?.code,
-                domain: failure?.domain,
-                underlyingCode: failure?.underlyingCode,
-                underlyingDomain: failure?.underlyingDomain,
-                underlyingError: failure?.underlyingDescription,
-                t: t
-            )
-        }
-        if let w = audioRawWriter, await w.hasFailed, !rawWriterFailureReported.contains("audio") {
-            rawWriterFailureReported.insert("audio")
-            let failure = await w.lastFailure
-            timeline.recordRawWriterFailed(
-                file: "audio.m4a",
-                error: failure?.description ?? "detected at segment boundary",
-                code: failure?.code,
-                domain: failure?.domain,
-                underlyingCode: failure?.underlyingCode,
-                underlyingDomain: failure?.underlyingDomain,
-                underlyingError: failure?.underlyingDescription,
-                t: t
-            )
+        for slot in RawWriterSlot.allCases {
+            guard let writer = rawWriter(slot),
+                  await writer.hasFailed,
+                  !rawWriterFailureReported.contains(slot)
+            else { continue }
+            rawWriterFailureReported.insert(slot)
+            await recordRawWriterFailure(slot, failure: writer.lastFailure, t: t)
         }
     }
 
@@ -363,12 +306,7 @@ extension RecordingActor {
         // Finalise raw writers so their AVAssetWriters release cleanly
         // before the local dir is removed below. The files themselves are
         // about to be deleted along with the rest of the session dir.
-        await screenRawWriter?.finish()
-        await cameraRawWriter?.finish()
-        await audioRawWriter?.finish()
-        screenRawWriter = nil
-        cameraRawWriter = nil
-        audioRawWriter = nil
+        await finishAndReleaseRawWriters()
 
         await upload.cancel()
 
@@ -393,12 +331,7 @@ extension RecordingActor {
         // Same for raw writers — they were configured but never started.
         // RawStreamWriter.finish() handles the unstarted case by removing
         // the empty file and bailing.
-        await screenRawWriter?.finish()
-        await cameraRawWriter?.finish()
-        await audioRawWriter?.finish()
-        screenRawWriter = nil
-        cameraRawWriter = nil
-        audioRawWriter = nil
+        await finishAndReleaseRawWriters()
 
         Log.recording.log("Preparation cancelled")
     }

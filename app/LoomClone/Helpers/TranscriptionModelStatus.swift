@@ -21,10 +21,19 @@ final class TranscriptionModelStatus {
         state == .ready
     }
 
-    /// Expected path where WhisperKit stores the downloaded model.
-    /// WhisperKit creates `models/argmaxinc/whisperkit-coreml/<modelName>/`
-    /// under the download base.
-    private static let modelSubpath = "models/argmaxinc/whisperkit-coreml/openai_whisper-large-v3-v20240930_626MB"
+    /// The WhisperKit model this app uses. Single source of truth: passed to
+    /// `WhisperKitConfig` by `TranscribeAgent`, and used to derive the
+    /// on-disk path below. `nonisolated` so the agent can read it off the
+    /// main actor.
+    nonisolated static let modelName = "large-v3-v20240930_626MB"
+
+    /// Where WhisperKit puts a downloaded model, relative to the download
+    /// base: `models/argmaxinc/whisperkit-coreml/openai_whisper-<modelName>/`.
+    /// The `openai_whisper-` prefix is WhisperKit's, not part of the name we
+    /// pass it.
+    private static var modelSubpath: String {
+        "models/argmaxinc/whisperkit-coreml/openai_whisper-\(modelName)"
+    }
 
     private var modelDirectory: URL {
         AppEnvironment.appSupportDirectory

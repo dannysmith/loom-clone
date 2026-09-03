@@ -13,21 +13,13 @@ import WhisperKit
 /// The model download is triggered explicitly from Settings via
 /// `downloadModel()`. All transcription is serialized through the actor.
 actor TranscribeAgent {
-    private static let startupWindow: TimeInterval = 3 * 24 * 60 * 60
     private static let minTranscriptionDuration: TimeInterval = 5
-    private static let modelName = "large-v3-v20240930_626MB"
 
     private let recordingsRoot: URL
 
     /// Lazily initialised WhisperKit pipeline, created after the model
     /// is confirmed on disk.
     private var whisperPipe: WhisperKit?
-
-    /// Read fresh per call so a Settings change to `serverURL` propagates
-    /// without an app restart. `APIClient.shared` is cheap to construct.
-    private var apiClient: APIClient {
-        .shared
-    }
 
     init() {
         self.recordingsRoot = AppEnvironment.recordingsDirectory
@@ -76,22 +68,18 @@ actor TranscribeAgent {
             return
         }
 
-        let cutoff = Date().addingTimeInterval(-Self.startupWindow)
         var pending: [(videoId: String, localDir: URL)] = []
 
         for entry in entries {
-            if fm.fileExists(atPath: entry.appendingPathComponent(".orphaned").path) { continue }
-            if fm.fileExists(atPath: entry.appendingPathComponent(".transcribed").path) { continue }
+            if LocalRecordings.exists(.orphaned, in: entry) { continue }
+            if LocalRecordings.exists(.transcribed, in: entry) { continue }
 
-            let audioFile = entry.appendingPathComponent("audio.m4a")
+            let audioFile = audioURL(in: entry)
             guard fm.fileExists(atPath: audioFile.path) else { continue }
 
-            if let attrs = try? fm.attributesOfItem(atPath: audioFile.path),
-               let modDate = attrs[.modificationDate] as? Date,
-               modDate < cutoff
-            {
-                continue
-            }
+            // Age gate — audio.m4a's modification date is a proxy for when
+            // the session ended.
+            if LocalRecordings.isOutsideStartupWindow(audioFile) { continue }
 
             let videoId = entry.lastPathComponent
             guard !videoId.isEmpty else { continue }
@@ -112,12 +100,9 @@ actor TranscribeAgent {
     private func transcribe(videoId: String, localDir: URL) async {
         guard await TranscriptionModelStatus.shared.isReady else { return }
 
-        let transcribedPath = localDir.appendingPathComponent(".transcribed")
-        if FileManager.default.fileExists(atPath: transcribedPath.path) {
-            return
-        }
+        if LocalRecordings.exists(.transcribed, in: localDir) { return }
 
-        let audioPath = localDir.appendingPathComponent("audio.m4a")
+        let audioPath = audioURL(in: localDir)
         guard FileManager.default.fileExists(atPath: audioPath.path) else {
             Log.transcribe.log("\(videoId): no audio.m4a — skipping")
             return
@@ -173,7 +158,7 @@ actor TranscribeAgent {
         do {
             try await uploadTranscript(videoId: videoId, srt: srt)
         } catch TranscribeError.orphaned {
-            markOrphaned(localDir: localDir)
+            LocalRecordings.markOrphaned(localDir: localDir, log: Log.transcribe)
             return
         } catch {
             Log.transcribe.log("\(videoId): upload failed: \(error) — will retry next launch")
@@ -213,8 +198,7 @@ actor TranscribeAgent {
             videoTitle: titleResult
         )
 
-        let now = ISO8601DateFormatter().string(from: Date())
-        try? Data("transcribed at \(now)\n".utf8).write(to: transcribedPath)
+        LocalRecordings.write(.transcribed, in: localDir, note: "transcribed")
         Log.transcribe.log("\(videoId): complete")
     }
 
@@ -240,7 +224,7 @@ actor TranscribeAgent {
         )
 
         let config = WhisperKitConfig(
-            model: Self.modelName,
+            model: TranscriptionModelStatus.modelName,
             downloadBase: downloadBase,
             verbose: false,
             prewarm: true
@@ -312,35 +296,70 @@ actor TranscribeAgent {
         case server(String)
     }
 
-    private func uploadTranscript(videoId: String, srt: String) async throws {
-        var request = try apiClient.authorizedRequest(
-            path: "/api/videos/\(videoId)/transcript"
-        )
+    /// PUT a body to `path`, mapping the status code onto this agent's two
+    /// error cases.
+    ///
+    /// `tolerating404` is the difference between the two kinds of upload here.
+    /// The transcript artifacts treat a missing video as `.orphaned` — the
+    /// record is gone upstream, so stop retrying this recording forever. The
+    /// AI suggestions are best-effort: a video deleted before the suggestion
+    /// landed isn't a failure, and neither is the server declining to apply it
+    /// (which it also answers with 200).
+    private func put(
+        _ body: Data,
+        contentType: String,
+        to path: String,
+        label: String,
+        tolerating404: Bool
+    ) async throws {
+        let client = APIClient.shared
+        var request = try client.authorizedRequest(path: path)
         request.httpMethod = "PUT"
-        request.setValue("application/x-subrip", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(srt.utf8)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
 
-        let (_, http) = try await apiClient.send(request)
-        if http.statusCode == 404 { throw TranscribeError.orphaned }
+        let (_, http) = try await client.send(request)
+        if http.statusCode == 404 {
+            if tolerating404 { return }
+            throw TranscribeError.orphaned
+        }
         guard http.statusCode == 200 else {
-            throw TranscribeError.server("status \(http.statusCode)")
+            throw TranscribeError.server("\(label) status \(http.statusCode)")
         }
     }
 
-    private func uploadWords(videoId: String, words: [[String: Any]]) async throws {
-        var request = try apiClient.authorizedRequest(
-            path: "/api/videos/\(videoId)/words"
+    private func putJSON(
+        _ object: Any,
+        to path: String,
+        label: String,
+        tolerating404: Bool
+    ) async throws {
+        try await put(
+            JSONSerialization.data(withJSONObject: object),
+            contentType: "application/json",
+            to: path,
+            label: label,
+            tolerating404: tolerating404
         )
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let jsonData = try JSONSerialization.data(withJSONObject: words)
-        request.httpBody = jsonData
+    }
 
-        let (_, http) = try await apiClient.send(request)
-        if http.statusCode == 404 { throw TranscribeError.orphaned }
-        guard http.statusCode == 200 else {
-            throw TranscribeError.server("words status \(http.statusCode)")
-        }
+    private func uploadTranscript(videoId: String, srt: String) async throws {
+        try await put(
+            Data(srt.utf8),
+            contentType: "application/x-subrip",
+            to: "/api/videos/\(videoId)/transcript",
+            label: "transcript",
+            tolerating404: false
+        )
+    }
+
+    private func uploadWords(videoId: String, words: [[String: Any]]) async throws {
+        try await putJSON(
+            words,
+            to: "/api/videos/\(videoId)/words",
+            label: "words",
+            tolerating404: false
+        )
     }
 
     // MARK: - Title Suggestion
@@ -442,22 +461,12 @@ actor TranscribeAgent {
     }
 
     private func uploadSuggestedTitle(videoId: String, title: String) async throws {
-        var request = try apiClient.authorizedRequest(
-            path: "/api/videos/\(videoId)/suggest-title"
+        try await putJSON(
+            ["title": title],
+            to: "/api/videos/\(videoId)/suggest-title",
+            label: "suggest-title",
+            tolerating404: true
         )
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = try JSONSerialization.data(
-            withJSONObject: ["title": title]
-        )
-        request.httpBody = body
-
-        let (_, http) = try await apiClient.send(request)
-        // 404 is fine — video was deleted, not our problem here.
-        // Any 2xx is fine (applied or not).
-        guard http.statusCode == 200 || http.statusCode == 404 else {
-            throw TranscribeError.server("suggest-title status \(http.statusCode)")
-        }
     }
 
     // MARK: - Chapter Title Suggestion
@@ -592,46 +601,28 @@ actor TranscribeAgent {
         chapterId: String,
         title: String
     ) async throws {
-        var request = try apiClient.authorizedRequest(
-            path: "/api/videos/\(videoId)/chapters/\(chapterId)/suggest-title"
+        try await putJSON(
+            ["title": title],
+            to: "/api/videos/\(videoId)/chapters/\(chapterId)/suggest-title",
+            label: "suggest-chapter-title",
+            tolerating404: true
         )
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = try JSONSerialization.data(withJSONObject: ["title": title])
-        request.httpBody = body
-
-        let (_, http) = try await apiClient.send(request)
-        // 200 = applied or not (server returns reason); 404 = video gone.
-        // Treat both as fine — the AI step is best-effort.
-        guard http.statusCode == 200 || http.statusCode == 404 else {
-            throw TranscribeError.server("suggest-chapter-title status \(http.statusCode)")
-        }
     }
 
     private func uploadSuggestedDescription(videoId: String, description: String) async throws {
-        var request = try apiClient.authorizedRequest(
-            path: "/api/videos/\(videoId)/suggest-description"
+        try await putJSON(
+            ["description": description],
+            to: "/api/videos/\(videoId)/suggest-description",
+            label: "suggest-description",
+            tolerating404: true
         )
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = try JSONSerialization.data(
-            withJSONObject: ["description": description]
-        )
-        request.httpBody = body
-
-        let (_, http) = try await apiClient.send(request)
-        guard http.statusCode == 200 || http.statusCode == 404 else {
-            throw TranscribeError.server("suggest-description status \(http.statusCode)")
-        }
     }
 
     // MARK: - Local state
 
-    private func markOrphaned(localDir: URL) {
-        let path = localDir.appendingPathComponent(".orphaned")
-        let now = ISO8601DateFormatter().string(from: Date())
-        let contents = Data("orphaned: server returned 404 at \(now)\n".utf8)
-        try? contents.write(to: path)
-        Log.transcribe.log("marked orphaned: \(localDir.lastPathComponent)")
+    /// The raw mic master. Whisper transcribes this rather than the
+    /// composited HLS output — it's the cleanest audio we have.
+    private func audioURL(in localDir: URL) -> URL {
+        localDir.appendingPathComponent(RecordingActor.RawWriterSlot.audio.filename)
     }
 }

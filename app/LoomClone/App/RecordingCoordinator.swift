@@ -30,6 +30,25 @@ final class RecordingCoordinator {
         }
     }
 
+    /// Whether a new recording can start right now.
+    ///
+    /// One definition, because three call sites (the menu's Record button,
+    /// the menu-bar action, the keyboard shortcut) previously carried three
+    /// that disagreed about `.stopped` — the shortcut and the menu-bar action
+    /// silently did nothing during the post-recording cooldown while the
+    /// button was live.
+    ///
+    /// `.stopped` is that cooldown: recording resources are already released,
+    /// so a second recording can start immediately and the pending
+    /// revert-to-idle Task no-ops once state moves on.
+    var canStartRecording: Bool {
+        (state == .idle || state == .stopped)
+            && !screenPermissionDenied
+            && !availableModes.isEmpty
+            && serverReachable
+            && APIKeyStatus.shared.hasKey
+    }
+
     // MARK: - Device Selection
 
     var availableDisplays: [SCDisplay] = []

@@ -17,23 +17,12 @@ import Foundation
 /// upstream — we write a `.orphaned` sidecar in the local dir and stop
 /// retrying that recording forever.
 actor HealAgent {
-    /// Recordings older than this are not heal-scanned at startup. In
-    /// practice a recording that didn't heal on the day it was made is
-    /// unlikely to ever heal cleanly.
-    private static let startupWindow: TimeInterval = 3 * 24 * 60 * 60
-
     private let recordingsRoot: URL
 
     /// Guard against double-starting the same recording when the post-stop
     /// handoff races the startup scan (shouldn't happen in practice, but
     /// cheap insurance).
     private var inFlight: Set<String> = []
-
-    /// Read fresh per call so a Settings change to `serverURL` propagates
-    /// without an app restart. `APIClient.shared` is cheap to construct.
-    private var apiClient: APIClient {
-        .shared
-    }
 
     init() {
         self.recordingsRoot = AppEnvironment.recordingsDirectory
@@ -72,26 +61,17 @@ actor HealAgent {
             return
         }
 
-        let cutoff = Date().addingTimeInterval(-Self.startupWindow)
-
         for entry in entries {
             // Skip orphans — a past heal already confirmed the server lost
             // this recording.
-            if fm.fileExists(atPath: entry.appendingPathComponent(".orphaned").path) {
-                continue
-            }
+            if LocalRecordings.exists(.orphaned, in: entry) { continue }
 
             let recordingJSON = recordingJSONURL(in: entry)
             guard fm.fileExists(atPath: recordingJSON.path) else { continue }
 
-            // Age gate — use the recording.json modification date as a proxy
-            // for when the session ended.
-            if let attrs = try? fm.attributesOfItem(atPath: recordingJSON.path),
-               let modDate = attrs[.modificationDate] as? Date,
-               modDate < cutoff
-            {
-                continue
-            }
+            // Age gate — recording.json's modification date is a proxy for
+            // when the session ended.
+            if LocalRecordings.isOutsideStartupWindow(recordingJSON) { continue }
 
             guard let parsed = parseTimelineForHealing(sessionDirectory: entry, jsonURL: recordingJSON) else { continue }
             guard !parsed.unhealedFilenames.isEmpty else { continue }
@@ -127,7 +107,7 @@ actor HealAgent {
         case let .ok(_, list):
             missing = list
         case .orphaned:
-            markOrphaned(localDir: localDir)
+            LocalRecordings.markOrphaned(localDir: localDir, log: Log.heal)
             return
         case let .failure(err):
             Log.heal.log("\(videoId): initial /complete failed: \(err) — will retry next launch")
@@ -162,7 +142,7 @@ actor HealAgent {
         case let .ok(_, finalMissing):
             Log.heal.log("\(videoId): final /complete still reports \(finalMissing.count) missing — will retry next launch")
         case .orphaned:
-            markOrphaned(localDir: localDir)
+            LocalRecordings.markOrphaned(localDir: localDir, log: Log.heal)
         case let .failure(err):
             Log.heal.log("\(videoId): final /complete failed: \(err) — will retry next launch")
         }
@@ -209,7 +189,7 @@ actor HealAgent {
                 SegmentLedger.markUploaded(filename, at: recordingJSONURL(in: localDir))
                 Log.heal.log("\(videoId): healed \(filename)")
             } catch HealError.orphaned {
-                markOrphaned(localDir: localDir)
+                LocalRecordings.markOrphaned(localDir: localDir, log: Log.heal)
                 return .orphaned
             } catch {
                 Log.heal.log("\(videoId): PUT failed for \(filename): \(error)")
@@ -234,7 +214,7 @@ actor HealAgent {
 
     private func postComplete(videoId: String, timelineData: Data) async -> CompleteOutcome {
         do {
-            var request = try apiClient.authorizedRequest(
+            var request = try APIClient.shared.authorizedRequest(
                 path: "/api/videos/\(videoId)/complete"
             )
             request.httpMethod = "POST"
@@ -246,7 +226,7 @@ actor HealAgent {
             body.append(Data("}".utf8))
             request.httpBody = body
 
-            let (data, http) = try await apiClient.send(request)
+            let (data, http) = try await APIClient.shared.send(request)
             if http.statusCode == 404 { return .orphaned }
             guard http.statusCode == 200 else { return .failure("status \(http.statusCode)") }
             let json = try JSONDecoder().decode(CompleteResponse.self, from: data)
@@ -269,26 +249,16 @@ actor HealAgent {
         data: Data,
         duration: Double
     ) async throws {
-        var request = try apiClient.authorizedRequest(
+        var request = try APIClient.shared.authorizedRequest(
             path: "/api/videos/\(videoId)/segments/\(filename)"
         )
         request.httpMethod = "PUT"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(duration), forHTTPHeaderField: "x-segment-duration")
 
-        let (_, http) = try await apiClient.upload(request, from: data)
+        let (_, http) = try await APIClient.shared.upload(request, from: data)
         if http.statusCode == 404 { throw HealError.orphaned }
         guard http.statusCode == 200 else { throw HealError.server("status \(http.statusCode)") }
-    }
-
-    // MARK: - Local state
-
-    private func markOrphaned(localDir: URL) {
-        let path = localDir.appendingPathComponent(".orphaned")
-        let now = ISO8601DateFormatter().string(from: Date())
-        let contents = Data("orphaned: server returned 404 at \(now)\n".utf8)
-        try? contents.write(to: path)
-        Log.heal.log("marked orphaned: \(localDir.lastPathComponent)")
     }
 
     // MARK: - Timeline parsing

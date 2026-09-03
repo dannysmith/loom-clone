@@ -348,12 +348,11 @@ extension RecordingCoordinator {
     /// Leave the recording states: freeze the UI, drop the overlay and
     /// warnings, and bring the popover previews back.
     ///
-    /// Shared by all three exits — user stop, user cancel, and terminal
-    /// error. They previously carried three copies that had already diverged:
-    /// only the normal stop restarted the microphone preview, and nothing
-    /// recorded which was intended. All three now restart both previews,
-    /// matching `cleanupAfterCancellation` — leaving the popover's level meter
-    /// dead after a cancel was an oversight, not a decision.
+    /// Shared by all three exits — user stop, user cancel, and terminal error.
+    /// All three restart *both* previews, matching `cleanupAfterCancellation`:
+    /// however a recording ends, an open popover should look the same
+    /// afterwards as it did before. Leaving the level meter dead after a
+    /// cancel is not a deliberate distinction — don't reintroduce one.
     private func enterStoppedState() {
         state = .stopped
         stopTimer()

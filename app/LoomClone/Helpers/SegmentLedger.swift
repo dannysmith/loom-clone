@@ -8,13 +8,16 @@ import Foundation
 /// needs work — so a bug here either abandons footage the server never
 /// received, or re-uploads forever.
 ///
-/// Free functions over a URL rather than methods on the agent, so the whole
-/// read/patch/round-trip contract is exercisable against a temp directory.
+/// Free functions over a URL, not methods on the agent, so the whole
+/// read/patch/round-trip contract stays exercisable against a temp directory.
+/// Keep new logic here rather than inside `HealAgent`, where it can't be
+/// reached without a live server and a real recordings directory.
 ///
-/// Strategy: `JSONSerialization` preserves the outer object exactly, including
-/// fields this type knows nothing about (schema bumps, future additions). Only
-/// the segments array is decoded into a strongly-typed `Codable`, patched, and
-/// spliced back — so unknown fields survive a round trip untouched.
+/// Strategy: read through `JSONSerialization` and write back the same
+/// dictionaries, touching only the two keys healing owns. The typed `Segment`
+/// below is for *deciding* what to write, never for re-encoding the file —
+/// that way a schema bump, or any field this type doesn't model, survives a
+/// round trip untouched.
 enum SegmentLedger {
     static let filename = "recording.json"
 

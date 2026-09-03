@@ -13,11 +13,12 @@ import CoreMedia
 /// it hit the hardware, which is what keeps A/V aligned regardless of capture
 /// pipeline latency.
 ///
-/// These used to be inline expressions woven through `RecordingActor`'s
-/// mutable state, which made the app's subtlest logic — the freshness gate,
-/// keep-alive decisions, pause accounting, the commit anchor's clamp — its
-/// least testable. Pulled out here they take their inputs explicitly, read no
-/// clock of their own, and are covered by `RecordingClockTests`.
+/// Every function here takes its inputs explicitly and reads no clock of its
+/// own, so the app's subtlest logic — the freshness gate, keep-alive
+/// decisions, pause accounting, the commit anchor's clamp — can be tested
+/// directly. Keep it that way: this is the arithmetic A/V sync rests on, and
+/// an innocuous-looking change here breaks it silently. See
+/// `RecordingClockTests`.
 enum RecordingClock {
     // MARK: - Logical time
 

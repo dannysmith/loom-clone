@@ -167,6 +167,9 @@ extension RecordingActor {
             failoverSharedSessionAudio(reason: audioFailoverReason, t: t)
         }
 
+        // Take down any stale pill this failure supersedes. Harmless when
+        // there wasn't one, and this is a cold path.
+        clearWarning(source.staleWarning)
         fireWarning(.init(
             id: source.failedWarning,
             severity: severity(for: source),

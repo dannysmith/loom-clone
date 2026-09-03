@@ -164,6 +164,32 @@ final class SourceHealthTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.markFailed(.camera))
     }
 
+    func testFailureSupersedesAStandingStaleWarning() {
+        // One source, one pill: "camera disconnected" replaces "camera not
+        // delivering frames" rather than sitting alongside it.
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        _ = tracker.evaluate(now: 5, activeSources: allSources)
+        XCTAssertTrue(tracker.activeWarnings.contains(.cameraStale))
+
+        tracker.markFailed(.camera)
+        XCTAssertFalse(tracker.activeWarnings.contains(.cameraStale))
+        XCTAssertTrue(tracker.activeWarnings.contains(.cameraFailed))
+    }
+
+    func testDeliveryAfterAFailureReportsNoRecovery() {
+        // With the stale warning gone, a late frame can't report a recovery
+        // the still-failed source hasn't actually made.
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        _ = tracker.evaluate(now: 5, activeSources: allSources)
+        tracker.markFailed(.camera)
+
+        XCTAssertNil(tracker.markReceived(.camera, now: 5.1))
+        XCTAssertTrue(tracker.activeWarnings.contains(.cameraFailed))
+        XCTAssertTrue(tracker.cameraIsUnusable)
+    }
+
     func testFailureOfOneSourceDoesNotSuppressAnother() {
         var tracker = SourceHealthTracker()
         tracker.markReceived(.screen, now: 0)

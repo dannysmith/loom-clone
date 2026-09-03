@@ -4,9 +4,8 @@ import SwiftUI
 /// at the top of the menu popover: an icon, a bold title, and whatever
 /// explanation and controls the caller supplies.
 ///
-/// One definition rather than three hand-rolled copies of the same chrome —
-/// they had already drifted on internal spacing and layout, and each new
-/// banner was copying whichever one it happened to sit next to.
+/// Add banners through this rather than hand-rolling the chrome again: the
+/// popover can show several at once, and they need to look like one family.
 struct WarningBanner<Content: View>: View {
     let title: String
     let systemImage: String

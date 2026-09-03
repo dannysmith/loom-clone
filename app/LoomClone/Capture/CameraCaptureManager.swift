@@ -393,27 +393,12 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     /// detect device disconnects, resource pressure, and other failures
     /// mid-recording.
     private func installSessionObservers(session: AVCaptureSession) {
-        let errorObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.runtimeErrorNotification,
-            object: session,
-            queue: nil
-        ) { [weak self] notification in
-            guard let self else { return }
-            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
-                ?? NSError(domain: "AVCaptureSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown runtime error"])
-            Log.camera.log("Session runtime error: \(error)")
-            self.onSessionError?(error)
-        }
-        let interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.wasInterruptedNotification,
-            object: session,
-            queue: nil
-        ) { [weak self] notification in
-            guard let self else { return }
-            Log.camera.log("Session interrupted: \(notification.userInfo ?? [:])")
-            self.onSessionInterrupted?()
-        }
-        sessionObservers = [errorObserver, interruptionObserver]
+        sessionObservers = CaptureSessionObservers.install(
+            on: session,
+            log: Log.camera,
+            onError: { [weak self] error in self?.onSessionError?(error) },
+            onInterrupted: { [weak self] in self?.onSessionInterrupted?() }
+        )
     }
 
     /// After `startRunning()`, read the device's active format dims. This is
@@ -453,9 +438,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     }
 
     func stopCapture() async {
-        for observer in sessionObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
+        CaptureSessionObservers.remove(sessionObservers)
         sessionObservers.removeAll()
         guard let session else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

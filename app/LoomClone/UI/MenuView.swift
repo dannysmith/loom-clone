@@ -139,15 +139,6 @@ struct MenuView: View {
                 HideAppWindowsSection(coordinator: coordinator)
             }
 
-            // Record button — disabled if any prerequisite isn't satisfied.
-            // `.stopped` is the post-recording cooldown; resources are already
-            // released so a second recording can start without waiting.
-            let canRecord = (coordinator.state == .idle || coordinator.state == .stopped)
-                && !coordinator.screenPermissionDenied
-                && !coordinator.availableModes.isEmpty
-                && coordinator.serverReachable
-                && apiKeyStatus.hasKey
-
             Button(action: onRecord) {
                 Label("Record", systemImage: "record.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -155,7 +146,7 @@ struct MenuView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .controlSize(.large)
-            .disabled(!canRecord)
+            .disabled(!coordinator.canStartRecording)
 
             // Last video — inline metadata editor
             if let info = coordinator.lastVideo {
@@ -457,68 +448,32 @@ struct MenuView: View {
         }
     }
 
-    // MARK: - API Key Banner
+    // MARK: - Banners
 
     private var apiKeyMissingBanner: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "key.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("No API key configured")
-                    .font(.caption.bold())
-                    .foregroundStyle(.orange)
-                Text("Add a server-issued token in Settings before recording.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                SettingsLink {
-                    Text("Open Settings")
-                }
-                .controlSize(.small)
+        WarningBanner(title: "No API key configured", systemImage: "key.fill") {
+            Text("Add a server-issued token in Settings before recording.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SettingsLink {
+                Text("Open Settings")
             }
+            .controlSize(.small)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
-        )
     }
-
-    // MARK: - Server Banner
 
     private var serverUnavailableBanner: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Server unreachable")
-                    .font(.caption.bold())
-                    .foregroundStyle(.orange)
-                Text("Server is not reachable at \(AppEnvironment.serverURL). Check Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        WarningBanner(title: "Server unreachable", systemImage: "exclamationmark.triangle.fill") {
+            Text("Server is not reachable at \(AppEnvironment.serverURL). Check Settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
-        )
     }
 
-    // MARK: - Permission Banner
-
     private var screenPermissionBanner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Screen Recording Required", systemImage: "exclamationmark.shield")
-                .font(.caption.bold())
-                .foregroundStyle(.orange)
-
+        WarningBanner(title: "Screen Recording Required", systemImage: "exclamationmark.shield") {
             Text("Grant permission in System Settings, then click Retry.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -535,13 +490,6 @@ struct MenuView: View {
                 .controlSize(.small)
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
-        )
     }
 
     // MARK: - Helpers
@@ -572,7 +520,7 @@ private struct CameraMetadataBadge: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
-                Text("\(meta.width)×\(meta.height) · \(Self.formatFPS(effectiveFPS))")
+                Text("\(meta.width)×\(meta.height) · \(FrameRate.formatMeasured(effectiveFPS))")
                     .foregroundStyle(belowTarget ? .orange : .secondary)
             }
             .font(.caption2)
@@ -586,19 +534,12 @@ private struct CameraMetadataBadge: View {
     }
 
     private func helpText(_ meta: CameraPreviewManager.PreviewMetadata) -> String {
-        var parts = ["Camera: \(meta.width)×\(meta.height)", "advertised \(Self.formatFPS(meta.advertisedMaxFPS))"]
+        var parts = ["Camera: \(meta.width)×\(meta.height)", "advertised \(FrameRate.formatMeasured(meta.advertisedMaxFPS))"]
         if let measured = meta.measuredFPS {
-            parts.append("measured \(Self.formatFPS(measured))")
+            parts.append("measured \(FrameRate.formatMeasured(measured))")
         }
         parts.append("target \(targetFrameRate.rawValue) fps")
         return parts.joined(separator: " · ")
-    }
-
-    private static func formatFPS(_ fps: Double) -> String {
-        let rounded = (fps * 10).rounded() / 10
-        return rounded == rounded.rounded()
-            ? String(format: "%.0f fps", rounded)
-            : String(format: "%.1f fps", rounded)
     }
 }
 
@@ -658,8 +599,8 @@ private struct CameraHealthNote: View {
             )
             let underDelivering = measured < targetFrameRate.minAcceptableRate
             if rateLocked, underDelivering {
-                let help = "This camera only offers \(Self.fps(meta.advertisedMaxFPS)) and is delivering "
-                    + "~\(Self.fps(measured)). Recording at \(targetFrameRate.rawValue)fps will likely desync "
+                let help = "This camera only offers \(FrameRate.formatMeasured(meta.advertisedMaxFPS, separator: "")) and is delivering "
+                    + "~\(FrameRate.formatMeasured(measured, separator: "")). Recording at \(targetFrameRate.rawValue)fps will likely desync "
                     + "audio and video. Try a different USB port or cable, or connect the camera via HDMI capture."
                 return Warning(
                     icon: "exclamationmark.triangle.fill",
@@ -681,12 +622,5 @@ private struct CameraHealthNote: View {
         }
 
         return nil
-    }
-
-    private static func fps(_ value: Double) -> String {
-        let rounded = (value * 10).rounded() / 10
-        return rounded == rounded.rounded()
-            ? String(format: "%.0ffps", rounded)
-            : String(format: "%.1ffps", rounded)
     }
 }

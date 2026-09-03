@@ -49,27 +49,12 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
         session.commitConfiguration()
         self.session = session
 
-        let errorObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.runtimeErrorNotification,
-            object: session,
-            queue: nil
-        ) { [weak self] notification in
-            guard let self else { return }
-            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
-                ?? NSError(domain: "AVCaptureSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown runtime error"])
-            Log.mic.log("Session runtime error: \(error)")
-            self.onSessionError?(error)
-        }
-        let interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.wasInterruptedNotification,
-            object: session,
-            queue: nil
-        ) { [weak self] notification in
-            guard let self else { return }
-            Log.mic.log("Session interrupted: \(notification.userInfo ?? [:])")
-            self.onSessionInterrupted?()
-        }
-        sessionObservers = [errorObserver, interruptionObserver]
+        sessionObservers = CaptureSessionObservers.install(
+            on: session,
+            log: Log.mic,
+            onError: { [weak self] error in self?.onSessionError?(error) },
+            onInterrupted: { [weak self] in self?.onSessionInterrupted?() }
+        )
 
         // startRunning() blocks until the session is actually running. Wait for
         // it to complete before returning so callers don't race against the
@@ -91,9 +76,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
     }
 
     func stopCapture() async {
-        for observer in sessionObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
+        CaptureSessionObservers.remove(sessionObservers)
         sessionObservers.removeAll()
         guard let session else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

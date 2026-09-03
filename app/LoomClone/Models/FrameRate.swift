@@ -1,4 +1,5 @@
 import CoreMedia
+import Foundation
 
 /// Target frame rate for the output video timeline.
 ///
@@ -37,5 +38,16 @@ enum FrameRate: Int32, CaseIterable, Identifiable, Codable {
     /// 59.94fps passes ≥ 59.0).
     var minAcceptableRate: Double {
         Double(rawValue) - 1.0
+    }
+
+    /// Render a *measured* or *advertised* rate — any Double, not just the
+    /// two selectable presets — for display. Whole rates stay whole
+    /// ("30 fps"); NTSC-ish ones keep a single decimal ("29.9 fps") rather
+    /// than showing the user 29.969999. `separator` is empty for the tighter
+    /// inline contexts.
+    static func formatMeasured(_ fps: Double, separator: String = " ") -> String {
+        let rounded = (fps * 10).rounded() / 10
+        let format = rounded == rounded.rounded() ? "%.0f" : "%.1f"
+        return String(format: format, rounded) + separator + "fps"
     }
 }

@@ -204,60 +204,11 @@ extension RecordingCoordinator {
         }
 
         guard state == .recording || state == .paused else { return }
-        state = .stopped
-        stopTimer()
-        stopAppLaunchObserver()
-        activeWarnings.removeAll()
-        cameraOverlay?.hide()
-
-        // Only restart the preview if the popover is still open (rare —
-        // usually the popover has been closed since before recording started).
-        if isPopoverOpen, let camera = selectedCamera {
-            Task { await cameraPreview.start(device: camera) }
-        }
-        if isPopoverOpen, let mic = selectedMicrophone {
-            Task { await microphonePreview.start(device: mic) }
-        }
+        enterStoppedState()
 
         Task {
-            let result = await recordingActor?.stopRecording()
-            if let result {
-                self.lastVideo = LastVideoInfo(
-                    url: result.url,
-                    videoId: result.videoId,
-                    slug: result.slug,
-                    title: result.title,
-                    visibility: result.visibility
-                )
-            }
-            self.recordingActor = nil
-
-            // Hand off any missing segments to HealAgent. Fire-and-forget —
-            // the user's clipboard already has the URL by now.
-            if let result, !result.missing.isEmpty, let heal = self.healAgent {
-                heal.scheduleHeal(
-                    videoId: result.videoId,
-                    localDir: result.localDir,
-                    timelineData: result.timelineData,
-                    missing: result.missing
-                )
-            }
-
-            // Hand off to TranscribeAgent. Fire-and-forget — runs Whisper
-            // in the background and uploads the SRT when done. The stop
-            // fallback returns an empty videoId when the upload session
-            // never got one — nothing to transcribe against in that case.
-            if let result, !result.videoId.isEmpty, let transcribe = self.transcribeAgent {
-                transcribe.scheduleTranscription(
-                    videoId: result.videoId,
-                    localDir: result.localDir
-                )
-            }
-
-            try? await Task.sleep(for: Self.stoppedToIdleDelay)
-            if self.state == .stopped {
-                self.state = .idle
-            }
+            await self.finishStopFlow()
+            await self.revertToIdleAfterDelay()
         }
     }
 
@@ -287,18 +238,10 @@ extension RecordingCoordinator {
             return false
         }
 
-        state = .stopped
-        stopTimer()
-        stopAppLaunchObserver()
-        activeWarnings.removeAll()
-        cameraOverlay?.hide()
-
-        if isPopoverOpen, let camera = selectedCamera {
-            Task { await cameraPreview.start(device: camera) }
-        }
+        enterStoppedState()
 
         Task {
-            await recordingActor?.cancelRecording()
+            await self.recordingActor?.cancelRecording()
             self.recordingActor = nil
             self.lastVideo = nil
             self.state = .idle
@@ -375,50 +318,15 @@ extension RecordingCoordinator {
     func handleTerminalRecordingError(_ message: String) {
         guard state == .recording || state == .paused else { return }
 
-        state = .stopped
-        stopTimer()
-        stopAppLaunchObserver()
-        activeWarnings.removeAll()
-        cameraOverlay?.hide()
+        enterStoppedState()
 
         // Tell AppDelegate to hide the floating RecordingPanel — we don't own
         // it, and neither user-initiated stop nor user-initiated cancel ran
         // here to do it for us.
         onTerminalRecordingStop?()
 
-        if isPopoverOpen, let camera = selectedCamera {
-            Task { await cameraPreview.start(device: camera) }
-        }
-
         Task { @MainActor in
-            let result = await recordingActor?.stopRecording()
-            if let result {
-                self.lastVideo = LastVideoInfo(
-                    url: result.url,
-                    videoId: result.videoId,
-                    slug: result.slug,
-                    title: result.title,
-                    visibility: result.visibility
-                )
-            }
-            self.recordingActor = nil
-
-            if let result, !result.missing.isEmpty, let heal = self.healAgent {
-                heal.scheduleHeal(
-                    videoId: result.videoId,
-                    localDir: result.localDir,
-                    timelineData: result.timelineData,
-                    missing: result.missing
-                )
-            }
-
-            // Same empty-videoId guard as the normal stop flow above.
-            if let result, !result.videoId.isEmpty, let transcribe = self.transcribeAgent {
-                transcribe.scheduleTranscription(
-                    videoId: result.videoId,
-                    localDir: result.localDir
-                )
-            }
+            await self.finishStopFlow()
 
             let alert = NSAlert()
             alert.messageText = "Recording stopped"
@@ -427,11 +335,85 @@ extension RecordingCoordinator {
             alert.addButton(withTitle: "OK")
             alert.runModal()
 
-            try? await Task.sleep(for: Self.stoppedToIdleDelay)
-            if self.state == .stopped {
-                self.state = .idle
-            }
+            await self.revertToIdleAfterDelay()
         }
+    }
+
+    // MARK: - Shared teardown
+
+    /// Leave the recording states: freeze the UI, drop the overlay and
+    /// warnings, and bring the popover previews back.
+    ///
+    /// Shared by all three exits — user stop, user cancel, and terminal
+    /// error. They previously carried three copies that had already diverged:
+    /// only the normal stop restarted the microphone preview, and nothing
+    /// recorded which was intended. All three now restart both previews,
+    /// matching `cleanupAfterCancellation` — leaving the popover's level meter
+    /// dead after a cancel was an oversight, not a decision.
+    private func enterStoppedState() {
+        state = .stopped
+        stopTimer()
+        stopAppLaunchObserver()
+        activeWarnings.removeAll()
+        cameraOverlay?.hide()
+
+        // Only worth restarting if the popover is still open — otherwise we'd
+        // silently re-activate the camera behind a closed popover, which is
+        // exactly what stopping it was for.
+        guard isPopoverOpen else { return }
+        if let camera = selectedCamera {
+            Task { await cameraPreview.start(device: camera) }
+        }
+        if let mic = selectedMicrophone {
+            Task { await microphonePreview.start(device: mic) }
+        }
+    }
+
+    /// Run the recording down and hand the result to the background agents.
+    /// Shared by the normal stop and the terminal-error stop; cancel doesn't
+    /// use it because it deliberately throws the recording away.
+    private func finishStopFlow() async {
+        let result = await recordingActor?.stopRecording()
+        recordingActor = nil
+        guard let result else { return }
+
+        lastVideo = LastVideoInfo(
+            url: result.url,
+            videoId: result.videoId,
+            slug: result.slug,
+            title: result.title,
+            visibility: result.visibility
+        )
+
+        // Both hand-offs are fire-and-forget — the user's clipboard already
+        // has the URL by now and neither should hold up the UI.
+
+        // Segments the server didn't have at stop time.
+        if !result.missing.isEmpty, let heal = healAgent {
+            heal.scheduleHeal(
+                videoId: result.videoId,
+                localDir: result.localDir,
+                timelineData: result.timelineData,
+                missing: result.missing
+            )
+        }
+
+        // Whisper runs in the background and uploads the SRT when done. The
+        // stop fallback returns an empty videoId when the upload session never
+        // got one — nothing to transcribe against in that case.
+        if !result.videoId.isEmpty, let transcribe = transcribeAgent {
+            transcribe.scheduleTranscription(
+                videoId: result.videoId,
+                localDir: result.localDir
+            )
+        }
+    }
+
+    /// Hold `.stopped` briefly so the panel doesn't snap straight back to
+    /// idle, then release it — unless something else has already moved on.
+    private func revertToIdleAfterDelay() async {
+        try? await Task.sleep(for: Self.stoppedToIdleDelay)
+        if state == .stopped { state = .idle }
     }
 
     // MARK: - Camera Overlay

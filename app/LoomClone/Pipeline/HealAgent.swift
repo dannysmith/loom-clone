@@ -81,7 +81,7 @@ actor HealAgent {
                 continue
             }
 
-            let recordingJSON = entry.appendingPathComponent("recording.json")
+            let recordingJSON = recordingJSONURL(in: entry)
             guard fm.fileExists(atPath: recordingJSON.path) else { continue }
 
             // Age gate — use the recording.json modification date as a proxy
@@ -93,7 +93,7 @@ actor HealAgent {
                 continue
             }
 
-            guard let parsed = parseTimelineForHealing(at: recordingJSON) else { continue }
+            guard let parsed = parseTimelineForHealing(sessionDirectory: entry, jsonURL: recordingJSON) else { continue }
             guard !parsed.unhealedFilenames.isEmpty else { continue }
 
             Task {
@@ -137,12 +137,7 @@ actor HealAgent {
         if missing.isEmpty {
             // Server has everything; local flags are stale. Flip them so the
             // next startup scan skips this recording.
-            _ = patchRecordingJSON(localDir: localDir) { seg in
-                var out = seg
-                out.uploaded = true
-                out.uploadError = nil
-                return out
-            }
+            SegmentLedger.markAllUploaded(at: recordingJSONURL(in: localDir))
             Log.heal.log("\(videoId): nothing missing server-side")
             return
         }
@@ -160,7 +155,7 @@ actor HealAgent {
         // Re-POST /complete with the updated timeline so the server's
         // recording.json mirrors local `uploaded: true` flags and the
         // status transitions healing → complete.
-        let updatedTimeline = (try? Data(contentsOf: localDir.appendingPathComponent("recording.json"))) ?? timelineData
+        let updatedTimeline = (try? Data(contentsOf: recordingJSONURL(in: localDir))) ?? timelineData
         switch await postComplete(videoId: videoId, timelineData: updatedTimeline) {
         case let .ok(_, finalMissing) where finalMissing.isEmpty:
             Log.heal.log("\(videoId): complete")
@@ -202,7 +197,8 @@ actor HealAgent {
                 failed.append(filename)
                 continue
             }
-            let duration = lookupDuration(localDir: localDir, filename: filename) ?? 4.0
+            let duration = SegmentLedger.duration(of: filename, at: recordingJSONURL(in: localDir))
+                ?? WriterActor.segmentIntervalSeconds
             do {
                 try await putSegment(
                     videoId: videoId,
@@ -210,13 +206,7 @@ actor HealAgent {
                     data: data,
                     duration: duration
                 )
-                _ = patchRecordingJSON(localDir: localDir) { seg in
-                    guard seg.filename == filename else { return seg }
-                    var out = seg
-                    out.uploaded = true
-                    out.uploadError = nil
-                    return out
-                }
+                SegmentLedger.markUploaded(filename, at: recordingJSONURL(in: localDir))
                 Log.heal.log("\(videoId): healed \(filename)")
             } catch HealError.orphaned {
                 markOrphaned(localDir: localDir)
@@ -301,18 +291,15 @@ actor HealAgent {
         Log.heal.log("marked orphaned: \(localDir.lastPathComponent)")
     }
 
-    // MARK: - Timeline parsing & patching
+    // MARK: - Timeline parsing
 
-    //
-    // recording.json is a versioned Encodable on the Swift side. The heal
-    // agent only needs to read session.id and the segments array, and patch
-    // the upload-state flags on each segment.
-    //
-    // Strategy: JSONSerialization preserves the outer dict exactly (including
-    // fields heal doesn't know about — schema bumps, future additions). The
-    // segments array is decoded into a strongly-typed `Codable` struct so
-    // field-name string literals don't leak across three call sites. Modified
-    // segments are re-encoded back into the dict before write.
+    // The segment read/patch mechanics live in `SegmentLedger` — free
+    // functions over a URL, so the audit trail this agent maintains can be
+    // tested against a temp directory rather than only in a real recording.
+
+    private func recordingJSONURL(in localDir: URL) -> URL {
+        localDir.appendingPathComponent(SegmentLedger.filename)
+    }
 
     private struct TimelineParse {
         let videoId: String
@@ -320,104 +307,18 @@ actor HealAgent {
         let unhealedFilenames: [String]
     }
 
-    /// Codable mirror of the segments-array entries in recording.json.
-    /// Mirrors `RecordingTimeline.SegmentEntry` but is its own type because
-    /// the agent only needs read+write on a subset of fields, and the round-
-    /// trip preserves unknown fields verbatim through JSONSerialization.
-    ///
-    /// `index`, `bytes`, and `emittedAt` are decoded as Optional so older or
-    /// partial JSON files (missing one of those fields for any reason) can
-    /// still be processed — healing only requires `filename`,
-    /// `durationSeconds`, and the upload flags. JSONEncoder omits nil values,
-    /// so a missing-in field stays missing on round-trip.
-    private struct SegmentPatch: Codable {
-        let index: Int?
-        let filename: String
-        let bytes: Int?
-        let durationSeconds: Double
-        let emittedAt: Double?
-        var uploaded: Bool
-        var uploadError: String?
-    }
-
-    /// Reads segments out of `recording.json` strongly-typed, applies
-    /// `transform`, and writes them back. Returns `nil` if the file can't
-    /// be read or doesn't have a segments array; otherwise returns the
-    /// patched segments so callers can interrogate the post-write state.
-    @discardableResult
-    private func patchRecordingJSON(
-        localDir: URL,
-        transform: (SegmentPatch) -> SegmentPatch
-    ) -> [SegmentPatch]? {
-        let url = localDir.appendingPathComponent("recording.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        guard var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        guard let rawSegments = obj["segments"] as? [[String: Any]] else { return nil }
-
-        // Round-trip through JSON to get a strongly-typed [SegmentPatch].
-        guard let segmentsData = try? JSONSerialization.data(withJSONObject: rawSegments),
-              var segments = try? JSONDecoder().decode([SegmentPatch].self, from: segmentsData)
+    /// What the startup scan needs from one session directory: which video it
+    /// is, its timeline bytes for the `/complete` POST, and whether anything
+    /// is still waiting to be uploaded. Nil when the file can't be used.
+    private func parseTimelineForHealing(sessionDirectory: URL, jsonURL: URL) -> TimelineParse? {
+        guard let data = try? Data(contentsOf: jsonURL),
+              let videoId = SegmentLedger.videoId(forSessionDirectory: sessionDirectory, jsonURL: jsonURL)
         else { return nil }
-
-        for i in segments.indices {
-            segments[i] = transform(segments[i])
-        }
-
-        // Re-serialise patched segments and splice back into the outer dict
-        // so unknown fields are preserved exactly.
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let patchedData = try? encoder.encode(segments),
-              let patchedAny = try? JSONSerialization.jsonObject(with: patchedData)
-        else { return nil }
-        obj["segments"] = patchedAny
-
-        guard let out = try? JSONSerialization.data(
-            withJSONObject: obj,
-            options: [.prettyPrinted, .sortedKeys]
-        ) else { return nil }
-        do {
-            try out.write(to: url)
-            return segments
-        } catch {
-            Log.heal.log("failed to rewrite recording.json: \(error)")
-            return nil
-        }
-    }
-
-    /// Read-only view of the segments array. Used by `parseTimelineForHealing`
-    /// and `lookupDuration` so neither has to repeat the JSON dance.
-    private func readSegments(at url: URL) -> [SegmentPatch]? {
-        guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawSegments = obj["segments"] as? [[String: Any]],
-              let segmentsData = try? JSONSerialization.data(withJSONObject: rawSegments)
-        else { return nil }
-        return try? JSONDecoder().decode([SegmentPatch].self, from: segmentsData)
-    }
-
-    private func parseTimelineForHealing(at url: URL) -> TimelineParse? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        // Prefer the directory name (matches server's video id exactly) but
-        // fall back to session.id if naming drifts for any reason.
-        let dirName = url.deletingLastPathComponent().lastPathComponent
-        let videoId: String = {
-            if !dirName.isEmpty { return dirName }
-            if let session = obj["session"] as? [String: Any],
-               let id = session["id"] as? String { return id }
-            return ""
-        }()
-        guard !videoId.isEmpty else { return nil }
-
-        let segments = readSegments(at: url) ?? []
-        let unhealed = segments.filter { !$0.uploaded }.map(\.filename)
-        return TimelineParse(videoId: videoId, timelineData: data, unhealedFilenames: unhealed)
-    }
-
-    private func lookupDuration(localDir: URL, filename: String) -> Double? {
-        let url = localDir.appendingPathComponent("recording.json")
-        return readSegments(at: url)?.first(where: { $0.filename == filename })?.durationSeconds
+        return TimelineParse(
+            videoId: videoId,
+            timelineData: data,
+            unhealedFilenames: SegmentLedger.unhealedFilenames(at: jsonURL)
+        )
     }
 
     private struct CompleteResponse: Decodable {

@@ -101,7 +101,7 @@ Direct commands (for reference or when you need different flags):
 │       ├── index.ts                      #   entry — initDb() + boots createApp()
 │       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)
 │       ├── test-utils.ts                 #   temp-dir test isolation helpers
-│       ├── lib/                          #   store, playlist, derivatives, errors, url, file-serve, site-config — co-located __tests__/
+│       ├── lib/                          #   paths, store, lifecycle, playlist, derivatives, errors, url, file-serve, site-config — co-located __tests__/
 │       │   └── processing/               #     post-processing: step registry, reconcile(), steps table, isProbablyPlayable, backfill
 │       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
 │       └── routes/                       #   four modules, each with co-located __tests__/

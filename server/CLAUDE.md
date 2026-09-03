@@ -110,13 +110,14 @@ Preferences:
 
 ## Style
 
+- **Keep the lib acyclic.** `paths.ts` (`DATA_DIR` + path helpers) has no project imports; `store.ts` is data access; whole-video orchestration lives in `lifecycle.ts` beside it. New orchestration goes beside the store, not in it — orchestration accumulating inside `store.ts` is what made it the module everything routed through, and forced a run of `await import()` calls purely to break cycles. There are none left; don't reach for one.
 - Path imports use `"path"` / `"fs/promises"` (not `"node:..."`) — Bun accepts both; keep consistent with existing files.
 - `noUncheckedIndexedAccess` is on. Array/record access gives `T | undefined` — destructure with defaults or guard explicitly.
 
 ## Gotchas
 
 - **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory in `src/app.ts` is the side-effect-free entry — import that from tests, not `index.ts`.
-- **`DATA_DIR = "data"`** is relative. Tests depend on this. In production the Docker bind-mount maps it to `/mnt/data/loom-clone` — don't hard-code absolute paths.
+- **`DATA_DIR = "data"`** lives in `src/lib/paths.ts` and is relative. Tests depend on this. In production the Docker bind-mount maps it to `/mnt/data/loom-clone` — don't hard-code absolute paths.
 - **Segment filename allowlist** in `routes/api/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists. Similar allowlists exist in `routes/videos/media.ts` for raw and stream routes.
 - **Derivatives are fire-and-forget.** `scheduleDerivatives(id)` returns immediately; the `/complete` response never waits on ffmpeg. Tests use `_inFlightPromise(id)` to await completion.
 - **Default queries hide trashed videos.** `getVideo` / `getVideoBySlug` / `resolveSlug` / `listVideos` all accept `{ includeTrashed: true }` to opt in. Admin-side code needs the opt-in; public routes should never use it.

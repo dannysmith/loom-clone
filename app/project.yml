@@ -8,9 +8,13 @@ options:
   createIntermediateGroups: true
 
 packages:
+  # Exact pin, not a range. This is the app's only third-party dependency and
+  # it's pre-1.0, so `from:` resolves to anything below 1.0.0 — on a clean
+  # checkout (the xcodeproj, and with it Package.resolved, is gitignored) that
+  # could be a different version than the one this code was built against.
   argmax-oss-swift:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
-    from: "0.9.0"
+    exactVersion: "0.18.0"
 
 settingGroups:
   codeQuality:
@@ -20,6 +24,10 @@ settingGroups:
 
 settings:
   base:
+    # Swift 5 language mode with strict concurrency set to `complete` above:
+    # the concurrency diagnostics are on, but the Swift 6 language-mode
+    # migration is deliberately deferred. Roughly eight `@unchecked Sendable`
+    # / `nonisolated(unsafe)` sites would need revisiting first.
     SWIFT_VERSION: "5"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
     groups:

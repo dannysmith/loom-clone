@@ -373,8 +373,6 @@ actor TranscribeAgent {
     /// generators. Returns nil if generation/validation failed.
     private func suggestTitle(videoId: String, localDir: URL, srt: String) async -> String? {
         #if canImport(FoundationModels)
-            guard #available(macOS 26, *) else { return nil }
-
             // Build context preamble from recording.json
             let recordingJsonURL = localDir.appendingPathComponent("recording.json")
             let preamble = RecordingContextBuilder.buildPreamble(from: recordingJsonURL)
@@ -416,8 +414,6 @@ actor TranscribeAgent {
         titleHint: String?
     ) async {
         #if canImport(FoundationModels)
-            guard #available(macOS 26, *) else { return }
-
             let recordingJsonURL = localDir.appendingPathComponent("recording.json")
             let preamble = RecordingContextBuilder.buildPreamble(from: recordingJsonURL)
                 ?? "video recording"
@@ -487,8 +483,6 @@ actor TranscribeAgent {
         videoTitle: String?
     ) async {
         #if canImport(FoundationModels)
-            guard #available(macOS 26, *) else { return }
-
             let recordingJsonURL = localDir.appendingPathComponent("recording.json")
             guard let markers = readChapterMarkers(from: recordingJsonURL),
                   !markers.isEmpty

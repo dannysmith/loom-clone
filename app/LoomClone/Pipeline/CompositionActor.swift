@@ -17,6 +17,11 @@ import Metal
 enum CompositionError: Error {
     case renderFailed(Error)
     case stallTimeout
+    /// `MTLCreateSystemDefaultDevice` returned nil at init, so there is no
+    /// context to render with. Takes the same rebuild-then-escalate path as
+    /// any other render failure — and since rebuild asks for the same device,
+    /// it escalates to a clean user-visible stop rather than a crash.
+    case metalUnavailable
 }
 
 actor CompositionActor {
@@ -32,7 +37,13 @@ actor CompositionActor {
 
     /// `var` rather than `let` so `rebuildContext()` can swap in a fresh
     /// context after a GPU error poisons the underlying Metal command queue.
-    private var ciContext: CIContext
+    /// Optional because Metal can be unavailable at init — the same failure
+    /// `rebuildContext` already handles gracefully. Crashing here while
+    /// treating the identical condition as recoverable four hundred lines
+    /// down was the inconsistency; now both paths surface a render failure
+    /// and the metronome escalates to a clean, user-visible stop.
+    private var ciContext: CIContext?
+
     private var outputPool: PixelBufferPool
     private var outputBounds: CGRect
 
@@ -64,16 +75,16 @@ actor CompositionActor {
     }
 
     init() {
-        guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue()
-        else {
-            fatalError("Metal not available")
+        if let device = MTLCreateSystemDefaultDevice(),
+           let queue = device.makeCommandQueue()
+        {
+            ciContext = CIContext(
+                mtlCommandQueue: queue,
+                options: [.cacheIntermediates: false]
+            )
+        } else {
+            Log.composition.log("Metal unavailable at init — every composite will fail until a rebuild succeeds")
         }
-
-        ciContext = CIContext(
-            mtlCommandQueue: queue,
-            options: [.cacheIntermediates: false]
-        )
 
         outputPool = PixelBufferPool(
             width: outputWidth,
@@ -210,6 +221,9 @@ actor CompositionActor {
         // we used previously had no feedback channel at all — a stuck
         // command buffer silently hung the metronome until the GPU watchdog
         // cleared it.
+        guard let ciContext else {
+            return .failure(.metalUnavailable)
+        }
         let renderTask: CIRenderTask
         do {
             renderTask = try ciContext.startTask(toRender: composited, to: destination)

@@ -52,4 +52,24 @@ final class FrameRateTests: XCTestCase {
         XCTAssertEqual(FrameRate.thirtyFPS.label, "30 fps")
         XCTAssertEqual(FrameRate.sixtyFPS.label, "60 fps")
     }
+
+    // MARK: - Measured-rate formatting
+
+    func testFormatMeasuredKeepsWholeRatesWhole() {
+        XCTAssertEqual(FrameRate.formatMeasured(30), "30 fps")
+        XCTAssertEqual(FrameRate.formatMeasured(60), "60 fps")
+    }
+
+    func testFormatMeasuredRoundsToOneDecimal() {
+        // The point of the helper: a measured NTSC rate reads as "29.9 fps",
+        // not "29.969999999999999 fps".
+        XCTAssertEqual(FrameRate.formatMeasured(29.97), "30 fps")
+        XCTAssertEqual(FrameRate.formatMeasured(29.94), "29.9 fps")
+        XCTAssertEqual(FrameRate.formatMeasured(24.32), "24.3 fps")
+    }
+
+    func testFormatMeasuredSeparatorIsConfigurable() {
+        XCTAssertEqual(FrameRate.formatMeasured(30, separator: ""), "30fps")
+        XCTAssertEqual(FrameRate.formatMeasured(24.32, separator: ""), "24.3fps")
+    }
 }

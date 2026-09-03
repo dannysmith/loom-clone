@@ -16,7 +16,8 @@ struct MetronomeTickEntry: Encodable {
     let hostT: Double
     /// Camera FIFO depth before any pop this tick.
     let queueDepthBefore: Int
-    /// `cameraOnly` branch taken: "pop" | "repeat" | "noSource" | "n/a"
+    /// Which source-acquisition branch the tick took. Serialised as
+    /// `CompositeBranch.rawValue`.
     let cameraBranch: String
     /// Candidate sourcePTS (seconds since `recordingStartTime`).
     /// `nil` when no source frame was available.
@@ -41,23 +42,44 @@ struct MetronomeTickEntry: Encodable {
     let sleepS: Double
 }
 
-enum MetronomeTickAction {
-    static let emit = "emit"
-    static let rejectMonotonicity = "reject:mono"
-    static let rejectNegElapsed = "reject:negElapsed"
-    static let rejectInvalidPTS = "reject:invalidPTS"
-    static let rejectSampleBuild = "reject:sampleBuild"
+/// What one metronome tick did. `rawValue` is what lands in the trace row —
+/// an enum rather than loose string constants so a typo at a comparison site
+/// is a compile error, not a branch that silently never matches.
+enum MetronomeTickAction: String {
+    case emit
+    case rejectMonotonicity = "reject:mono"
+    case rejectNegElapsed = "reject:negElapsed"
+    case rejectInvalidPTS = "reject:invalidPTS"
+    case rejectSampleBuild = "reject:sampleBuild"
     /// Source-PTS freshness check skipped this tick (Phase 1/2). Distinct
     /// from `noSource` — we have a cached frame, it's just not strictly
     /// newer than what we last emitted.
-    static let skipStale = "skipStale"
+    case skipStale
     /// Phase 3 keep-alive: emitted a synthetic-PTS repeat of the last
     /// cached source during a long static-source run.
-    static let keepalive = "keepalive"
-    static let noSource = "noSource"
-    static let compositionFail = "compositionFail"
-    static let notRecording = "notRecording"
-    static let noStart = "noStart"
+    case keepalive
+    case noSource
+    case compositionFail
+    case notRecording
+    case noStart
+}
+
+/// How a tick acquired (or failed to acquire) its source frame. Recorded on
+/// the trace row so the branch taken can be correlated with whether the emit
+/// that followed succeeded.
+enum CompositeBranch: String {
+    /// A camera frame was popped off the FIFO (`cameraOnly`).
+    case pop
+    /// No cached source frame existed at all — a real problem.
+    case noSource
+    /// A cached frame existed but wasn't strictly newer than the last emit.
+    /// Expected in normal operation: a static screen, or the metronome
+    /// over-running the camera's delivery rate.
+    case skipStale
+    /// Synthetic repeat emitted during a long static run.
+    case keepalive
+    /// Composition was attempted; the branch says nothing further.
+    case notApplicable = "n/a"
 }
 
 /// First-N camera frames captured in detail. Each entry is independent of

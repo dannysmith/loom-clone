@@ -104,7 +104,7 @@ extension RecordingActor {
         elapsedLogical: Double?,
         emitLogical: Double?,
         lastEmitLogical: Double?,
-        action: String
+        action: MetronomeTickAction
     ) {
         let host = logicalElapsedSeconds()
         let entry = MetronomeTickEntry(
@@ -112,13 +112,13 @@ extension RecordingActor {
             emittedTickIdx: metronomeTickIdx,
             hostT: host,
             queueDepthBefore: decision.queueDepthBefore,
-            cameraBranch: decision.branch,
+            cameraBranch: decision.branch.rawValue,
             sourcePTS: sourceLogical,
             elapsedLogical: elapsedLogical,
             emitPTS: emitLogical,
             lastEmitPTS: lastEmitLogical,
             compositeS: decision.compositeS,
-            action: action,
+            action: action.rawValue,
             driftS: 0, // filled by metronomeLoop after the call if desired
             sleepS: 0
         )
@@ -129,7 +129,7 @@ extension RecordingActor {
     /// rejected before composition ran (e.g. notRecording / noStart).
     func recordTickRejection(
         iterIdx: Int64,
-        action: String,
+        action: MetronomeTickAction,
         decision: CompositeDecision?,
         ptsLogical: Double?,
         lastEmitLogical: Double?
@@ -144,13 +144,13 @@ extension RecordingActor {
             emittedTickIdx: metronomeTickIdx,
             hostT: host,
             queueDepthBefore: decision?.queueDepthBefore ?? cameraFrameQueue.count,
-            cameraBranch: decision?.branch ?? "n/a",
+            cameraBranch: (decision?.branch ?? .notApplicable).rawValue,
             sourcePTS: sourceRelative,
             elapsedLogical: ptsLogical,
             emitPTS: nil,
             lastEmitPTS: lastEmitLogical,
             compositeS: decision?.compositeS ?? 0,
-            action: action,
+            action: action.rawValue,
             driftS: 0,
             sleepS: 0
         )
@@ -161,7 +161,7 @@ extension RecordingActor {
     /// one-line summary to console. No-op if there's no local save path.
     func writeDiagnosticsDump(sessionID: String) {
         let summary = diagnostics.summaryLine()
-        print("[diag-summary] \(summary)")
+        Log.recording.log("diagnostics: \(summary)")
 
         guard let localDir = localSavePath else { return }
         let path = localDir.appendingPathComponent("diagnostics.json")
@@ -174,9 +174,9 @@ extension RecordingActor {
         do {
             let data = try encoder.encode(dump)
             try data.write(to: path)
-            print("[diag] Wrote \(data.count) bytes to diagnostics.json")
+            Log.recording.log("Wrote \(data.count) bytes to diagnostics.json")
         } catch {
-            print("[diag] Failed to write diagnostics dump: \(error)")
+            Log.recording.log("Failed to write diagnostics dump: \(error)")
         }
     }
 

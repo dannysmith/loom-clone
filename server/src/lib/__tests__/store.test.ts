@@ -7,10 +7,10 @@ import {
   videos as videosTable,
 } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { ConflictError, ValidationError } from "../errors";
 import { listEvents } from "../events";
 import {
   addSegment,
-  ConflictError,
   completeVideo,
   createVideo,
   deleteVideo,
@@ -27,7 +27,6 @@ import {
   untrashVideo,
   updateSlug,
   updateVideo,
-  ValidationError,
   validateSlugFormat,
 } from "../store";
 import { addTagToVideo, createTag } from "../tags";

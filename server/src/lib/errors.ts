@@ -1,5 +1,26 @@
 import type { Context } from "hono";
 
+// The two error classes the lib layer throws for bad input. Routes catch them
+// and map each to its HTTP status + `ErrorCode` below.
+
+// Thrown when a slug or other input fails format/reservation validation.
+// Routes map this to HTTP 400.
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+// Thrown when a mutation would violate uniqueness expectations (e.g. slug
+// already in use by another video or redirect). Routes map this to HTTP 409.
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
 // Machine-readable error codes for the API envelope. Routes use the
 // `apiError` helper so every error response has a uniform shape:
 //   { error: "<human message>", code: "<MACHINE_CODE>" }

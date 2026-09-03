@@ -4,6 +4,7 @@ import { join, resolve, sep } from "path";
 import type { ProcessingStepKind } from "../../db/schema";
 import { purgeVideo } from "../../lib/cdn";
 import { chaptersExist } from "../../lib/chapters";
+import { ConflictError, ValidationError } from "../../lib/errors";
 import { listEvents, logEvent } from "../../lib/events";
 import { probeJson } from "../../lib/ffprobe";
 import { listVideoFiles } from "../../lib/files";
@@ -15,14 +16,12 @@ import { REGENERABLE_KINDS } from "../../lib/processing/registry";
 import { hasActiveRun } from "../../lib/processing/run-lock";
 import { slugFromTitle } from "../../lib/slug-utils";
 import {
-  ConflictError,
   checkSlugAvailable,
   getTranscript,
   trashVideo,
   untrashVideo,
   updateSlug,
   updateVideo,
-  ValidationError,
   validateSlugFormat,
 } from "../../lib/store";
 import { addTagToVideo, getVideoTags, listTags, removeTagFromVideo } from "../../lib/tags";

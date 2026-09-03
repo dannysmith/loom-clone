@@ -6,7 +6,7 @@ import { join, resolve } from "path";
 import { z } from "zod";
 import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../lib/chapters";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
-import { apiError, ErrorCode } from "../../lib/errors";
+import { apiError, ConflictError, ErrorCode, ValidationError } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
 import { DATA_DIR } from "../../lib/paths";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
@@ -15,7 +15,6 @@ import { recordExternalStep } from "../../lib/processing/steps-store";
 import { parseSrtToPlainText } from "../../lib/srt";
 import {
   addSegment,
-  ConflictError,
   createVideo,
   deleteVideo,
   getVideo,
@@ -25,7 +24,6 @@ import {
   updateSlug,
   updateVideo,
   upsertTranscript,
-  ValidationError,
   type Video,
 } from "../../lib/store";
 import { absoluteUrl, urlsForVideo } from "../../lib/url";

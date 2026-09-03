@@ -30,6 +30,7 @@ import {
   videoTranscripts,
 } from "../db/schema";
 import { purgeGlobalFeeds, purgeSlugRename, purgeVideo } from "./cdn";
+import { ConflictError, ValidationError } from "./errors";
 import { type EventType, logEvent } from "./events";
 import { nowIso } from "./format";
 import { DATA_DIR } from "./paths";
@@ -38,24 +39,6 @@ import { searchVideoIds, updateFtsTranscript } from "./search";
 // Re-export for convenience — routes import Video from here alongside store
 // functions rather than reaching into db/schema directly.
 export type { Video } from "../db/schema";
-
-// Thrown when a slug or other input fails format/reservation validation.
-// Routes map this to HTTP 400.
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-// Thrown when a mutation would violate uniqueness expectations (e.g. slug
-// already in use by another video or redirect). Routes map this to HTTP 409.
-export class ConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ConflictError";
-  }
-}
 
 // Slug format: lowercase alphanumeric + single dashes, no leading/trailing/double dashes.
 // Deliberately excludes dots and slashes so `.json`/`.md`/`.mp4` suffix routes and

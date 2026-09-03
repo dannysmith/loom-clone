@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { Hono } from "hono";
 import { resolve } from "path";
-import { ConflictError, ValidationError } from "../../lib/store";
+import { ConflictError, ValidationError } from "../../lib/errors";
 import videos from "./videos";
 
 // Read version once at import time. resolve() from this file's directory

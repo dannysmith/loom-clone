@@ -3,15 +3,14 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../db/client";
 import { tagSlugRedirects, videoEvents, videoTags } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { ConflictError, ValidationError } from "../errors";
 import {
-  ConflictError,
   checkSlugAvailable,
   completeVideo,
   createVideo,
   deleteVideo,
   updateSlug,
   updateVideo,
-  ValidationError,
 } from "../store";
 import {
   addTagToVideo,
@@ -126,6 +125,13 @@ describe("updateTag", () => {
     await createTag("first");
     const second = await createTag("second");
     expect(updateTag(second.id, { name: "first" })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("rejects an empty name with ValidationError", async () => {
+    // ValidationError (not a bare Error) so the admin route renders the
+    // failure inline on the edit row instead of 500ing.
+    const tag = await createTag("demo");
+    expect(updateTag(tag.id, { name: "   " })).rejects.toBeInstanceOf(ValidationError);
   });
 
   test("throws for unknown tag id", async () => {

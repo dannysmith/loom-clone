@@ -81,7 +81,7 @@ As soon as `/complete` returns a non-empty `missing`, `RecordingCoordinator` fir
 
 ### Startup scan
 
-At app launch, `HealAgent.runStartupScan()` walks `~/Library/Application Support/LoomClone/recordings/`. For each session within the last **3 days** whose `recording.json` has at least one segment with `uploaded: false`, it kicks off a heal. Directories with a `.orphaned` marker are skipped. Recordings older than 3 days are ignored — if it didn't heal by now, it's very unlikely to ever heal cleanly.
+At app launch, `HealAgent.runStartupScan()` walks `~/Library/Application Support/LoomClone/recordings/`. For each session within the last **3 days** whose `recording.json` has at least one segment with `uploaded: false`, it kicks off a heal. Directories with a `.orphaned` marker are skipped. Recordings older than 3 days are ignored — if it didn't heal by now, it's very unlikely to ever heal cleanly. The window and the sidecar semantics are shared with TranscribeAgent in `Pipeline/LocalRecordings.swift`.
 
 ### The heal loop
 
@@ -93,7 +93,7 @@ For each video being healed:
 4. Otherwise, for each missing filename:
    - Read bytes from the local dir.
    - PUT to the server.
-   - On success, patch the local `recording.json` to set `uploaded: true` for that filename.
+   - On success, patch the local `recording.json` to set `uploaded: true` for that filename. The read/patch mechanics are in `Helpers/SegmentLedger.swift` (free functions over a URL, unit-tested against a temp directory); the round-trip preserves fields the patcher doesn't know about, so a future schema addition survives a heal.
    - On 404, mark `.orphaned` and stop.
    - On any other failure, log and move on — the recording will be picked up again at next startup.
 5. **Final `/complete`.** Re-POST with the updated timeline so the server's `recording.json` mirrors the healed local state. Server transitions `status: "healing"` → `"processing"` → `"ready"` when there's nothing missing.

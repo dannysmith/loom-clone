@@ -1,6 +1,6 @@
 import { readdir, stat } from "fs/promises";
 import { join, relative } from "path";
-import { DATA_DIR } from "./store";
+import { DATA_DIR } from "./paths";
 
 export interface FileEntry {
   path: string; // relative to the video's data dir

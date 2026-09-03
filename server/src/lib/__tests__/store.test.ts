@@ -10,13 +10,13 @@ import {
 } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { listEvents } from "../events";
+import { DATA_DIR } from "../paths";
 import { getStepStates } from "../processing/steps-store";
 import {
   addSegment,
   ConflictError,
   completeVideo,
   createVideo,
-  DATA_DIR,
   deleteVideo,
   duplicateVideo,
   getSegmentDurations,

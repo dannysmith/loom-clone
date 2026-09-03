@@ -16,7 +16,7 @@ import {
 } from "../../lib/chapters";
 import { computeKeptSegments, type Edit } from "../../lib/edit-transcript";
 import { logEvent } from "../../lib/events";
-import { DATA_DIR } from "../../lib/store";
+import { DATA_DIR } from "../../lib/paths";
 import { type AdminEnv, requireVideo } from "./helpers";
 
 const chapters = new Hono<AdminEnv>();

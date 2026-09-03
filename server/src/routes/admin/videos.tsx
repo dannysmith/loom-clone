@@ -7,6 +7,7 @@ import { chaptersExist } from "../../lib/chapters";
 import { listEvents, logEvent } from "../../lib/events";
 import { probeJson } from "../../lib/ffprobe";
 import { listVideoFiles } from "../../lib/files";
+import { DATA_DIR } from "../../lib/paths";
 import { scheduleReprocess } from "../../lib/processing/pipeline";
 import { canReprocess, computeReadiness, reprocessability } from "../../lib/processing/readiness";
 import { REGENERABLE_KINDS } from "../../lib/processing/registry";
@@ -15,7 +16,6 @@ import { slugFromTitle } from "../../lib/slug-utils";
 import {
   ConflictError,
   checkSlugAvailable,
-  DATA_DIR,
   duplicateVideo,
   getTranscript,
   permanentlyDeleteVideo,

@@ -1,15 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import { DATA_DIR } from "../../../lib/paths";
 import { _inFlightPromise } from "../../../lib/processing/pipeline";
 import { getStep, markStepReady } from "../../../lib/processing/steps-store";
-import {
-  DATA_DIR,
-  getSegmentDurations,
-  getVideo,
-  setVideoStatus,
-  trashVideo,
-} from "../../../lib/store";
+import { getSegmentDurations, getVideo, setVideoStatus, trashVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import videos, { expectedFilenamesFromTimeline } from "../videos";
 

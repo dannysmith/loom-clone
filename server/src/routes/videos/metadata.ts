@@ -2,7 +2,8 @@ import type { Context } from "hono";
 import { join } from "path";
 import { agentTextCacheControl } from "../../lib/cache-control";
 import { formatDate, formatDuration } from "../../lib/format";
-import { DATA_DIR, getTranscript, resolveSlug, type Video } from "../../lib/store";
+import { DATA_DIR } from "../../lib/paths";
+import { getTranscript, resolveSlug, type Video } from "../../lib/store";
 import { absoluteUrl, activeRawFilename, urlsForVideo } from "../../lib/url";
 
 // Machine-readable representations of a video for programmatic/LLM

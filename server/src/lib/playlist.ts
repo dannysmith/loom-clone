@@ -1,7 +1,8 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { DEFAULT_SEGMENT_DURATION } from "./constants";
-import { DATA_DIR, getSegmentDurations, type Video } from "./store";
+import { DATA_DIR } from "./paths";
+import { getSegmentDurations, type Video } from "./store";
 
 // Build the playlist from the filesystem: directory listing sorted by filename
 // is the source of truth for order, durations come from the in-memory sidecar.

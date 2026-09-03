@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
+import { DATA_DIR } from "../paths";
 import { buildPlaylist, writePlaylist } from "../playlist";
-import { addSegment, createVideo, DATA_DIR, setVideoStatus } from "../store";
+import { addSegment, createVideo, setVideoStatus } from "../store";
 
 let env: TestEnv;
 

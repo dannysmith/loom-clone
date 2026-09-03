@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { join } from "path";
-import { derivativesDir } from "../../lib/derivatives";
+import { derivativesDir } from "../../lib/paths";
 import { staticUrl } from "../../lib/static-assets";
 import type { Video } from "../../lib/store";
 import { getVideosForTag, resolveTagSlug } from "../../lib/tags";

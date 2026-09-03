@@ -3,7 +3,7 @@ import { mkdir } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { _parseLoudnormJson, processAudio } from "../derivatives";
-import { DATA_DIR } from "../store";
+import { DATA_DIR } from "../paths";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;
 const sayAvailable = Bun.which("say") !== null;

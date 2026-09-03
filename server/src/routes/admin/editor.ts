@@ -5,9 +5,9 @@ import { raw } from "hono/html";
 import { join } from "path";
 import { z } from "zod";
 import { serveFileWithRange } from "../../lib/file-serve";
+import { DATA_DIR } from "../../lib/paths";
 import { scheduleEdit } from "../../lib/processing/pipeline";
 import { hasActiveRun } from "../../lib/processing/run-lock";
-import { DATA_DIR } from "../../lib/store";
 import { loadEntryAssets } from "../../lib/vite-manifest";
 import { type AdminEnv, requireVideo } from "./helpers";
 

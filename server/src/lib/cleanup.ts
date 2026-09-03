@@ -4,9 +4,10 @@ import { join } from "path";
 import { getDb } from "../db/client";
 import { type ProcessingStepKind, videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
+import { DATA_DIR } from "./paths";
 import { applicabilityContext, isServable, stepByKind } from "./processing/registry";
 import { getStep } from "./processing/steps-store";
-import { DATA_DIR, getVideo } from "./store";
+import { getVideo } from "./store";
 
 const STALE_DAYS = 10;
 

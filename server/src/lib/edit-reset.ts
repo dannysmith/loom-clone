@@ -12,8 +12,9 @@ import { probeDuration, probeMetadata } from "./derivatives";
 import { deriveEditedTranscript, type Word } from "./edit-transcript";
 import { logEvent } from "./events";
 import { nowIso } from "./format";
+import { DATA_DIR } from "./paths";
 import { markStepSkipped } from "./processing/steps-store";
-import { DATA_DIR, getVideo, upsertTranscript } from "./store";
+import { getVideo, upsertTranscript } from "./store";
 
 // Wash a committed edit away so the build pipeline can rebuild a consistent,
 // UNEDITED video from source.mp4: a build run is edit-unaware and would otherwise

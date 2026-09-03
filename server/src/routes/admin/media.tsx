@@ -8,7 +8,7 @@ import {
 } from "../../lib/chapters";
 import type { Edit } from "../../lib/edit-transcript";
 import { serveFileWithRange } from "../../lib/file-serve";
-import { DATA_DIR } from "../../lib/store";
+import { DATA_DIR } from "../../lib/paths";
 import { type AdminEnv, requireVideo } from "./helpers";
 
 type EditsFileLike = { edits?: unknown };

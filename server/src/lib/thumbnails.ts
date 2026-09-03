@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, rename, rm } from "fs/promises";
 import { join } from "path";
-import { DATA_DIR } from "./store";
+import { DATA_DIR } from "./paths";
 
 // Thumbnail candidate extraction and selection. Replaces the old single-frame
 // thumbnail recipe with a multi-candidate system: extract several frames biased

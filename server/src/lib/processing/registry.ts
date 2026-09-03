@@ -8,7 +8,6 @@
 import { join } from "path";
 import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
 import {
-  derivativesDir,
   extractMetadata,
   generateSourceFromHls,
   generateSourceFromUpload,
@@ -21,6 +20,7 @@ import {
 } from "../derivatives";
 import { type Edl, renderEditedOutput } from "../edit-render";
 import { computeKeptSegments, type Segment } from "../edit-transcript";
+import { derivativesDir } from "../paths";
 import { generatePeaks } from "../peaks";
 import { generateStoryboard } from "../storyboard";
 import { generateSuggestedEdits, runSilenceDetect, type Silence } from "../suggested-edits";

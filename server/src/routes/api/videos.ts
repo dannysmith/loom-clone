@@ -8,6 +8,7 @@ import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { apiError, ErrorCode } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
+import { DATA_DIR } from "../../lib/paths";
 import { buildPlaylist, writePlaylist } from "../../lib/playlist";
 import { scheduleDerivatives, scheduleReprocess } from "../../lib/processing/pipeline";
 import { recordExternalStep } from "../../lib/processing/steps-store";
@@ -16,7 +17,6 @@ import {
   addSegment,
   ConflictError,
   createVideo,
-  DATA_DIR,
   deleteVideo,
   getVideo,
   listVideosPaginated,

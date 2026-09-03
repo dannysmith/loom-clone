@@ -3,7 +3,8 @@ import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
 import { extractMetadata } from "../derivatives";
-import { createVideo, DATA_DIR, getVideo } from "../store";
+import { DATA_DIR } from "../paths";
+import { createVideo, getVideo } from "../store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;
 

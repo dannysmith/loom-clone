@@ -10,7 +10,8 @@ import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { probeDuration } from "../../derivatives";
-import { createVideo, DATA_DIR, getTranscript, getVideo, upsertTranscript } from "../../store";
+import { DATA_DIR } from "../../paths";
+import { createVideo, getTranscript, getVideo, upsertTranscript } from "../../store";
 import { _drainInFlight, scheduleEdit, scheduleReprocess } from "../pipeline";
 import { getStepStates, markStepReady } from "../steps-store";
 

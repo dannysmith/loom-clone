@@ -12,7 +12,7 @@
 import { mkdir, rename } from "fs/promises";
 import { join } from "path";
 import { computeKeptSegments, type Edit, type Segment } from "./edit-transcript";
-import { DATA_DIR } from "./store";
+import { DATA_DIR } from "./paths";
 
 export type Chapter = {
   id: string;

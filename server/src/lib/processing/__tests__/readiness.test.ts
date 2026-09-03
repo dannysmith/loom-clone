@@ -7,7 +7,8 @@ import type { ProcessingStepKind } from "../../../db/schema";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { writeChapters } from "../../chapters";
-import { createVideo, DATA_DIR, getVideo } from "../../store";
+import { DATA_DIR } from "../../paths";
+import { createVideo, getVideo } from "../../store";
 import { canReprocess, computeReadiness, type ReadinessItem, reprocessability } from "../readiness";
 import { markStepFailed, markStepReady } from "../steps-store";
 

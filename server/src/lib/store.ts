@@ -32,10 +32,9 @@ import {
 import { purgeGlobalFeeds, purgeSlugRename, purgeVideo } from "./cdn";
 import { type EventType, logEvent } from "./events";
 import { nowIso } from "./format";
+import { DATA_DIR } from "./paths";
 import { searchVideoIds, updateFtsTranscript } from "./search";
 import { POST_FOOTAGE_STATUSES } from "./status";
-
-export const DATA_DIR = "data";
 
 // Re-export for convenience — routes import Video from here alongside store
 // functions rather than reaching into db/schema directly.

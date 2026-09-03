@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { createApp } from "../../../app";
-import { createVideo, DATA_DIR, trashVideo, updateVideo } from "../../../lib/store";
+import { DATA_DIR } from "../../../lib/paths";
+import { createVideo, trashVideo, updateVideo } from "../../../lib/store";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;

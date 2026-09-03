@@ -5,18 +5,18 @@
 #   bun 1.3.14, Debian 13 (trixie), apt ffmpeg 7.1.x
 FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS base
 
-# --- Editor build stage ---
-# Builds the admin React editor in its own stage so the toolchain (React,
-# Vite, wavesurfer — all of editor/node_modules) never reaches the runtime
-# image, and so server source changes don't invalidate the editor layers
-# (and vice versa). CI also builds the editor as a check (deploy.yml), but
-# this build is the one production actually serves.
-FROM base AS editor-build
-WORKDIR /build/editor
-COPY editor/package.json editor/bun.lock ./
+# --- Admin client build stage ---
+# Builds the admin React apps (editor + cover tool) in their own stage so the
+# toolchain (React, Vite, wavesurfer — all of admin-client/node_modules) never
+# reaches the runtime image, and so server source changes don't invalidate the
+# admin-client layers (and vice versa). CI also builds it as a check
+# (deploy.yml), but this build is the one production actually serves.
+FROM base AS admin-client-build
+WORKDIR /build/admin-client
+COPY admin-client/package.json admin-client/bun.lock ./
 RUN bun install --frozen-lockfile
-COPY editor/ ./
-# vite.config.ts outDir is ../public/editor → /build/public/editor
+COPY admin-client/ ./
+# vite.config.ts outDir is ../public/admin-client → /build/public/admin-client
 RUN bun run build
 
 # --- Runtime image ---
@@ -39,12 +39,13 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-# Copy all server source (editor/player node_modules and public/editor are
-# excluded via .dockerignore; their sources are copied but never installed).
+# Copy all server source (admin-client/player node_modules and
+# public/admin-client are excluded via .dockerignore; their sources are copied
+# but never installed).
 COPY . .
 
-# Bring in the built editor assets.
-COPY --from=editor-build /build/public/editor ./public/editor
+# Bring in the built admin-client assets.
+COPY --from=admin-client-build /build/public/admin-client ./public/admin-client
 
 EXPOSE 3000
 

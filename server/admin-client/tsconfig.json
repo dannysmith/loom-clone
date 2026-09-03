@@ -9,7 +9,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Vite's ambient module declarations — CSS imports and the `?url` asset
+    // suffix used for the embedded webfonts.
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

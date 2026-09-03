@@ -57,6 +57,16 @@ export type VideoInputs = {
   currentThumbnailUrl: string;
 };
 
+// Author identity rendered onto the cover. Owned by the server's
+// site-config.ts and passed in the same way as the video inputs, so nothing
+// here hardcodes a name, handle or avatar.
+export type Author = {
+  name: string;
+  /** Bare handle — the "@" sigil is rendered separately. */
+  handle: string;
+  avatarUrl: string;
+};
+
 // Placeholder shown when the video has no title set in the DB.
 export const TITLE_PLACEHOLDER = "Untitled video";
 

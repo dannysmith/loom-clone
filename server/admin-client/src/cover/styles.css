@@ -23,7 +23,7 @@ html, body, #cover-root {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, system-ui, -apple-system, sans-serif;
+  font-family: "Inter Variable", system-ui, -apple-system, sans-serif;
 }
 
 body {

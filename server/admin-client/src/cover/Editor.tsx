@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { addToThumbnails } from "./api";
 import { dataUrlToBlob, downloadDataUrl, exportJpeg, exportPng, exportSvg } from "./export";
 import {
+  type Author,
   type CoverState,
   MEDIA_DEFAULTS,
   QR_DEFAULTS,
@@ -13,12 +14,13 @@ import {
 
 type Props = {
   inputs: VideoInputs;
+  author: Author;
   state: CoverState;
   setState: React.Dispatch<React.SetStateAction<CoverState>>;
   svgRef: React.RefObject<SVGSVGElement | null>;
 };
 
-export function Editor({ inputs, state, setState, svgRef }: Props) {
+export function Editor({ inputs, author, state, setState, svgRef }: Props) {
   // Export panel — local UI state.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [working, setWorking] = useState<null | "preview" | "png" | "jpeg" | "svg" | "upload">(
@@ -226,7 +228,7 @@ export function Editor({ inputs, state, setState, svgRef }: Props) {
 
       <div className="field">
         <div className="field-header">
-          <span className="field-label">@dannysmith</span>
+          <span className="field-label">@{author.handle}</span>
           <label className="switch">
             <input
               type="checkbox"

@@ -1,3 +1,5 @@
+import firaCodeWoff2 from "@fontsource-variable/fira-code/files/fira-code-latin-wght-normal.woff2?url";
+import interWoff2 from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
 import { toJpeg, toPng } from "html-to-image";
 import { CANVAS } from "./preview/constants";
 
@@ -9,8 +11,14 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const XLINK_NS = "http://www.w3.org/1999/xlink";
 const PIXEL_RATIO = 2;
 
-const GOOGLE_FONTS_HREF =
-  "https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400&family=Inter:wght@200;300;700;800;900&display=swap";
+// The fonts the canvas renders in, for embedding into an exported SVG. Family
+// names and weight ranges match what @fontsource declares for the variable
+// builds imported in main.tsx; the latin subset covers the Latin-1 range,
+// which is what covers are titled in.
+const EMBEDDED_FONTS = [
+  { family: "Inter Variable", weight: "100 900", url: interWoff2 },
+  { family: "Fira Code Variable", weight: "300 700", url: firaCodeWoff2 },
+];
 
 // PNG — html-to-image rasterizes via canvas. Returns a data URL.
 export async function exportPng(svg: SVGSVGElement): Promise<string> {
@@ -126,66 +134,23 @@ async function inlineImagesWithDedup(svg: SVGSVGElement) {
   }
 }
 
-// Fetch Google Fonts CSS, keep only the latin @font-face blocks (covers
-// basic English + common punctuation), then base64-encode each WOFF2 and
-// inline it into the CSS. Returns a self-contained CSS string ready to drop
-// into a <style> element. Falls back to a remote @import if anything fails
-// so the SVG still renders (with network).
+// Base64-inline the webfonts as @font-face rules so an exported SVG renders
+// correctly when opened standalone, with no network at all. A font that fails
+// to fetch is skipped rather than failing the export — the SVG still opens,
+// just in fallback fonts.
 async function buildEmbeddedFontsCss(): Promise<string> {
-  const fallback = `@import url('${GOOGLE_FONTS_HREF}');`;
-
-  let css: string;
-  try {
-    const res = await fetch(GOOGLE_FONTS_HREF);
-    if (!res.ok) return fallback;
-    css = await res.text();
-  } catch {
-    return fallback;
-  }
-
-  // Pull out the individual @font-face blocks. unicode-range is what tells
-  // us which subset each block represents; we only want latin.
-  const blocks = css.match(/@font-face\s*\{[^}]+\}/g) ?? [];
-  const latin = blocks.filter((block) => {
-    const range = /unicode-range\s*:\s*([^;]+);/i.exec(block)?.[1] ?? "";
-    // The "latin" subset starts at U+0000. Blocks without a unicode-range
-    // (rare here) are kept too since they cover everything.
-    return range === "" || /U\+0000/.test(range);
-  });
-
-  if (latin.length === 0) return fallback;
-
-  // Fetch each unique WOFF2 url once and base64-encode it.
-  const urls = new Set<string>();
-  for (const block of latin) {
-    for (const m of block.matchAll(/url\((https?:[^)]+\.woff2[^)]*)\)/g)) {
-      if (m[1]) urls.add(m[1]);
-    }
-  }
-  const urlToData = new Map<string, string>();
-  await Promise.all(
-    [...urls].map(async (url) => {
+  const faces = await Promise.all(
+    EMBEDDED_FONTS.map(async ({ family, weight, url }) => {
       try {
-        urlToData.set(url, await fetchAsDataUrl(url));
+        const data = await fetchAsDataUrl(url);
+        return `@font-face { font-family: "${family}"; font-style: normal; font-weight: ${weight}; src: url(${data}) format("woff2-variations"); }`;
       } catch (err) {
-        console.warn("Failed to embed font url:", url, err);
+        console.warn("Failed to embed font during SVG export:", url, err);
+        return "";
       }
     }),
   );
-
-  // If we couldn't fetch any, fall back rather than ship a broken CSS.
-  if (urlToData.size === 0) return fallback;
-
-  // Substitute every url(...) reference with its data URL.
-  const embedded = latin.map((block) => {
-    let out = block;
-    for (const [url, data] of urlToData) {
-      out = out.split(url).join(data);
-    }
-    return out;
-  });
-
-  return embedded.join("\n");
+  return faces.filter(Boolean).join("\n");
 }
 
 async function fetchAsDataUrl(url: string): Promise<string> {

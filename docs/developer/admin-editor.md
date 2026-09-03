@@ -1,6 +1,8 @@
 # Admin Video Editor
 
-How the web-based video editor works — architecture, build process, editing pipeline, and the relationship between source files and edited derivatives.
+How the web-based video editor works — architecture, editing pipeline, and the relationship between source files and edited derivatives.
+
+The editor is one of the two apps in `server/admin-client/`. Its package layout, build and dev workflow, and the manifest seam that joins it to the Hono server are covered in [`admin-client.md`](admin-client.md); this document is about the editor itself.
 
 ## Architecture overview
 
@@ -26,78 +28,44 @@ Browser (React editor)              Server (Hono + Bun)
   │                                    │  → sets status back to "ready"
 ```
 
-## Why it's a separate React app
+## Why it's a React app
 
-The rest of the admin panel uses HTMX + vanilla JS with server-rendered Hono JSX. That's the right choice for CRUD forms and page navigation. A video editor needs continuous state management (timeline position, zoom, drag handles, undo/redo stack, playback sync) that benefits from React's model. Keeping it as a separate Vite + React sub-project means the editor's complexity doesn't leak into the rest of the admin panel.
+The rest of the admin panel uses HTMX + vanilla JS with server-rendered Hono JSX. That's the right choice for CRUD forms and page navigation. A video editor needs continuous state management (timeline position, zoom, drag handles, undo/redo stack, playback sync) that benefits from React's model.
 
 ## Project structure
 
 ```
-server/editor/              # Vite + React sub-project
-  package.json              # separate dependencies (react, wavesurfer.js, vite)
-  tsconfig.json             # React JSX config (not hono/jsx)
-  vite.config.ts            # base="/static/editor/", builds to ../public/editor/
-  index.html                # Vite entry point template (editor)
-  cover.html                # second Vite entry (cover-image tool)
-  src/
-    main.tsx                # React entry — reads data attributes from the HTML shell
-    main-cover.tsx          # React entry for the cover-image tool
-    App.tsx                 # orchestrates all components and hooks
-    api.ts                  # fetch helpers for EDL load/save/commit, chapters, media URLs
-    types.ts                # shared types: Edit, Edl, PeaksData, Word, Chapter
-    hooks/
-      useEdl.ts             # EDL state management with undo/redo history
-      useChapters.ts        # chapter list state + debounced auto-save
-      useVideoPlayback.ts   # video element control, playback through cuts
-      useKeyboard.ts        # keyboard shortcut bindings
-    components/
-      VideoPreview.tsx      # <video> element playing source.mp4
-      Waveform.tsx          # wavesurfer.js with Regions plugin for trim/cut handles
-      Timeline.tsx          # thumbnail strip + draggable chapter flag markers
-      Toolbar.tsx           # controls: play, trim, cut, undo/redo, save, commit
-      CommitDialog.tsx      # confirmation dialog before processing
-      TranscriptOverlay.tsx # word-level transcript with current-word highlighting
-      ChaptersPanel.tsx     # chapter list editor (title/time/jump/delete + add)
-    styles/
-      editor.css            # dark theme, full-viewport layout
-    cover/                  # cover-image tool — its own mini-app (App, Editor,
-                            #   preview components, canvas export); shares no
-                            #   code with the editor beyond the Vite build
+server/admin-client/src/editor/
+  main.tsx                # React entry — reads data attributes from the HTML shell
+  App.tsx                 # orchestrates all components and hooks
+  api.ts                  # fetch helpers for EDL load/save/commit, chapters, media URLs
+  types.ts                # shared types: Edit, Edl, PeaksData, Word, Chapter
+  hooks/
+    useEdl.ts             # EDL state management with undo/redo history
+    useChapters.ts        # chapter list state + debounced auto-save
+    useVideoPlayback.ts   # video element control, playback through cuts
+    useKeyboard.ts        # keyboard shortcut bindings
+  components/
+    VideoPreview.tsx      # <video> element playing source.mp4
+    Waveform.tsx          # wavesurfer.js with Regions plugin for trim/cut handles
+    Timeline.tsx          # thumbnail strip + draggable chapter flag markers
+    Toolbar.tsx           # controls: play, trim, cut, undo/redo, save, commit
+    CommitDialog.tsx      # confirmation dialog before processing
+    TranscriptOverlay.tsx # word-level transcript with current-word highlighting
+    ChaptersPanel.tsx     # chapter list editor (title/time/jump/delete + add)
+  styles/
+    editor.css            # dark theme, full-viewport layout
 ```
-
-## Build and dev workflow
-
-**Production build:**
-```sh
-cd server/editor && bun run build
-# or from server/: bun run editor:build
-```
-
-Output lands in `server/public/editor/` (gitignored). The Hono route reads the Vite manifest at `public/editor/.vite/manifest.json` to resolve hashed JS/CSS filenames.
-
-**Development (two terminals):**
-```sh
-# Terminal 1: Hono server, with the editor in dev mode
-cd server && EDITOR_DEV=1 bun run dev
-
-# Terminal 2: Vite dev server with HMR
-cd server && bun run editor:dev
-```
-
-Dev mode is an explicit opt-in: when `EDITOR_DEV=1` is set, the Hono route emits script tags pointing at the Vite dev server (`localhost:5173`) for hot module replacement — even if a local build exists. Without the flag, the route always serves the built assets from the Vite manifest, and a missing manifest is a hard error (run `bun run editor:build`, or set the flag). This replaced an older file-presence check that silently served dev script tags in production when the build was missing, and disabled HMR whenever a stale local build existed.
 
 ## How the Hono route serves the editor
 
-`server/src/routes/admin/editor.ts` has a `GET /:id/editor` route that:
+`server/src/routes/admin/editor.tsx` has a `GET /:id/editor` route that:
 
 1. Checks admin auth (inherited from the admin middleware)
-2. Guards against non-complete or trashed videos
-3. Returns an HTML shell with:
-   - The video's ID, slug, duration, title, and height as `data-*` attributes on `#editor-root`
-   - Normally: `<script>` and `<link>` tags resolved from the Vite manifest (missing manifest = hard error)
-   - With `EDITOR_DEV=1`: `<script>` tags pointing at the Vite dev server
+2. Guards against non-ready or trashed videos, and against a post-processing run still in flight
+3. Renders `EditorPage`, which puts the video's ID, title and duration on `#editor-root` as `data-*` attributes and pulls in the built bundle
 
-The React app reads the data attributes on mount and never needs a separate API call for video metadata.
+The React app reads those attributes on mount and never needs a separate API call for video metadata. See [`admin-client.md`](admin-client.md) for the asset seam and the dev-server workflow.
 
 ## Edit Decision List (EDL)
 

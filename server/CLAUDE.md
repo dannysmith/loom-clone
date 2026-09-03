@@ -9,13 +9,13 @@ All scripts run from `server/`:
 - `bun run dev` — hot-reload dev server on `http://localhost:3000`. Do NOT start this unless explicitly asked.
 - `bun test` — run the full test suite (Bun's built-in runner, bun:test APIs)
 - `bun run test:watch` — re-run tests on file changes
-- `bun run check` — Biome lint + format check (read-only; covers `src/`, `scripts/`, `editor/src/`, `player/src/` per `biome.jsonc`)
+- `bun run check` — Biome lint + format check (read-only; covers `src/`, `scripts/`, `admin-client/src/`, `player/src/` per `biome.jsonc`)
 - `bun run check:fix` — auto-fix lint + format issues
-- `bun run check:all` — lint + format check, typecheck (server + editor + player), and full test suite in one command (what CI runs)
+- `bun run check:all` — lint + format check, typecheck (server + admin-client + player), and full test suite in one command (what CI runs)
 - `bun run lint` / `bun run lint:fix` — lint only
 - `bun run format` / `bun run format:check` — format only
 - `bun run typecheck` — `tsc --noEmit` on the server
-- `bun run typecheck:editor` / `bun run typecheck:player` — `tsc --noEmit` on the sub-packages (needs `bun install` run in `editor/` / `player/` once)
+- `bun run typecheck:admin-client` / `bun run typecheck:player` — `tsc --noEmit` on the sub-packages (needs `bun install` run in `admin-client/` / `player/` once)
 - `bun run db:generate` — generate a new migration SQL file from `src/db/schema.ts` changes
 - `bun run db:migrate` — apply pending migrations to `data/app.db` (also applied automatically on server startup)
 - `bun run db:studio` — browse `data/app.db` in the Drizzle Studio web UI
@@ -62,8 +62,8 @@ Four modules in `src/routes/`, each with its own auth profile. Full route refere
 
 Hono JSX (`hono/jsx`) for server-rendered HTML, vanilla CSS with `@layer` + custom properties for styling. The server itself has no build step — Bun handles `.tsx` natively, browsers fetch CSS as-is. Two Vite builds produce static assets, with opposite commit policies:
 
-- `editor/` → `public/editor/` — the admin React editor. **Gitignored**, built in its own Dockerfile stage at deploy time (CI also builds it as a check). In local dev, set `EDITOR_DEV=1` on the Hono server to load the editor from the Vite dev server (`bun run editor:dev`) with HMR; without the flag a missing `public/editor/` build is a hard error. See `docs/developer/admin-editor.md`.
-- `player/` → `public/player/` — the self-hosted Vidstack player bundle (viewer, embed, and admin video pages). **Committed to git**, deliberately: serving the player must never depend on the npm registry being up or `vidstack@1.15.6` still being published. That durability is the reason the player is self-hosted at all (issue #54). (Deploys as a whole still hit the registry — the Dockerfile runs `bun install` for the server and editor — but the committed player bundle means the registry can't take the *viewer* surface hostage.)
+- `admin-client/` → `public/admin-client/` — the admin React apps (video editor, cover generator). **Gitignored**, built in its own Dockerfile stage at deploy time (CI also builds it as a check). In local dev, set `ADMIN_CLIENT_DEV=1` on the Hono server to load them from the Vite dev server (`bun run admin-client:dev`) with HMR; without the flag a missing `public/admin-client/` build is a hard error. See `docs/developer/admin-client.md`.
+- `player/` → `public/player/` — the self-hosted Vidstack player bundle (viewer, embed, and admin video pages). **Committed to git**, deliberately: serving the player must never depend on the npm registry being up or `vidstack@1.15.6` still being published. That durability is the reason the player is self-hosted at all (issue #54). (Deploys as a whole still hit the registry — the Dockerfile runs `bun install` for the server and admin client — but the committed player bundle means the registry can't take the *viewer* surface hostage.)
 
 **Upgrading Vidstack**: bump the exact pin in `player/package.json`, `bun install` + `bun run player:build` (from `server/`), verify a video page in the browser, commit source + built output together — CI rebuilds the player and fails if `public/player/` doesn't match the source. Trap: vidstack's npm `latest` dist-tag points at a stale 2023 build (0.6.15) — real releases ship under the `next` tag, so always pin an explicit version, never `bun add vidstack` bare. `hls.js` is pinned in the same package and bundled as a lazy chunk (fetched only for `.m3u8` sources, via the `provider-change` hook in `player/src/player.ts`).
 
@@ -74,7 +74,9 @@ src/views/
   layouts/   RootLayout, ViewerLayout, AdminLayout — shared <html>/<head>/body shells
   viewer/    public viewer pages (VideoPage, EmbedPage, TagPage), SiteFooter, icons.tsx
   admin/     admin UI components (dashboard, video detail, settings, upload, trash)
-             plus components/Icons.tsx (Lucide set), components/VideoCard
+             plus components/Icons.tsx (Lucide set), components/VideoCard, and the
+             editor/cover shells (pages/EditorPage, pages/CoverPage) that mount the
+             admin-client React apps via components/AdminClientAssets
 public/
   styles/    CSS — see below
   player/    committed Vidstack build (see above) — hashed filenames read via playerAssets() in src/lib/vite-manifest.ts, not staticUrl()
@@ -94,7 +96,7 @@ public/
   - `RootLayout` accepts a `stylesheet` prop; `ViewerLayout` and `EmbedPage` set it.
 - `public/styles/admin.css` is linked separately by `AdminLayout`'s head slot — it ships only on admin pages.
 - `tokens.css` is the single source of truth for design tokens (OKLCH brand palette, semantic mappings via `light-dark()`, type/spacing scales, motion). Change values here; everything downstream uses `var(--…)`.
-- Editor pages (`server/editor/`) consume the same tokens — their `:root` sets `color-scheme: dark` and aliases shared vars onto the local `--bg`/`--panel-bg`/`--text`/`--accent` names.
+- Admin client pages (`server/admin-client/`) consume the same tokens — their `:root` sets `color-scheme: dark` and aliases shared vars onto the local `--bg`/`--panel-bg`/`--text`/`--accent` names.
 - Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`, `color-mix(in oklch, …)`, `oklch(from <c> …)`, native `<dialog>`/`popover`. All Baseline.
 
 ## Testing

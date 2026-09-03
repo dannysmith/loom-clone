@@ -1,7 +1,7 @@
 node_modules/
-editor/node_modules/
+admin-client/node_modules/
 player/node_modules/
-public/editor/
+public/admin-client/
 data/
 .env
 .DS_Store

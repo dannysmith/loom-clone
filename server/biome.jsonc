@@ -5,8 +5,8 @@
       "src/**/*.ts",
       "src/**/*.tsx",
       "scripts/**/*.ts",
-      "editor/src/**/*.ts",
-      "editor/src/**/*.tsx",
+      "admin-client/src/**/*.ts",
+      "admin-client/src/**/*.tsx",
       "player/src/**/*.ts"
     ]
   },
@@ -44,14 +44,14 @@
   },
   "overrides": [
     {
-      // The editor is a single-user internal tool driven by mouse + dedicated
-      // keyboard shortcuts (useKeyboard.ts). These four a11y rules encode
-      // requirements it deliberately doesn't have: captions for the preview
-      // <video>, titles on decorative cover SVGs, and per-element keyboard
-      // handlers on canvas-like drag surfaces (waveform, transcript scrubber).
-      // Everything else — including useButtonType and the rest of a11y —
-      // stays on.
-      "includes": ["editor/src/**"],
+      // The admin client apps are single-user internal tools driven by mouse
+      // + dedicated keyboard shortcuts (useKeyboard.ts). These four a11y rules
+      // encode requirements they deliberately don't have: captions for the
+      // preview <video>, titles on decorative cover SVGs, and per-element
+      // keyboard handlers on canvas-like drag surfaces (waveform, transcript
+      // scrubber, cover drag handles). Everything else — including
+      // useButtonType and the rest of a11y — stays on.
+      "includes": ["admin-client/src/**"],
       "linter": {
         "rules": {
           "a11y": {

@@ -17,6 +17,14 @@ export const COLORS = {
   blob3: "#fed9b7",
 } as const;
 
+// Font stacks for the canvas. The family names are @fontsource's, for the
+// variable fonts bundled by src/cover/main.tsx — nothing here is fetched from
+// a third party at render or export time.
+export const FONTS = {
+  sans: '"Inter Variable", system-ui, sans-serif',
+  mono: '"Fira Code Variable", ui-monospace, SFMono-Regular, monospace',
+} as const;
+
 export const CANVAS = {
   width: 1545,
   height: 869,

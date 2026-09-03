@@ -11,7 +11,7 @@ server/.env.*
 
 # Build output
 server/dist/
-server/public/editor/
+server/public/admin-client/
 app/LoomClone.xcodeproj/
 app/build/
 

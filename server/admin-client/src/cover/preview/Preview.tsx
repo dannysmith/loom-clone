@@ -1,4 +1,4 @@
-import type { CoverState } from "../state";
+import type { Author, CoverState } from "../state";
 import { Avatar } from "./Avatar";
 import { Background } from "./Background";
 import { Blobs } from "./Blobs";
@@ -12,9 +12,10 @@ type Props = {
   state: CoverState;
   setState: React.Dispatch<React.SetStateAction<CoverState>>;
   svgRef: React.RefObject<SVGSVGElement | null>;
+  author: Author;
 };
 
-export function Preview({ state, setState, svgRef }: Props) {
+export function Preview({ state, setState, svgRef, author }: Props) {
   const onMediaMove = (x: number, y: number) =>
     setState((s) => ({ ...s, media: { ...s.media, x, y } }));
   const onQrMove = (x: number, y: number) => setState((s) => ({ ...s, qr: { ...s.qr, x, y } }));
@@ -35,13 +36,14 @@ export function Preview({ state, setState, svgRef }: Props) {
       <g clipPath="url(#canvas-clip)">
         <Background />
         <Blobs />
-        {state.avatar.enabled && <Avatar />}
+        {state.avatar.enabled && <Avatar src={author.avatarUrl} />}
         {state.title.enabled && (
           <Title text={state.title.text} mediaEnabled={state.media.enabled} />
         )}
         <MediaSlot slot={state.media} onMove={onMediaMove} />
-        <QrCode slot={state.qr} onMove={onQrMove} />
+        <QrCode slot={state.qr} onMove={onQrMove} avatarUrl={author.avatarUrl} />
         <Footer
+          author={author}
           showAttribution={state.attribution.enabled}
           showUrl={state.url.enabled}
           urlText={state.url.text}

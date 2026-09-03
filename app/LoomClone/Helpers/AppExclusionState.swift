@@ -17,11 +17,10 @@ struct AppExclusionState {
     /// exception list has to be re-enumerated as windows open and close.
     private(set) var hideDesktopIcons: Bool = false
 
-    /// Bundle ID of the app the focus warning is currently showing for.
-    /// Single source of truth: when this is non-nil the warning is up.
-    /// (Before the extraction this was two variables — a "last warned" ID and
-    /// a membership flag in a shared warning set — which could disagree, and
-    /// the old code carried a defensive re-fire branch for exactly that.)
+    /// Bundle ID of the app the focus warning is currently showing for, and
+    /// the single source of truth for whether it's up. Don't split "which app"
+    /// from "is it showing" into two variables — they can disagree, and then
+    /// the state machine needs defensive re-fire branches to paper over it.
     private var warnedBundleID: String?
 
     /// Health-check ticks since the last filter refresh.

@@ -32,19 +32,18 @@ final class RecordingCoordinator {
 
     /// Whether a new recording can start right now.
     ///
-    /// One definition, because three call sites (the menu's Record button,
-    /// the menu-bar action, the keyboard shortcut) previously carried three
-    /// that disagreed about `.stopped` — the shortcut and the menu-bar action
-    /// silently did nothing during the post-recording cooldown while the
-    /// button was live.
+    /// The single definition — the menu's Record button, the menu-bar action
+    /// and the keyboard shortcut must all agree, or a route into recording
+    /// silently does nothing while the others work.
     ///
-    /// `.stopped` is that cooldown: recording resources are already released,
-    /// so a second recording can start immediately and the pending
-    /// revert-to-idle Task no-ops once state moves on.
+    /// `.stopped` is the post-recording cooldown and counts as startable:
+    /// recording resources are already released, so a second recording can
+    /// start immediately, and the pending revert-to-idle Task no-ops once
+    /// state moves on.
+    ///
     /// Screen permission only blocks recording when the screen is actually
-    /// involved. With permission denied and no display selected, the only
-    /// reachable mode is `.cameraOnly`, which doesn't need it — gating that
-    /// unconditionally left a camera-only recording impossible to start.
+    /// involved — with permission denied and no display selected, the only
+    /// reachable mode is `.cameraOnly`, which doesn't need it.
     var canStartRecording: Bool {
         (state == .idle || state == .stopped)
             && !(screenPermissionDenied && selectedDisplay != nil)

@@ -37,11 +37,10 @@ actor CompositionActor {
 
     /// `var` rather than `let` so `rebuildContext()` can swap in a fresh
     /// context after a GPU error poisons the underlying Metal command queue.
-    /// Optional because Metal can be unavailable at init — the same failure
-    /// `rebuildContext` already handles gracefully. Crashing here while
-    /// treating the identical condition as recoverable four hundred lines
-    /// down was the inconsistency; now both paths surface a render failure
-    /// and the metronome escalates to a clean, user-visible stop.
+    /// Optional because Metal can be unavailable at init — the same condition
+    /// `rebuildContext` handles. Both paths report a render failure rather
+    /// than trapping, so the metronome escalates to a clean, user-visible stop
+    /// with the recording saved up to that point.
     private var ciContext: CIContext?
 
     private var outputPool: PixelBufferPool

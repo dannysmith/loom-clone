@@ -86,13 +86,20 @@ struct SourceHealthTracker {
     /// Record a hard failure (stream error, session error, interruption).
     /// Suppresses the source's stale check until it delivers again.
     ///
+    /// A standing stale warning is replaced rather than left alongside it:
+    /// "camera disconnected" supersedes "camera not delivering frames", and
+    /// keeping both would show two pills for one source — and let a later
+    /// frame clear the stale one, reporting a recovery the still-failed
+    /// source hasn't made.
+    ///
     /// Returns true only the first time — AVFoundation can report the same
     /// dead session repeatedly, and the stale path already fires once per
     /// stall, so failures hold to the same contract rather than stacking
     /// duplicate timeline events and warning fires.
     @discardableResult
     mutating func markFailed(_ source: Source) -> Bool {
-        activeWarnings.insert(source.failedWarning).inserted
+        activeWarnings.remove(source.staleWarning)
+        return activeWarnings.insert(source.failedWarning).inserted
     }
 
     // MARK: - Evaluate

@@ -4,8 +4,9 @@ import Foundation
 /// background agents that walk it (`HealAgent`, `TranscribeAgent`).
 ///
 /// Both scan the same directories on launch and both mark the same sidecars,
-/// so the window and the sidecar semantics live here rather than in two copies
-/// that can drift apart.
+/// so the window and the sidecar semantics belong in one place — a heal that
+/// disagreed with a transcription about which recordings are still live would
+/// be very hard to spot.
 enum LocalRecordings {
     /// Recordings older than this are not scanned at startup. In practice a
     /// recording that didn't heal or transcribe on the day it was made is

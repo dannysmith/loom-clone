@@ -8,7 +8,7 @@
     "lint:fix": "biome lint --write",
     "format": "biome format --write",
     "format:check": "biome format",
-    "check": "biome check",
+    "check": "biome check --error-on-warnings",
     "check:fix": "biome check --write",
     "check:all": "bun run check && bun run typecheck && bun run typecheck:editor && bun run typecheck:player && bun test",
     "typecheck": "tsc --noEmit",

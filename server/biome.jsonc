@@ -27,6 +27,8 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      // "warn" keeps these yellow (not red) in editors while iterating, but
+      // they still gate: the `check` script runs with --error-on-warnings.
       "correctness": {
         "noUnusedVariables": "warn",
         "noUnusedImports": "warn"

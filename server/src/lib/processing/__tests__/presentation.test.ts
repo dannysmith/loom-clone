@@ -230,6 +230,58 @@ describe("presentation master", () => {
   );
 });
 
+describe("the audio chain is an enhancement, not a precondition", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "a recording with no audio stream still gets a master",
+    async () => {
+      // A screen recording made with the mic off. The chain declines (nothing to
+      // process) and the master is produced by remuxing — a video that can't be
+      // enhanced must still be servable.
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      const proc = Bun.spawn(
+        [
+          "ffmpeg",
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "testsrc=duration=2:size=1280x720:rate=15",
+          "-c:v",
+          "libx264",
+          "-preset",
+          "ultrafast",
+          "-movflags",
+          "+faststart",
+          "-f",
+          "mp4",
+          join(dir, "source.mp4"),
+        ],
+        { stderr: "pipe", stdout: "pipe" },
+      );
+      if ((await proc.exited) !== 0) throw new Error("silent fixture failed");
+      await markStepReady(video.id, "source");
+      await markStepReady(video.id, "metadata");
+      await getDb()
+        .update(videos)
+        .set({ status: "ready", width: 1280, height: 720, durationSeconds: 2 })
+        .where(eq(videos.id, video.id));
+
+      scheduleReprocess(video.id, { source: "recorded", intent: "present" });
+      await _drainInFlight();
+
+      expect(await Bun.file(join(dir, "720p.mp4")).exists()).toBe(true);
+      expect((await getStepStates(video.id)).get("presentation")?.state).toBe("ready");
+      expect((await getVideo(video.id))?.status).toBe("ready");
+    },
+    60_000,
+  );
+});
+
 describe("captions follow the presentation timeline", () => {
   test.skipIf(!ffmpegAvailable)(
     "an edit re-derives the transcript from words.json",

@@ -293,12 +293,32 @@ const DEFAULT_NOISE_FLOOR_DB = -50;
 const NOISE_FLOOR_MIN_DB = -65;
 const NOISE_FLOOR_MAX_DB = -30;
 
+// Workaround for an ffmpeg bug, NOT a tuning choice: arnndn can emit a frame of
+// NaN samples when it flushes at end-of-stream, which poisons everything
+// downstream and makes the AAC encoder fail the whole encode with "Input
+// contains (near) NaN/+-Inf". It's non-deterministic (measured on a real 66s
+// recording: 6 of 8 identical runs affected, always the final 480-sample frame,
+// 384 of which are EOF padding rather than real audio) — the signature of
+// uninitialised memory in the flush path. Related: ffmpeg ticket #10863.
+//
+// Round-tripping through 16-bit integer turns any non-finite sample into a
+// finite one. Verified to clear it in 10 of 10 runs, where a mono downmix (7 of
+// 10 still affected), per-channel arnndn instances (10 of 10 affected) and
+// `-filter_threads 1` did not.
+//
+// It sits immediately after arnndn so a single bad sample can't reach afftdn,
+// whose FFT would smear it across a whole window. The 16-bit floor is ~96 dB
+// below full scale, under a chain that ends in a 160 kbps AAC encode — the
+// quantisation is inaudible here. Remove it once arnndn is fixed upstream.
+const ARNNDN_NAN_GUARD = "aformat=sample_fmts=s16,aformat=sample_fmts=fltp";
+
 function audioFilterChain(noiseFloorDb: number): string {
   // Linear threshold for -45 dBFS = 10^(-45/20) ≈ 0.0056. Hardcoded rather
   // than computed at call time — the gate threshold is a tuned constant.
   const filters = [
     "highpass=f=80",
     `arnndn=m=${ARNNDN_MODEL}`,
+    ARNNDN_NAN_GUARD,
     `afftdn=nf=${noiseFloorDb}:nr=12`,
     "agate=threshold=0.0056:ratio=10:attack=5:release=300:knee=2.5",
     "dynaudnorm=f=500:g=11:m=10:p=0.95",

@@ -62,9 +62,13 @@ export function VideoDetailPage({
   const chaptersUrl = hasChapters ? `/admin/videos/${video.id}/media/chapters.vtt` : null;
   const title = video.title || video.slug;
   const duration = formatDuration(video.durationSeconds);
-  const hasMp4 = files.some((f) => f.path === "derivatives/source.mp4");
+  // Preview what a viewer gets: the presentation master, falling back to HLS
+  // while it's still being produced. (The editor is the one place that plays the
+  // pristine source instead — it edits against the original timeline.)
+  const masterFile = activeRawFilename(video);
+  const hasMp4 = files.some((f) => f.path === `derivatives/${masterFile}`);
   const playerSrc = hasMp4
-    ? `/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`
+    ? `/admin/videos/${video.id}/media/raw/${masterFile}`
     : `/admin/videos/${video.id}/media/stream/stream.m3u8`;
   const posterSrc = `/admin/videos/${video.id}/media/poster.jpg`;
 

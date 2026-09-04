@@ -65,7 +65,7 @@ describe("GET /:slug.json", () => {
     expect(body.url).toMatch(/^https?:\/\//);
     // URLs should all be absolute
     expect(body.urls.page).toMatch(/^https?:\/\//);
-    expect(body.urls.raw).toContain("/raw/source.mp4");
+    expect(body.urls.raw).toContain("/raw/video.mp4");
     expect(body.urls.embed).toContain("/embed");
     expect(body.urls.json).toContain(".json");
     expect(body.urls.md).toContain(".md");

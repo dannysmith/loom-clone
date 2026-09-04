@@ -5,11 +5,11 @@
 //
 // It does NOT own the recording↔healing boundary (decided in the /complete
 // handler by diffing the client timeline against on-disk segments). It settles a
-// `reprocessing` video (an edit run) UP to `ready` once its mandatory steps
-// validate, but never demotes one — the edit run owns the failure path
-// (restoring `ready`), and a crash leaves it for recoverStrandedReprocessing on
-// boot. Call it after each pipeline step (running:true) and once when a run
-// settles (running:false).
+// `reprocessing` video (a staged rebuild) UP to `ready` once its mandatory steps
+// validate, but never demotes one — the rebuild owns the failure path (restoring
+// `ready`), and a crash leaves it for recoverStrandedReprocessing on boot. Call
+// it after each pipeline step (running:true) and once when a run settles
+// (running:false).
 
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../../db/client";
@@ -38,8 +38,8 @@ export function rollupFromSteps(
 export async function reconcile(videoId: string, opts: { running: boolean }): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video || video.trashedAt) return;
-  // reconcile settles its owned post-footage statuses plus `reprocessing` (an
-  // edit run, which it only ever promotes UP to `ready`).
+  // reconcile settles its owned post-footage statuses plus `reprocessing` (a
+  // staged rebuild, which it only ever promotes UP to `ready`).
   const isReprocessing = video.status === "reprocessing";
   if (!RECONCILE_OWNED.has(video.status) && !isReprocessing) return;
 
@@ -50,9 +50,9 @@ export async function reconcile(videoId: string, opts: { running: boolean }): Pr
   // listing it until TTL. markVideoReady re-purges on the way back in.
   const wasReady = video.status === "ready";
 
-  // Promote to `ready` once the mandatory steps validate. (Forced rebuilds and
-  // edits regenerate atomically via the staging swap, so there's no longer a
-  // mid-run window to hold status open for.) Note this publishes `ready` while
+  // Promote to `ready` once the mandatory steps validate. (Rebuilds regenerate
+  // the served set atomically via the staging swap, so there's no mid-run window
+  // to hold status open for.) Note this publishes `ready` while
   // the slower EXPECTED steps may still be running — the readiness UI reflects
   // that "ready but still enriching" state (see couldStillProduce / computeBadge
   // in readiness.ts), so the two stay in sync on what `ready` means mid-run.
@@ -61,7 +61,7 @@ export async function reconcile(videoId: string, opts: { running: boolean }): Pr
     return;
   }
 
-  // An edit run is the only owner of `reprocessing`'s downward transitions
+  // A staged rebuild is the only owner of `reprocessing`'s downward transitions
   // (restoring `ready` on failure); reconcile only ever settles it UP (above),
   // never demotes it to processing/processing_failed.
   if (isReprocessing) return;
@@ -92,13 +92,14 @@ export async function reconcile(videoId: string, opts: { running: boolean }): Pr
   }
 }
 
-// A `reprocessing` row means an edit run was in flight when the process last
-// stopped. Those runs are in-memory fire-and-forget, so a restart strands them.
-// On boot no edit can still be running, so reconcile each one: a video whose
-// mandatory steps validated settles back to `ready` (it serves the untouched
-// source.mp4 — a half-applied edit never set lastEditedAt, so activeRawFilename
-// resolves to source.mp4); the rest stay `reprocessing` (reconcile never demotes
-// it) for a manual reprocess. Run once at startup and from the backfill script.
+// A `reprocessing` row means a staged rebuild was in flight when the process
+// last stopped. Those runs are in-memory fire-and-forget, so a restart strands
+// them. On boot none can still be running, so reconcile each one: a video whose
+// mandatory steps validated settles back to `ready` (it keeps serving the
+// previous presentation master — a staged rebuild only swaps once the whole set
+// has validated, so an interrupted one left it untouched); the rest stay
+// `reprocessing` (reconcile never demotes it) for a manual reprocess. Run once at
+// startup and from the backfill script.
 export async function recoverStrandedReprocessing(): Promise<void> {
   const rows = await getDb()
     .select({ id: videos.id })

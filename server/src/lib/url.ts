@@ -11,6 +11,17 @@ export type VideoUrls = {
   poster: string;
 };
 
+// The stable public name for "the MP4 of this video". It redirects to whatever
+// the best rendition currently is, so a caller asking for the video doesn't have
+// to know its height — and a link keeps working when a video is re-edited,
+// re-encoded, or (later) watermarked. Asking for a smaller rendition stays
+// explicit: /{slug}/raw/720p.mp4.
+export const PUBLIC_VIDEO_FILENAME = "video.mp4";
+
+export function publicVideoPath(slug: string): string {
+  return `/${slug}/raw/${PUBLIC_VIDEO_FILENAME}`;
+}
+
 // The filename of the "active" raw MP4 for a video — the file viewers should
 // see. Always the presentation master, named for the source's height (e.g.
 // 1440p.mp4), whether or not the video has been edited: it's the file carrying
@@ -28,17 +39,19 @@ export function activeRawFilename(video: {
   return video.height ? `${video.height}p.mp4` : "source.mp4";
 }
 
-// Build viewer-facing URLs for a video. Uses activeRawFilename to point
-// `raw` at the correct file (edited or original).
+// Build viewer-facing URLs for a video. `raw` is the redirecting `video.mp4`
+// entry point rather than a concrete rendition, so everything we publish (feeds,
+// JSON, Markdown, oEmbed, llms.txt) names a URL that stays valid across
+// re-encodes. The player is the exception — it gets concrete per-rendition URLs
+// so playback never pays for a redirect (see resolve.ts).
 export function urlsForVideo(video: {
   slug: string;
   lastEditedAt: string | null;
   height: number | null;
 }): VideoUrls {
-  const filename = activeRawFilename(video);
   return {
     page: `/${video.slug}`,
-    raw: `/${video.slug}/raw/${filename}`,
+    raw: publicVideoPath(video.slug),
     hls: `/${video.slug}/stream/stream.m3u8`,
     poster: `/${video.slug}/poster.jpg`,
   };

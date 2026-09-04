@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { join } from "path";
+import { agentTextCacheControl } from "../../lib/cache-control";
 import {
   chaptersForViewer,
   generateChaptersVTT,
@@ -10,8 +11,8 @@ import {
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/paths";
 import { srtToVtt } from "../../lib/srt";
-import { resolveSlug } from "../../lib/store";
-import { activeRawFilename } from "../../lib/url";
+import { resolveSlug, sumSegmentDuration } from "../../lib/store";
+import { activeRawFilename, PUBLIC_VIDEO_FILENAME } from "../../lib/url";
 
 // Loose-typed EDL shape — we only need the edits array. Avoids pulling an
 // edit module into the media route just for a type.
@@ -20,10 +21,16 @@ type EditsFileLike = { edits?: unknown };
 // Allowlists constrain which on-disk files each route can serve, preventing
 // traversal and keeping the public surface focused. `upload.mp4` is the
 // original of an UPLOADED video — served only as a fallback when its
-// post-processing failed to produce a servable source.mp4 (resolve.ts), and it
-// only ever exists in that failure case (maybeDeleteUpload removes it once
-// source+metadata succeed). It lives in the video dir, not derivatives/.
-const RAW_FILENAME = /^(source|\d+p|upload)\.mp4$/;
+// post-processing failed to produce a servable presentation master
+// (resolve.ts), and it only ever exists in that failure case (maybeDeleteUpload
+// removes it once source+metadata succeed). It lives in the video dir, not
+// derivatives/.
+//
+// `source.mp4` is deliberately NOT here: it's the pristine original, kept as the
+// thing everything else is regenerated from, and serving it would hand out
+// un-processed (later, un-watermarked) video. Requests for it redirect to the
+// presentation master instead, so links made before the restructure still work.
+const RAW_FILENAME = /^(\d+p|upload)\.mp4$/;
 const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
 
 async function resolveForMedia(slug: string) {
@@ -35,10 +42,25 @@ const media = new Hono();
 
 media.get("/:slug/raw/:file", async (c) => {
   const { slug, file } = c.req.param();
+
+  // `video.mp4` is the stable public name for "the best rendition", and
+  // `source.mp4` is what that name used to be. Both resolve to the presentation
+  // master, so published links survive a re-encode or a change of resolution.
+  //
+  // Explicitly short-cached: the target moves if a video is ever rebuilt at a
+  // different resolution, and without a header BunnyCDN would apply its 30-day
+  // default to the redirect.
+  if (file === PUBLIC_VIDEO_FILENAME || file === "source.mp4") {
+    const video = await resolveForMedia(slug);
+    if (!video) return c.text("Not found", 404);
+    c.header("Cache-Control", agentTextCacheControl(video.visibility));
+    return c.redirect(`/${video.slug}/raw/${activeRawFilename(video)}`, 302);
+  }
+
   if (!RAW_FILENAME.test(file)) return c.text("Not found", 404);
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-  // upload.mp4 sits in the video dir; everything else under derivatives/.
+  // upload.mp4 sits in the video dir; the renditions under derivatives/.
   const path =
     file === "upload.mp4"
       ? join(DATA_DIR, video.id, "upload.mp4")
@@ -135,7 +157,12 @@ media.get("/:slug/chapters.vtt", async (c) => {
   // Remap recording-timeline timestamps through the EDL (if any) so the
   // VTT reflects the viewer-facing timeline. Chapters that fall inside
   // cuts are dropped from the rendered VTT but stay in chapters.json.
-  const sourceDuration = video.durationSeconds ?? 0;
+  //
+  // The EDL is expressed against the SOURCE, so the remap needs the source's own
+  // length — the segment-duration sum. `durationSeconds` describes the
+  // presentation master, which for an edited video is shorter, and feeding that
+  // in truncates the kept segments so chapters near the end get dropped.
+  const sourceDuration = (await sumSegmentDuration(video.id)) || (video.durationSeconds ?? 0);
   let edits: unknown[] = [];
   const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
   if (await editsFile.exists()) {
@@ -168,7 +195,8 @@ media.get("/:slug/chapters.vtt", async (c) => {
 
 // /:slug.mp4 convenience redirect. Dispatched from the aggregator's /:file
 // handler because Hono can't separate `:slug` from `.mp4` as param + literal.
-// Uses activeRawFilename to resolve to the correct file (edited or original).
+// Goes straight to the concrete rendition rather than via video.mp4, so it stays
+// a single hop.
 export async function handleMp4Redirect(c: Context, slug: string): Promise<Response> {
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);

@@ -29,18 +29,21 @@ describe("activeRawFilename", () => {
 });
 
 describe("urlsForVideo", () => {
-  test("points raw at the presentation master for an unedited video", () => {
+  // Everything we publish names video.mp4 rather than a concrete rendition, so a
+  // link survives a re-encode or a change of resolution. The player is the
+  // exception and gets concrete URLs (see resolve.ts).
+  test("points raw at the redirecting video.mp4 entry point", () => {
     const urls = urlsForVideo({ slug: "my-video", lastEditedAt: null, height: 1080 });
-    expect(urls.raw).toBe("/my-video/raw/1080p.mp4");
+    expect(urls.raw).toBe("/my-video/raw/video.mp4");
   });
 
-  test("points raw at the same master for an edited video", () => {
+  test("points raw at video.mp4 for an edited video too", () => {
     const urls = urlsForVideo({
       slug: "my-video",
       lastEditedAt: "2026-04-30T12:00:00Z",
       height: 1080,
     });
-    expect(urls.raw).toBe("/my-video/raw/1080p.mp4");
+    expect(urls.raw).toBe("/my-video/raw/video.mp4");
   });
 
   test("includes page, hls, and poster regardless of edit state", () => {

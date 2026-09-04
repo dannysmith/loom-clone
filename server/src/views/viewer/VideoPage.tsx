@@ -5,7 +5,7 @@ import { formatDate, formatDuration, formatDurationIso } from "../../lib/format"
 import { jsonLdScript } from "../../lib/json-ld";
 import { siteConfig } from "../../lib/site-config";
 import type { Video } from "../../lib/store";
-import { absoluteUrl, activeRawFilename } from "../../lib/url";
+import { absoluteUrl, publicVideoPath } from "../../lib/url";
 import { playerAssets } from "../../lib/vite-manifest";
 import type { SourceDescriptor } from "../../routes/videos/resolve";
 import { ViewerLayout } from "../layouts/ViewerLayout";
@@ -42,11 +42,10 @@ export function VideoPage({
   embedAbsolute,
   adminUrl,
 }: Props) {
-  // contentUrl for JSON-LD points at the active raw file (source.mp4 for
-  // unedited videos, the resolution file for edited ones).
-  const rawFilename = activeRawFilename(video);
-  const rawUrl = `/${video.slug}/raw/${rawFilename}`;
-  const contentUrl = sources?.find((s) => s.src === rawUrl)?.src ?? sources?.[0]?.src ?? src;
+  // contentUrl for JSON-LD names the redirecting video.mp4 rather than a
+  // concrete rendition: it's a URL that consumers may keep for a long time, and
+  // it stays valid across a re-encode or a change of resolution.
+  const contentUrl = sources ? publicVideoPath(video.slug) : src;
   const pageTitle = video.title ?? siteConfig.defaultVideoTitle(video.slug);
   const description = video.description ?? undefined;
   const ogDescription =
@@ -249,7 +248,7 @@ export function VideoPage({
         </media-provider>
         <media-video-layout
           thumbnails={`/${video.slug}/storyboard.vtt`}
-          download={absoluteUrl(rawUrl)}
+          download={absoluteUrl(publicVideoPath(video.slug))}
         />
       </media-player>
 

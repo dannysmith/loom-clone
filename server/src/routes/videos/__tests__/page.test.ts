@@ -24,7 +24,6 @@ afterEach(async () => {
 // Serving is table-gated (state `ready` + file present), so writing the file
 // must be paired with marking the gating step ready.
 const STEP_FOR_FILE: Record<string, ProcessingStepKind> = {
-  "source.mp4": "source",
   "1080p.mp4": "variant_1080",
   "720p.mp4": "variant_720",
 };
@@ -35,8 +34,19 @@ async function writeDerivative(video: Video, filename: string): Promise<void> {
   await Bun.write(join(dir, filename), "stub");
   const kind = STEP_FOR_FILE[filename];
   if (kind) await markStepReady(video.id, kind);
-  // MP4 serving is gated on the full mandatory set (source AND metadata).
-  if (filename === "source.mp4") await markStepReady(video.id, "metadata");
+}
+
+// The presentation master at the video's own height — the file viewers get.
+// Marks the mandatory set ready too, since a servable master implies the video
+// got past source + metadata.
+async function writeMaster(video: Video, height: number): Promise<void> {
+  const dir = join(DATA_DIR, video.id, "derivatives");
+  await mkdir(dir, { recursive: true });
+  await Bun.write(join(dir, `${height}p.mp4`), "stub");
+  await getDb().update(videosTable).set({ height }).where(eq(videosTable.id, video.id));
+  await markStepReady(video.id, "presentation");
+  await markStepReady(video.id, "source");
+  await markStepReady(video.id, "metadata");
 }
 
 describe("GET /v/:slug (back-compat redirect)", () => {
@@ -152,7 +162,7 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
   // an unsupported `as` value, so the page must not emit it.
   test("never emits a rel=preload as=video hint", async () => {
     const video = await createVideo();
-    await writeDerivative(video, "source.mp4");
+    await writeMaster(video, 1080);
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
     expect(html).not.toContain('as="video"');
@@ -177,12 +187,12 @@ describe("GET /:slug (slug-namespaced, via aggregator)", () => {
     expect(html).not.toContain("/data/");
   });
 
-  test("uses slug-namespaced MP4 URL when derivative exists", async () => {
+  test("uses slug-namespaced MP4 URL when the master exists", async () => {
     const video = await createVideo();
-    await writeDerivative(video, "source.mp4");
+    await writeMaster(video, 1080);
     const res = await videos.request(`/${video.slug}`);
     const html = await res.text();
-    expect(html).toContain(`/${video.slug}/raw/source.mp4`);
+    expect(html).toContain(`/${video.slug}/raw/1080p.mp4`);
     expect(html).not.toContain("/data/");
   });
 

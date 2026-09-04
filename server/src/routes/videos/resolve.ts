@@ -11,7 +11,7 @@ import {
 } from "../../lib/processing/registry";
 import { getStepStates } from "../../lib/processing/steps-store";
 import { resolveSlug, type Video } from "../../lib/store";
-import { urlsForVideo, type VideoUrls } from "../../lib/url";
+import { activeRawFilename, urlsForVideo, type VideoUrls } from "../../lib/url";
 
 // VARIANTS (from lib/derivatives) is highest-first, which is the order the
 // player sees them in <source> children — biasing its initial pick.
@@ -133,18 +133,20 @@ export async function resolveForViewer(slug: string): Promise<ViewerResolution> 
     const aspect =
       video.aspectRatio ?? (video.width && video.height ? video.width / video.height : null);
 
-    // urls.raw points to the correct "primary" file — source.mp4 for
-    // unedited videos, or the resolution-named file (e.g. 1080p.mp4) for
-    // edited videos. See activeRawFilename() in lib/url.ts.
-    const sourceEntry: SourceDescriptor = { src: urls.raw, type: "video/mp4" };
+    // The CONCRETE presentation master, not the redirecting `urls.raw`
+    // (video.mp4): the player follows these URLs on every load, and a 302 per
+    // playback start is a needless round-trip. video.mp4 is for what we publish.
+    const sourceEntry: SourceDescriptor = {
+      src: `/${video.slug}/raw/${activeRawFilename(video)}`,
+      type: "video/mp4",
+    };
     if (video.width && video.height) {
       sourceEntry.width = video.width;
       sourceEntry.height = video.height;
     }
 
-    // Downscaled variants (only those that are a different resolution from
-    // the source entry — for edited videos, the source-resolution file is
-    // already the sourceEntry via urls.raw).
+    // Downscaled variants, minus any at the master's own height (that file IS
+    // the master, already the leading entry).
     const variantEntries: SourceDescriptor[] = variantHeights
       .filter((h) => h !== video.height)
       .map((height) => {

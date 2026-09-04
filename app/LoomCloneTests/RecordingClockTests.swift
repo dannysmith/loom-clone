@@ -149,22 +149,109 @@ final class RecordingClockTests: XCTestCase {
 
     // MARK: - Freshness gate
 
+    /// `isStaleSource` with an anchor at zero, for the cases that are only
+    /// about the freshness watermark.
+    private func isStale(_ capturePTS: CMTime, watermark: CMTime) -> Bool {
+        RecordingClock.isStaleSource(
+            capturePTS: capturePTS,
+            lastEmittedSourcePTS: watermark,
+            start: .zero,
+            pauseAccumulator: .zero
+        )
+    }
+
     func testNothingIsStaleBeforeTheFirstEmit() {
-        XCTAssertFalse(RecordingClock.isStaleSource(capturePTS: t(5), lastEmittedSourcePTS: .invalid))
+        XCTAssertFalse(isStale(t(5), watermark: .invalid))
     }
 
     func testFrameNewerThanTheWatermarkIsFresh() {
-        XCTAssertFalse(RecordingClock.isStaleSource(capturePTS: t(5.01), lastEmittedSourcePTS: t(5)))
+        XCTAssertFalse(isStale(t(5.01), watermark: t(5)))
     }
 
     func testRepeatedFrameIsStale() {
         // A static screen re-delivers the same capture PTS; compositing it
         // again would only produce a frame the encoder rejects.
-        XCTAssertTrue(RecordingClock.isStaleSource(capturePTS: t(5), lastEmittedSourcePTS: t(5)))
+        XCTAssertTrue(isStale(t(5), watermark: t(5)))
     }
 
     func testOlderFrameIsStale() {
-        XCTAssertTrue(RecordingClock.isStaleSource(capturePTS: t(4.9), lastEmittedSourcePTS: t(5)))
+        XCTAssertTrue(isStale(t(4.9), watermark: t(5)))
+    }
+
+    func testFrameCapturedBeforeTheAnchorIsStale() {
+        // The static-display case: the cached frame at commit was captured
+        // seconds before the anchor, so its logical PTS is negative and stays
+        // negative until the display next changes. Nothing has been emitted
+        // yet, so only the anchor test can catch it.
+        XCTAssertTrue(RecordingClock.isStaleSource(
+            capturePTS: t(98.4),
+            lastEmittedSourcePTS: .invalid,
+            start: t(100),
+            pauseAccumulator: .zero
+        ))
+    }
+
+    func testFrameCapturedAtTheAnchorIsEmittable() {
+        // The anchor is normally the cached frame's own capture PTS, so that
+        // frame lands at logical 0 and must pass — rejecting it would leave
+        // every recording a frame short at the head.
+        XCTAssertFalse(RecordingClock.isStaleSource(
+            capturePTS: t(100),
+            lastEmittedSourcePTS: .invalid,
+            start: t(100),
+            pauseAccumulator: .zero
+        ))
+    }
+
+    func testFrameCapturedDuringACompletedPauseIsStale() {
+        // Its logical PTS is negative once the pause is folded in. `resume`
+        // bumps the watermark past the pause as well; this is the backstop
+        // for a frame that slips through on a tight race.
+        XCTAssertTrue(RecordingClock.isStaleSource(
+            capturePTS: t(105),
+            lastEmittedSourcePTS: .invalid,
+            start: t(100),
+            pauseAccumulator: t(10)
+        ))
+    }
+
+    // MARK: - Two-source timing
+
+    func testNewestSourceWinsWhenTheSecondaryIsAhead() {
+        // A static screen with a live camera: the camera is the only thing
+        // putting new content in the frame, so it drives output timing.
+        XCTAssertEqual(
+            RecordingClock.newestSourcePTS(primary: t(98), secondary: t(100), now: t(100.02)).seconds,
+            100,
+            accuracy: 1e-6
+        )
+    }
+
+    func testPrimarySourceWinsWhenTheSecondaryIsBehind() {
+        XCTAssertEqual(
+            RecordingClock.newestSourcePTS(primary: t(100), secondary: t(99.9), now: t(100.02)).seconds,
+            100,
+            accuracy: 1e-6
+        )
+    }
+
+    func testSecondarySourceIsIgnoredWithoutAFrame() {
+        XCTAssertEqual(
+            RecordingClock.newestSourcePTS(primary: t(100), secondary: nil, now: t(100.02)).seconds,
+            100,
+            accuracy: 1e-6
+        )
+    }
+
+    func testSecondarySourceCannotStampTheOutputIntoTheFuture() {
+        // A corrupt camera timeline (the CMIO meltdown) can stamp frames ahead
+        // of the host clock. Accepting one would make every later frame
+        // non-monotonic until the wall clock caught up.
+        XCTAssertEqual(
+            RecordingClock.newestSourcePTS(primary: t(100), secondary: t(102), now: t(100.02)).seconds,
+            100,
+            accuracy: 1e-6
+        )
     }
 
     // MARK: - Monotonicity net
@@ -181,21 +268,53 @@ final class RecordingClockTests: XCTestCase {
 
     // MARK: - Keep-alive
 
-    func testNoKeepAliveBeforeAnythingHasBeenEmitted() {
-        XCTAssertNil(RecordingClock.keepAliveStaleDuration(now: t(100), lastEmitHostTime: .invalid))
+    func testNoKeepAliveBeforeTheClockIsArmed() {
+        XCTAssertNil(RecordingClock.keepAliveStaleDuration(
+            now: t(100),
+            lastEmitHostTime: .invalid,
+            lastEmittedVideoPTS: .invalid
+        ))
     }
 
     func testNoKeepAliveDuringNormalCadence() {
-        XCTAssertNil(RecordingClock.keepAliveStaleDuration(now: t(100.033), lastEmitHostTime: t(100)))
+        XCTAssertNil(RecordingClock.keepAliveStaleDuration(
+            now: t(100.033),
+            lastEmitHostTime: t(100),
+            lastEmittedVideoPTS: t(10)
+        ))
     }
 
     func testKeepAliveFiresOnceTheRunPassesTheThreshold() {
         let threshold = RecordingClock.keepAliveThresholdSeconds
         let stale = RecordingClock.keepAliveStaleDuration(
             now: t(100 + threshold + 0.5),
-            lastEmitHostTime: t(100)
+            lastEmitHostTime: t(100),
+            lastEmittedVideoPTS: t(10)
         )
         XCTAssertEqual(stale ?? .nan, threshold + 0.5, accuracy: 1e-6)
+    }
+
+    func testFirstHeldFrameIsDueOnTheFirstTick() {
+        // Recording started on a source that isn't changing: nothing can be
+        // emitted from it, and waiting out the threshold would leave the head
+        // of the video without a picture. The clock is armed at commit, so
+        // one tick's worth of staleness is enough.
+        let stale = RecordingClock.keepAliveStaleDuration(
+            now: t(100.033),
+            lastEmitHostTime: t(100),
+            lastEmittedVideoPTS: .invalid
+        )
+        XCTAssertEqual(stale ?? .nan, 0.033, accuracy: 1e-6)
+    }
+
+    func testTheThresholdAppliesAgainOnceSomethingHasBeenEmitted() {
+        // Only the first held frame skips the threshold — after that a static
+        // run holds at the keep-alive rate rather than re-emitting per tick.
+        XCTAssertNil(RecordingClock.keepAliveStaleDuration(
+            now: t(100.066),
+            lastEmitHostTime: t(100.033),
+            lastEmittedVideoPTS: t(0.033)
+        ))
     }
 
     func testKeepAliveThresholdSitsBetweenATickAndASegment() {
@@ -254,7 +373,9 @@ final class RecordingClockTests: XCTestCase {
         )
         XCTAssertTrue(RecordingClock.isStaleSource(
             capturePTS: t(65),
-            lastEmittedSourcePTS: resumed.lastEmittedSourcePTS
+            lastEmittedSourcePTS: resumed.lastEmittedSourcePTS,
+            start: t(10),
+            pauseAccumulator: resumed.pauseAccumulator
         ))
     }
 
@@ -270,14 +391,16 @@ final class RecordingClockTests: XCTestCase {
         )
         XCTAssertNil(RecordingClock.keepAliveStaleDuration(
             now: t(70.001),
-            lastEmitHostTime: resumed.lastEmitHostTime
+            lastEmitHostTime: resumed.lastEmitHostTime,
+            lastEmittedVideoPTS: t(49)
         ))
     }
 
     func testResumeLeavesInvalidWatermarksAlone() {
-        // Invalid means nothing has been emitted yet, so the freshness gate
-        // and keep-alive path already short-circuit. A pause must not be what
-        // initialises them.
+        // Invalid means nothing has been emitted yet and the clock was never
+        // armed, so the freshness gate falls through to its anchor test and
+        // the keep-alive path short-circuits. A pause must not be what
+        // initialises either.
         let resumed = RecordingClock.resume(
             now: t(70),
             pauseStartHostTime: t(60),

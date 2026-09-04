@@ -233,6 +233,23 @@ extension RecordingActor {
         pauseAccumulator = .zero
         pauseStartHostTime = nil
         lastEmittedVideoPTS = .invalid
+        // Arm the keep-alive clock here rather than leaving it to the first
+        // real emit. A source that is static from the very first tick — a
+        // display with nothing changing on it — never produces that emit, and
+        // an unarmed keep-alive means no picture at all until it does.
+        lastEmitHostTime = now
+
+        // Camera frames cached during prepare and the countdown are
+        // pre-recording content: their logical PTS is negative, so the
+        // metronome would walk the FIFO discarding them a tick at a time
+        // before reaching anything emittable. Keep only the most recent —
+        // the frame the anchor came from in the camera-bearing modes, and
+        // the first one that should reach the output. `resume` drains the
+        // same queue for the same reason.
+        if cameraFrameQueue.count > 1 {
+            cameraFrameQueue.removeFirst(cameraFrameQueue.count - 1)
+        }
+
         isRecording = true
 
         // Anchor the timeline at the same moment.

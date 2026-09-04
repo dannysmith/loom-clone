@@ -65,9 +65,11 @@ The coordinator runs the countdown and `prepareRecording()` in parallel. After c
 
 ## Frame flow by mode
 
-The metronome ticks at a wall-clock cadence set by the target frame rate (30fps or 60fps), but the tick interval is a **budget, not a contract**. Output rate tracks whatever the active mode's source is actually delivering — every tick consults the cached source frame and only emits when its `capturePTS` is strictly newer than `lastEmittedSourcePTS`. Stale-source ticks become no-ops; a long-static run triggers a [keep-alive](#keep-alive-for-long-static-sources) emit so HLS segments don't go empty.
+The metronome ticks at a wall-clock cadence set by the target frame rate (30fps or 60fps), but the tick interval is a **budget, not a contract**. Output rate tracks whatever the active mode's sources are actually delivering — every tick consults the cached source frame(s) and only emits when the `capturePTS` driving the tick is strictly newer than `lastEmittedSourcePTS` *and* lands at or after the recording anchor. Ticks that fail either test become no-ops; a static source triggers a [keep-alive](#keep-alive-for-static-sources) emit so HLS segments don't go empty.
 
 This source-PTS freshness gate is the primary monotonicity defence. The encoder-level monotonicity check survives as a safety net — post [task-21](../tasks-done/task-2026-05-11-21-output-frame-cadence-rework.md) it should never fire on the happy path; any fire surfaces as a `monotonicity.rejected` event in `recording.json`.
+
+The anchor half of the gate is what covers a recording that *starts* on a source which isn't changing. The cached frame at commit can be seconds old — it stays the newest frame the source has ever produced until the display next changes — so its logical PTS is negative and no composite drawn from it can be emitted. Failing it in the gate rather than at the encoder ([#71](https://github.com/dannysmith/loom-clone/issues/71)) is what routes the tick to the keep-alive path instead of burning a GPU composite per tick on a frame that can never land.
 
 ### `cameraOnly`
 
@@ -79,13 +81,20 @@ Screen frames go into a single-slot cache (latest wins). The metronome reads the
 
 ### `screenAndCamera`
 
-Screen drives the output cadence (it's the primary content; camera is a PiP overlay). The freshness check runs on `screen.capturePTS`. Each tick peeks (without popping) the most recent camera frame from the FIFO as the overlay content. The camera FIFO accumulates and ages out via the capacity cap; no frames are consumed by this mode.
+Each tick peeks (without popping) the most recent camera frame from the FIFO as the overlay content — the camera FIFO accumulates and ages out via the capacity cap; no frames are consumed by this mode.
+
+Output timing follows whichever of the two composited sources captured most recently (`RecordingClock.newestSourcePTS`). The screen is the primary content and usually wins. But when nothing on the display is changing, the camera's PiP is the only moving content in the frame, and it takes over as the timing source — without that the whole composite, face included, would hold at the keep-alive's 1fps for as long as the display stayed still. A camera `capturePTS` ahead of the host clock is ignored: a corrupt camera timeline (the CMIO meltdown, see [Live quality degradation](#live-quality-degradation-camera-capture-pts-corruption)) would otherwise stamp output into the future and make every later frame non-monotonic.
 
 In all three modes, the emitted frame is stamped with the source frame's hardware capture PTS — not the wall clock at emit time. Audio samples are stamped with their own hardware capture PTS. Both share the same clock domain, which keeps A/V aligned through capture-pipeline latency.
 
-### Keep-alive for long-static sources
+### Keep-alive for static sources
 
 When the freshness gate has been skipping for ≥ 1.0s (`host_now - lastEmitHostTime`), the metronome emits a synthetic-PTS repeat of the last cached source frame. This stops AVAssetWriter's 4-second segmenter from cutting empty segments during a static-screen run (which would freeze playback past the gap).
+
+Two bootstrap details make this reachable from the very first tick, which is what stops a recording started on a static display from having no picture at all until the display changes ([#71](https://github.com/dannysmith/loom-clone/issues/71)):
+
+- `lastEmitHostTime` is armed in `commitRecording`, not by the first real emit. A source that is static from t=0 never produces that emit.
+- The 1.0s threshold doesn't apply before the first emit. There's no picture yet, so there's nothing to duplicate and nothing to space out — waiting a full threshold would only leave a hole at the head of the video.
 
 Keep-alive PTS uses the same formula real frames use — `primingOffset + (host_now - start) - pauseAccumulator` — substituting `host_now` for the source capture time. The wall-clock anchor is what keeps audio and video aligned across the static period: audio PTS also advances at wall-clock rate, so a 10s static run produces 10 keep-alives whose PTS spans 10 seconds, matching audio exactly.
 
@@ -186,7 +195,7 @@ This task **observes** the violation; task 3 (#30) **enforces** the same invaria
 
 ### Screen capture (SCStream)
 
-`ScreenCaptureManager` forwards `stream(_:didStopWithError:)` to `handleScreenCaptureError`, which records `source.screen.failed` and fires a pill. For a silent stall (no error, just no frames), the staleness watchdog fires `source.screen.stale` after 2s. At the pipeline level the single-slot `latestScreenFrame` cache retains the last frame and the freshness gate rejects every tick; after 1s the keep-alive fires at ~1Hz, so the output holds frozen pixels at low cadence rather than hard-freezing.
+`ScreenCaptureManager` forwards `stream(_:didStopWithError:)` to `handleScreenCaptureError`, which records `source.screen.failed` and fires a pill. For a silent stall (no error, just no frames), the staleness watchdog fires `source.screen.stale` after 2s. At the pipeline level the single-slot `latestScreenFrame` cache retains the last frame and the freshness gate rejects every tick; the keep-alive then fires at ~1Hz, so the output holds frozen pixels at low cadence rather than hard-freezing (in `screenAndCamera` a live camera keeps the composite at full cadence instead). Note the watchdog can't currently tell a dead stream from a display with nothing happening on it — both look like no frames — so a static display raises this pill too.
 
 ### Camera (AVCaptureSession)
 

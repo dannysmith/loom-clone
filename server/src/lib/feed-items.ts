@@ -6,7 +6,7 @@ import { inArray } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { type Video, videoTranscripts } from "../db/schema";
 import { formatDuration } from "./format";
-import { absoluteUrl, activeRawFilename } from "./url";
+import { absoluteUrl, publicVideoPath } from "./url";
 
 export const TRANSCRIPT_WORD_LIMIT = 200;
 
@@ -28,7 +28,7 @@ export function truncateWords(text: string, limit: number): string {
 // Renders the inner XML for a single <item> in an RSS 2.0 + Media RSS feed.
 export function renderRssItem(v: Video): string {
   const pageUrl = absoluteUrl(`/${v.slug}`);
-  const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
+  const mp4Url = absoluteUrl(publicVideoPath(v.slug));
   const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
   const title = v.title ?? v.slug;
   const durationSec = v.durationSeconds != null ? Math.round(v.durationSeconds) : undefined;
@@ -89,7 +89,7 @@ export function buildJsonFeedItem(v: Video, transcriptMap: Map<string, string>) 
     ...(transcriptExcerpt && { _transcript_excerpt: transcriptExcerpt }),
     attachments: [
       {
-        url: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
+        url: absoluteUrl(publicVideoPath(v.slug)),
         mime_type: "video/mp4",
         ...(durationSec != null && { duration_in_seconds: durationSec }),
       },
@@ -99,7 +99,7 @@ export function buildJsonFeedItem(v: Video, transcriptMap: Map<string, string>) 
       embed: absoluteUrl(`/${v.slug}/embed`),
       json: absoluteUrl(`/${v.slug}.json`),
       md: absoluteUrl(`/${v.slug}.md`),
-      raw: absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`),
+      raw: absoluteUrl(publicVideoPath(v.slug)),
       poster: absoluteUrl(`/${v.slug}/poster.jpg`),
     },
   };

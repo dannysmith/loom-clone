@@ -58,7 +58,7 @@ upload.post("/", async (c) => {
     // Validate the upload at intake and surface the result in the admin event
     // log. A genuinely-broken upload is the uploader's problem (caught here,
     // immediately); we don't reject it — resolve.ts still falls back to serving
-    // upload.mp4 if post-processing can't produce a source.mp4.
+    // upload.mp4 if post-processing can't produce a presentation master.
     const playable = await isProbablyPlayable(uploadPath);
     await logEvent(video.id, "upload_received", { playable, bytes: file.size });
 
@@ -67,7 +67,7 @@ upload.post("/", async (c) => {
       await addTagToVideo(video.id, tagId);
     }
 
-    // Fire-and-forget: generate derivatives (source.mp4 with faststart + thumbnail)
+    // Fire-and-forget: generate derivatives (source.mp4 + presentation master)
     scheduleUploadDerivatives(video.id);
 
     return c.redirect(`/admin/videos/${video.id}`);

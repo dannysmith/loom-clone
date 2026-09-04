@@ -7,7 +7,7 @@ import { agentTextCacheControl } from "../../lib/cache-control";
 import { siteConfig } from "../../lib/site-config";
 import { PUBLIC_ROOT } from "../../lib/static-assets";
 import { listPublicTags } from "../../lib/tags";
-import { absoluteUrl, activeRawFilename } from "../../lib/url";
+import { absoluteUrl, publicVideoPath } from "../../lib/url";
 import { buildLlmsTxt } from "./feeds";
 
 // Root + well-known files. Open, no auth.
@@ -130,7 +130,7 @@ wellKnown.get("/sitemap.xml", async (c) => {
   const entries = rows.map((v) => {
     const pageUrl = absoluteUrl(`/${v.slug}`);
     const posterUrl = absoluteUrl(`/${v.slug}/poster.jpg`);
-    const mp4Url = absoluteUrl(`/${v.slug}/raw/${activeRawFilename(v)}`);
+    const mp4Url = absoluteUrl(publicVideoPath(v.slug));
     const embedUrl = absoluteUrl(`/${v.slug}/embed`);
     const title = v.title ?? v.slug;
     const durationSec = v.durationSeconds ? Math.round(v.durationSeconds) : undefined;

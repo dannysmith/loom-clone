@@ -33,11 +33,18 @@ async function writeVideoFile(videoId: string, relPath: string, content: string 
   await Bun.write(full, content);
 }
 
+// The presentation master is named for the video's height, so the raw routes
+// need one cached.
+async function setHeight(videoId: string, height: number): Promise<void> {
+  await getDb().update(videosTable).set({ height }).where(eq(videosTable.id, videoId));
+}
+
 describe("GET /:slug/raw/:file", () => {
-  test("serves source.mp4 with video/mp4 content type", async () => {
+  test("serves a rendition with video/mp4 content type", async () => {
     const video = await createVideo();
-    await writeVideoFile(video.id, "derivatives/source.mp4", "fake-mp4");
-    const res = await media.request(`/${video.slug}/raw/source.mp4`);
+    await setHeight(video.id, 1080);
+    await writeVideoFile(video.id, "derivatives/1080p.mp4", "fake-mp4");
+    const res = await media.request(`/${video.slug}/raw/1080p.mp4`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("video/mp4");
     expect(res.headers.get("accept-ranges")).toBe("bytes");
@@ -51,6 +58,25 @@ describe("GET /:slug/raw/:file", () => {
     expect(res.status).toBe(200);
   });
 
+  test("video.mp4 redirects to the presentation master", async () => {
+    const video = await createVideo();
+    await setHeight(video.id, 1440);
+    const res = await media.request(`/${video.slug}/raw/video.mp4`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`/${video.slug}/raw/1440p.mp4`);
+  });
+
+  test("source.mp4 redirects too — the pristine original is never served", async () => {
+    const video = await createVideo();
+    await setHeight(video.id, 1080);
+    // Present on disk, and still not served: it's the archive, and handing it out
+    // would mean un-processed audio and (later) no watermark.
+    await writeVideoFile(video.id, "derivatives/source.mp4", "pristine");
+    const res = await media.request(`/${video.slug}/raw/source.mp4`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`/${video.slug}/raw/1080p.mp4`);
+  });
+
   test("rejects files not matching the allowlist", async () => {
     const video = await createVideo();
     const res = await media.request(`/${video.slug}/raw/evil.sh`);
@@ -58,8 +84,8 @@ describe("GET /:slug/raw/:file", () => {
   });
 
   test("serves upload.mp4 from the video dir (uploaded-video fallback)", async () => {
-    // [P1.3] upload.mp4 lives one dir up from derivatives/; it's the fallback an
-    // uploaded video serves when post-processing couldn't produce source.mp4.
+    // upload.mp4 lives one dir up from derivatives/; it's the fallback an
+    // uploaded video serves when post-processing couldn't produce a master.
     const video = await createVideo();
     await writeVideoFile(video.id, "upload.mp4", "raw-upload");
     const res = await media.request(`/${video.slug}/raw/upload.mp4`);
@@ -70,12 +96,12 @@ describe("GET /:slug/raw/:file", () => {
 
   test("returns 404 for missing file on disk", async () => {
     const video = await createVideo();
-    const res = await media.request(`/${video.slug}/raw/source.mp4`);
+    const res = await media.request(`/${video.slug}/raw/1080p.mp4`);
     expect(res.status).toBe(404);
   });
 
   test("returns 404 for unknown slug", async () => {
-    const res = await media.request("/nonexist/raw/source.mp4");
+    const res = await media.request("/nonexist/raw/1080p.mp4");
     expect(res.status).toBe(404);
   });
 
@@ -83,15 +109,15 @@ describe("GET /:slug/raw/:file", () => {
     const video = await createVideo();
     const oldSlug = video.slug;
     await updateSlug(video.id, "newname");
-    await writeVideoFile(video.id, "derivatives/source.mp4", "bytes");
-    const res = await media.request(`/${oldSlug}/raw/source.mp4`);
+    await writeVideoFile(video.id, "derivatives/1080p.mp4", "bytes");
+    const res = await media.request(`/${oldSlug}/raw/1080p.mp4`);
     expect(res.status).toBe(200);
   });
 
   test("supports Range requests", async () => {
     const video = await createVideo();
-    await writeVideoFile(video.id, "derivatives/source.mp4", "0123456789");
-    const res = await media.request(`/${video.slug}/raw/source.mp4`, {
+    await writeVideoFile(video.id, "derivatives/1080p.mp4", "0123456789");
+    const res = await media.request(`/${video.slug}/raw/1080p.mp4`, {
       headers: { Range: "bytes=2-5" },
     });
     expect(res.status).toBe(206);
@@ -159,11 +185,12 @@ describe("GET /:slug/poster.jpg", () => {
 });
 
 describe("GET /:slug.mp4 (via aggregator)", () => {
-  test("302 redirects to /raw/source.mp4", async () => {
+  test("302 redirects straight to the presentation master (one hop)", async () => {
     const video = await createVideo();
+    await setHeight(video.id, 1080);
     const res = await videos.request(`/${video.slug}.mp4`, { redirect: "manual" });
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(`/${video.slug}/raw/source.mp4`);
+    expect(res.headers.get("location")).toBe(`/${video.slug}/raw/1080p.mp4`);
   });
 
   test("returns 404 for unknown slug", async () => {
@@ -174,10 +201,11 @@ describe("GET /:slug.mp4 (via aggregator)", () => {
   test("resolves old slug and redirects to canonical", async () => {
     const video = await createVideo();
     const oldSlug = video.slug;
+    await setHeight(video.id, 1080);
     await updateSlug(video.id, "latest");
     const res = await videos.request(`/${oldSlug}.mp4`, { redirect: "manual" });
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/latest/raw/source.mp4");
+    expect(res.headers.get("location")).toBe("/latest/raw/1080p.mp4");
   });
 
   test("returns 404 for trashed video", async () => {

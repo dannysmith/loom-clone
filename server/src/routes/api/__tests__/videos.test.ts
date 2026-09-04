@@ -130,7 +130,7 @@ describe("GET /:id", () => {
     expect(body.slug).toBe(slug);
     expect(body.status).toBe("recording");
     expect(body.urls.page).toBe(`/${slug}`);
-    expect(body.urls.raw).toBe(`/${slug}/raw/source.mp4`);
+    expect(body.urls.raw).toBe(`/${slug}/raw/video.mp4`);
     expect(body.urls.hls).toBe(`/${slug}/stream/stream.m3u8`);
     expect(body.urls.poster).toBe(`/${slug}/poster.jpg`);
     expect(body.url).toMatch(/^https?:\/\//);

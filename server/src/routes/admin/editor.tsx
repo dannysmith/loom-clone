@@ -26,10 +26,10 @@ editor.get("/:id/editor", async (c) => {
     return c.text("Cannot edit a trashed video", 400);
   }
   // A `ready` video can still have a run in flight — reconcile publishes `ready`
-  // the moment source+metadata validate, while audio (an in-place rewrite of
-  // source.mp4) and the variants are still being produced. Editing during that
-  // window would race two writers on the same derivatives/ dir, so block it
-  // until the run settles.
+  // the moment source+metadata validate, while the presentation master and the
+  // variants cut from it are still being produced. Editing during that window
+  // would race two writers on the same derivatives/ dir, so block it until the
+  // run settles.
   if (hasActiveRun(video.id)) {
     return c.text("Post-processing is still running for this video — try again shortly", 409);
   }
@@ -102,9 +102,9 @@ editor.post("/:id/editor/commit", async (c) => {
     return c.json({ error: `Cannot commit edits for a video with status "${result.status}"` }, 400);
   }
   // Mirror the page-load gate: a `ready` video may still have the post-recording
-  // run enriching in the background (audio rewrites source.mp4 in place, variants
-  // still cutting). Committing now would run two ffmpeg + ledger writers against
-  // the same derivatives/ dir. Block until the run settles.
+  // run enriching in the background (the master being built, variants still
+  // cutting). Committing now would run two ffmpeg + ledger writers against the
+  // same derivatives/ dir. Block until the run settles.
   if (hasActiveRun(result.id)) {
     return c.json({ error: "Post-processing is still running for this video" }, 409);
   }

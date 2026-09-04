@@ -302,29 +302,47 @@ extension RecordingActor {
         guard let screen = latestScreenFrame else {
             return ModeCompositeStep(result: nil, sourcePTS: .invalid, branch: .noSource, compositeS: 0)
         }
-        // Screen drives timing in screenAndCamera mode — it's the primary
-        // content, camera is just a PiP overlay. Using screen PTS ensures
-        // the output advances at the screen's delivery rate and lets a
-        // static screen short-circuit through the stale-source check.
-        if isStaleSource(screen.capturePTS) {
-            return ModeCompositeStep(result: nil, sourcePTS: screen.capturePTS, branch: .skipStale, compositeS: 0)
+        // Timing follows whichever of the two composited sources captured
+        // most recently. The screen is the primary content and usually wins
+        // — but when nothing on the display is changing, the camera's PiP is
+        // the only moving content in the frame. Without it the whole
+        // composite, face included, holds at the keep-alive's 1fps until the
+        // display next changes.
+        let camera = pipCameraFrame
+        let sourcePTS = RecordingClock.newestSourcePTS(
+            primary: screen.capturePTS,
+            secondary: camera?.capturePTS,
+            now: CMClockGetTime(CMClockGetHostTimeClock())
+        )
+        if isStaleSource(sourcePTS) {
+            return ModeCompositeStep(result: nil, sourcePTS: sourcePTS, branch: .skipStale, compositeS: 0)
         }
         let startedAt = Date()
-        let result = await compositeScreenWithPiP(screen: screen)
+        let result = await compositeScreenWithPiP(screen: screen, camera: camera)
         return ModeCompositeStep(
             result: result,
-            sourcePTS: screen.capturePTS,
+            sourcePTS: sourcePTS,
             branch: .notApplicable,
             compositeS: -startedAt.timeIntervalSinceNow
         )
     }
 
-    /// Composite a screen frame with the most recent camera frame peeked (not
-    /// popped) as the PiP overlay, falling back to screen-only when the camera
-    /// isn't fit to render. Shared by the metronome's `screenAndCamera` branch
-    /// and the keep-alive path, which must produce a visually identical frame.
-    private func compositeScreenWithPiP(screen: CachedFrame) async -> Result<CVPixelBuffer, CompositionError>? {
-        guard let camera = cameraFrameQueue.last, !sourceHealth.cameraIsUnusable else {
+    /// The most recent camera frame peeked (not popped) from the FIFO, or nil
+    /// when the camera isn't fit to render. Resolved once per tick so the
+    /// timing decision and the composite agree on what's in the frame.
+    var pipCameraFrame: CachedFrame? {
+        sourceHealth.cameraIsUnusable ? nil : cameraFrameQueue.last
+    }
+
+    /// Composite a screen frame with a camera frame as the PiP overlay,
+    /// falling back to screen-only when there's no camera frame to use.
+    /// Shared by the metronome's `screenAndCamera` branch and the keep-alive
+    /// path, which must produce a visually identical frame.
+    func compositeScreenWithPiP(
+        screen: CachedFrame,
+        camera: CachedFrame?
+    ) async -> Result<CVPixelBuffer, CompositionError>? {
+        guard let camera else {
             return await composition.compositeFrame(
                 screenBuffer: screen.pixelBuffer,
                 cameraBuffer: nil,
@@ -378,12 +396,19 @@ extension RecordingActor {
         )
     }
 
-    /// True when the source's capturePTS is not strictly newer than what
-    /// we last emitted. Used by the per-mode branches of
-    /// `compositeForCurrentMode` to skip a tick before spending GPU time
-    /// compositing content the encoder would only reject downstream.
+    /// True when the source's capturePTS can't produce an emittable frame —
+    /// it predates the anchor, or it isn't strictly newer than what we last
+    /// emitted. Used by the per-mode branches of `compositeForCurrentMode` to
+    /// skip a tick before spending GPU time compositing content the encoder
+    /// would only reject downstream.
     private func isStaleSource(_ capturePTS: CMTime) -> Bool {
-        RecordingClock.isStaleSource(capturePTS: capturePTS, lastEmittedSourcePTS: lastEmittedSourcePTS)
+        guard let start = recordingStartTime else { return true }
+        return RecordingClock.isStaleSource(
+            capturePTS: capturePTS,
+            lastEmittedSourcePTS: lastEmittedSourcePTS,
+            start: start,
+            pauseAccumulator: pauseAccumulator
+        )
     }
 
     /// Compose and append a single metronome frame. Returns true if a frame
@@ -591,9 +616,10 @@ extension RecordingActor {
         // normal operation) from "no source ever arrived" (noSource,
         // real problem).
         if decision.branch == .skipStale {
-            // Phase 3: in a long static run, emit a synthetic-PTS repeat
-            // of the last cached source so AVAssetWriter's segment cutter
-            // doesn't see >4s of dead air.
+            // Emit a synthetic-PTS repeat of the last cached source, so a
+            // static run doesn't show AVAssetWriter's segment cutter >4s of
+            // dead air — and so a recording that starts static still has a
+            // picture from the first tick.
             if await tryEmitKeepAlive(
                 iterIdx: iterIdx,
                 start: start,
@@ -666,127 +692,5 @@ extension RecordingActor {
             ptsLogical: elapsedLogical.seconds,
             lastEmitLogical: lastEmitLogical
         )
-    }
-
-    /// Phase 3: emit a synthetic-PTS repeat of the last cached source
-    /// frame during a long static-source run. Called from
-    /// `emitMetronomeFrame` after the freshness check skipped a tick;
-    /// returns true if a keep-alive was actually appended.
-    ///
-    /// The keep-alive PTS is wall-clock-anchored
-    /// (`primingOffset + (host_now - start) - pauseAccumulator`) — the
-    /// same formula real frames use, just substituting host_now for the
-    /// source capture time. This keeps A/V aligned through the static
-    /// run: audio PTS is also wall-clock-relative-to-start, so audio
-    /// continues at its real cadence while video holds the last frame.
-    ///
-    /// We deliberately do NOT update `lastEmittedSourcePTS` — when a
-    /// fresh source frame eventually arrives, its capturePTS should still
-    /// be strictly newer than the pre-stale-run real emit, so the
-    /// freshness check accepts it.
-    private func tryEmitKeepAlive(
-        iterIdx: Int64,
-        start: CMTime,
-        lastEmitLogical: Double?
-    ) async -> Bool {
-        let nowHost = CMClockGetTime(CMClockGetHostTimeClock())
-        guard let staleDuration = RecordingClock.keepAliveStaleDuration(
-            now: nowHost,
-            lastEmitHostTime: lastEmitHostTime
-        ) else { return false }
-
-        // Compose with peek-only access to the cached source frames —
-        // cameraOnly uses `lastPoppedCameraFrame` rather than touching
-        // the FIFO. The source mode determines content; freshness is
-        // irrelevant since the synthetic PTS doesn't reference
-        // capturePTS.
-        let composedResult: Result<CVPixelBuffer, CompositionError>?
-        let compositeStart = Date()
-        switch mode {
-        case .screenOnly:
-            guard let screen = latestScreenFrame else { return false }
-            composedResult = await composition.compositeFrame(
-                screenBuffer: screen.pixelBuffer,
-                cameraBuffer: nil,
-                mode: .screenOnly
-            )
-        case .screenAndCamera:
-            guard let screen = latestScreenFrame else { return false }
-            composedResult = await compositeScreenWithPiP(screen: screen)
-        case .cameraOnly:
-            guard let last = lastPoppedCameraFrame else { return false }
-            composedResult = await composition.compositeFrame(
-                screenBuffer: nil,
-                cameraBuffer: last.pixelBuffer,
-                mode: .cameraOnly
-            )
-        }
-        let compositeS = -compositeStart.timeIntervalSinceNow
-
-        guard let result = composedResult,
-              case let .success(buffer) = result
-        else {
-            return false
-        }
-
-        // Synthetic wall-clock-anchored PTS: `nowHost` stands in for the
-        // source capture time the real path would use.
-        let elapsedLogical = RecordingClock.logicalPTS(
-            capturePTS: nowHost,
-            start: start,
-            pauseAccumulator: pauseAccumulator
-        )
-        guard elapsedLogical >= .zero else { return false }
-        let pts = RecordingClock.encoderPTS(logical: elapsedLogical)
-
-        // Encoder monotonicity safety net. Host time only advances, so
-        // this should always pass in practice — defensive only.
-        if RecordingClock.breaksMonotonicity(pts: pts, lastEmittedVideoPTS: lastEmittedVideoPTS) {
-            return false
-        }
-
-        guard let outputSample = createSampleBuffer(
-            from: buffer,
-            pts: pts,
-            duration: frameDuration
-        ) else {
-            return false
-        }
-
-        lastEmittedVideoPTS = pts
-        lastEmitHostTime = nowHost
-        // NOTE: lastEmittedSourcePTS deliberately unchanged.
-        diagnostics.keepAliveEmits += 1
-
-        // One timeline event per static run.
-        if !keepAliveEventFiredForCurrentStaleRun {
-            keepAliveEventFiredForCurrentStaleRun = true
-            timeline.recordKeepaliveEmitted(
-                staleDurationSeconds: staleDuration,
-                t: logicalElapsedSeconds()
-            )
-        }
-
-        // Trace row. `sourcePTS = nil` flags this as synthetic.
-        let host = logicalElapsedSeconds()
-        let entry = MetronomeTickEntry(
-            iter: iterIdx,
-            emittedTickIdx: metronomeTickIdx,
-            hostT: host,
-            queueDepthBefore: cameraFrameQueue.count,
-            cameraBranch: CompositeBranch.keepalive.rawValue,
-            sourcePTS: nil,
-            elapsedLogical: elapsedLogical.seconds,
-            emitPTS: elapsedLogical.seconds,
-            lastEmitPTS: lastEmitLogical,
-            compositeS: compositeS,
-            action: MetronomeTickAction.keepalive.rawValue,
-            driftS: 0,
-            sleepS: 0
-        )
-        diagnostics.pushTick(entry)
-
-        await writer.appendVideo(outputSample)
-        return true
     }
 }

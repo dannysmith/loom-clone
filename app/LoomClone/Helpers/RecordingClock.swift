@@ -106,16 +106,49 @@ enum RecordingClock {
         return (pts - TimestampAdjuster.defaultPrimingOffset).seconds
     }
 
+    /// Output PTS for a composite drawn from two live sources: whichever of
+    /// them captured most recently, so the output advances whenever either
+    /// has put new content in the frame.
+    ///
+    /// `secondary` is ignored when it sits ahead of `now`. Capture sources
+    /// stamp against the host clock so that shouldn't happen — but a corrupt
+    /// camera timeline (the CMIO meltdown) can produce one, and a PTS in the
+    /// future makes every subsequent frame non-monotonic, stopping output
+    /// until the wall clock catches up. `primary` is trusted as given: it's
+    /// the source the mode is built around, and silently retiming it would be
+    /// its own desync.
+    static func newestSourcePTS(primary: CMTime, secondary: CMTime?, now: CMTime) -> CMTime {
+        guard let secondary, secondary.isValid, secondary > primary, secondary <= now else { return primary }
+        return secondary
+    }
+
     // MARK: - Freshness gate
 
-    /// True when a source frame is not strictly newer than the last one that
-    /// produced a real emit — i.e. compositing it would only produce a frame
-    /// the encoder rejects downstream.
+    /// True when a source frame can't produce an emittable output frame:
+    /// either it predates the recording anchor, or it isn't strictly newer
+    /// than the frame behind the last real emit. Compositing it would only
+    /// produce a frame the encoder rejects downstream.
     ///
     /// This is the primary defence against non-monotonic video PTS; the
-    /// encoder-level check is a safety net behind it. An invalid watermark
-    /// means nothing has been emitted yet, so nothing can be stale.
-    static func isStaleSource(capturePTS: CMTime, lastEmittedSourcePTS: CMTime) -> Bool {
+    /// encoder-level checks are safety nets behind it. An invalid watermark
+    /// means nothing has been emitted yet, so only the anchor test applies.
+    ///
+    /// The anchor test is what covers a recording that starts on a source
+    /// which isn't changing. A static display hands the metronome a cached
+    /// frame captured seconds before commit, whose logical PTS is negative
+    /// and stays negative until the display next changes. Failing it here
+    /// rather than after composition is what lets the keep-alive path hold
+    /// that frame, instead of every tick paying for a composite that can
+    /// never be emitted.
+    static func isStaleSource(
+        capturePTS: CMTime,
+        lastEmittedSourcePTS: CMTime,
+        start: CMTime,
+        pauseAccumulator: CMTime
+    ) -> Bool {
+        if logicalPTS(capturePTS: capturePTS, start: start, pauseAccumulator: pauseAccumulator) < .zero {
+            return true
+        }
         guard lastEmittedSourcePTS.isValid else { return false }
         return capturePTS <= lastEmittedSourcePTS
     }
@@ -136,16 +169,28 @@ enum RecordingClock {
     static let keepAliveThresholdSeconds: Double = 1.0
 
     /// Whether a keep-alive repeat is due, and how long the static run has
-    /// been going. `nil` means no — either nothing has been emitted yet, or
-    /// the last emit is too recent to count as a static run.
+    /// been going. `nil` means no — either the clock isn't armed yet, or the
+    /// last emit is too recent to count as a static run.
     ///
     /// A keep-alive's PTS is wall-clock-anchored (`now` substituted for the
     /// source capture time) rather than derived from a source frame, which is
     /// what holds A/V together through the run: audio keeps advancing at its
     /// real cadence while video repeats the last frame.
-    static func keepAliveStaleDuration(now: CMTime, lastEmitHostTime: CMTime) -> Double? {
+    ///
+    /// Before the first emit the threshold doesn't apply. The recording has
+    /// no picture at all at that point, so there's nothing to duplicate and
+    /// nothing to space out — waiting a full threshold would only leave a
+    /// hole at the head of the video. `lastEmitHostTime` is armed at commit
+    /// so this case is reachable at all: a source that is static from the
+    /// very first tick never produces the real emit that would arm it.
+    static func keepAliveStaleDuration(
+        now: CMTime,
+        lastEmitHostTime: CMTime,
+        lastEmittedVideoPTS: CMTime
+    ) -> Double? {
         guard lastEmitHostTime.isValid else { return nil }
         let staleDuration = (now - lastEmitHostTime).seconds
+        guard lastEmittedVideoPTS.isValid else { return staleDuration }
         guard staleDuration >= keepAliveThresholdSeconds else { return nil }
         return staleDuration
     }
@@ -172,10 +217,12 @@ enum RecordingClock {
 
     /// Fold a completed pause into the clock.
     ///
-    /// Both watermarks are left untouched when invalid: an invalid watermark
-    /// means no real emit has happened yet, so `isStaleSource` already returns
-    /// false and the keep-alive path already short-circuits. Watermarks are
-    /// only ever initialised by a real emit, never by a pause path.
+    /// Both watermarks are left untouched when invalid: an invalid
+    /// `lastEmittedSourcePTS` means no real emit has happened yet, so
+    /// `isStaleSource` already falls through to its anchor test, and an
+    /// unarmed keep-alive clock short-circuits. Neither is initialised by a
+    /// pause path — the source watermark comes from a real emit, the
+    /// keep-alive clock from commit.
     static func resume(
         now: CMTime,
         pauseStartHostTime: CMTime?,

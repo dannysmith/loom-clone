@@ -246,6 +246,12 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     return;
   }
 
+  // A master built without its audio chain is still served, and looks identical
+  // to a processed one — so say so where the video's history is recorded.
+  if (ctx.scratch.audioChainError) {
+    await logStep(videoId, "audio_chain", "failed", ctx.scratch.audioChainError);
+  }
+
   if (opts.intent !== "only") {
     await settleEditState(videoId, ctx);
     // For uploads, upload.mp4 produced source.mp4 — drop it once source +

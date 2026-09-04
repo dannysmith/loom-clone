@@ -101,6 +101,10 @@ export type StepContext = {
     // reused by captions so both describe the same cut.
     kept?: Segment[];
     fullSpan?: boolean;
+    // Set when the audio chain failed and the master was built without it, so
+    // the run can surface that on the activity feed rather than leaving a
+    // silently-unenhanced video looking identical to a processed one.
+    audioChainError?: string;
   };
 };
 
@@ -212,7 +216,21 @@ async function buildPresentation(ctx: StepContext): Promise<void> {
     let produced = false;
     if (wantsAudioChain) {
       const noiseFloorDb = await profileNoiseFloorFor(source, await ensureSilences(ctx));
-      produced = await applyAudioChain(chainInput, out, { noiseFloorDb });
+      try {
+        produced = await applyAudioChain(chainInput, out, { noiseFloorDb });
+      } catch (err) {
+        // The audio chain is an ENHANCEMENT. A video with un-enhanced audio is
+        // worth far more than no video at all, so a failure here degrades to an
+        // unprocessed master rather than failing the step and leaving nothing to
+        // serve. Loud, because it should be looked at: ffmpeg's arnndn can emit
+        // a frame of NaNs at end-of-stream, non-deterministically, which the AAC
+        // encoder then refuses. A later reprocess retries the chain.
+        console.error(
+          `[pipeline] ${ctx.videoId} audio chain failed — building an unprocessed master:`,
+          err instanceof Error ? err.message : err,
+        );
+        ctx.scratch.audioChainError = err instanceof Error ? err.message : String(err);
+      }
     }
     // No chain, or it declined (no audio stream / missing model): the master is
     // the cut — or the source itself — remuxed with a faststart header.

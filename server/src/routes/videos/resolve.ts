@@ -20,9 +20,8 @@ import { urlsForVideo, type VideoUrls } from "../../lib/url";
 // to offer. Gated on the video_processing_steps table (state `ready`) AND the
 // file still being present on disk, NOT bare file presence: a byte-complete but
 // semantically-broken or hand-deleted MP4 is never served, so the viewer falls
-// back to HLS automatically. The active raw file (source.mp4 for unedited
-// videos, {height}p.mp4 for edited ones) is gated on the validated step that
-// PRODUCED it — `source` for recorded/uploaded, `edited_output` for edited.
+// back to HLS automatically. The served file is always the {height}p.mp4
+// presentation master, gated on the `presentation` step that produced it.
 async function derivativeFlags(video: Video): Promise<{
   hasSource: boolean;
   variantHeights: number[];
@@ -39,13 +38,12 @@ async function derivativeFlags(video: Video): Promise<{
   // whose metadata step failed serves HLS, instead of an MP4 with no dimensions.
   const mandatoryReady = REQUIRED_KINDS.every((k) => steps.get(k)?.state === "ready");
 
-  // The active raw file is gated on ITS producing step being servable: `source`
-  // for unedited/uploaded videos, `edited_output` for edited ones — so the
-  // edited cut gets the same validated-serving guarantee as a recorded source
-  // rather than bare disk-presence. (Edited videos predating the edited_output
-  // step have no such row, so they need `videos:backfill-processing-steps` run
-  // once to keep serving — see that script.)
-  const activeProducerKind: ProcessingStepKind = video.lastEditedAt ? "edited_output" : "source";
+  // The served file is always the presentation master, so it's gated on the step
+  // that produces it — edited or not, recorded or uploaded. Until that step has
+  // run and validated, the page falls back to HLS; source.mp4 is never served
+  // publicly. (A video migrated from before the presentation master has its row
+  // written by `videos:backfill-processing-steps`.)
+  const activeProducerKind: ProcessingStepKind = "presentation";
   const activeProducer = stepByKind(activeProducerKind)!;
 
   // This runs on every viewer request, so fan the independent checks out in

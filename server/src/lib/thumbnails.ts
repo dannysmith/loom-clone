@@ -57,17 +57,22 @@ export function candidatesDir(videoId: string): string {
   return join(DATA_DIR, videoId, "derivatives", CANDIDATES_DIR);
 }
 
-// Extract thumbnail candidate frames from source.mp4 and promote the best one.
-// Writes candidates to derivatives/thumbnail-candidates/auto-NN.jpg and
+// Extract thumbnail candidate frames from the source video and promote the best
+// one. Writes candidates to derivatives/thumbnail-candidates/auto-NN.jpg and
 // promotes the winner to derivatives/thumbnail.jpg.
+//
+// The thumbnail is a frame of the pristine ORIGINAL, so `inputPath` is passed
+// explicitly by the pipeline rather than defaulted from `derivDir` — during a
+// staged rebuild those are two different directories.
 export async function extractAndPromoteThumbnails(
   derivDir: string,
   duration: number,
+  inputPath?: string,
 ): Promise<void> {
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
-  const source = join(derivDir, "source.mp4");
+  const source = inputPath ?? join(derivDir, "source.mp4");
   const candDir = join(derivDir, CANDIDATES_DIR);
 
   // Clean any previous candidates (idempotent re-run).

@@ -1,10 +1,11 @@
-// Rendering helpers for applying an EDL (edit decision list) to source.mp4:
-// building the trimmed/concatenated output and deriving the edited captions.
-// Shared by the post-processing pipeline's `edited_output` step. Pure ffmpeg +
-// data transforms — no DB or status concerns live here.
+// Applying an EDL (edit decision list) to source.mp4: the trimmed/concatenated
+// video render. Used by the pipeline's `presentation` step when the EDL keeps
+// less than the whole source. Pure ffmpeg — no DB or status concerns here, and
+// no audio processing: the chain runs over this render's output, so loudness is
+// measured on the final cut rather than on material that gets discarded.
 
-import { join } from "path";
-import { deriveEditedTranscript, type Segment, type Word } from "./edit-transcript";
+import { rename } from "fs/promises";
+import type { Segment } from "./edit-transcript";
 import { spawnFfmpeg } from "./ffmpeg";
 
 export type Edl = {
@@ -119,23 +120,5 @@ export async function renderEditedOutput(
     ...buildEditArgs(sourcePath, tmpPath, kept),
   ]);
   if (exitCode !== 0) throw new Error(`ffmpeg edit render exited ${exitCode}: ${stderr.trim()}`);
-  const { rename } = await import("fs/promises");
   await rename(tmpPath, outputPath);
-}
-
-// Derive edited captions from the unchanged words.json + the kept segments,
-// writing captions.srt into `outDir`. Returns the edited plain text for the
-// caller to upsert into the transcript, or null when there's no words.json.
-export async function deriveEditedCaptions(
-  derivDir: string,
-  outDir: string,
-  keptSegments: Segment[],
-): Promise<string | null> {
-  const wordsFile = Bun.file(join(derivDir, "words.json"));
-  if (!(await wordsFile.exists())) return null;
-
-  const originalWords = (await wordsFile.json()) as Word[];
-  const result = deriveEditedTranscript(originalWords, keptSegments);
-  if (result.srt) await Bun.write(join(outDir, "captions.srt"), result.srt);
-  return result.plainText || null;
 }

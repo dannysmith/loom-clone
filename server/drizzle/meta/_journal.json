@@ -99,6 +99,13 @@
       "when": 1781199041317,
       "tag": "0013_amazing_karen_page",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1788559337598,
+      "tag": "0014_early_tarot",
+      "breakpoints": true
     }
   ]
 }

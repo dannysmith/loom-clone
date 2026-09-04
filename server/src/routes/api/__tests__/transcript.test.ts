@@ -52,7 +52,7 @@ describe("PUT /:id/transcript", () => {
     expect(transcript!.wordCount).toBeGreaterThan(0);
   });
 
-  test("writes captions.srt to derivatives directory", async () => {
+  test("stores the upload verbatim as the pristine original", async () => {
     const { id } = await createVideoViaApi();
     await videos.request(`/${id}/transcript`, {
       method: "PUT",
@@ -60,10 +60,12 @@ describe("PUT /:id/transcript", () => {
       body: SAMPLE_SRT,
     });
 
-    const file = Bun.file(join(DATA_DIR, id, "derivatives", "captions.srt"));
-    expect(await file.exists()).toBe(true);
-    const content = await file.text();
-    expect(content).toBe(SAMPLE_SRT);
+    // The endpoint writes captions.original.srt and never touches the SERVED
+    // captions — those follow the EDL and are produced by the `captions` step,
+    // so writing them here would desync an edited video's subtitles.
+    const original = Bun.file(join(DATA_DIR, id, "derivatives", "captions.original.srt"));
+    expect(await original.exists()).toBe(true);
+    expect(await original.text()).toBe(SAMPLE_SRT);
   });
 
   test("detects VTT format from content-type", async () => {

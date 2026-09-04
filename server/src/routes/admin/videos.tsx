@@ -517,10 +517,13 @@ videoRoutes.post("/:id/duplicate", async (c) => {
   return c.redirect(`/admin/videos/${duplicate.id}`);
 });
 
-// Re-run the post-processing pipeline for the whole video. Default is the
-// resumable run (steps that already succeeded are skipped). With `rebuild=hls`
-// it forces a full from-HLS rebuild (re-stitch source + everything), only
-// possible while the source is rebuildable. reconcile() drives the status.
+// Re-run the post-processing pipeline for the whole video. The default is a
+// `present` run: rebuild the presentation master and everything cut from it,
+// from the preserved source and whatever EDL is on disk — so a reprocess of an
+// edited video regenerates the same edit rather than discarding it. With
+// `rebuild=hls` it's an `intake` run instead, re-stitching source.mp4 from the
+// segments first, which is only possible while they're still there.
+// reconcile() drives the status.
 videoRoutes.post("/:id/reprocess", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
@@ -530,23 +533,29 @@ videoRoutes.post("/:id/reprocess", async (c) => {
   }
 
   const body = await c.req.parseBody();
-  const force = body.rebuild === "hls";
-  if (force) {
+  const rebuildFromHls = body.rebuild === "hls";
+  if (rebuildFromHls) {
     const { canRebuildSource } = await reprocessability(result);
     if (!canRebuildSource) {
       return c.text("Cannot rebuild — the source's HLS segments are gone", 400);
     }
   }
 
-  await logEvent(result.id, "reprocess_requested", force ? { rebuild: "hls" } : undefined);
-  const outcome = scheduleReprocess(result.id, { source: result.source, force });
+  await logEvent(result.id, "reprocess_requested", rebuildFromHls ? { rebuild: "hls" } : undefined);
+  const outcome = scheduleReprocess(result.id, {
+    source: result.source,
+    intent: rebuildFromHls ? "intake" : "present",
+  });
 
   return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
 });
 
-// Regenerate a single derivative from the existing source.mp4 (dependency-aware:
-// only the steps that read source.mp4 non-destructively, and only when source
-// is valid). The per-file tmp→rename makes a single-artifact regenerate atomic.
+// Regenerate a single derivative from whatever it declares as its input — the
+// pristine source for a source-group artifact, the presentation master for a
+// presentation-group one. Restricted to REGENERABLE_KINDS, which excludes the
+// two steps that have dependents (`source` and `presentation`); regenerating
+// either of those is a whole-video run. The per-file tmp→rename makes a
+// single-artifact regenerate atomic.
 videoRoutes.post("/:id/reprocess/:kind", async (c) => {
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
@@ -558,18 +567,15 @@ videoRoutes.post("/:id/reprocess/:kind", async (c) => {
   if (!REGENERABLE_KINDS.has(kind)) {
     return c.text(`"${kind}" cannot be regenerated standalone`, 400);
   }
-  // Edit-aware: for an edited video the pipeline runs this regen from the edited
-  // cut (variants/storyboard/metadata) while source-based artifacts (thumbnail,
-  // peaks) still derive from the preserved source.mp4 — so a single-artifact
-  // regen stays consistent with the edited active file. source must still be
-  // valid (the edited cut and the source-based artifacts both depend on it).
+  // Every regenerable step depends on the source either directly or through the
+  // presentation master, so a valid source is the precondition for all of them.
   const { sourceValid } = await reprocessability(result);
   if (!sourceValid) {
     return c.text("Cannot regenerate — source.mp4 is missing or invalid", 400);
   }
 
   await logEvent(result.id, "reprocess_requested", { only: kind });
-  const outcome = scheduleReprocess(result.id, { source: result.source, force: true, only: kind });
+  const outcome = scheduleReprocess(result.id, { source: result.source, intent: "only", kind });
 
   return c.redirect(`/admin/videos/${result.id}?tab=processing&reprocessed=${outcome}`);
 });

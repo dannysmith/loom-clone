@@ -91,10 +91,10 @@ describe("GET /:slug.json", () => {
     expect(body.aspectRatio).toBeCloseTo(1.7778, 3);
   });
 
-  test("sources lists active raw + downscales, highest first (unedited 1080p)", async () => {
+  test("sources lists the master + downscales, highest first (1080p)", async () => {
     const video = await createVideo();
     await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 120 });
-    await writeDerivative(video, "source.mp4");
+    await writeDerivative(video, "1080p.mp4"); // the presentation master
     await writeDerivative(video, "720p.mp4");
     const res = await videos.request(`/${video.slug}.json`);
     const body = await res.json();
@@ -103,7 +103,7 @@ describe("GET /:slug.json", () => {
       height: 1080,
       width: 1920,
       type: "video/mp4",
-      url: expect.stringMatching(/\/raw\/source\.mp4$/),
+      url: expect.stringMatching(/\/raw\/1080p\.mp4$/),
     });
     expect(body.sources[1]).toEqual({
       height: 720,

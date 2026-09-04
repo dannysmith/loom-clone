@@ -28,7 +28,7 @@ export type EventType =
   | "processing_step" // one per post-processing step outcome (kind + state)
   | "processing_complete" // post-processing run finished (summary for the activity feed)
   | "reprocess_requested" // admin manually re-ran the post-processing pipeline
-  | "edits_reset" // an edited video's edit was washed away before a reprocess rebuilt from source
+  | "edits_reset" // a rebuild found an empty EDL, so the presentation is back to the full source
   | "marked_incomplete" // a recording with no segment activity for hours was given up on
   | "transcript_uploaded"
   | "words_uploaded"

@@ -23,21 +23,25 @@ afterEach(async () => {
 });
 
 // Artifact filename per file-producing step (mirrors the registry). Steps not
-// listed (metadata, audio, external items) produce no on-disk file.
+// listed (metadata, external items) produce no on-disk file. `presentation` is
+// named for the video's own height, so it's resolved per video below.
 const ARTIFACT: Partial<Record<ProcessingStepKind, string>> = {
   source: "source.mp4",
   thumbnail: "thumbnail.jpg",
   variant_1080: "1080p.mp4",
   variant_720: "720p.mp4",
   storyboard: "storyboard.vtt",
+  captions: "captions.srt",
   peaks: "peaks.json",
+  editor_storyboard: "editor-storyboard.vtt",
   suggested_edits: "suggested-edits.json",
 };
 
 // Mark a step ready AND write its artifact (a `ready` row only renders ✅ when
 // the file is actually present).
 async function markReady(videoId: string, kind: ProcessingStepKind): Promise<void> {
-  const file = ARTIFACT[kind];
+  const video = await getVideo(videoId);
+  const file = kind === "presentation" ? `${video?.height ?? 0}p.mp4` : ARTIFACT[kind];
   if (file) {
     const dir = join(DATA_DIR, videoId, "derivatives");
     await mkdir(dir, { recursive: true });
@@ -111,7 +115,7 @@ describe("computeReadiness — icons", () => {
     expect(icon(items, "peaks")).toBe("ready");
   });
 
-  test("uploaded videos never expect the Mac-sent items (—) or audio", async () => {
+  test("uploaded videos never expect the Mac-sent items or the captions cut from them (—)", async () => {
     const video = await createVideo();
     await getDb()
       .update(videos)
@@ -119,7 +123,10 @@ describe("computeReadiness — icons", () => {
       .where(eq(videos.id, video.id));
     const { items } = await computeReadiness((await getVideo(video.id))!);
     expect(icon(items, "transcript")).toBe("na");
-    expect(icon(items, "audio")).toBe("na");
+    expect(icon(items, "captions")).toBe("na");
+    // The presentation master applies to every video, uploads included — it's
+    // what gets served.
+    expect(icon(items, "presentation")).not.toBe("na");
   });
 
   // [P3.2] chapter_titles is only expected when the recording captured markers.
@@ -160,8 +167,16 @@ describe("computeReadiness — badge", () => {
     // ready so the only gap is... nothing external for uploads. Use a recorded
     // video and satisfy all expected steps, leaving only externals.
     const video = await readyVideo({ width: 1280, height: 720, duration: 30 });
-    // Applicable expected for 720p/30s recorded: audio, thumbnail, peaks, suggested_edits.
-    for (const k of ["audio", "thumbnail", "peaks", "suggested_edits"] as const) {
+    // Applicable expected for 720p/30s recorded: presentation, captions,
+    // thumbnail, peaks, editor_storyboard, suggested_edits.
+    for (const k of [
+      "presentation",
+      "captions",
+      "thumbnail",
+      "peaks",
+      "editor_storyboard",
+      "suggested_edits",
+    ] as const) {
       await markReady(video.id, k);
     }
     // Satisfy all external items except transcript.
@@ -187,7 +202,13 @@ describe("computeReadiness — badge", () => {
       .where(eq(videos.id, video.id));
     await markReady(video.id, "source");
     await markReady(video.id, "metadata");
-    for (const k of ["thumbnail", "peaks", "suggested_edits"] as const) {
+    for (const k of [
+      "presentation",
+      "thumbnail",
+      "peaks",
+      "editor_storyboard",
+      "suggested_edits",
+    ] as const) {
       await markReady(video.id, k);
     }
     const { badge } = await computeReadiness((await getVideo(video.id))!);
@@ -268,9 +289,10 @@ describe("computeReadiness — regenerable flag", () => {
     const { items } = await computeReadiness(video);
     expect(items.find((i) => i.kind === "thumbnail")?.regenerable).toBe(true);
     expect(items.find((i) => i.kind === "peaks")?.regenerable).toBe(true);
-    // source/audio are not standalone-regenerable; external items aren't either.
+    // source/presentation have dependents, so neither is standalone-regenerable;
+    // external items aren't either.
     expect(items.find((i) => i.kind === "source")?.regenerable).toBe(false);
-    expect(items.find((i) => i.kind === "audio")?.regenerable).toBe(false);
+    expect(items.find((i) => i.kind === "presentation")?.regenerable).toBe(false);
     expect(items.find((i) => i.kind === "transcript")?.regenerable).toBe(false);
   });
 

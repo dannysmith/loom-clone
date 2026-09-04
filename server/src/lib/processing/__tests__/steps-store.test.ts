@@ -43,10 +43,10 @@ describe("video_processing_steps store", () => {
 
   test("markStepSkipped marks skipped and clears error", async () => {
     const video = await createVideo();
-    await markStepFailed(video.id, "audio", "boom");
-    await markStepSkipped(video.id, "audio");
+    await markStepFailed(video.id, "presentation", "boom");
+    await markStepSkipped(video.id, "presentation");
 
-    const row = await getStep(video.id, "audio");
+    const row = await getStep(video.id, "presentation");
     expect(row?.state).toBe("skipped");
     expect(row?.error).toBeNull();
   });

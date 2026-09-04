@@ -60,7 +60,7 @@ async function generateTestSource(videoDir: string, size = "320x240"): Promise<v
 
 describe("extractMetadata", () => {
   test.skipIf(!ffmpegAvailable)(
-    "populates width, height, aspectRatio, and fileBytes from source.mp4",
+    "populates width, height and aspectRatio from source.mp4",
     async () => {
       const video = await createVideo();
       const videoDir = join(DATA_DIR, video.id);
@@ -74,7 +74,9 @@ describe("extractMetadata", () => {
       expect(updated!.height).toBe(240);
       // 320/240 = 1.3333
       expect(updated!.aspectRatio).toBeCloseTo(1.3333, 3);
-      expect(updated!.fileBytes).toBeGreaterThan(0);
+      // fileBytes and durationSeconds describe the presentation master, not the
+      // source, so the presentation step owns them (setPresentationMetadata).
+      expect(updated!.fileBytes).toBeNull();
     },
     30_000,
   );

@@ -616,7 +616,12 @@ export async function getSegmentDurations(id: string): Promise<Map<string, numbe
   return map;
 }
 
-async function sumSegmentDuration(id: string): Promise<number> {
+// The recording's true length, summed from the segment ledger. Those rows
+// outlive the HLS file cleanup, so this stays correct for the life of the video
+// — which is why the pipeline validates source.mp4 against it rather than
+// against the cached durationSeconds (that describes the presentation master,
+// and is shorter for an edited video).
+export async function sumSegmentDuration(id: string): Promise<number> {
   const [row] = await getDb()
     .select({ total: sql<number>`COALESCE(SUM(${videoSegments.durationSeconds}), 0)` })
     .from(videoSegments)

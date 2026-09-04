@@ -123,16 +123,15 @@ export async function duplicateVideo(id: string): Promise<Video> {
       createdAt: now,
       updatedAt: now,
       completedAt: original.completedAt ? now : null,
-      // Preserve the edited flag (verbatim — it reflects when the content was
-      // edited, and the copied cut IS that edit) so a copy of an edited video is
-      // itself a working edited video: activeRawFilename resolves to
-      // {height}p.mp4 (the copied edited cut, not the full-length source.mp4),
-      // and step inference skips the source duration check (durationSeconds
-      // describes the edited output, which is shorter than the copied
-      // source.mp4). Without this the copy validates the full source against the
-      // edited duration and lands in processing_failed. See sourceExpectedDuration
-      // in registry.ts.
+      // Preserve the edited timestamp verbatim — it records when the content was
+      // edited, and the copied presentation master IS that edit. The copy's
+      // edits.json comes across with the files, so a rebuild of the duplicate
+      // reproduces the same cut.
       lastEditedAt: original.lastEditedAt,
+      // Whether the copied source.mp4 is pristine is a property of the file, so
+      // it travels with it. Getting this wrong on a copy would either double-
+      // process its audio or leave a pristine source unprocessed.
+      sourcePristine: original.sourcePristine,
     })
     .returning();
   if (!duplicate) throw new Error("Failed to create duplicate video");

@@ -1,6 +1,7 @@
 import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
 import { spawnFfmpeg } from "./ffmpeg";
+import { hasAudioStream } from "./ffprobe";
 
 // Generates peaks.json for wavesurfer.js from source.mp4.
 // Extracts mono PCM audio at a low sample rate, computes peak amplitudes
@@ -25,6 +26,10 @@ export async function generatePeaks(
   if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
 
   const sourcePath = inputPath ?? join(derivDir, "source.mp4");
+  // A screen recording with no microphone has no waveform to draw. That's a
+  // legitimate absence rather than a failure, so skip instead of letting the PCM
+  // extraction fail on a file with no audio stream.
+  if (!(await hasAudioStream(sourcePath))) return false;
   const tmpPath = join(derivDir, "peaks.json.tmp");
   const finalPath = join(derivDir, "peaks.json");
   const rawTmpPath = join(derivDir, "_peaks_raw.tmp");

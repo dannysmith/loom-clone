@@ -1,33 +1,42 @@
 // The post-processing pipeline orchestrator. Drives the step registry in order,
 // writing a video_processing_steps row + an event per step and calling
-// reconcile() after each so `ready` is reached the moment the mandatory steps
-// (source + metadata) validate — independent of the slow, fragile audio/variant
-// steps that follow.
+// reconcile() after each mandatory one so `ready` is reached the moment source +
+// metadata validate — independent of the slower steps that follow.
+//
+// A run is described by two sets rather than a mode matrix:
+//
+//   runSet   — which steps this run considers at all
+//   forceSet — which of them are redone even though they're already `ready`
+//
+// Four named intents build those sets (see INTENTS). Everything else follows:
+// skip-if-ready consults the force set, and staging is decided by one rule —
+// stage when the run would replace artifacts the video is currently serving.
+// There is no build/edit distinction, because an EDL is an input to the
+// presentation master rather than a mode.
 //
 // Re-entrant by construction: each step is a no-op when its row is already
 // `ready`/`skipped` and (for file-producing steps) the artifact is still on
-// disk — unless `force` is set. So re-running the pipeline IS "resume from where
-// it failed", which is what the manual reprocess button relies on.
+// disk — unless the force set says otherwise. So re-running the pipeline IS
+// "resume from where it failed", which is what the manual reprocess relies on.
 
 import { eq } from "drizzle-orm";
-import { mkdir, readdir, rename, rm } from "fs/promises";
-import { basename, join } from "path";
+import { mkdir, readdir, rename, rm, stat } from "fs/promises";
+import { join } from "path";
 import { getDb } from "../../db/client";
 import { type ProcessingStepKind, videos } from "../../db/schema";
 import { purgeVideo } from "../cdn";
 import { probeMetadata } from "../derivatives";
-import { deriveEditedCaptions } from "../edit-render";
-import { resetAllEdits } from "../edit-reset";
 import { logEvent } from "../events";
 import { nowIso } from "../format";
 import { DATA_DIR, derivativesDir } from "../paths";
-import { getVideo, setVideoStatus, upsertTranscript } from "../store";
-import { generateEditorStoryboard } from "../storyboard";
-import { activeRawFilename } from "../url";
+import { getVideo, setVideoStatus, sumSegmentDuration } from "../store";
+import { keptSegmentsFor } from "./edl";
 import { reconcile } from "./reconcile";
 import {
   isServable,
+  PRESENTATION_KINDS,
   type ProcessingStep,
+  presentationPath,
   REQUIRED_KINDS,
   RUNNABLE_STEPS,
   type StepContext,
@@ -43,65 +52,106 @@ import {
   markStepSkipped,
 } from "./steps-store";
 
+// What a run is for. The intent picks the sets; nothing downstream branches on
+// it again.
+//
+//   intake  — (re)produce source.mp4 and everything from it. First `/complete`,
+//             a heal re-`/complete` (the segments changed, so the stitch is
+//             stale), and the admin's "Rebuild from HLS".
+//   present — rebuild the presentation set from the existing source. Committing
+//             an edit, "Re-run post-processing", and a future bulk reprocess
+//             after the audio chain or watermark changes.
+//   resume  — fill in whatever is missing, redo nothing. A redundant
+//             `/complete`, or picking up after a failed step.
+//   only    — one artifact (the admin's per-row ↻).
+export type RunIntent = "intake" | "present" | "resume" | "only";
+
+// Higher wins when a run is deferred behind one already in flight, so a queued
+// full rebuild is never downgraded to something narrower.
+const INTENT_PRECEDENCE: Record<RunIntent, number> = {
+  intake: 3,
+  present: 2,
+  only: 1,
+  resume: 0,
+};
+
+export type RunOpts = {
+  source: "recorded" | "uploaded";
+  intent: RunIntent;
+  // Required for `only`, ignored otherwise.
+  kind?: ProcessingStepKind;
+};
+
+function forceSetFor(opts: RunOpts): Set<ProcessingStepKind> {
+  switch (opts.intent) {
+    case "intake":
+      return new Set(RUNNABLE_STEPS.map((s) => s.kind));
+    case "present":
+      return new Set(PRESENTATION_KINDS);
+    case "only":
+      return new Set(opts.kind ? [opts.kind] : []);
+    case "resume":
+      return new Set();
+  }
+}
+
+function runSetFor(opts: RunOpts): Set<ProcessingStepKind> {
+  if (opts.intent === "only") return new Set(opts.kind ? [opts.kind] : []);
+  return new Set(RUNNABLE_STEPS.map((s) => s.kind));
+}
+
 // Collapses repeated schedule calls while a generation is in flight to the same
 // promise, preventing two pipelines from racing on one video. The durable
 // dedupe is the step table itself (skip-if-ready); this map just avoids
 // redundant concurrent work within a single process lifetime.
 const inFlight = new Map<string, Promise<void>>();
 
-// A force/only run requested while one is in flight is DEFERRED here (not
-// dropped) and fired once the current run settles. A forced run does work the
-// in-flight resumable run won't (re-stitch source, regenerate variants), so
-// silently dropping it would, e.g., lose a heal's required re-stitch. Last
-// meaningful request wins, but a queued full rebuild is never downgraded to a
-// single-artifact regenerate.
+// A run requested while one is in flight is DEFERRED here (not dropped) and
+// fired once the current run settles. The highest-precedence request wins, so a
+// queued rebuild is never downgraded by a later, narrower one.
 const pendingRerun = new Map<string, RunOpts>();
 
 export type ScheduleOutcome = "started" | "queued" | "skipped";
 
 export function scheduleDerivatives(videoId: string): void {
-  schedule(videoId, { source: "recorded" });
+  schedule(videoId, { source: "recorded", intent: "resume" });
 }
 
 export function scheduleUploadDerivatives(videoId: string): void {
-  schedule(videoId, { source: "uploaded" });
+  schedule(videoId, { source: "uploaded", intent: "resume" });
 }
 
-// Fire-and-forget an edit commit: applies the saved EDL as an `edit`-mode run.
-// The editor route gates this on `ready` + no in-flight run, so it never races.
+// Fire-and-forget an edit commit. Under the presentation-master model this is
+// exactly a `present` run — the EDL on disk is what makes the master a cut — so
+// committing an edit and reprocessing share one code path.
 export function scheduleEdit(videoId: string, source: "recorded" | "uploaded"): ScheduleOutcome {
-  return schedule(videoId, { source, mode: "edit" });
+  return schedule(videoId, { source, intent: "present" });
 }
 
-// Fire-and-forget a manual reprocess: a forced full rebuild (force, no `only`)
-// or a single-artifact regenerate (`only`). Returns whether the run started now
-// or was queued behind an in-flight run, so the admin route can tell the user.
+// Fire-and-forget a manual reprocess. Returns whether the run started now or was
+// queued behind an in-flight one, so the admin route can tell the user.
 export function scheduleReprocess(
   videoId: string,
-  opts: { source: "recorded" | "uploaded"; force?: boolean; only?: ProcessingStepKind },
+  opts: { source: "recorded" | "uploaded"; intent: RunIntent; kind?: ProcessingStepKind },
 ): ScheduleOutcome {
   return schedule(videoId, opts);
 }
 
 function schedule(videoId: string, opts: RunOpts): ScheduleOutcome {
   if (inFlight.has(videoId)) {
-    // A plain resumable re-schedule is already covered by the in-flight run. A
-    // forced rebuild, single-artifact regen, or edit does work the resumable run
-    // won't, so it's deferred (below) rather than dropped.
-    if (!opts.force && !opts.only && opts.mode !== "edit") {
+    // A `resume` is already covered by whatever is in flight. Everything else
+    // does work the current run won't, so it's deferred rather than dropped.
+    if (opts.intent === "resume") {
       console.log(
         `[pipeline] ${videoId} schedule skipped — already in flight (n=${inFlight.size})`,
       );
       return "skipped";
     }
-    // Defer the forced/only run; don't downgrade a queued full rebuild to a
-    // single-artifact regenerate.
     const existing = pendingRerun.get(videoId);
-    const downgrade = existing?.force && !existing.only && !!opts.only && !opts.force;
-    if (!downgrade) pendingRerun.set(videoId, opts);
-    console.log(
-      `[pipeline] ${videoId} run queued behind in-flight run (force=${opts.force ?? false}, only=${opts.only ?? "—"})`,
-    );
+    if (!existing || INTENT_PRECEDENCE[opts.intent] >= INTENT_PRECEDENCE[existing.intent]) {
+      pendingRerun.set(videoId, opts);
+    }
+    console.log(`[pipeline] ${videoId} run queued behind in-flight run (intent=${opts.intent})`);
     return "queued";
   }
   const p = runPipeline(videoId, opts).finally(() => {
@@ -119,7 +169,9 @@ function schedule(videoId: string, opts: RunOpts): ScheduleOutcome {
   inFlight.set(videoId, p);
   markRunActive(videoId);
   console.log(
-    `[pipeline] ${videoId} scheduled (source=${opts.source}, force=${opts.force ?? false}, only=${opts.only ?? "—"}, n=${inFlight.size})`,
+    `[pipeline] ${videoId} scheduled (source=${opts.source}, intent=${opts.intent}${
+      opts.kind ? `:${opts.kind}` : ""
+    }, n=${inFlight.size})`,
   );
   p.catch((err) => console.error(`[pipeline] ${videoId} unexpected failure:`, err));
   return "started";
@@ -140,114 +192,62 @@ export async function _drainInFlight(): Promise<void> {
   }
 }
 
-// `only` restricts the run to a single step (a per-artifact regenerate);
-// `force` re-runs steps even when already ready (manual reprocess); `mode`
-// `edit` applies the saved EDL instead of (re)producing source.mp4.
-type RunOpts = {
-  source: "recorded" | "uploaded";
-  force?: boolean;
-  only?: ProcessingStepKind;
-  mode?: "build" | "edit";
-};
-
 export async function runPipeline(videoId: string, opts: RunOpts): Promise<void> {
-  let video = await getVideo(videoId, { includeTrashed: true });
+  const video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
-
-  const mode: "build" | "edit" = opts.mode ?? "build";
-
-  // Reprocess chokepoint: a full BUILD reprocess of an edited video washes the
-  // edit away first and rebuilds a consistent UNEDITED video from source.mp4
-  // (the build steps consume source.mp4, not the edited cut). An edit run skips
-  // this — it re-applies the new EDL to the preserved source.mp4. A per-artifact
-  // `only` regen also skips it: it's edit-aware (activeFile resolves to the
-  // edited cut below), so the edit is preserved.
-  if (!opts.only && mode !== "edit" && video.lastEditedAt) {
-    await resetAllEdits(videoId);
-    const reloaded = await getVideo(videoId, { includeTrashed: true });
-    if (reloaded) video = reloaded;
-  }
-
-  if (mode === "edit" && !video.height) {
-    console.error(`[pipeline] ${videoId} edit run aborted — no cached height`);
-    return;
-  }
 
   const dir = derivativesDir(videoId);
   await mkdir(dir, { recursive: true });
+
+  const runSet = runSetFor(opts);
+  const forceSet = forceSetFor(opts);
 
   const ctx: StepContext = {
     videoId,
     video,
     source: opts.source,
-    mode,
     dir,
-    // The active served file that downstream steps (variants, storyboard,
-    // metadata) consume. For an edit it's the resolution-named EDL cut being
-    // produced. Otherwise it's the video's CURRENT active file — source.mp4 for
-    // an unedited build, but the existing edited cut for a single-artifact regen
-    // of an already-edited video, so the regen runs from the edited output
-    // rather than the full source (a forced full rebuild resets the edit first,
-    // so `video` is unedited here and this resolves to source.mp4). source.mp4
-    // is always preserved as the original.
-    activeFile:
-      mode === "edit" ? join(dir, `${video.height}p.mp4`) : join(dir, activeRawFilename(video)),
-    duration: video.durationSeconds ?? 0,
+    inputDir: dir,
+    sourceFile: join(dir, "source.mp4"),
+    sourceDuration: 0, // refined below, then again by the source probe
+    expectedSourceDuration: await expectedSourceDuration(videoId, opts.source),
+    presentationDuration: video.durationSeconds ?? 0,
     height: video.height ?? 0,
-    force: opts.force ?? false,
     scratch: { silencesComputed: false },
   };
 
-  // An edit run publishes `reprocessing` while it works — source.mp4 is preserved
-  // and the pre-edit set keeps serving (lastEditedAt is still unset, so serving
-  // resolves to source.mp4). It restores `ready` on failure.
-  if (mode === "edit") await setVideoStatus(videoId, "reprocessing");
+  // Stage→validate→swap when the run would replace artifacts the video is
+  // currently serving: the previous outputs keep serving until the swap, and a
+  // failed run leaves them (and the ledger) untouched. Everything else writes in
+  // place, because it's additive or non-destructive — the first build, a heal
+  // re-stitch (still serving HLS, so a failed stitch should surface as a failed
+  // `source`), a resume, and single-artifact regenerates (each atomic already).
+  const staged =
+    video.status === "ready" && (opts.intent === "present" || opts.intent === "intake");
+
+  // A staged run publishes `reprocessing` while it works. The previous set keeps
+  // serving throughout; `ready` is restored on failure.
+  if (staged) await setVideoStatus(videoId, "reprocessing");
 
   const started = Date.now();
   const produced: string[] = [];
 
-  // Stage→validate→swap for runs that replace an already-served set: every edit,
-  // and a forced rebuild of a `ready` video. The previous outputs keep serving
-  // until the swap, and a failed run leaves them (and the ledger) untouched.
-  // Everything else writes in place: the first build, a heal re-stitch (status
-  // `healing`, still serving HLS — a failed stitch should surface as a failed
-  // `source`), a resumable run, and single-artifact `only` regenerates are
-  // additive or non-destructive (each step is atomic tmp→rename).
-  const staged =
-    !opts.only && (mode === "edit" || ((opts.force ?? false) && video.status === "ready"));
-  if (staged) {
-    try {
-      await runStepsStaged(videoId, ctx, produced);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[pipeline] ${videoId} staged ${mode} failed (previous outputs kept):`, msg);
-      await logStep(videoId, "source", "failed", `staged ${mode}: ${msg}`);
-      // An edit set `reprocessing` up front; restore the pre-edit `ready` (its
-      // outputs are untouched). A forced rebuild was already `ready`.
-      if (mode === "edit") await setVideoStatus(videoId, "ready");
-      return;
-    }
-  } else {
-    await runStepsInPlace(videoId, ctx, opts, produced);
+  const stageKinds = staged
+    ? new Set(PRESENTATION_KINDS.filter((k) => runSet.has(k)))
+    : new Set<ProcessingStepKind>();
+
+  try {
+    await runSteps(videoId, ctx, { runSet, forceSet, stageKinds }, produced);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[pipeline] ${videoId} staged ${opts.intent} failed (outputs kept):`, msg);
+    await logStep(videoId, "presentation", "failed", `staged ${opts.intent}: ${msg}`);
+    await setVideoStatus(videoId, "ready");
+    return;
   }
 
-  if (mode === "edit") {
-    // Edit-specific finalisation — only after a validated swap.
-    await finalizeEdit(videoId, ctx);
-  } else if (!opts.only) {
-    // Editor storyboard: dense frames for the editing timeline. Not part of the
-    // public checklist (no step row), regenerated only from the original source.
-    if (ctx.duration >= 5) {
-      try {
-        await generateEditorStoryboard(dir, ctx.duration);
-      } catch (err) {
-        console.error(
-          `[pipeline] ${videoId} editor storyboard failed:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-
+  if (opts.intent !== "only") {
+    await settleEditState(videoId, ctx);
     // For uploads, upload.mp4 produced source.mp4 — drop it once source +
     // metadata are confirmed so we never keep two copies (and never delete the
     // only copy of a still-unprocessed upload).
@@ -259,139 +259,178 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   const totalMs = Date.now() - started;
   console.log(`[pipeline] ${videoId} done (${totalMs}ms, produced=[${produced.join(", ")}])`);
   // Final summary event for the activity feed (additive — per-step events above
-  // are the durable record). Tolerate a missing DB in tests.
-  try {
-    await logEvent(videoId, "processing_complete", { produced, durationMs: totalMs });
-  } catch {
-    // DB may be gone in tests — don't let event logging crash the pipeline.
-  }
+  // are the durable record).
+  await logEvent(videoId, "processing_complete", { produced, durationMs: totalMs });
 }
 
-// In-place run: first build / heal / resumable / single-artifact regenerate.
-// Each step writes atomically (tmp→rename) into the real derivatives dir, and we
-// reconcile after each mandatory step so the video reaches `ready` the moment
-// source + metadata validate — independent of the slower expected steps.
-async function runStepsInPlace(
+// How long source.mp4 SHOULD be, measured independently of the file itself so
+// the stitch can be validated against it. For a recording that's the
+// segment-duration sum — those rows outlive the HLS cleanup, so it stays correct
+// even for an edited video whose cached durationSeconds describes the shorter
+// master. For an upload it's a probe of upload.mp4, which only exists until the
+// first successful run. Undefined when neither is available, in which case the
+// source gets a structural check only.
+async function expectedSourceDuration(
   videoId: string,
-  ctx: StepContext,
-  opts: RunOpts,
-  produced: string[],
-): Promise<void> {
-  const heightState = { probed: false };
-
-  for (const step of RUNNABLE_STEPS) {
-    if (opts.only && step.kind !== opts.only) continue;
-
-    // Probe the active file's height once it exists, so resolution-gated steps
-    // (variants) see the real value even on a fresh run where video.height was
-    // still null.
-    if (!heightState.probed && ctx.height === 0) {
-      if (await Bun.file(ctx.activeFile).exists()) {
-        heightState.probed = true;
-        const meta = await probeMetadata(ctx.activeFile);
-        if (meta) {
-          ctx.height = meta.height;
-          // Reused by the metadata step (extractMetadata) so the active file is
-          // probed once per run, not twice.
-          ctx.scratch.sourceMeta = meta;
-        }
-      }
-    }
-
-    if (!step.appliesTo(ctx)) continue;
-    if (!(await inputsSatisfied(videoId, step, ctx))) continue;
-
-    // reconcile only reads the mandatory (source/metadata) step states, so a
-    // reconcile after a non-mandatory step can't change the status — run it only
-    // after the mandatory ones (reaching `ready` the moment they validate) plus
-    // the final settle.
-    const reconcileNow = REQUIRED_KINDS.includes(step.kind);
-
-    // Skip-if-ready resumability.
-    if (!ctx.force && (await isAlreadyDone(videoId, step, ctx))) {
-      produced.push(`${step.kind}*`);
-      if (reconcileNow) await reconcile(videoId, { running: true });
-      continue;
-    }
-
-    await runStep(videoId, step, ctx, produced);
-    if (reconcileNow) await reconcile(videoId, { running: true });
+  source: "recorded" | "uploaded",
+): Promise<number | undefined> {
+  if (source === "recorded") {
+    const total = await sumSegmentDuration(videoId);
+    return total > 0 ? total : undefined;
   }
+  const upload = join(DATA_DIR, videoId, "upload.mp4");
+  if (!(await Bun.file(upload).exists())) return undefined;
+  return (await probeMetadata(upload))?.duration;
 }
 
-// Staged run: regenerate the served set atomically. Every applicable step
-// produces + validates into a staging dir; ANY failure throws and aborts the
-// whole run (leaving the previous outputs, ledger, and status untouched — a
-// failed rebuild can't demote a working video). Only once the full set is built
-// do we swap it into place and mark the ledger — so there's never a window where
-// a freshly-regenerated file sits beside a stale one. Status is withheld until
-// the caller's final reconcile.
-async function runStepsStaged(
+// One runner for every intent. Each step writes either into the real
+// derivatives dir or into a staging dir, decided per step by `stageKinds`.
+//
+// Only the PRESENTATION group is ever staged, and that's the whole point of
+// staging: it's the set a viewer is currently being served, so it has to be
+// replaced all at once. Source-group artifacts are additive and already atomic
+// (tmp→rename), and staging them would mean moving a directory —
+// thumbnail-candidates/ — during the swap, which `rename` refuses to do onto a
+// non-empty target.
+//
+// In-place steps mark the ledger as they go, and we reconcile after each
+// mandatory one so the video reaches `ready` the moment source + metadata
+// validate. Staged steps defer their ledger rows until the swap: any failure
+// throws, aborting the run with the previous outputs, ledger and status
+// untouched, so a failed rebuild can never demote a working video.
+async function runSteps(
   videoId: string,
   ctx: StepContext,
+  sets: {
+    runSet: Set<ProcessingStepKind>;
+    forceSet: Set<ProcessingStepKind>;
+    stageKinds: Set<ProcessingStepKind>;
+  },
   produced: string[],
 ): Promise<void> {
+  const { runSet, forceSet, stageKinds } = sets;
   const realDir = ctx.dir;
   const stagingDir = join(realDir, ".staging");
-  await rm(stagingDir, { recursive: true, force: true });
-  await mkdir(stagingDir, { recursive: true });
+  if (stageKinds.size > 0) {
+    await rm(stagingDir, { recursive: true, force: true });
+    await mkdir(stagingDir, { recursive: true });
+  }
 
-  // Outputs go to staging; the active file lives there too. Inputs are read from
-  // their real locations (a precondition like source.mp4, or — for a from-HLS
-  // rebuild — the freshly staged source, which is still present in realDir as
-  // the old copy until the swap), so input checks use the real-dir `ctx`.
-  const stagedCtx: StepContext = {
-    ...ctx,
-    dir: stagingDir,
-    activeFile: join(stagingDir, basename(ctx.activeFile)),
-  };
-  const heightState = { probed: false };
-  const outcomes: Array<{ step: ProcessingStep; result: StepRunResult }> = [];
+  const deferred: Array<{ step: ProcessingStep; result: StepRunResult }> = [];
+  // Kinds produced into staging by this run. Their ledger rows don't exist until
+  // the swap, so without this every step downstream of the presentation master
+  // would find its input unsatisfied and silently never run.
+  const stagedKinds = new Set<ProcessingStepKind>();
+
+  await refreshSourceProbe(ctx, [join(realDir, "source.mp4")]);
 
   try {
     for (const step of RUNNABLE_STEPS) {
-      if (!heightState.probed && stagedCtx.height === 0) {
-        if (await Bun.file(stagedCtx.activeFile).exists()) {
-          heightState.probed = true;
-          const meta = await probeMetadata(stagedCtx.activeFile);
-          if (meta) {
-            stagedCtx.height = meta.height;
-            stagedCtx.scratch.sourceMeta = meta;
-          }
+      if (!runSet.has(step.kind)) continue;
+      const toStaging = stageKinds.has(step.kind);
+
+      // `dir` is where a step WRITES, so it moves for the duration of a staged
+      // step and is restored afterwards — artifact paths for the ledger and the
+      // servable checks always resolve against the real dir.
+      if (toStaging) ctx.dir = stagingDir;
+      try {
+        if (!step.appliesTo(ctx)) continue;
+        if (!(await inputsSatisfied(videoId, step, withRealDir(ctx, realDir), stagedKinds))) {
+          continue;
         }
+        if (
+          !forceSet.has(step.kind) &&
+          (await isAlreadyDone(videoId, step, withRealDir(ctx, realDir)))
+        ) {
+          produced.push(`${step.kind}*`);
+          if (REQUIRED_KINDS.includes(step.kind)) await reconcile(videoId, { running: true });
+          continue;
+        }
+
+        if (toStaging) {
+          const result = await step.run!(ctx);
+          if (result !== "skipped") {
+            const valid = step.validate ? await step.validate(ctx) : true;
+            if (!valid) throw new Error(`staged ${step.kind} produced an invalid artifact`);
+            stagedKinds.add(step.kind);
+          }
+          deferred.push({ step, result });
+        } else {
+          await runStep(videoId, step, ctx, produced);
+        }
+      } finally {
+        ctx.dir = realDir;
       }
 
-      if (!step.appliesTo(stagedCtx)) continue;
-      if (!(await inputsSatisfied(videoId, step, ctx))) continue;
-
-      const result = await step.run!(stagedCtx);
-      if (result !== "skipped") {
-        const valid = step.validate ? await step.validate(stagedCtx) : true;
-        if (!valid) throw new Error(`staged ${step.kind} produced an invalid artifact`);
-      }
-      outcomes.push({ step, result });
+      // A fresh source means a fresh height — and the height names the
+      // presentation master, so it has to be right before that step runs.
+      if (step.kind === "source") await refreshSourceProbe(ctx, [join(realDir, "source.mp4")]);
+      if (REQUIRED_KINDS.includes(step.kind)) await reconcile(videoId, { running: true });
     }
 
-    // Swap the validated set into place. Per-file renames within the same
-    // filesystem (staging is a subdir of the derivatives dir) are atomic. Files
-    // the run didn't regenerate (e.g. an edit leaves the thumbnail/peaks) stay
-    // in realDir untouched.
-    const stagedFiles = (await readdir(stagingDir)).filter((f) => !f.endsWith(".tmp"));
-    for (const f of stagedFiles) await rename(join(stagingDir, f), join(realDir, f));
-    console.log(`[pipeline] ${videoId} swapped ${stagedFiles.length} staged output(s)`);
-
-    // Mark the ledger now the files are in their real home (artifact paths
-    // resolve against the real-dir `ctx`).
-    for (const { step, result } of outcomes) {
-      await markStagedStep(videoId, step, ctx, result, produced);
+    if (stageKinds.size > 0) {
+      await swapStagedFiles(videoId, stagingDir, realDir);
+      for (const { step, result } of deferred) {
+        await markStagedStep(videoId, step, ctx, result, produced);
+      }
     }
   } finally {
-    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    if (stageKinds.size > 0) await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-// Ledger marking for a staged step, post-swap. Mirrors finishReady/runStep's
-// "skipped but artifact present is really ready" rule.
+// Move a validated staged set into place. Per-file renames within the same
+// filesystem (staging is a subdir of the derivatives dir) are atomic, and files
+// the run didn't regenerate stay in realDir untouched.
+//
+// Files only. `rename` onto an existing non-empty DIRECTORY fails with
+// ENOTEMPTY, which would abort the swap halfway — after some files had already
+// moved, and despite the caller reporting that the previous outputs were kept.
+// Only the presentation group is staged and none of it produces a directory, so
+// one here means a step has changed group without the swap being reconsidered:
+// fail loudly rather than half-swap.
+async function swapStagedFiles(
+  videoId: string,
+  stagingDir: string,
+  realDir: string,
+): Promise<void> {
+  const entries = (await readdir(stagingDir)).filter((f) => !f.endsWith(".tmp"));
+  for (const name of entries) {
+    if ((await stat(join(stagingDir, name))).isDirectory()) {
+      throw new Error(`staged output ${name} is a directory — staged runs produce files only`);
+    }
+  }
+  for (const name of entries) await rename(join(stagingDir, name), join(realDir, name));
+  console.log(`[pipeline] ${videoId} swapped ${entries.length} staged output(s)`);
+}
+
+// Probe source.mp4, seeding the height that names the presentation master and
+// the dimensions the metadata step writes, plus the path every reader uses.
+// Called once before the loop and again after the source step, so a re-stitch is
+// measured rather than assumed.
+async function refreshSourceProbe(ctx: StepContext, candidates: string[]): Promise<void> {
+  for (const path of candidates) {
+    if (!(await Bun.file(path).exists())) continue;
+    ctx.sourceFile = path;
+    const meta = await probeMetadata(path);
+    if (!meta) return;
+    ctx.height = meta.height;
+    ctx.sourceDuration = meta.duration;
+    ctx.scratch.sourceMeta = meta;
+    return;
+  }
+  // No source on disk yet (a first build). The segment sum is the best estimate
+  // available until the stitch lands and this runs again.
+  ctx.sourceDuration = ctx.expectedSourceDuration ?? 0;
+}
+
+// A context view whose `dir` is the real derivatives dir, for the checks that
+// ask about what's already on disk rather than about where this step writes.
+function withRealDir(ctx: StepContext, realDir: string): StepContext {
+  return ctx.dir === realDir ? ctx : { ...ctx, dir: realDir };
+}
+
+// Ledger marking for a staged step, post-swap.
 async function markStagedStep(
   videoId: string,
   step: ProcessingStep,
@@ -399,15 +438,34 @@ async function markStagedStep(
   result: StepRunResult,
   produced: string[],
 ): Promise<void> {
-  const path = step.artifact?.(ctx);
-  if (result === "skipped" && !(path && (await Bun.file(path).exists()))) {
-    await markStepSkipped(videoId, step.kind);
-    await logStep(videoId, step.kind, "skipped");
+  if (result === "skipped") {
+    await dropStaleArtifact(videoId, step, ctx);
     return;
   }
+  const path = step.artifact?.(ctx);
   await markStepReady(videoId, step.kind, { sizeBytes: path ? fileSizeBytes(path) : null });
   await logStep(videoId, step.kind, "ready");
   produced.push(step.kind);
+}
+
+// A presentation-group step that produced nothing this run leaves whatever was
+// there describing the PREVIOUS presentation — a storyboard for a timeline the
+// edit just shortened, captions for words that were cut. Those are worse than
+// nothing (a viewer gets silently desynced scrubbing or subtitles), so the old
+// artifact goes with the step's own output.
+//
+// This is the general form of a rule the edit path used to hand-code for the
+// one case it had noticed: "if the edited cut fell below the storyboard
+// threshold, delete the storyboard".
+async function dropStaleArtifact(
+  videoId: string,
+  step: ProcessingStep,
+  ctx: StepContext,
+): Promise<void> {
+  const path = step.artifact?.(ctx);
+  if (path) await rm(path, { force: true }).catch(() => {});
+  await markStepSkipped(videoId, step.kind);
+  await logStep(videoId, step.kind, "skipped");
 }
 
 async function runStep(
@@ -421,8 +479,14 @@ async function runStep(
     const result = await step.run!(ctx);
 
     if (result === "skipped") {
-      // A "skipped" step whose artifact nonetheless exists is really ready
-      // (e.g. suggested-edits found on disk from a prior run).
+      // A presentation-group skip invalidates whatever was there (see
+      // dropStaleArtifact). Elsewhere a "skipped" step whose artifact
+      // nonetheless exists is really ready — suggested-edits declines to
+      // overwrite a file from a prior run, and that file is still correct.
+      if (PRESENTATION_KINDS.includes(step.kind)) {
+        await dropStaleArtifact(videoId, step, ctx);
+        return;
+      }
       const path = step.artifact?.(ctx);
       if (path && (await Bun.file(path).exists())) {
         await finishReady(videoId, step, ctx, produced);
@@ -466,13 +530,16 @@ async function finishReady(
 
 // All declared inputs must be servable (`ready` AND, for file-producing inputs,
 // present on disk) before a step can run. A missing input leaves this step
-// untouched.
+// untouched. `producedThisRun` covers the staged case, where an input has been
+// built into the staging dir but won't reach the ledger until the swap.
 async function inputsSatisfied(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
+  producedThisRun?: ReadonlySet<ProcessingStepKind>,
 ): Promise<boolean> {
   for (const inputKind of step.inputs) {
+    if (producedThisRun?.has(inputKind)) continue;
     const inputStep = stepByKind(inputKind);
     if (!inputStep) return false;
     if (!(await isServable(inputStep, ctx, await getStep(videoId, inputKind)))) return false;
@@ -492,64 +559,34 @@ async function isAlreadyDone(
   return isServable(step, ctx, row);
 }
 
-// Edit-specific finalisation, run after the validated staged swap: derive the
-// edited captions, drop the now-stale viewer storyboard if the cut fell below
-// the threshold, remove suggested-edits.json, and flip the video to edited
-// (lastEditedAt + edited durationSeconds). Setting lastEditedAt last means
-// serving only resolves to the {height}p.mp4 cut once it's in place and valid.
-async function finalizeEdit(videoId: string, ctx: StepContext): Promise<void> {
-  const dir = ctx.dir;
-  const kept = ctx.scratch.keptSegments ?? [];
-  const editedDuration = ctx.scratch.editedDuration ?? ctx.video.durationSeconds ?? 0;
+// Bring `lastEditedAt` in line with the EDL that was just applied. It's a
+// display/audit timestamp now, not a behaviour switch — the EDL on disk decides
+// what the master contains — so this only records whether the presentation
+// currently reflects any edits, and stamps a fresh time when it starts to.
+// Clearing it when the EDL is empty is what makes "remove every edit and commit"
+// a full revert.
+async function settleEditState(videoId: string, ctx: StepContext): Promise<void> {
+  if (!(await Bun.file(presentationPath(ctx)).exists())) return;
 
-  // Edited captions from the unchanged words.json + the kept segments.
-  try {
-    const editedPlainText = await deriveEditedCaptions(dir, dir, kept);
-    if (editedPlainText) await upsertTranscript(videoId, "srt", editedPlainText);
-  } catch (err) {
-    console.error(
-      `[pipeline] ${videoId} edited captions failed:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
+  const { fullSpan } =
+    ctx.scratch.fullSpan === undefined
+      ? await keptSegmentsFor(ctx.dir, ctx.sourceDuration)
+      : { fullSpan: ctx.scratch.fullSpan };
 
-  // If the edited cut dropped below the storyboard threshold, the storyboard step
-  // didn't run (so nothing was staged/swapped) — remove the old, longer one so
-  // scrubbing doesn't reflect the un-edited timeline.
-  if (editedDuration < 60) {
-    await rm(join(dir, "storyboard.vtt"), { force: true }).catch(() => {});
-    await markStepSkipped(videoId, "storyboard");
-  }
+  const wasEdited = ctx.video.lastEditedAt != null;
+  const isEdited = !fullSpan;
+  if (wasEdited === isEdited) return;
 
-  // Suggestions are a one-shot pre-first-edit helper; never re-surface post-edit.
-  // Drop the file and settle its ledger row so it isn't a phantom `ready` (it's
-  // masked as "—" for edited videos, but keep the ledger honest).
-  await rm(join(dir, "suggested-edits.json"), { force: true }).catch(() => {});
-  await markStepSkipped(videoId, "suggested_edits");
-
-  try {
-    await getDb()
-      .update(videos)
-      .set({ lastEditedAt: nowIso(), durationSeconds: editedDuration, updatedAt: nowIso() })
-      .where(eq(videos.id, videoId));
-  } catch (err) {
-    // The staged swap already landed the edited {height}p.mp4, so a failure here
-    // leaves the filesystem edited but the DB unedited (activeRawFilename still
-    // resolves to source.mp4). Surface the mismatch loudly rather than swallow it.
-    console.error(
-      `[pipeline] ${videoId} edit flip FAILED after swap — files edited but lastEditedAt unset:`,
-      err instanceof Error ? err.message : err,
-    );
-    throw err;
-  }
+  await getDb()
+    .update(videos)
+    .set({ lastEditedAt: isEdited ? nowIso() : null, updatedAt: nowIso() })
+    .where(eq(videos.id, videoId));
 
   const video = await getVideo(videoId);
   if (video) purgeVideo(video.slug);
-  try {
-    await logEvent(videoId, "edits_committed", { editedDuration });
-  } catch {
-    // DB may be gone in tests.
-  }
+  await logEvent(videoId, isEdited ? "edits_committed" : "edits_reset", {
+    presentationDuration: ctx.presentationDuration,
+  });
 }
 
 async function maybeDeleteUpload(videoId: string): Promise<void> {
@@ -577,9 +614,5 @@ async function logStep(
   state: string,
   error?: string,
 ): Promise<void> {
-  try {
-    await logEvent(videoId, "processing_step", error ? { kind, state, error } : { kind, state });
-  } catch {
-    // DB may be gone in tests.
-  }
+  await logEvent(videoId, "processing_step", error ? { kind, state, error } : { kind, state });
 }

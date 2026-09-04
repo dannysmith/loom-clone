@@ -79,15 +79,16 @@ export function canReprocess(video: Video): boolean {
 }
 
 const LABELS: Record<ProcessingStepKind, string> = {
-  source: "Source video",
-  edited_output: "Edited video",
+  source: "Original video",
   metadata: "Metadata",
-  audio: "Audio processed",
+  presentation: "Presentation video",
   thumbnail: "Thumbnail",
   variant_1080: "1080p variant",
   variant_720: "720p variant",
   storyboard: "Storyboard",
+  captions: "Captions",
   peaks: "Audio peaks",
+  editor_storyboard: "Editor storyboard",
   suggested_edits: "Suggested edits",
   transcript: "Transcript",
   words: "Word timings",

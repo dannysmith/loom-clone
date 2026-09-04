@@ -2,7 +2,7 @@ import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
-import { type ProcessingStepKind, videoSegments, videos } from "../db/schema";
+import { videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
 import { DATA_DIR } from "./paths";
 import { applicabilityContext, isServable, stepByKind } from "./processing/registry";
@@ -47,27 +47,25 @@ export async function cleanupStaleFiles(): Promise<void> {
     const video = await getVideo(id, { includeTrashed: true });
     if (!video) continue;
     const ctx = applicabilityContext(video);
+    let keep = false;
 
-    // Require the `source` step validated good AND source.mp4 still present
-    // before removing the HLS segments it was built from — source.mp4 is the
-    // validated fallback that must outlive the HLS. (Same isServable predicate
-    // the viewer serves on.)
-    if (!(await isServable(stepByKind("source")!, ctx, await getStep(id, "source")))) continue;
-
-    // Also require the file the viewer is ACTUALLY served to be servable — for
-    // an edited video that's the {H}p.mp4 cut produced by `edited_output`, not
-    // source.mp4. If its producer isn't servable we must keep the HLS fallback
-    // (resolve.ts would otherwise have nothing to serve).
-    const activeProducerKind: ProcessingStepKind = video.lastEditedAt ? "edited_output" : "source";
-    if (
-      !(await isServable(
-        stepByKind(activeProducerKind)!,
-        ctx,
-        await getStep(id, activeProducerKind),
-      ))
-    ) {
-      continue;
+    // Two gates, because the two files have different jobs and losing either is
+    // unrecoverable once the segments are gone.
+    //
+    // `source` — the pristine original everything is regenerated from. It must
+    // outlive the HLS it was stitched from.
+    // `presentation` — the <H>p.mp4 a viewer is actually served. If it isn't
+    // servable we keep the HLS fallback, because resolve.ts would otherwise have
+    // nothing to serve (source.mp4 is never served publicly).
+    //
+    // Same isServable predicate the viewer serves on, so the three can't drift.
+    for (const kind of ["source", "presentation"] as const) {
+      if (!(await isServable(stepByKind(kind)!, ctx, await getStep(id, kind)))) {
+        keep = true;
+        break;
+      }
     }
+    if (keep) continue;
 
     let filesRemoved = 0;
 

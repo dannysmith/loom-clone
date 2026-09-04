@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { absoluteUrl, activeRawFilename, getPublicBaseUrl, urlsForVideo } from "../url";
 
 describe("activeRawFilename", () => {
-  test("returns source.mp4 for unedited video", () => {
-    expect(activeRawFilename({ lastEditedAt: null, height: 1080 })).toBe("source.mp4");
+  test("returns the presentation master for an unedited video", () => {
+    expect(activeRawFilename({ lastEditedAt: null, height: 1080 })).toBe("1080p.mp4");
   });
 
-  test("returns resolution file for edited video", () => {
+  test("returns the same master for an edited video — editing doesn't rename it", () => {
     expect(activeRawFilename({ lastEditedAt: "2026-04-30T12:00:00Z", height: 1080 })).toBe(
       "1080p.mp4",
     );
   });
 
-  test("returns source.mp4 if edited but height is null", () => {
+  test("falls back to source.mp4 when the height isn't cached yet", () => {
     expect(activeRawFilename({ lastEditedAt: "2026-04-30T12:00:00Z", height: null })).toBe(
       "source.mp4",
     );
@@ -29,12 +29,12 @@ describe("activeRawFilename", () => {
 });
 
 describe("urlsForVideo", () => {
-  test("points raw at source.mp4 for unedited video", () => {
+  test("points raw at the presentation master for an unedited video", () => {
     const urls = urlsForVideo({ slug: "my-video", lastEditedAt: null, height: 1080 });
-    expect(urls.raw).toBe("/my-video/raw/source.mp4");
+    expect(urls.raw).toBe("/my-video/raw/1080p.mp4");
   });
 
-  test("points raw at resolution file for edited video", () => {
+  test("points raw at the same master for an edited video", () => {
     const urls = urlsForVideo({
       slug: "my-video",
       lastEditedAt: "2026-04-30T12:00:00Z",

@@ -22,8 +22,9 @@ afterEach(async () => {
 
 const OLD = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-// Build a `ready` video, completed long ago, with HLS segments + a source.mp4
-// derivative on disk. Returns its id and the key file paths.
+// Build a `ready` video, completed long ago, with HLS segments plus both the
+// pristine source.mp4 and its 1080p.mp4 presentation master on disk. Returns its
+// id and the key file paths.
 async function makeStaleReadyVideo(): Promise<{ id: string; hls: string[]; source: string }> {
   const video = await createVideo();
   const dir = join(DATA_DIR, video.id);
@@ -33,25 +34,38 @@ async function makeStaleReadyVideo(): Promise<{ id: string; hls: string[]; sourc
   for (const f of hls) await Bun.write(f, "stub");
   const source = join(dir, "derivatives", "source.mp4");
   await Bun.write(source, "stub");
+  await Bun.write(join(dir, "derivatives", "1080p.mp4"), "stub");
 
   await getDb()
     .update(videos)
-    .set({ status: "ready", completedAt: OLD, fileBytes: 1000 })
+    .set({ status: "ready", completedAt: OLD, fileBytes: 1000, height: 1080 })
     .where(eq(videos.id, video.id));
 
   return { id: video.id, hls, source };
 }
 
 describe("cleanupStaleFiles", () => {
-  test("removes stale HLS when the source step is validated ready", async () => {
+  test("removes stale HLS when both the source and the master are validated", async () => {
     const { id, hls, source } = await makeStaleReadyVideo();
     await markStepReady(id, "source");
+    await markStepReady(id, "presentation");
 
     await cleanupStaleFiles();
 
     for (const f of hls) expect(await Bun.file(f).exists()).toBe(false);
-    // The MP4 is kept — it's the only remaining copy.
+    // The pristine original is kept — once the segments are gone it's the only
+    // copy everything else can be regenerated from.
     expect(await Bun.file(source).exists()).toBe(true);
+  });
+
+  test("does NOT remove HLS when the source is ready but the master is not", async () => {
+    // Nothing to serve as MP4 yet, so the HLS is still the viewer's only path.
+    const { id, hls } = await makeStaleReadyVideo();
+    await markStepReady(id, "source");
+
+    await cleanupStaleFiles();
+
+    for (const f of hls) expect(await Bun.file(f).exists()).toBe(true);
   });
 
   test("does NOT remove HLS when the source step is failed (broken MP4 safety)", async () => {
@@ -117,32 +131,27 @@ describe("cleanupStaleFiles", () => {
     expect(await Bun.file(candidate).exists()).toBe(true);
   });
 
-  test("removes HLS for an edited video when its edited_output is validated ready", async () => {
+  test("removes HLS once both the source and the presentation master are validated", async () => {
     const { id, hls } = await makeStaleReadyVideo();
     await markStepReady(id, "source");
-    await getDb()
-      .update(videos)
-      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
-      .where(eq(videos.id, id));
-    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // active cut present
-    await markStepReady(id, "edited_output"); // validated, the bar resolve.ts serves on
+    await getDb().update(videos).set({ height: 1080 }).where(eq(videos.id, id));
+    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // served master
+    await markStepReady(id, "presentation"); // validated, the bar resolve.ts serves on
 
     await cleanupStaleFiles();
 
     for (const f of hls) expect(await Bun.file(f).exists()).toBe(false);
   });
 
-  test("does NOT remove HLS for an edited video with no edited_output row (legacy safety)", async () => {
-    // An edited video predating the edited_output step: its cut is on disk but
-    // there's no validated ledger row, so resolve.ts won't serve the MP4 until
-    // the backfill runs. Keep the HLS fallback rather than stranding the viewer.
+  test("does NOT remove HLS when the master is on disk but has no validated row", async () => {
+    // A video migrated from before the presentation master, or one whose step
+    // rows were lost: the file is there but nothing validated it, so resolve.ts
+    // won't serve the MP4 until the backfill runs. Keep the HLS fallback rather
+    // than stranding the viewer.
     const { id, hls } = await makeStaleReadyVideo();
     await markStepReady(id, "source");
-    await getDb()
-      .update(videos)
-      .set({ lastEditedAt: new Date().toISOString(), height: 1080 })
-      .where(eq(videos.id, id));
-    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // cut present, no row
+    await getDb().update(videos).set({ height: 1080 }).where(eq(videos.id, id));
+    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // present, no row
 
     await cleanupStaleFiles();
 

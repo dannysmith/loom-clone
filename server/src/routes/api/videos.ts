@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { join, resolve } from "path";
 import { z } from "zod";
+import { writeOriginalCaptions } from "../../lib/captions";
 import { extractChaptersFromTimeline, readChapters, writeChapters } from "../../lib/chapters";
 import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { apiError, ConflictError, ErrorCode, ValidationError } from "../../lib/errors";
@@ -267,15 +268,15 @@ videos.post("/:id/complete", async (c) => {
 
   if (footageWhole) {
     // Healing / incomplete-recovery changed the HLS segments, so the
-    // previously-stitched source.mp4 and its derivatives are stale — but
-    // skip-if-ready can't tell. Force a full re-stitch + re-derive. A first
-    // `/complete` (from `recording`) has nothing to skip, and a redundant one on
-    // an already-processed video should stay a near-no-op, so both use the plain
-    // resumable schedule. (Mac-sent steps aren't server-run, so force never
-    // touches them.)
+    // previously-stitched source.mp4 and everything derived from it are stale —
+    // but skip-if-ready can't tell. An `intake` run re-stitches and re-derives
+    // the lot. A first `/complete` (from `recording`) has nothing to skip, and a
+    // redundant one on an already-processed video should stay a near-no-op, so
+    // both use the plain `resume` schedule. (Mac-sent steps aren't server-run,
+    // so an intake never touches them.)
     const segmentsChanged = existing.status === "healing" || existing.status === "incomplete";
     if (segmentsChanged) {
-      scheduleReprocess(id, { source: "recorded", force: true });
+      scheduleReprocess(id, { source: "recorded", intent: "intake" });
     } else {
       scheduleDerivatives(id);
     }
@@ -314,17 +315,20 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
   const contentType = c.req.header("content-type") ?? "";
   const isVtt = contentType.includes("text/vtt") || body.trimStart().startsWith("WEBVTT");
   const format = isVtt ? "vtt" : "srt";
-  const extension = isVtt ? "captions.vtt" : "captions.srt";
 
-  // Write to derivatives/ atomically (tmp → rename).
+  // Store what the Mac sent as the pristine original — a source-group artifact,
+  // never modified. The SERVED captions are produced from it by the `captions`
+  // pipeline step, because they have to follow the EDL: on an edited video the
+  // transcript describes the uncut timeline, and writing it straight through
+  // would desync a viewer's subtitles. The step is scheduled below; it copies the
+  // original verbatim when nothing is cut.
   const derivDir = join(DATA_DIR, id, "derivatives");
   await mkdir(derivDir, { recursive: true });
-  const tmpPath = join(derivDir, `${extension}.tmp`);
-  const finalPath = join(derivDir, extension);
-  await Bun.write(tmpPath, body);
-  await rename(tmpPath, finalPath);
+  await writeOriginalCaptions(derivDir, format, body);
 
-  // Parse to plain text and upsert into DB + FTS.
+  // Parse to plain text and upsert into DB + FTS. The captions step re-upserts
+  // the remapped text for an edited video; this keeps search working for the
+  // (much more common) unedited case even if that step can't run yet.
   const plainText = parseSrtToPlainText(body);
   await upsertTranscript(id, format, plainText);
   // Pass the raw body so the receipt records byte length, not body.length
@@ -335,6 +339,10 @@ videos.put("/:id/transcript", bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c)
     format,
     wordCount: plainText.split(/\s+/).filter(Boolean).length,
   });
+
+  // The transcript arrives long after the pipeline has finished, so nothing else
+  // would produce the served captions from it.
+  scheduleReprocess(id, { source: video.source, intent: "only", kind: "captions" });
 
   console.log(
     `[transcript] ${id} (${format}, ${plainText.split(/\s+/).filter(Boolean).length} words)`,

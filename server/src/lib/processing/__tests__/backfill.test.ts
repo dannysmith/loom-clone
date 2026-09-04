@@ -6,7 +6,7 @@ import { getDb } from "../../../db/client";
 import { videos } from "../../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { DATA_DIR } from "../../paths";
-import { createVideo } from "../../store";
+import { addSegment, createVideo } from "../../store";
 import { inferStepsFromDisk } from "../backfill";
 import { getStepStates } from "../steps-store";
 
@@ -90,67 +90,63 @@ describe("inferStepsFromDisk", () => {
     },
   );
 
-  // For edited videos durationSeconds is the EDITED length, but source.mp4 is
-  // the longer original. The duration tolerance check must be skipped so the
-  // original isn't wrongly marked failed.
+  // The {H}p.mp4 master is the file every video serves. resolve.ts and cleanup
+  // gate on a `ready` presentation step, and duplicateVideo re-derives its ledger
+  // via inferStepsFromDisk — so a backfilled or duplicated video must gain that
+  // row to keep serving.
   test.skipIf(!ffmpegAvailable)(
-    "an edited video's source.mp4 is validated structurally, not against the edited duration",
-    async () => {
-      const video = await createVideo();
-      const dir = join(DATA_DIR, video.id, "derivatives");
-      await mkdir(dir, { recursive: true });
-      await writeRealMp4(join(dir, "source.mp4")); // ~2s
-
-      // durationSeconds reflects a trimmed edit (well outside the 2s tolerance);
-      // lastEditedAt marks it as edited.
-      await getDb()
-        .update(videos)
-        .set({ durationSeconds: 10, lastEditedAt: new Date().toISOString(), height: 240 })
-        .where(eq(videos.id, video.id));
-
-      await inferStepsFromDisk(video.id);
-      expect((await getStepStates(video.id)).get("source")?.state).toBe("ready");
-    },
-  );
-
-  // The edited cut ({H}p.mp4) is the file an edited video serves. resolve.ts +
-  // cleanup gate it on a `ready` edited_output step (P4.8), and duplicateVideo
-  // re-derives its ledger via inferStepsFromDisk — so a backfilled or duplicated
-  // edited video must gain a ready edited_output row to keep serving its cut.
-  test.skipIf(!ffmpegAvailable)(
-    "an edited video's cut is inferred as a ready edited_output step",
+    "an edited video's master is inferred as a ready presentation step",
     async () => {
       const video = await createVideo();
       const dir = join(DATA_DIR, video.id, "derivatives");
       await mkdir(dir, { recursive: true });
       await writeRealMp4(join(dir, "source.mp4")); // preserved original
-      await writeRealMp4(join(dir, "240p.mp4")); // the edited cut (active file)
+      await writeRealMp4(join(dir, "240p.mp4")); // the presentation master
       await getDb()
         .update(videos)
         .set({ durationSeconds: 2, lastEditedAt: new Date().toISOString(), height: 240 })
         .where(eq(videos.id, video.id));
 
       await inferStepsFromDisk(video.id);
-      expect((await getStepStates(video.id)).get("edited_output")?.state).toBe("ready");
+      expect((await getStepStates(video.id)).get("presentation")?.state).toBe("ready");
     },
   );
 
   test.skipIf(!ffmpegAvailable)(
-    "an unedited video's source.mp4 IS duration-checked (mismatch → failed)",
+    "source.mp4 is duration-checked against the SEGMENT SUM (mismatch → failed)",
     async () => {
       const video = await createVideo();
       const dir = join(DATA_DIR, video.id, "derivatives");
       await mkdir(dir, { recursive: true });
       await writeRealMp4(join(dir, "source.mp4")); // ~2s
 
-      // Not edited, but durationSeconds is wildly wrong → the check should fail.
-      await getDb()
-        .update(videos)
-        .set({ durationSeconds: 10, height: 240 })
-        .where(eq(videos.id, video.id));
+      // The segment ledger says 10s but the stitch is 2s — a truncated stitch,
+      // which is exactly what this check exists to catch. It's independent of
+      // durationSeconds, which describes the presentation master.
+      await addSegment(video.id, "seg_0.m4s", 10);
+      await getDb().update(videos).set({ height: 240 }).where(eq(videos.id, video.id));
 
       await inferStepsFromDisk(video.id);
       expect((await getStepStates(video.id)).get("source")?.state).toBe("failed");
+    },
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "an edited video's source.mp4 passes despite a shorter cached duration",
+    async () => {
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeRealMp4(join(dir, "source.mp4")); // ~2s, the full original
+      await addSegment(video.id, "seg_0.m4s", 2);
+      // durationSeconds describes the 1s edited master, not the source.
+      await getDb()
+        .update(videos)
+        .set({ durationSeconds: 1, height: 240, lastEditedAt: new Date().toISOString() })
+        .where(eq(videos.id, video.id));
+
+      await inferStepsFromDisk(video.id);
+      expect((await getStepStates(video.id)).get("source")?.state).toBe("ready");
     },
   );
 });

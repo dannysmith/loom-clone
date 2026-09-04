@@ -107,7 +107,7 @@ describe("post-processing pipeline (end-to-end)", () => {
       );
 
       await markFootageComplete(video.id);
-      await runPipeline(video.id, { source: "recorded" });
+      await runPipeline(video.id, { source: "recorded", intent: "resume" });
 
       expect((await getVideo(video.id))?.status).toBe("processing_failed");
       expect((await getStepStates(video.id)).get("source")?.state).toBe("failed");
@@ -128,7 +128,7 @@ describe("post-processing pipeline (end-to-end)", () => {
       const videoDir = join(DATA_DIR, video.id);
       await generateTestHls(videoDir);
       await markFootageComplete(video.id);
-      await runPipeline(video.id, { source: "recorded" });
+      await runPipeline(video.id, { source: "recorded", intent: "resume" });
 
       const firstSteps = await getStepStates(video.id);
       // Precondition: the first run actually produced a ready source step (so
@@ -139,7 +139,7 @@ describe("post-processing pipeline (end-to-end)", () => {
 
       // Second run resumes — source is already ready + present, so it's skipped
       // (producedAt unchanged) rather than re-stitched.
-      await runPipeline(video.id, { source: "recorded" });
+      await runPipeline(video.id, { source: "recorded", intent: "resume" });
       const secondSteps = await getStepStates(video.id);
       expect(secondSteps.get("source")?.producedAt).toBe(firstSourceAt ?? null);
       expect((await getVideo(video.id))?.status).toBe("ready");
@@ -148,13 +148,13 @@ describe("post-processing pipeline (end-to-end)", () => {
   );
 
   test.skipIf(!ffmpegAvailable)(
-    "single-step regenerate (only + force) redoes just that artifact, not source",
+    "single-artifact regenerate redoes just that artifact, not source",
     async () => {
       const video = await createVideo();
       const videoDir = join(DATA_DIR, video.id);
       await generateTestHls(videoDir);
       await markFootageComplete(video.id);
-      await runPipeline(video.id, { source: "recorded" });
+      await runPipeline(video.id, { source: "recorded", intent: "resume" });
 
       const before = await getStepStates(video.id);
       const sourceAt = before.get("source")?.producedAt;
@@ -163,7 +163,7 @@ describe("post-processing pipeline (end-to-end)", () => {
 
       // Regenerate only the thumbnail (forced). source is left untouched.
       await Bun.write(thumbPath, ""); // clobber so we can prove it's rewritten
-      await runPipeline(video.id, { source: "recorded", force: true, only: "thumbnail" });
+      await runPipeline(video.id, { source: "recorded", intent: "only", kind: "thumbnail" });
 
       const after = await getStepStates(video.id);
       expect(after.get("source")?.producedAt).toBe(sourceAt ?? null); // source not re-stitched
@@ -178,11 +178,11 @@ describe("scheduleReprocess in-flight coalescing", () => {
   // The two calls are synchronous (no await between them), so the first run's
   // promise is still pending when the second is requested — deterministically
   // exercising the queue path without needing a slow ffmpeg run.
-  test("a forced run requested while one is in flight is queued, not dropped", async () => {
+  test("an intake run requested while one is in flight is queued, not dropped", async () => {
     const video = await createVideo();
 
-    const first = scheduleReprocess(video.id, { source: "recorded", force: true });
-    const second = scheduleReprocess(video.id, { source: "recorded", force: true });
+    const first = scheduleReprocess(video.id, { source: "recorded", intent: "intake" });
+    const second = scheduleReprocess(video.id, { source: "recorded", intent: "intake" });
 
     expect(first).toBe("started");
     expect(second).toBe("queued");
@@ -193,11 +193,11 @@ describe("scheduleReprocess in-flight coalescing", () => {
     expect(_inFlightPromise(video.id)).toBeUndefined();
   });
 
-  test("a plain resumable re-schedule while in flight is skipped (already covered)", async () => {
+  test("a resume re-schedule while in flight is skipped (already covered)", async () => {
     const video = await createVideo();
 
-    const first = scheduleReprocess(video.id, { source: "recorded" });
-    const second = scheduleReprocess(video.id, { source: "recorded" });
+    const first = scheduleReprocess(video.id, { source: "recorded", intent: "resume" });
+    const second = scheduleReprocess(video.id, { source: "recorded", intent: "resume" });
 
     expect(first).toBe("started");
     expect(second).toBe("skipped");

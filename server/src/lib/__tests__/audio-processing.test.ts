@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { _parseLoudnormJson, processAudio } from "../derivatives";
+import { _parseLoudnormJson, applyAudioChain } from "../derivatives";
 import { DATA_DIR } from "../paths";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null;
@@ -123,25 +123,24 @@ async function measureLUFS(filePath: string): Promise<number> {
   return Number.parseFloat(json.input_i);
 }
 
-describe("processAudio (end-to-end)", () => {
+describe("applyAudioChain (end-to-end)", () => {
   test.skipIf(!ffmpegAvailable)(
     "processes audio and output LUFS is within ±1 of -14",
     async () => {
       const dir = join(DATA_DIR, "test-audio");
       const sourcePath = await generateTestSource(dir);
 
-      const sizeBefore = Bun.file(sourcePath).size;
+      const outPath = join(dir, "1080p.mp4");
 
-      await processAudio(sourcePath);
+      await applyAudioChain(sourcePath, outPath);
 
-      // File should exist and be different (re-encoded audio).
-      const sizeAfter = Bun.file(sourcePath).size;
-      expect(sizeAfter).toBeGreaterThan(0);
-      // Size will differ because audio was re-encoded at 160k vs 64k.
-      expect(sizeAfter).not.toBe(sizeBefore);
+      // The chain writes a NEW file and leaves the input untouched — that's what
+      // keeps source.mp4 pristine and reprocessing repeatable.
+      expect(Bun.file(outPath).size).toBeGreaterThan(0);
+      expect(await Bun.file(sourcePath).exists()).toBe(true);
 
       // Verify output loudness is within ±1 LU of target (-14 LUFS).
-      const lufs = await measureLUFS(sourcePath);
+      const lufs = await measureLUFS(outPath);
       expect(lufs).toBeGreaterThan(-15);
       expect(lufs).toBeLessThan(-13);
     },
@@ -153,8 +152,9 @@ describe("processAudio (end-to-end)", () => {
     async () => {
       const dir = join(DATA_DIR, "test-audio-video");
       const sourcePath = await generateTestSource(dir);
+      const outPath = join(dir, "1080p.mp4");
 
-      await processAudio(sourcePath);
+      await applyAudioChain(sourcePath, outPath);
 
       // Verify video dimensions are preserved via ffprobe.
       const proc = Bun.spawn(
@@ -167,7 +167,7 @@ describe("processAudio (end-to-end)", () => {
           "-show_streams",
           "-select_streams",
           "v:0",
-          sourcePath,
+          outPath,
         ],
         { stdout: "pipe", stderr: "pipe" },
       );
@@ -184,19 +184,20 @@ describe("processAudio (end-to-end)", () => {
     async () => {
       const dir = join(DATA_DIR, "test-audio-idempotent");
       const sourcePath = await generateTestSource(dir);
+      const once = join(dir, "once.mp4");
+      const twice = join(dir, "twice.mp4");
 
-      await processAudio(sourcePath);
-      const size1 = Bun.file(sourcePath).size;
+      await applyAudioChain(sourcePath, once);
+      await applyAudioChain(once, twice);
 
-      await processAudio(sourcePath);
-      const size2 = Bun.file(sourcePath).size;
+      // Both runs produce valid files.
+      expect(Bun.file(once).size).toBeGreaterThan(0);
+      expect(Bun.file(twice).size).toBeGreaterThan(0);
 
-      // Both runs should produce valid files.
-      expect(size1).toBeGreaterThan(0);
-      expect(size2).toBeGreaterThan(0);
-
-      // LUFS should still be on target after double-processing.
-      const lufs = await measureLUFS(sourcePath);
+      // Running the chain over its own output stays on target. Nothing should do
+      // this — `sourcePristine` exists to prevent it — but a double-processed
+      // file being merely over-treated rather than broken is worth knowing.
+      const lufs = await measureLUFS(twice);
       expect(lufs).toBeGreaterThan(-15);
       expect(lufs).toBeLessThan(-13);
     },
@@ -356,20 +357,21 @@ async function meanVolume(file: string, start: number, length: number): Promise<
   return Number.parseFloat(match[1]);
 }
 
-describe("processAudio (chain effects)", () => {
+describe("applyAudioChain (chain effects)", () => {
   test.skipIf(!ffmpegAvailable || !sayAvailable)(
     "gate floors the noise pad in silent regions",
     async () => {
       const dir = join(DATA_DIR, "test-audio-noise-floor");
       const sourcePath = await generateMultiSegmentFixture(dir);
+      const outPath = join(dir, "out.mp4");
 
-      await processAudio(sourcePath);
+      await applyAudioChain(sourcePath, outPath);
 
       // Fixture layout: t1 0-5s (loud), n1 5-9s (noise pad), t2 9-14s
       // (quiet), n2 14-18s (noise pad), t3 18-23s. Sample 2 s in the
       // middle of n1 (with a small lead-in to clear gate release tail).
       // Mean volume must sit well below the gate threshold (-45 dBFS).
-      const padDb = await meanVolume(sourcePath, 6, 2);
+      const padDb = await meanVolume(outPath, 6, 2);
       expect(padDb).toBeLessThan(-50);
     },
     60_000,
@@ -380,13 +382,14 @@ describe("processAudio (chain effects)", () => {
     async () => {
       const dir = join(DATA_DIR, "test-audio-dynamic-range");
       const sourcePath = await generateMultiSegmentFixture(dir);
+      const outPath = join(dir, "out.mp4");
 
-      await processAudio(sourcePath);
+      await applyAudioChain(sourcePath, outPath);
 
       // Loud speech t1 (0-5 s), quiet speech t2 (9-14 s, -8 dB before
       // processing). Sample 2 s windows comfortably inside each.
-      const loudDb = await meanVolume(sourcePath, 1.5, 2);
-      const quietDb = await meanVolume(sourcePath, 10.5, 2);
+      const loudDb = await meanVolume(outPath, 1.5, 2);
+      const quietDb = await meanVolume(outPath, 10.5, 2);
 
       // Input gap is 8 dB. After dynaudnorm + loudnorm we expect this
       // significantly compressed. Allow up to 4 dB residual gap.

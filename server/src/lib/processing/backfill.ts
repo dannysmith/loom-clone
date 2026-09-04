@@ -11,15 +11,14 @@
 import { join } from "path";
 import { hasRecordedChapters } from "../chapters";
 import { probeMetadata } from "../derivatives";
-import { hasAudioStream } from "../ffprobe";
-import { getTranscript, getVideo } from "../store";
+import { getTranscript, getVideo, sumSegmentDuration } from "../store";
 import {
   applicabilityContext,
   PROCESSING_STEPS,
   type ProcessingStep,
   type StepContext,
 } from "./registry";
-import { fileSizeBytes, markStepFailed, markStepReady, markStepSkipped } from "./steps-store";
+import { fileSizeBytes, markStepFailed, markStepReady } from "./steps-store";
 
 async function exists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
@@ -29,8 +28,13 @@ async function exists(path: string): Promise<boolean> {
 export async function inferStepsFromDisk(videoId: string): Promise<void> {
   const video = await getVideo(videoId, { includeTrashed: true });
   if (!video) return;
+  // The segment sum is the only independent record of how long source.mp4 should
+  // be — durationSeconds describes the presentation master, which is shorter for
+  // an edited video. Without it the stitch gets a structural check only.
+  const segmentDuration = await sumSegmentDuration(videoId);
   const ctx = applicabilityContext(video, {
     hasRecordedChapters: await hasRecordedChapters(videoId),
+    expectedSourceDuration: segmentDuration > 0 ? segmentDuration : undefined,
   });
   const sourceFile = join(ctx.dir, "source.mp4");
 
@@ -58,17 +62,6 @@ async function inferStep(
         if (meta) await markStepReady(videoId, "metadata");
       }
       return;
-    case "audio":
-      // No standalone artifact — assume processed if the source carries audio.
-      // This is a deliberate fidelity trade-off: a recorded video whose source
-      // has audio is marked `ready` even though we can't tell whether loudnorm
-      // actually ran (e.g. a pre-task-4 video, or a duplicate). A non-force
-      // reprocess then skips audio; a force from-HLS rebuild is the way to
-      // actually (re-)loudnorm such a video.
-      if (!(await exists(sourceFile))) return;
-      if (await hasAudioStream(sourceFile)) await markStepReady(videoId, "audio");
-      else await markStepSkipped(videoId, "audio");
-      return;
     case "transcript":
       if (await getTranscript(videoId)) await markStepReady(videoId, "transcript");
       return;
@@ -79,12 +72,13 @@ async function inferStep(
       return;
   }
 
-  // Generic file-producing steps (source, variants, thumbnail, storyboard,
-  // peaks, suggested_edits): validate against the SAME artifact()/validate() the
-  // pipeline used at generation time, off the registry — so renaming an artifact
-  // can't silently break backfill/duplicate. The remaining external suggestion
-  // items (title/description/chapter_titles) have no artifact and leave no
-  // on-disk trace, so they fall through here as "—".
+  // Generic file-producing steps (source, presentation, variants, thumbnail,
+  // storyboard, captions, peaks, editor storyboard, suggested_edits): validate
+  // against the SAME artifact()/validate() the pipeline used at generation time,
+  // off the registry — so renaming an artifact can't silently break
+  // backfill/duplicate. The remaining external suggestion items
+  // (title/description/chapter_titles) have no artifact and leave no on-disk
+  // trace, so they fall through here as "—".
   const path = step.artifact?.(ctx);
   if (!path) return;
   if (!(await exists(path))) return; // no row — nothing to serve

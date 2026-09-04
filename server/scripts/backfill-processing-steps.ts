@@ -1,22 +1,15 @@
 #!/usr/bin/env bun
 /**
- * One-time backfill of the video_processing_steps table for existing videos.
- * The 0012 migration renamed `complete` → `ready` but could not create step
- * rows (that needs ffprobe validation), so until this runs, table-gated serving
- * has nothing to gate on. Run it immediately after deploying the migration.
+ * Rebuild the video_processing_steps table for existing videos from what's on
+ * disk. The ledger is a receipt rather than an inventory, which makes it
+ * re-derivable: this script is the recovery path whenever those rows are wrong
+ * or missing — after a schema change that adds step kinds, or if a data
+ * migration mis-keys them.
  *
- * It infers each step's state from on-disk presence, validating source.mp4 /
- * variants with the same isProbablyPlayable helper used at generation time.
- * It does NOT regenerate anything — many old videos no longer have HLS segments
- * (cleaned up) and couldn't be rebuilt anyway. Cleaned-up videos keep their
- * `source` step `ready` (so they keep serving the MP4) and simply lack the
- * segment-derived steps. Idempotent — safe to re-run.
- *
- * Also backfills the `edited_output` step (added in the Phase 3 pipeline
- * unification) for videos edited before it existed: resolve.ts now gates an
- * edited video's served cut on that step being servable, so a legacy edited
- * video stops serving its MP4 until this runs (it falls back to HLS until then).
- * Re-run this once after deploying the gate to keep such videos serving.
+ * It infers each step's state from on-disk presence, validating video artifacts
+ * with the same isProbablyPlayable helper used at generation time. It does NOT
+ * regenerate anything — many old videos no longer have HLS segments (cleaned up)
+ * and couldn't be rebuilt anyway. Idempotent, so it's always safe to re-run.
  *
  * Usage:
  *   bun run videos:backfill-processing-steps

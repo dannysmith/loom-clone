@@ -4,68 +4,103 @@
 // drives these in order; reconcile and the admin readiness UI read the same
 // metadata. Keeping it declarative is what makes per-step events, skip-if-ready
 // resumability and dependency-aware regeneration fall out naturally.
+//
+// Every step belongs to one of two artifact groups, and `inputs` is where that
+// shows up:
+//
+//   SOURCE group       — derives from the pristine source.mp4 (`inputs: ["source"]`).
+//                        The editor's material: thumbnail, peaks, editor
+//                        storyboard, suggested edits. Changes only when the
+//                        source itself is re-stitched.
+//   PRESENTATION group — derives from the <H>p.mp4 presentation master
+//                        (`inputs: ["presentation"]`). What viewers get:
+//                        variants, storyboard, captions. Regenerated as a set
+//                        whenever the presentation changes.
+//
+// There is no "edit mode". An EDL is an input to the presentation master, so
+// committing an edit and reprocessing are the same run.
 
 import { join } from "path";
 import type { ProcessingStepKind, Video, VideoProcessingStep } from "../../db/schema";
+import { buildServedCaptions } from "../captions";
 import {
+  applyAudioChain,
   extractMetadata,
   generateSourceFromHls,
   generateSourceFromUpload,
   generateVariant,
   type ProbeMetadata,
-  probeDuration,
-  processAudio,
-  refreshFileBytes,
+  probeMetadata,
+  profileNoiseFloorFor,
+  remuxCopy,
+  setPresentationMetadata,
   VARIANTS,
 } from "../derivatives";
-import { type Edl, renderEditedOutput } from "../edit-render";
-import { computeKeptSegments, type Segment } from "../edit-transcript";
+import { renderEditedOutput } from "../edit-render";
+import type { Segment } from "../edit-transcript";
 import { derivativesDir } from "../paths";
 import { generatePeaks } from "../peaks";
-import { generateStoryboard } from "../storyboard";
+import { upsertTranscript } from "../store";
+import { generateEditorStoryboard, generateStoryboard } from "../storyboard";
 import { generateSuggestedEdits, runSilenceDetect, type Silence } from "../suggested-edits";
 import { extractAndPromoteThumbnails } from "../thumbnails";
-import { activeRawFilename } from "../url";
+import { keptSegmentsFor } from "./edl";
 import { isProbablyPlayable } from "./playable";
 
 export type StepTier = "required" | "expected" | "external";
 export type StepRunResult = "ready" | "skipped";
 
-// Per-run context shared by every step. `height` is 0 until the metadata step
-// has probed source.mp4; steps gated on resolution must run after metadata.
+// Per-run context shared by every step. `height` is 0 until source.mp4 has been
+// probed; steps gated on resolution (and the presentation master, which is named
+// after it) must run after that probe.
 export type StepContext = {
   videoId: string;
   video: Video;
   source: "recorded" | "uploaded";
-  // Run mode. `build` produces/replaces source.mp4 (first build, heal re-stitch,
-  // forced from-HLS rebuild). `edit` applies an EDL, producing the edited cut as
-  // the active file while leaving source.mp4 untouched. Gates which steps run:
-  // source/audio/thumbnail/peaks/suggested_edits are build-only; edited_output is
-  // edit-only. Defaults to `build` everywhere except an edit run.
-  mode: "build" | "edit";
-  dir: string; // derivatives directory
-  // Absolute path to the "active" playable file that downstream steps (variants,
-  // storyboard, metadata) consume. Defaults to source.mp4; in edit mode it
-  // becomes the EDL-cut {height}p.mp4. source.mp4-specific steps (source, audio,
-  // silence detection) stay on sourcePath() regardless.
-  activeFile: string;
-  duration: number; // seconds
-  height: number; // probed source height (0 before metadata)
+  // Where this run WRITES: the real derivatives dir, or a staging dir during a
+  // staged rebuild.
+  dir: string;
+  // Where persistent INPUTS live — always the real derivatives dir. edits.json,
+  // words.json and captions.original.* are read from here even mid-staging,
+  // because a staged run only ever writes the set it's replacing.
+  inputDir: string;
+  // The source.mp4 to read from. Resolved once per run: a staged intake reads the
+  // source it just stitched into staging, everything else reads the preserved
+  // original. Steps never join their own source path — that's what let a staged
+  // run silently read the wrong file.
+  sourceFile: string;
+  // Measured length of the PRISTINE source: the segment-duration sum, refined by
+  // a probe of source.mp4 once it exists. Drives every source-group step and the
+  // EDL computation.
+  sourceDuration: number;
+  // INDEPENDENT expectation of how long source.mp4 should be, used to validate
+  // the stitch. The segment-duration sum for a recording, the intake probe of
+  // upload.mp4 for an upload, undefined when neither is available. Deliberately
+  // not derived from source.mp4 — validating a file against a probe of itself
+  // checks nothing.
+  expectedSourceDuration?: number;
+  // Duration of the presentation master — shorter than sourceDuration when the
+  // EDL cuts. Seeded from the video's cached duration and rewritten by the
+  // presentation step from a probe of what it produced; the storyboard threshold
+  // and the DB's durationSeconds both read it. This is deliberately a second
+  // named field rather than a mutated shared one — the old single `duration`
+  // being rewritten mid-run was a side channel between steps.
+  presentationDuration: number;
+  height: number; // probed source height (0 before the source probe)
   // Whether the recording captured chapter markers — gates chapter_titles
   // applicability. Only set when the context is built for readiness/backfill (the
   // live pipeline never evaluates the external chapter_titles step).
   hasRecordedChapters?: boolean;
-  force: boolean;
   scratch: {
     silences?: Silence[];
     silencesComputed: boolean;
-    // source.mp4 probe, seeded by the pipeline's height probe and reused by the
-    // metadata step so source.mp4 is probed once per run, not twice.
+    // source.mp4 probe, seeded by the pipeline's source probe and reused by the
+    // metadata step so the source is probed once per run, not twice.
     sourceMeta?: ProbeMetadata;
-    // Set by the edited_output step during an edit run, for the post-swap edit
-    // actions (edited captions, durationSeconds).
-    keptSegments?: Segment[];
-    editedDuration?: number;
+    // Kept segments from the EDL, computed once by the presentation step and
+    // reused by captions so both describe the same cut.
+    kept?: Segment[];
+    fullSpan?: boolean;
   };
 };
 
@@ -83,12 +118,18 @@ export type ProcessingStep = {
   // Post-run structural check; false ⇒ the step is marked `failed`.
   validate?(ctx: StepContext): Promise<boolean>;
   // Primary artifact path, for the "is it still present on disk?" servable
-  // check. Absent for steps that produce no file (metadata) or mutate
-  // source.mp4 in place (audio).
+  // check. Absent for steps that produce no file (metadata).
   artifact?(ctx: StepContext): string;
 };
 
-const sourcePath = (ctx: StepContext): string => join(ctx.dir, "source.mp4");
+// Where the `source` step WRITES. Everything that reads the source uses
+// ctx.sourceFile instead, which may point at the real dir during a staged run.
+export const sourceOutputPath = (ctx: StepContext): string => join(ctx.dir, "source.mp4");
+
+// The presentation master, named for the source's own height (1440p.mp4 for a
+// 1440p recording). Undefined before the source has been probed, which is why
+// every presentation-group step is gated on `height > 0`.
+export const presentationPath = (ctx: StepContext): string => join(ctx.dir, `${ctx.height}p.mp4`);
 
 // One downscaled-variant step (e.g. 720p.mp4), built from the canonical
 // VARIANTS entry so the height threshold, filename and kind never drift.
@@ -97,10 +138,10 @@ function variantStep(kind: ProcessingStepKind, height: number): ProcessingStep {
   return {
     kind,
     tier: "expected",
-    inputs: ["source"],
+    inputs: ["presentation"],
     appliesTo: (ctx) => ctx.height > height,
     run: async (ctx) => {
-      await generateVariant(ctx.dir, height, ctx.activeFile);
+      await generateVariant(ctx.dir, height, presentationPath(ctx));
       return "ready";
     },
     validate: (ctx) => isProbablyPlayable(join(ctx.dir, file)),
@@ -108,28 +149,22 @@ function variantStep(kind: ProcessingStepKind, height: number): ProcessingStep {
   };
 }
 
-// Expected duration for validating source.mp4 (the ORIGINAL recording).
-// durationSeconds describes the *edited* output for edited videos, not the
-// (longer) source.mp4 — so duration-check only unedited videos; for edited ones
-// a structural check is enough to confirm the original is still playable.
-export function sourceExpectedDuration(ctx: StepContext): number | undefined {
-  return ctx.video.lastEditedAt ? undefined : ctx.duration;
-}
-
-// Silence detection runs once per pipeline, on the RAW source BEFORE loudnorm
-// (post-loudnorm the dynamic range is compressed and silence is
-// indistinguishable from quiet speech). Both the audio step and suggested_edits
-// reuse the result. The audio step calls this first, guaranteeing the silences
-// reflect the un-loudnormed source.
+// Silence detection runs once per pipeline, on the pristine source. Two
+// consumers: suggested_edits, and the afftdn noise-floor profile in the
+// presentation step. Because source.mp4 is never loudnormed any more, there's no
+// longer an ordering hazard here — pre/post-processing is a property of the file,
+// not of when we look at it. (A legacy non-pristine source is already
+// loudnormed, so its silences are less distinct; that's inherent and only
+// affects videos recorded before the restructure.)
 async function ensureSilences(ctx: StepContext): Promise<Silence[] | undefined> {
   if (ctx.scratch.silencesComputed) return ctx.scratch.silences;
   ctx.scratch.silencesComputed = true;
-  if (ctx.duration >= 5) {
+  if (ctx.sourceDuration >= 5) {
     try {
-      ctx.scratch.silences = await runSilenceDetect(sourcePath(ctx), ctx.duration);
+      ctx.scratch.silences = await runSilenceDetect(ctx.sourceFile, ctx.sourceDuration);
     } catch (err) {
       console.error(
-        `[pipeline] ${ctx.videoId} pre-loudnorm silence detection failed:`,
+        `[pipeline] ${ctx.videoId} silence detection failed:`,
         err instanceof Error ? err.message : err,
       );
     }
@@ -146,60 +181,69 @@ async function jsonParses(path: string): Promise<boolean> {
   }
 }
 
+// Produce the presentation master: the EDL applied to the pristine source, with
+// the audio chain over the result. Returns the probe of what it produced.
+//
+// The two operations compose in this order deliberately. Cutting first means the
+// video is encoded exactly once and loudnorm measures the audio a viewer will
+// actually hear; the audio pass copies the video track, so it costs nothing
+// extra. The noise floor is still profiled from the SOURCE, because silence
+// timestamps are in source coordinates.
+async function buildPresentation(ctx: StepContext): Promise<void> {
+  const source = ctx.sourceFile;
+  const out = presentationPath(ctx);
+  const { kept, fullSpan } = await keptSegmentsFor(ctx.inputDir, ctx.sourceDuration);
+  if (kept.length === 0) throw new Error("presentation: all content removed by edits");
+  ctx.scratch.kept = kept;
+  ctx.scratch.fullSpan = fullSpan;
+
+  // Uploads aren't mic recordings, and a legacy source already carries the chain
+  // — re-running it would process the audio twice.
+  const wantsAudioChain = ctx.source === "recorded" && ctx.video.sourcePristine;
+
+  const cutTmp = `${out}.cut`;
+  try {
+    let chainInput = source;
+    if (!fullSpan) {
+      await renderEditedOutput(source, cutTmp, kept);
+      chainInput = cutTmp;
+    }
+
+    let produced = false;
+    if (wantsAudioChain) {
+      const noiseFloorDb = await profileNoiseFloorFor(source, await ensureSilences(ctx));
+      produced = await applyAudioChain(chainInput, out, { noiseFloorDb });
+    }
+    // No chain, or it declined (no audio stream / missing model): the master is
+    // the cut — or the source itself — remuxed with a faststart header.
+    if (!produced) await remuxCopy(chainInput, out);
+  } finally {
+    await Bun.file(cutTmp)
+      .delete()
+      .catch(() => {});
+  }
+}
+
 // Ordered: source → metadata gate the `ready` transition and must run first;
-// audio runs before the variants so they're cut from the loudnormed source;
-// suggested_edits runs after audio but reuses the pre-loudnorm silences. The
-// external (Mac-sent) steps never run here — they exist for UI applicability
-// and tier classification only.
+// presentation produces the file everything viewer-facing is cut from, so it
+// precedes the variants, storyboard and captions. The source-group steps
+// (thumbnail, peaks, editor storyboard, suggested edits) are independent of it
+// and run last. The external (Mac-sent) steps never run here — they exist for UI
+// applicability and tier classification only.
 export const PROCESSING_STEPS: ProcessingStep[] = [
   {
     kind: "source",
     tier: "required",
     inputs: [],
-    // Edit runs don't re-produce source.mp4 — it's the preserved original and a
-    // precondition of the EDL apply. (In readiness/backfill, mode is `build`, so
-    // source still shows for edited videos — its row stays ready.)
-    appliesTo: (ctx) => ctx.mode !== "edit",
+    appliesTo: () => true,
     run: async (ctx) => {
       if (ctx.source === "uploaded") await generateSourceFromUpload(ctx.videoId, ctx.dir);
       else await generateSourceFromHls(ctx.videoId, ctx.dir);
       return "ready";
     },
     validate: (ctx) =>
-      isProbablyPlayable(sourcePath(ctx), { expectedDuration: sourceExpectedDuration(ctx) }),
-    artifact: (ctx) => sourcePath(ctx),
-  },
-  {
-    // The EDL-cut active file for an edited video ({height}p.mp4), produced from
-    // the preserved source.mp4. Runs only on an edit; in readiness/backfill
-    // (mode `build`) it shows for an already-edited video so the served cut is a
-    // first-class, validated checklist item. Not in REQUIRED_KINDS — `lastEditedAt`
-    // is set only after a validated swap, so a video that presents as edited
-    // already has a valid edited_output.
-    kind: "edited_output",
-    tier: "expected",
-    inputs: ["source"],
-    appliesTo: (ctx) => ctx.mode === "edit" || ctx.video.lastEditedAt != null,
-    run: async (ctx) => {
-      const realDir = derivativesDir(ctx.videoId);
-      const edlFile = Bun.file(join(realDir, "edits.json"));
-      if (!(await edlFile.exists())) throw new Error("edited_output: no edits.json to apply");
-      const edl = (await edlFile.json()) as Edl;
-      const realSource = join(realDir, "source.mp4");
-      const sourceDuration = await probeDuration(realSource);
-      if (sourceDuration === null) throw new Error("edited_output: cannot probe source.mp4");
-      const kept = computeKeptSegments(edl.edits, sourceDuration);
-      if (kept.length === 0) throw new Error("edited_output: all content removed by edits");
-      await renderEditedOutput(realSource, ctx.activeFile, kept);
-      const editedDuration = (await probeDuration(ctx.activeFile)) ?? sourceDuration;
-      ctx.duration = editedDuration; // the storyboard threshold reads ctx.duration
-      ctx.scratch.keptSegments = kept;
-      ctx.scratch.editedDuration = editedDuration;
-      return "ready";
-    },
-    validate: (ctx) =>
-      isProbablyPlayable(ctx.activeFile, { expectedDuration: ctx.scratch.editedDuration }),
-    artifact: (ctx) => ctx.activeFile,
+      isProbablyPlayable(sourceOutputPath(ctx), { expectedDuration: ctx.expectedSourceDuration }),
+    artifact: (ctx) => sourceOutputPath(ctx),
   },
   {
     kind: "metadata",
@@ -208,7 +252,7 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     appliesTo: () => true,
     run: async (ctx) => {
       const ok = await extractMetadata(ctx.videoId, {
-        activeFile: ctx.activeFile,
+        sourceFile: ctx.sourceFile,
         preProbed: ctx.scratch.sourceMeta,
       });
       if (!ok) throw new Error("ffprobe metadata extraction failed");
@@ -216,33 +260,24 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     },
   },
   {
-    kind: "audio",
+    // The served file. Always produced, for every video — that uniformity is what
+    // lets source.mp4 stay pristine, makes "reprocess with a better audio chain"
+    // possible years later, and gives watermarking somewhere to live.
+    kind: "presentation",
     tier: "expected",
     inputs: ["source"],
-    // Uploads aren't mic recordings — loudnorm/denoise shouldn't run on them.
-    // Edit runs cut from the already-loudnormed source.mp4, so audio never
-    // re-runs (and never touches the preserved source.mp4) in edit mode.
-    appliesTo: (ctx) => ctx.source === "recorded" && ctx.mode !== "edit",
+    appliesTo: (ctx) => ctx.height > 0,
     run: async (ctx) => {
-      const silences = await ensureSilences(ctx);
-      const processed = await processAudio(sourcePath(ctx), silences);
-      if (processed) await refreshFileBytes(ctx.videoId);
-      return processed ? "ready" : "skipped";
-    },
-  },
-  {
-    kind: "thumbnail",
-    tier: "expected",
-    inputs: ["source"],
-    // The thumbnail comes from the original source.mp4 and is not regenerated on
-    // edit (the editor works from source; the existing thumbnail stays valid).
-    appliesTo: (ctx) => ctx.mode !== "edit",
-    run: async (ctx) => {
-      await extractAndPromoteThumbnails(ctx.dir, ctx.duration);
+      await buildPresentation(ctx);
+      const probe = await probeMetadata(presentationPath(ctx));
+      if (!probe) throw new Error("presentation: cannot probe the produced master");
+      ctx.presentationDuration = probe.duration;
+      await setPresentationMetadata(ctx.videoId, probe);
       return "ready";
     },
-    validate: (ctx) => Bun.file(join(ctx.dir, "thumbnail.jpg")).exists(),
-    artifact: (ctx) => join(ctx.dir, "thumbnail.jpg"),
+    validate: (ctx) =>
+      isProbablyPlayable(presentationPath(ctx), { expectedDuration: ctx.presentationDuration }),
+    artifact: (ctx) => presentationPath(ctx),
   },
   // Downscaled variants, generated from the canonical VARIANTS list (highest
   // first) so heights/kinds stay in sync with derivatives.ts and resolve.ts.
@@ -250,35 +285,94 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
   {
     kind: "storyboard",
     tier: "expected",
-    inputs: ["source"],
-    appliesTo: (ctx) => ctx.duration >= 60,
+    inputs: ["presentation"],
+    appliesTo: (ctx) => ctx.presentationDuration >= 60 && ctx.height > 0,
     run: async (ctx) =>
-      (await generateStoryboard(ctx.dir, ctx.duration, ctx.activeFile)) ? "ready" : "skipped",
+      (await generateStoryboard(ctx.dir, ctx.presentationDuration, presentationPath(ctx)))
+        ? "ready"
+        : "skipped",
     validate: (ctx) => Bun.file(join(ctx.dir, "storyboard.vtt")).exists(),
     artifact: (ctx) => join(ctx.dir, "storyboard.vtt"),
+  },
+  {
+    // The Mac's transcript mapped onto the presentation timeline — a verbatim
+    // copy when nothing is cut, re-derived from words.json when something is.
+    kind: "captions",
+    tier: "expected",
+    inputs: ["presentation", "transcript"],
+    // Only recordings get a transcript (the Mac sends it), so an upload has
+    // nothing to map onto its timeline and shows "—" rather than a permanent ❌.
+    appliesTo: (ctx) => ctx.source === "recorded",
+    run: async (ctx) => {
+      const { kept, fullSpan } = await keptSegmentsFor(ctx.inputDir, ctx.sourceDuration);
+      const result = await buildServedCaptions({
+        inputDir: ctx.inputDir,
+        outDir: ctx.dir,
+        kept: ctx.scratch.kept ?? kept,
+        fullSpan: ctx.scratch.fullSpan ?? fullSpan,
+      });
+      if (result.state === "skipped") return "skipped";
+      await upsertTranscript(ctx.videoId, result.format, result.plainText);
+      return "ready";
+    },
+    validate: async (ctx) =>
+      (await Bun.file(join(ctx.dir, "captions.srt")).exists()) ||
+      Bun.file(join(ctx.dir, "captions.vtt")).exists(),
+    artifact: (ctx) => join(ctx.dir, "captions.srt"),
+  },
+  {
+    // Source group: the thumbnail is a frame of the original, and deliberately
+    // does NOT re-run when the presentation is rebuilt. Regenerating it wipes
+    // thumbnail-candidates/ — including custom covers — so tying it to routine
+    // reprocessing would destroy curation the first time the library is
+    // reprocessed in bulk.
+    kind: "thumbnail",
+    tier: "expected",
+    inputs: ["source"],
+    appliesTo: () => true,
+    run: async (ctx) => {
+      await extractAndPromoteThumbnails(ctx.dir, ctx.sourceDuration, ctx.sourceFile);
+      return "ready";
+    },
+    validate: (ctx) => Bun.file(join(ctx.dir, "thumbnail.jpg")).exists(),
+    artifact: (ctx) => join(ctx.dir, "thumbnail.jpg"),
   },
   {
     kind: "peaks",
     tier: "expected",
     inputs: ["source"],
-    // Waveform peaks reflect the original source.mp4 (the editor timeline works
-    // from source); not regenerated on edit.
-    appliesTo: (ctx) => ctx.duration >= 1 && ctx.mode !== "edit",
-    run: async (ctx) => ((await generatePeaks(ctx.dir, ctx.duration)) ? "ready" : "skipped"),
+    appliesTo: (ctx) => ctx.sourceDuration >= 1,
+    run: async (ctx) =>
+      (await generatePeaks(ctx.dir, ctx.sourceDuration, ctx.sourceFile)) ? "ready" : "skipped",
     validate: (ctx) => jsonParses(join(ctx.dir, "peaks.json")),
     artifact: (ctx) => join(ctx.dir, "peaks.json"),
+  },
+  {
+    // Dense frames for the editor's timeline. Source-group, like everything else
+    // the editor reads.
+    kind: "editor_storyboard",
+    tier: "expected",
+    inputs: ["source"],
+    appliesTo: (ctx) => ctx.sourceDuration >= 5,
+    run: async (ctx) =>
+      (await generateEditorStoryboard(ctx.dir, ctx.sourceDuration, ctx.sourceFile))
+        ? "ready"
+        : "skipped",
+    validate: (ctx) => Bun.file(join(ctx.dir, "editor-storyboard.vtt")).exists(),
+    artifact: (ctx) => join(ctx.dir, "editor-storyboard.vtt"),
   },
   {
     kind: "suggested_edits",
     tier: "expected",
     inputs: ["source"],
-    // Once the user has committed an edit we never surface auto-suggestions
-    // again. The `mode` guard also covers the in-flight edit run, where
-    // lastEditedAt isn't set yet but suggestions still must not regenerate.
-    appliesTo: (ctx) => ctx.duration >= 5 && !ctx.video.lastEditedAt && ctx.mode !== "edit",
+    // Once the user has committed an edit we never surface auto-suggestions again.
+    appliesTo: (ctx) => ctx.sourceDuration >= 5 && !ctx.video.lastEditedAt,
     run: async (ctx) => {
       const silences = await ensureSilences(ctx);
-      const generated = await generateSuggestedEdits(ctx.dir, ctx.duration, { silences });
+      const generated = await generateSuggestedEdits(ctx.dir, ctx.sourceDuration, {
+        silences,
+        inputPath: ctx.sourceFile,
+      });
       return generated ? "ready" : "skipped";
     },
     validate: (ctx) => jsonParses(join(ctx.dir, "suggested-edits.json")),
@@ -315,27 +409,36 @@ function externalStep(kind: ProcessingStepKind): ProcessingStep {
 // Steps the server pipeline actually runs, in order.
 export const RUNNABLE_STEPS = PROCESSING_STEPS.filter((s) => s.run);
 
-// The mandatory subset that gates `processing → ready`.
+// The mandatory subset that gates `processing → ready`. Deliberately NOT
+// including `presentation`: a video is `ready` once its footage is whole and
+// probed, so it publishes immediately and serves HLS while the master is still
+// being produced. MP4 serving is gated separately, on the presentation step.
 export const REQUIRED_KINDS: ProcessingStepKind[] = PROCESSING_STEPS.filter(
   (s) => s.tier === "required",
 ).map((s) => s.kind);
 
-// Steps that can be regenerated standalone from a valid source.mp4 — they read
-// source.mp4 and write their result atomically: a tmp→rename file, or (metadata)
-// a single videos-row UPDATE. So a single-artifact regenerate is inherently
-// atomic. Deliberately EXCLUDES:
-//   - `source`: re-stitching needs the HLS segments (or upload.mp4), so it's a
-//     full from-HLS rebuild, not an in-place regenerate.
-//   - `audio`: loudnorm replaces source.mp4 in place, so re-running it would
-//     double-process; to redo audio you re-stitch source from HLS (full rebuild).
-export const REGENERABLE_KINDS = new Set<ProcessingStepKind>([
-  "metadata",
-  "thumbnail",
+// The presentation group: everything cut from the master, plus the master. This
+// is the force set for a `present` run, and the closure that a change to the
+// audio chain, the EDL or (later) the watermark invalidates.
+export const PRESENTATION_KINDS: ProcessingStepKind[] = [
+  "presentation",
   ...VARIANTS.map((v) => v.kind),
   "storyboard",
-  "peaks",
-  "suggested_edits",
-]);
+  "captions",
+];
+
+// Steps that can be regenerated standalone — they read an existing input and
+// write their result atomically (a tmp→rename file, or a single videos-row
+// UPDATE), so a single-artifact regenerate is inherently atomic. Deliberately
+// EXCLUDES the two steps that have dependents:
+//   - `source`: re-stitching needs the HLS segments (or upload.mp4), and
+//     everything else derives from it — that's a full `intake` run.
+//   - `presentation`: the variants, storyboard and captions are cut from it, so
+//     regenerating it alone would leave them describing the previous master.
+//     Rebuilding the presentation is the `present` intent, which redoes the set.
+export const REGENERABLE_KINDS = new Set<ProcessingStepKind>(
+  RUNNABLE_STEPS.filter((s) => s.kind !== "source" && s.kind !== "presentation").map((s) => s.kind),
+);
 
 export function stepByKind(kind: ProcessingStepKind): ProcessingStep | undefined {
   return PROCESSING_STEPS.find((s) => s.kind === kind);
@@ -363,27 +466,30 @@ export async function isServable(
 }
 
 // Builds a StepContext from a stored video row, for applicability/artifact
-// checks outside a live pipeline run (readiness UI, backfill). height/duration
-// come from the cached metadata; the run-only fields are inert here.
+// checks outside a live pipeline run (readiness UI, backfill, serving, cleanup).
+// height/duration come from the cached metadata; the run-only fields are inert.
 export function applicabilityContext(
   video: Video,
-  opts: { hasRecordedChapters?: boolean } = {},
+  opts: { hasRecordedChapters?: boolean; expectedSourceDuration?: number } = {},
 ): StepContext {
   const dir = derivativesDir(video.id);
+  // durationSeconds describes the presentation master. Outside a run there's no
+  // separate record of the source's own length, and nothing that consults this
+  // context needs one — applicability for the source-group steps is stable once
+  // they've been produced.
+  const duration = video.durationSeconds ?? 0;
   return {
     videoId: video.id,
     video,
     source: video.source,
-    mode: "build",
     dir,
-    hasRecordedChapters: opts.hasRecordedChapters,
-    // The active served file: source.mp4 for unedited videos, the {height}p.mp4
-    // cut for edited ones — so edited_output's artifact resolves correctly in
-    // readiness/backfill.
-    activeFile: join(dir, activeRawFilename(video)),
-    duration: video.durationSeconds ?? 0,
+    inputDir: dir,
+    sourceFile: join(dir, "source.mp4"),
+    sourceDuration: duration,
+    expectedSourceDuration: opts.expectedSourceDuration,
+    presentationDuration: duration,
     height: video.height ?? 0,
-    force: false,
+    hasRecordedChapters: opts.hasRecordedChapters,
     scratch: { silencesComputed: true },
   };
 }

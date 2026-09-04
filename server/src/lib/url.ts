@@ -12,18 +12,20 @@ export type VideoUrls = {
 };
 
 // The filename of the "active" raw MP4 for a video — the file viewers should
-// see. For unedited videos this is source.mp4 (the original). For edited
-// videos this is the resolution-named file (e.g. 1080p.mp4) which contains
-// the edits applied to source.mp4. source.mp4 is always preserved as the
-// unedited original for re-editing and backups.
+// see. Always the presentation master, named for the source's height (e.g.
+// 1440p.mp4), whether or not the video has been edited: it's the file carrying
+// the audio chain and any committed cut. source.mp4 is the pristine original and
+// is never served publicly.
+//
+// Falls back to source.mp4 only when the height isn't cached yet — a video that
+// hasn't reached the metadata step, where nothing is servable anyway (the
+// serving gate keys on the `presentation` step, so this fallback never becomes a
+// URL a viewer follows).
 export function activeRawFilename(video: {
   lastEditedAt: string | null;
   height: number | null;
 }): string {
-  if (video.lastEditedAt && video.height) {
-    return `${video.height}p.mp4`;
-  }
-  return "source.mp4";
+  return video.height ? `${video.height}p.mp4` : "source.mp4";
 }
 
 // Build viewer-facing URLs for a video. Uses activeRawFilename to point

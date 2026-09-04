@@ -125,11 +125,15 @@ export async function probeDuration(filePath: string): Promise<number | null> {
   return Number.isFinite(d) ? d : null;
 }
 
-// Full video metadata from ffprobe: dimensions and file size.
+// Full video metadata from ffprobe: dimensions, file size and duration. One
+// probe serves every caller — the pipeline seeds the source's height and
+// duration from a single call, and the presentation step reads the master's
+// size and duration from another.
 export type ProbeMetadata = {
   width: number;
   height: number;
   fileBytes: number;
+  duration: number;
 };
 
 export async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
@@ -145,7 +149,7 @@ export async function probeMetadata(filePath: string): Promise<ProbeMetadata | n
     filePath,
   ])) as {
     streams?: Array<{ width?: number; height?: number }>;
-    format?: { size?: string };
+    format?: { size?: string; duration?: string };
   } | null;
   if (!data) return null;
 
@@ -153,9 +157,10 @@ export async function probeMetadata(filePath: string): Promise<ProbeMetadata | n
   const w = stream?.width;
   const h = stream?.height;
   const size = Number.parseInt(data.format?.size ?? "", 10);
+  const duration = Number.parseFloat(data.format?.duration ?? "");
 
-  if (!w || !h || !Number.isFinite(size)) return null;
-  return { width: w, height: h, fileBytes: size };
+  if (!w || !h || !Number.isFinite(size) || !Number.isFinite(duration)) return null;
+  return { width: w, height: h, fileBytes: size, duration };
 }
 
 // Read recording.json sidecar for camera/mic names and recording health.
@@ -197,24 +202,28 @@ async function readRecordingJson(videoDir: string): Promise<RecordingMeta> {
   }
 }
 
-// Extracts metadata from source.mp4 and recording.json, writes it to the DB.
-// Doesn't produce a file — it's a mandatory pipeline step (gates `ready`).
+// Extracts GEOMETRY from source.mp4 plus the recording.json sidecar, and writes
+// them to the DB. Doesn't produce a file — it's a mandatory pipeline step (gates
+// `ready`), which is why it reads the source rather than the presentation master:
+// it has to be able to run before the master exists. The geometry is identical
+// either way, because nothing in the presentation pipeline scales the video.
+//
+// The two properties that DO differ between source and master — `fileBytes` and
+// `durationSeconds` — are owned by the presentation step, which probes the file
+// viewers are actually served. See setPresentationMetadata.
+//
 // Returns false when ffprobe fails/unavailable so the step is marked failed.
-// Probes the active file (defaults to source.mp4) for dimensions/size and reads
-// recording.json, writing both to the DB. `opts.activeFile` lets an edit run
-// point metadata at the edited cut; `opts.preProbed` lets the caller pass an
-// already-computed probe (the pipeline seeds one for resolution-gated steps) so
-// the active file isn't probed twice in the same run.
+// `opts.preProbed` lets the caller pass an already-computed probe (the pipeline
+// seeds one) so the source isn't probed twice in the same run.
 export async function extractMetadata(
   videoId: string,
-  opts: { activeFile?: string; preProbed?: ProbeMetadata } = {},
+  opts: { sourceFile?: string; preProbed?: ProbeMetadata } = {},
 ): Promise<boolean> {
-  const dir = derivativesDir(videoId);
-  const activeFile = opts.activeFile ?? join(dir, "source.mp4");
   const videoDir = join(DATA_DIR, videoId);
+  const sourceFile = opts.sourceFile ?? join(derivativesDir(videoId), "source.mp4");
 
   const [probe, recording] = await Promise.all([
-    opts.preProbed ?? probeMetadata(activeFile),
+    opts.preProbed ?? probeMetadata(sourceFile),
     readRecordingJson(videoDir),
   ]);
 
@@ -231,28 +240,29 @@ export async function extractMetadata(
       width: probe.width,
       height: probe.height,
       aspectRatio,
-      fileBytes: probe.fileBytes,
       cameraName: recording.cameraName,
       microphoneName: recording.microphoneName,
       recordingHealth: recording.recordingHealth,
     })
     .where(eq(videos.id, videoId));
 
-  console.log(
-    `[derivatives] ${videoId} metadata: ${probe.width}x${probe.height}, ${probe.fileBytes} bytes`,
-  );
+  console.log(`[derivatives] ${videoId} metadata: ${probe.width}x${probe.height}`);
   return true;
 }
 
-// Re-probe source.mp4 and update the cached fileBytes. Used after in-place
-// audio replacement, which runs AFTER metadata extraction (so the byte count
-// recorded by extractMetadata reflects the pre-loudnorm source). Dimensions
-// don't change with audio processing, so only fileBytes needs refreshing.
-export async function refreshFileBytes(videoId: string): Promise<void> {
-  const sourcePath = join(derivativesDir(videoId), "source.mp4");
-  const probe = await probeMetadata(sourcePath);
-  if (!probe) return;
-  await getDb().update(videos).set({ fileBytes: probe.fileBytes }).where(eq(videos.id, videoId));
+// Cache the size and duration of the presentation master — the properties that
+// describe what a viewer actually gets, and the only two that differ between the
+// pristine source and the served file (an edited master is shorter; any master
+// is a different size once the audio has been re-encoded). Written by the
+// presentation step from its own probe of the file it just produced.
+export async function setPresentationMetadata(
+  videoId: string,
+  probe: ProbeMetadata,
+): Promise<void> {
+  await getDb()
+    .update(videos)
+    .set({ fileBytes: probe.fileBytes, durationSeconds: probe.duration })
+    .where(eq(videos.id, videoId));
 }
 
 // --- Audio processing chain ---
@@ -411,22 +421,33 @@ async function checkAudioModel(): Promise<boolean> {
   return true;
 }
 
-// Two-pass audio processing on an existing source.mp4. Replaces it in-place
-// with the processed version (video copied, audio re-encoded). The
-// `silences` argument feeds the afftdn noise-floor profile; if omitted the
-// chain falls back to a fixed -50 dB noise floor.
-// Returns true when the source was actually re-encoded (loudnormed) and
-// replaced in place; false when audio processing was skipped (no audio stream
-// or the arnndn model is missing) — in which case the original source.mp4 is
-// left untouched and remains fully playable.
-export async function processAudio(sourcePath: string, silences?: Silence[]): Promise<boolean> {
-  if (!(await hasAudioStream(sourcePath))) return false;
+// Two-pass audio processing from `inputPath` to `outputPath`: the video track is
+// copied untouched, the audio is run through the chain above and re-encoded.
+// Nothing is modified in place — this is what makes the pristine source.mp4
+// possible, and what makes "reprocess with a better chain" a repeatable
+// operation rather than a one-shot.
+//
+// `opts.noiseFloorDb` feeds afftdn. Callers profile it from the SOURCE (see
+// profileNoiseFloor) even when the input here is an edited cut, because silence
+// timestamps are in source coordinates; the measured floor is a property of the
+// recording, not of the cut.
+//
+// Returns true when the audio was processed; false when it was skipped (no audio
+// stream, or the arnndn model is missing) — in which case nothing is written and
+// the caller is responsible for producing `outputPath` some other way.
+export async function applyAudioChain(
+  inputPath: string,
+  outputPath: string,
+  opts: { noiseFloorDb?: number } = {},
+): Promise<boolean> {
+  if (!(await hasAudioStream(inputPath))) return false;
   if (!(await checkAudioModel())) return false;
 
   const fp = Bun.which("ffmpeg");
   if (!fp) throw new Error("ffmpeg not found on PATH");
 
-  const noiseFloorDb = await profileNoiseFloor(sourcePath, silences);
+  const sourcePath = inputPath;
+  const noiseFloorDb = opts.noiseFloorDb ?? DEFAULT_NOISE_FLOOR_DB;
 
   // Pass 1: measure loudness through the full denoise chain.
   //
@@ -457,7 +478,7 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
   const measurement = parseLoudnormJson(pass1Stderr);
 
   // Pass 2: apply the measured values, encode audio as AAC 160 kbps.
-  const tmpOut = `${sourcePath}.audio-tmp`;
+  const tmpOut = `${outputPath}.tmp`;
   const { exitCode: pass2Exit, stderr: pass2Stderr } = await spawnFfmpeg(fp, [
     "-y",
     "-hide_banner",
@@ -486,16 +507,40 @@ export async function processAudio(sourcePath: string, silences?: Silence[]): Pr
     throw new Error(`audio pass 2 failed (exit ${pass2Exit}): ${pass2Stderr.trim()}`);
   }
 
-  // Validate the processed file BEFORE overwriting the good served source —
-  // never replace a known-playable file with an unvalidated one.
+  // Validate before the rename — an unplayable output must never land at
+  // `outputPath`, where a staged swap or the serving gate could pick it up.
   if (!(await isProbablyPlayable(tmpOut))) {
     await rm(tmpOut, { force: true }).catch(() => {});
-    throw new Error("audio output failed playability check — keeping original source.mp4");
+    throw new Error("audio output failed playability check");
   }
 
-  // Atomic replace: rename processed file over the original.
-  await rename(tmpOut, sourcePath);
+  await rename(tmpOut, outputPath);
   return true;
+}
+
+// Profile the noise floor for the audio chain from a file's silent regions.
+// Exposed so the presentation step can measure the SOURCE and then run the chain
+// over an edited cut. Returns the fixed default when there's nothing to measure.
+export async function profileNoiseFloorFor(
+  sourcePath: string,
+  silences: Silence[] | undefined,
+): Promise<number> {
+  return profileNoiseFloor(sourcePath, silences);
+}
+
+// Remux a file into `outputPath` with both streams copied and the moov atom up
+// front. Used for a presentation master that needs no audio work and no cuts —
+// an upload, or a video whose source already carries processed audio — so the
+// master is produced without re-encoding anything.
+export async function remuxCopy(inputPath: string, outputPath: string): Promise<void> {
+  const tmp = `${outputPath}.tmp`;
+  try {
+    await runFfmpeg(["-i", inputPath, "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp]);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+  await rename(tmp, outputPath);
 }
 
 // --- Video variant generation ---

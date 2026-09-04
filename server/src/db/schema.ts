@@ -69,6 +69,12 @@ export const videos = sqliteTable(
     completedAt: text("completed_at"),
     trashedAt: text("trashed_at"),
     lastEditedAt: text("last_edited_at"),
+    // False means this video's source.mp4 already has the audio chain baked
+    // into it — the in-place `audio` step from before the presentation-master
+    // restructure. Gates one thing: whether the presentation step applies the
+    // audio chain. Also means the original audio is unrecoverable for that
+    // video, so a retroactive chain reprocess leaves it alone.
+    sourcePristine: integer("source_pristine", { mode: "boolean" }).notNull().default(true),
   },
   (t) => [
     index("videos_trashed_at_idx").on(t.trashedAt),
@@ -102,19 +108,25 @@ export const videoSegments = sqliteTable(
 //
 // There is no auto-retry: a failed step is recovered by a manual reprocess.
 //
-// NOTE: this is an UNORDERED key set, not the run order. The pipeline runs
-// source → metadata → audio → … (metadata must gate `ready` before the fragile
-// audio step); `PROCESSING_STEPS` in registry.ts is the ordering authority.
+// NOTE: this is an UNORDERED key set, not the run order. `PROCESSING_STEPS` in
+// registry.ts is the ordering authority.
+//
+// Each kind belongs to one of two artifact groups. SOURCE-group artifacts
+// derive from the pristine source.mp4 and change only when it does; PRESENTATION
+// -group artifacts derive from the <H>p.mp4 presentation master and are
+// regenerated together whenever anything about the presentation changes (an
+// edit, a reprocess, a future watermark).
 export const PROCESSING_STEP_KINDS = [
   "source",
-  "edited_output",
   "metadata",
-  "audio",
+  "presentation",
   "thumbnail",
   "variant_720",
   "variant_1080",
   "storyboard",
+  "captions",
   "peaks",
+  "editor_storyboard",
   "suggested_edits",
   "transcript",
   "words",

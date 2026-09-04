@@ -173,7 +173,7 @@ describe("video detail readiness section", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("readiness-panel");
-    expect(html).toContain("Source video");
+    expect(html).toContain("Original video");
     expect(html).toContain("Re-run post-processing");
     // Per-artifact regenerate button appears on the settled thumbnail row.
     expect(html).toContain(`/admin/videos/${video.id}/reprocess/thumbnail`);

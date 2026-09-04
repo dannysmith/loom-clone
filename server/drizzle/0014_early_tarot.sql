@@ -1,0 +1,1 @@
+ALTER TABLE `videos` ADD `source_pristine` integer DEFAULT true NOT NULL;

@@ -5,11 +5,19 @@
 #
 # What gets backed up:
 #   - data/app.db.bak  (point-in-time SQLite snapshot, deleted after run)
-#   - Per-video: recording.json, derivatives/source.mp4, derivatives/thumbnail.jpg,
-#     derivatives/edits.json (edit decisions), derivatives/words.json (word timestamps)
+#   - Per-video: recording.json, derivatives/source.mp4 (the pristine original),
+#     derivatives/thumbnail.jpg, derivatives/edits.json (edit decisions),
+#     derivatives/words.json (word timestamps), derivatives/captions.original.*
+#     (the transcript exactly as the Mac produced it)
 #
-# What does NOT get backed up (regenerable from source.mp4 + edits.json):
-#   - HLS segments, variants, storyboards, thumbnail candidates, peaks, editor storyboards
+# What does NOT get backed up — everything here is regenerable from the files
+# above by re-running post-processing:
+#   - HLS segments, the <H>p.mp4 presentation master and its downscaled variants,
+#     the served captions.srt (remapped from captions.original.* through the EDL),
+#     storyboards, thumbnail candidates, peaks, editor storyboards
+#
+# Note that a restored video therefore needs a reprocess before it serves: the
+# master is a derivative now, not the archive.
 #
 # Prerequisites:
 #   - restic, sqlite3 installed on the host
@@ -100,7 +108,9 @@ for dir in "$DATA_DIR"/*/; do
     "$dir/derivatives/source.mp4" \
     "$dir/derivatives/thumbnail.jpg" \
     "$dir/derivatives/edits.json" \
-    "$dir/derivatives/words.json"; do
+    "$dir/derivatives/words.json" \
+    "$dir/derivatives/captions.original.srt" \
+    "$dir/derivatives/captions.original.vtt"; do
     if [[ -f "$f" ]]; then
       echo "$f" >> "$FILELIST"
       ((file_count++))

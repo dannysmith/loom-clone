@@ -4,12 +4,10 @@ import CoreMedia
 extension RecordingActor {
     // MARK: - Keep-Alive
 
-    // The held-frame path. A capture source that isn't changing delivers no
-    // frames — ScreenCaptureKit only sends a `.complete` frame on content
-    // change — so the freshness gate has nothing to emit and the output would
-    // simply stop. This emits a synthetic-PTS repeat of the last cached frame
-    // instead, which is what keeps a static-screen recording playable: video
-    // holds while audio runs on at its real cadence.
+    // A capture source that isn't changing delivers no frames at all —
+    // ScreenCaptureKit only sends a `.complete` frame on content change — so
+    // "nothing is happening" and "capture has died" look identical here, and
+    // the freshness gate has nothing to emit either way.
 
     /// Emit a synthetic-PTS repeat of the last cached source frame when the
     /// freshness gate has nothing emittable — a long static-source run, or a
@@ -102,7 +100,7 @@ extension RecordingActor {
 
         lastEmittedVideoPTS = pts
         lastEmitHostTime = nowHost
-        // NOTE: lastEmittedSourcePTS deliberately unchanged — see above.
+        // NOTE: lastEmittedSourcePTS deliberately unchanged.
         diagnostics.keepAliveEmits += 1
 
         // One timeline event per static run.

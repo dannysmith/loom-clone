@@ -136,7 +136,8 @@ enum RecordingClock {
     /// down emits nothing at all and re-composites the same doomed frame on
     /// every subsequent tick. The encoder-level checks behind it are safety
     /// nets that should never fire. Invalid watermarks mean nothing has been
-    /// emitted yet, so those tests pass and only the anchor test applies.
+    /// emitted yet, so both watermark tests are no-ops and only the anchor
+    /// test applies.
     ///
     /// The anchor test covers a recording that starts on a source which isn't
     /// changing. A static display hands the metronome a cached frame captured

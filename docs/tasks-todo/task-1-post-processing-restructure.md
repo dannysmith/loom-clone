@@ -233,17 +233,17 @@ One PR, one commit per phase. Phases 1–5 happen in the branch and each ends gr
 
 **Deploy posture:** production downtime during the changeover is accepted. Merging phases 1–5 deploys code that expects a presentation master no video has yet, so until phase 6 runs, videos under 10 days old fall back to HLS and older ones have nothing to serve. That's the trade for not carrying a transitional serving fallback we'd only delete again. The admin panel keeps working throughout, which is what phase 6 needs.
 
-### Phase 1 — Registry & orchestrator
+### Phase 1 — Registry & orchestrator [✅ DONE]
 
 The `presentation`, `captions` and `editor_storyboard` steps; retire `audio` and `edited_output`; run set / force set / the four intents; `sourceDuration` / `presentationDuration` replacing the mutated `ctx.duration`; the staged-swap directory fix; the transcript endpoint's pristine-original change; delete `edit-reset.ts` and `finalizeEdit`.
 
 Tests: a forced rebuild of a `ready` video that already has thumbnail candidates (the `ENOTEMPTY` case, which has no coverage today), an edit commit, an empty-EDL revert, a reprocess that preserves an edit, per-artifact regen on an edited video, and a transcript arriving after an edit was committed.
 
-### Phase 2 — Serving & URLs
+### Phase 2 — Serving & URLs [✅ DONE]
 
 `activeRawFilename` unconditional; `resolve.ts` gated on `presentation`; `/raw/video.mp4` plus the `source.mp4` and `/:slug.mp4` redirects; and every publishing surface that names a file — JSON metadata, the Markdown view, RSS/JSON feeds, `llms.txt`, JSON-LD `contentUrl`, oEmbed, the admin download link.
 
-### Phase 3 — Migration tooling
+### Phase 3 — Migration tooling [✅ DONE]
 
 The drizzle migration, the `migrate-presentation-masters.ts` script with `--apply` gating, and the [data-safety properties](#data-safety-properties) as executable behaviour rather than intentions — each one gets a test against synthetic fixtures. Also add `captions.original.srt` to `backup.sh`.
 

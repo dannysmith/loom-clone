@@ -121,8 +121,35 @@ describe("generateVtt", () => {
     const vtt = generateVtt(params, 240, 135);
     const lines = vtt.split("\n").filter((l) => l.includes("-->"));
     const lastLine = lines[lines.length - 1]!;
-    // Frame 23: starts at 23*5=115, ends at 24*5=120
+    // Frame 23: starts at 23*5=115, ends at the video's end — 120 either way
+    // here, because 120 divides evenly by the 5s interval.
     expect(lastLine).toBe("00:01:55.000 --> 00:02:00.000");
+  });
+
+  test("last cue runs to the video's end when the duration isn't a whole number of intervals", () => {
+    // 601s at a 6s interval is 100 frames covering 600s. Ending the last cue on
+    // the interval boundary would leave the final second of the scrubber with no
+    // thumbnail at all.
+    const params = computeStoryboardParams(601)!;
+    expect(params.interval).toBe(6);
+    expect(params.expectedFrames).toBe(100);
+
+    const vtt = generateVtt(params, 240, 135);
+    const lines = vtt.split("\n").filter((l) => l.includes("-->"));
+    expect(lines[lines.length - 1]).toBe("00:09:54.000 --> 00:10:01.000");
+    // Earlier cues keep their interval boundaries.
+    expect(lines[0]).toBe("00:00:00.000 --> 00:00:06.000");
+  });
+
+  test("a short video's single cue spans the whole thing", () => {
+    // The case that made this visible: an 11s video is 2 tiles at 5s each, so a
+    // boundary-ending last cue left a ninth of the scrubber blank.
+    const params = computeStoryboardParams(11)!;
+    const lines = generateVtt(params, 240, 135)
+      .split("\n")
+      .filter((l) => l.includes("-->"));
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toBe("00:00:05.000 --> 00:00:11.000");
   });
 
   test("all cues have matching xywh coordinates within grid bounds", () => {

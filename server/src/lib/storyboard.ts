@@ -71,9 +71,12 @@ export function generateVtt(
 
   for (let i = 0; i < params.expectedFrames; i++) {
     const startTime = i * params.interval;
-    // The final tile covers whatever is left rather than overrunning the video:
-    // frames are whole intervals, durations aren't.
-    const endTime = Math.min((i + 1) * params.interval, params.duration);
+    // The final tile runs to the end of the video rather than to the next
+    // interval boundary. Frames are whole intervals and durations aren't, so
+    // stopping at the boundary leaves a slice of the scrubber with no thumbnail
+    // at all — up to a whole interval of it, which on a short video is most of
+    // the last tenth.
+    const endTime = i === params.expectedFrames - 1 ? params.duration : (i + 1) * params.interval;
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
     const x = col * tileWidth;
@@ -180,7 +183,7 @@ export function generateEditorVtt(
 
   for (let i = 0; i < params.expectedFrames; i++) {
     const startTime = i * params.interval;
-    const endTime = Math.min((i + 1) * params.interval, params.duration);
+    const endTime = i === params.expectedFrames - 1 ? params.duration : (i + 1) * params.interval;
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
     const x = col * tileWidth;

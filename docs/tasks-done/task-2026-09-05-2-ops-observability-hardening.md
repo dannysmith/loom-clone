@@ -90,10 +90,14 @@ Render the collector's data in the admin settings page: volume disk usage, loom-
 - Fix `backup.log`: kill the double logging (crontab redirect + script `tee` both append to the same file) and cap its size — it's at 86 MB. Simplest: drop the crontab redirect, keep the script's own logging, and trim in-script or via a logrotate.d entry.
 - Update `backup-and-restore.md`: the what-gets-backed-up list, the restore loop, the crontab examples, and promote the healthchecks.io step from "(Optional)" to required, pointing at the phase 3 setup.
 
-### Phase 7: Review & docs — review + docs sweep DONE (2026-09-05); remaining: the live alert test (PR #78 checklist step 5) and closing #61, both after Danny's deploy steps
+### Phase 7: Review & docs — DONE (2026-09-05)
 
 - Walk every change against the original #61 phases and review §3/§4; confirm each item landed or was consciously dropped (this doc's decisions list is the checklist).
 - Deliberately break something safe (e.g. stop the container, or point the self-check cron at a dead URL) and confirm the alert email actually arrives — the whole task is worthless if the wiring was never tested end to end.
 - Finish `operations.md` (alert runbook, self-check reference, thresholds).
 - Docs currency sweep over everything touched: `backup-and-restore.md`, `deployment.md`, `server-routes-and-api.md` (new endpoint), `server/CLAUDE.md`, `AGENTS.md`, danny-vps-infra README.
 - Close #61.
+
+## Outcome (2026-09-05)
+
+Finished. All seven phases landed via [PR #78](https://github.com/dannysmith/loom-clone/pull/78) and the host-side setup is live and verified end to end: all three healthchecks.io checks green, the deliberate-failure test produced a real alert email (and the recovery notice), the first grouped prune thinned the repo from 71 snapshots to 14, `restic check` is clean, and the container runs healthy as uid 1000. One setup wrinkle worth remembering: a wrong-but-valid ping UUID in the ops env file fails completely silently — the ping 200s against whatever check it hits — so checking the dashboard shows "Never" after the first manual run is a mandatory setup step, not paranoia. The living reference for all of it is `docs/developer/operations.md`.

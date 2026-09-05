@@ -397,7 +397,7 @@ extension RecordingActor {
     }
 
     /// True when the source's capturePTS can't produce an emittable frame —
-    /// it predates the anchor, or it isn't strictly newer than what we last
+    /// it predates the anchor, or it wouldn't advance past what we last
     /// emitted. Used by the per-mode branches of `compositeForCurrentMode` to
     /// skip a tick before spending GPU time compositing content the encoder
     /// would only reject downstream.
@@ -406,6 +406,7 @@ extension RecordingActor {
         return RecordingClock.isStaleSource(
             capturePTS: capturePTS,
             lastEmittedSourcePTS: lastEmittedSourcePTS,
+            lastEmittedVideoPTS: lastEmittedVideoPTS,
             start: start,
             pauseAccumulator: pauseAccumulator
         )

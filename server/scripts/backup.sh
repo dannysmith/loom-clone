@@ -48,9 +48,8 @@ LOG_FILE="$LOG_DIR/backup.log"
 
 mkdir -p "$LOG_DIR"
 
-# Cap the log: nothing rotates it, and it once reached 86 MB (restic --verbose
-# output, doubled by a since-removed crontab redirect). Trim to the most
-# recent ~1 MB whenever it exceeds 5 MB.
+# Cap the log: nothing rotates it, and unbounded restic output once grew it
+# to 86 MB. Trim to the most recent ~1 MB whenever it exceeds 5 MB.
 if [[ -f "$LOG_FILE" && $(wc -c < "$LOG_FILE") -gt 5242880 ]]; then
   tail -c 1048576 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
 fi
@@ -141,8 +140,8 @@ log "file list built: $file_count files"
 # ---------------------------------------------------------------------------
 
 log "running restic backup..."
-# No --verbose: it logs every file on every run (the main reason the log once
-# hit 86 MB); the end-of-run summary restic prints anyway is what matters.
+# No --verbose: it would log every file on every run; restic's end-of-run
+# summary is what matters.
 restic backup \
   --files-from "$FILELIST" \
   2>&1 | tee -a "$LOG_FILE"

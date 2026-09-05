@@ -7,6 +7,7 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
     var onAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
     var onSessionError: (@Sendable (Error) -> Void)?
     var onSessionInterrupted: (@Sendable () -> Void)?
+    var onSessionInterruptionEnded: (@Sendable () -> Void)?
 
     private var session: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "com.loomclone.camera-capture", qos: .userInteractive)
@@ -397,7 +398,8 @@ final class CameraCaptureManager: NSObject, @unchecked Sendable {
             on: session,
             log: Log.camera,
             onError: { [weak self] error in self?.onSessionError?(error) },
-            onInterrupted: { [weak self] in self?.onSessionInterrupted?() }
+            onInterrupted: { [weak self] in self?.onSessionInterrupted?() },
+            onInterruptionEnded: { [weak self] in self?.onSessionInterruptionEnded?() }
         )
     }
 

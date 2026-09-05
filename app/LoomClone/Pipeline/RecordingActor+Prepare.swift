@@ -420,6 +420,10 @@ extension RecordingActor {
                 guard let self else { return }
                 Task { await self.handleCameraSessionInterrupted() }
             }
+            cameraCapture.onSessionInterruptionEnded = { [weak self] in
+                guard let self else { return }
+                Task { await self.handleCameraSessionInterruptionEnded() }
+            }
 
             // When camera + mic share a session, the shared session's audio
             // feeds the HLS writer directly (eliminating cross-session clock
@@ -450,6 +454,10 @@ extension RecordingActor {
             micCapture.onSessionInterrupted = { [weak self] in
                 guard let self else { return }
                 Task { await self.handleMicSessionInterrupted() }
+            }
+            micCapture.onSessionInterruptionEnded = { [weak self] in
+                guard let self else { return }
+                Task { await self.handleMicSessionInterruptionEnded() }
             }
         }
     }

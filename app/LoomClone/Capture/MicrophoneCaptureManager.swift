@@ -6,6 +6,7 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
     var onAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
     var onSessionError: (@Sendable (Error) -> Void)?
     var onSessionInterrupted: (@Sendable () -> Void)?
+    var onSessionInterruptionEnded: (@Sendable () -> Void)?
 
     private var session: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "com.loomclone.mic-capture", qos: .userInteractive)
@@ -53,7 +54,8 @@ final class MicrophoneCaptureManager: NSObject, @unchecked Sendable {
             on: session,
             log: Log.mic,
             onError: { [weak self] error in self?.onSessionError?(error) },
-            onInterrupted: { [weak self] in self?.onSessionInterrupted?() }
+            onInterrupted: { [weak self] in self?.onSessionInterrupted?() },
+            onInterruptionEnded: { [weak self] in self?.onSessionInterruptionEnded?() }
         )
 
         // startRunning() blocks until the session is actually running. Wait for

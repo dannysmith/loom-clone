@@ -147,6 +147,50 @@ final class SourceHealthTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.activeWarnings.contains(.screenStale))
     }
 
+    func testInterruptionEndingClearsTheFailure() {
+        // Without this the failure is permanent for the session: the pill
+        // never comes down, and `cameraIsUnusable` keeps the camera out of the
+        // composite — and out of the output timing — even once frames resume.
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        tracker.markFailed(.camera)
+        XCTAssertTrue(tracker.cameraIsUnusable)
+
+        XCTAssertEqual(tracker.markFailureEnded(.camera, now: 5), .failureEnded(.camera))
+        XCTAssertFalse(tracker.cameraIsUnusable)
+        XCTAssertTrue(tracker.activeWarnings.isEmpty)
+    }
+
+    func testInterruptionEndingIsOnlyNewsWhenAFailureWasStanding() {
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        XCTAssertNil(tracker.markFailureEnded(.camera, now: 5))
+    }
+
+    func testARecoveredSourceGetsItsFullThresholdBeforeGoingStale() {
+        // The stall clock re-arms from the recovery, not from the last frame
+        // before the interruption — otherwise the failure pill flickers
+        // straight into a staleness pill even when frames resume promptly.
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        tracker.markFailed(.camera)
+        tracker.markFailureEnded(.camera, now: 30)
+        XCTAssertTrue(tracker.evaluate(now: 30.5, activeSources: allSources).isEmpty)
+    }
+
+    func testASourceThatDoesNotComeBackGoesStaleOnItsOwn() {
+        // Clearing the failure isn't a promise that frames resumed. If they
+        // don't, the watchdog says so a threshold later.
+        var tracker = SourceHealthTracker()
+        tracker.markReceived(.camera, now: 0)
+        tracker.markFailed(.camera)
+        tracker.markFailureEnded(.camera, now: 30)
+        XCTAssertEqual(
+            tracker.evaluate(now: 31.5, activeSources: allSources),
+            [.wentStale(.camera, staleSeconds: 1.5)]
+        )
+    }
+
     func testRepeatedFailureReportsOnlyOnce() {
         // AVFoundation can report the same dead session more than once; only
         // the first is news, so duplicates don't stack timeline events and

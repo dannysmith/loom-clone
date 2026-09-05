@@ -5,6 +5,7 @@ import { getDb } from "../db/client";
 import { videoSegments, videos } from "../db/schema";
 import { logEvent } from "./events";
 import { DATA_DIR } from "./paths";
+import { MEDIA_SEGMENT } from "./playlist";
 import { applicabilityContext, isServable, stepByKind } from "./processing/registry";
 import { getStep } from "./processing/steps-store";
 import { getVideo } from "./store";
@@ -17,13 +18,12 @@ const STALE_DAYS = 10;
 // paused recording produces no segments.
 const STALE_RECORDING_HOURS = 4;
 
-// Deletes HLS segments for videos that have been
-// `ready` for longer than STALE_DAYS and have a VALIDATED source.mp4. Once the
-// HLS segments are gone the MP4 is the only copy, so this gates on the `source`
-// step being `ready` (isProbablyPlayable passed at generation) AND the file
-// being present — never on bare existence. This is the change that stops a
-// temporarily-broken MP4 from turning a video permanently unplayable.
-// Called daily by the timer in index.ts.
+// Deletes HLS segments for videos that have been `ready` for longer than
+// STALE_DAYS. Once the segments are gone the MP4s are all that's left, so this
+// gates on BOTH the pristine source and the served presentation master being
+// validated `ready` and still on disk — never on bare file existence. That's
+// what stops a temporarily-broken master from turning a video permanently
+// unplayable. Called daily by the timer in index.ts.
 export async function cleanupStaleFiles(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
@@ -82,7 +82,7 @@ export async function cleanupStaleFiles(): Promise<void> {
     try {
       const entries = await readdir(videoDir);
       for (const entry of entries) {
-        if (/^seg_\d+\.m4s$/.test(entry)) {
+        if (MEDIA_SEGMENT.test(entry)) {
           await rm(join(videoDir, entry), { force: true });
           filesRemoved++;
         }

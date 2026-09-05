@@ -4,6 +4,22 @@ import { DEFAULT_SEGMENT_DURATION } from "./constants";
 import { DATA_DIR } from "./paths";
 import { getSegmentDurations, type Video } from "./store";
 
+// What the HLS files on disk are called. Three patterns because three jobs, and
+// they are NOT interchangeable:
+//
+//   SEGMENT_UPLOAD  what a client may PUT. This is the real path-traversal
+//                   defence on the upload route — don't widen it.
+//   HLS_SERVABLE    what the media routes will serve back, which adds the
+//                   playlist.
+//   MEDIA_SEGMENT   just the numbered segments, for the cleanup sweep that
+//                   deletes them.
+//
+// They used to be four separate literals in four files, which is how one of them
+// drifts without anyone noticing.
+export const MEDIA_SEGMENT = /^seg_\d+\.m4s$/;
+export const SEGMENT_UPLOAD = /^(init\.mp4|seg_\d+\.m4s)$/;
+export const HLS_SERVABLE = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
+
 // Build the playlist from the filesystem: directory listing sorted by filename
 // is the source of truth for order, durations come from the in-memory sidecar.
 // Safe against out-of-order uploads, duplicates, and late re-uploads.

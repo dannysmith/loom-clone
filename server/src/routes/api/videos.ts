@@ -10,7 +10,7 @@ import { DEFAULT_SEGMENT_DURATION } from "../../lib/constants";
 import { apiError, ConflictError, ErrorCode, ValidationError } from "../../lib/errors";
 import { logEvent } from "../../lib/events";
 import { DATA_DIR } from "../../lib/paths";
-import { buildPlaylist, writePlaylist } from "../../lib/playlist";
+import { buildPlaylist, SEGMENT_UPLOAD, writePlaylist } from "../../lib/playlist";
 import { scheduleDerivatives, scheduleReprocess } from "../../lib/processing/pipeline";
 import { recordExternalStep } from "../../lib/processing/steps-store";
 import { parseSrtToPlainText } from "../../lib/srt";
@@ -50,12 +50,6 @@ export function expectedFilenamesFromTimeline(timeline: TimelineLike): string[] 
   }
   return [...names];
 }
-
-// Conservative filename allowlist for segment uploads. init.mp4 is the HLS
-// initialization segment; seg_NNN.m4s are the media segments emitted by the
-// writer. Anything else is rejected so a malicious or buggy client can't
-// traverse out of the video directory or overwrite metadata files.
-const SEGMENT_FILENAME = /^(init\.mp4|seg_\d+\.m4s)$/;
 
 async function onDiskFilenames(id: string): Promise<Set<string>> {
   try {
@@ -176,7 +170,12 @@ videos.put("/:id/segments/:filename", bodyLimit({ maxSize: 50 * 1024 * 1024 }), 
   const video = await getVideo(id);
   if (!video) return apiError(c, 404, "Video not found", ErrorCode.VIDEO_NOT_FOUND);
 
-  if (!SEGMENT_FILENAME.test(filename)) {
+  // Conservative allowlist: init.mp4 is the HLS initialization segment,
+  // seg_NNN.m4s are the media segments the writer emits. Anything else is
+  // rejected so a malicious or buggy client can't traverse out of the video
+  // directory or overwrite metadata files. This is the real path-traversal
+  // defence — see lib/playlist.ts, where the pattern lives.
+  if (!SEGMENT_UPLOAD.test(filename)) {
     return apiError(c, 400, "Invalid segment filename", ErrorCode.INVALID_SEGMENT_FILENAME);
   }
 

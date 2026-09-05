@@ -26,6 +26,30 @@
 
 const DEFAULT_STDERR_TAIL_BYTES = 64 * 1024;
 
+// Resolved once per process. `Bun.which` walks PATH, and the alternative was
+// twelve call sites doing it themselves — three of them inside loops, one of
+// them per extracted thumbnail frame — each with its own not-found message.
+let cachedPath: string | null | undefined; // undefined = not looked up yet
+
+// The ffmpeg binary, or null when it isn't on PATH. Callers that can degrade
+// (skipping a derivative rather than failing a run) check for null; callers that
+// can't use requireFfmpeg.
+export function ffmpegPath(): string | null {
+  if (cachedPath === undefined) {
+    cachedPath = Bun.which("ffmpeg");
+    if (!cachedPath) {
+      console.warn("[ffmpeg] not found on PATH — media processing will fail");
+    }
+  }
+  return cachedPath;
+}
+
+export function requireFfmpeg(): string {
+  const path = ffmpegPath();
+  if (!path) throw new Error("ffmpeg not found on PATH");
+  return path;
+}
+
 export interface SpawnFfmpegResult {
   exitCode: number;
   // The last `tailBytes` of the process's stderr, decoded as UTF-8.

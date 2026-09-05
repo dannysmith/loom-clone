@@ -6,7 +6,7 @@
 
 import { rename } from "fs/promises";
 import type { Segment } from "./edit-transcript";
-import { spawnFfmpeg } from "./ffmpeg";
+import { requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 
 export type Edl = {
   version: number;
@@ -112,19 +112,14 @@ export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segm
   ];
 }
 
-let ffmpegPath: string | null | undefined;
-
 // Render the edited output, writing atomically via a temp file.
 export async function renderEditedOutput(
   sourcePath: string,
   outputPath: string,
   kept: Segment[],
 ): Promise<void> {
-  if (ffmpegPath === undefined) ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
-
   const tmpPath = `${outputPath}.tmp`;
-  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+  const { exitCode, stderr } = await spawnFfmpeg(requireFfmpeg(), [
     "-y",
     "-hide_banner",
     "-loglevel",

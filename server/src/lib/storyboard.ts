@@ -1,6 +1,7 @@
 import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
-import { spawnFfmpeg } from "./ffmpeg";
+import { requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
+import { probeJson } from "./ffprobe";
 
 // Storyboard sprite sheet + WebVTT generation for scrubber thumbnail previews.
 // Produces a single JPEG sprite and an accompanying VTT so Vidstack's
@@ -60,12 +61,14 @@ function formatVttTime(seconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(whole).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
 }
 
-// Generate the VTT content for a storyboard sprite sheet.
-// tileWidth/tileHeight are the actual pixel dimensions of each tile in the sprite.
+// Generate the VTT content for a storyboard sprite sheet. `tileWidth`/
+// `tileHeight` are the actual pixel dimensions of each tile in the sprite, and
+// `spriteFile` is what the cues point at.
 export function generateVtt(
   params: StoryboardParams,
   tileWidth: number,
   tileHeight: number,
+  spriteFile = "storyboard.jpg",
 ): string {
   const lines: string[] = ["WEBVTT", ""];
 
@@ -79,11 +82,11 @@ export function generateVtt(
     const endTime = i === params.expectedFrames - 1 ? params.duration : (i + 1) * params.interval;
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
-    const x = col * tileWidth;
-    const y = row * tileHeight;
 
     lines.push(`${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`);
-    lines.push(`storyboard.jpg#xywh=${x},${y},${tileWidth},${tileHeight}`);
+    lines.push(
+      `${spriteFile}#xywh=${col * tileWidth},${row * tileHeight},${tileWidth},${tileHeight}`,
+    );
     lines.push("");
   }
 
@@ -92,78 +95,14 @@ export function generateVtt(
 
 // Generate the storyboard sprite sheet and VTT file for a video.
 // Files are written to the derivatives directory: storyboard.jpg + storyboard.vtt.
-export async function generateStoryboard(
-  derivDir: string,
-  duration: number,
-  inputPath?: string,
-): Promise<boolean> {
-  const params = computeStoryboardParams(duration);
-  if (!params) return false;
-
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
-
-  const sourcePath = inputPath ?? join(derivDir, "source.mp4");
-  const spriteFile = "storyboard.jpg";
-  const spriteTmp = join(derivDir, `${spriteFile}.tmp`);
-  const spriteFinal = join(derivDir, spriteFile);
-  const vttFile = "storyboard.vtt";
-  const vttFinal = join(derivDir, vttFile);
-
-  await mkdir(derivDir, { recursive: true });
-
-  // Generate sprite sheet via ffmpeg tile filter.
-  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
-    "-y",
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-i",
-    sourcePath,
-    "-vf",
-    `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows},${JPEG_PIX_FMT}`,
-    "-qscale:v",
-    "5",
-    "-frames:v",
-    "1",
-    "-f",
-    "image2",
-    spriteTmp,
-  ]);
-  if (exitCode !== 0) {
-    await rm(spriteTmp, { force: true }).catch(() => {});
-    throw new Error(`storyboard generation failed (exit ${exitCode}): ${stderr.trim()}`);
-  }
-
-  // Atomic rename for the sprite.
-  await rename(spriteTmp, spriteFinal);
-
-  // Read actual tile dimensions from the generated sprite via ffprobe.
-  const { tileWidth, tileHeight } = await probeTileDimensions(spriteFinal, params);
-
-  // Generate and write the VTT file.
-  const vttContent = generateVtt(params, tileWidth, tileHeight);
-  await Bun.write(vttFinal, vttContent);
-
-  return true;
-}
-
-// --- Editor storyboard (dense frame extraction for the editing timeline) ---
+// --- Editor storyboard (dense frames for the editing timeline) ---
 
 const EDITOR_TILE_WIDTH = 200;
 const EDITOR_MIN_DURATION = 5;
 
-export type EditorStoryboardParams = {
-  interval: number;
-  expectedFrames: number;
-  cols: number;
-  rows: number;
-  duration: number;
-};
-
 // 1 fps up to 10 minutes, 0.5 fps beyond. Keeps its 5-second floor: this one is
 // source-derived, so its applicability never moves when a video is edited.
-export function computeEditorStoryboardParams(duration: number): EditorStoryboardParams | null {
+export function computeEditorStoryboardParams(duration: number): StoryboardParams | null {
   if (duration < EDITOR_MIN_DURATION) return null;
 
   const interval = duration <= 600 ? 1 : 2;
@@ -174,58 +113,35 @@ export function computeEditorStoryboardParams(duration: number): EditorStoryboar
   return { interval, expectedFrames, cols, rows, duration };
 }
 
-export function generateEditorVtt(
-  params: EditorStoryboardParams,
-  tileWidth: number,
-  tileHeight: number,
-): string {
-  const lines: string[] = ["WEBVTT", ""];
+// Render a sprite sheet and its VTT. Both storyboards are the same operation
+// with different sampling and a different name, and keeping them as two
+// near-identical copies meant fixing the same bug twice — the last-cue overrun
+// and the JPEG pixel format both had to be corrected in each.
+async function renderStoryboard(opts: {
+  derivDir: string;
+  inputPath: string;
+  params: StoryboardParams;
+  basename: string;
+  tileWidth: number;
+}): Promise<boolean> {
+  const { derivDir, inputPath, params, basename, tileWidth } = opts;
+  const ffmpeg = requireFfmpeg();
 
-  for (let i = 0; i < params.expectedFrames; i++) {
-    const startTime = i * params.interval;
-    const endTime = i === params.expectedFrames - 1 ? params.duration : (i + 1) * params.interval;
-    const col = i % params.cols;
-    const row = Math.floor(i / params.cols);
-    const x = col * tileWidth;
-    const y = row * tileHeight;
-
-    lines.push(`${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`);
-    lines.push(`editor-storyboard.jpg#xywh=${x},${y},${tileWidth},${tileHeight}`);
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
-export async function generateEditorStoryboard(
-  derivDir: string,
-  duration: number,
-  inputPath?: string,
-): Promise<boolean> {
-  const params = computeEditorStoryboardParams(duration);
-  if (!params) return false;
-
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
-
-  const sourcePath = inputPath ?? join(derivDir, "source.mp4");
-  const spriteFile = "editor-storyboard.jpg";
+  const spriteFile = `${basename}.jpg`;
   const spriteTmp = join(derivDir, `${spriteFile}.tmp`);
   const spriteFinal = join(derivDir, spriteFile);
-  const vttFile = "editor-storyboard.vtt";
-  const vttFinal = join(derivDir, vttFile);
 
   await mkdir(derivDir, { recursive: true });
 
-  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpeg, [
     "-y",
     "-hide_banner",
     "-loglevel",
     "error",
     "-i",
-    sourcePath,
+    inputPath,
     "-vf",
-    `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows},${JPEG_PIX_FMT}`,
+    `fps=1/${params.interval},scale=${tileWidth}:-2,tile=${params.cols}x${params.rows},${JPEG_PIX_FMT}`,
     "-qscale:v",
     "5",
     "-frames:v",
@@ -236,60 +152,86 @@ export async function generateEditorStoryboard(
   ]);
   if (exitCode !== 0) {
     await rm(spriteTmp, { force: true }).catch(() => {});
-    throw new Error(`editor storyboard generation failed (exit ${exitCode}): ${stderr.trim()}`);
+    throw new Error(`${basename} generation failed (exit ${exitCode}): ${stderr.trim()}`);
   }
 
   await rename(spriteTmp, spriteFinal);
 
-  const { tileWidth, tileHeight } = await probeTileDimensions(spriteFinal, params);
-  const vttContent = generateEditorVtt(params, tileWidth, tileHeight);
-  await Bun.write(vttFinal, vttContent);
+  // Read the actual tile size back off the sprite rather than assuming it: the
+  // scale filter picks the height from the source's aspect ratio.
+  const tile = await probeTileDimensions(spriteFinal, params, tileWidth);
+  await Bun.write(
+    join(derivDir, `${basename}.vtt`),
+    generateVtt(params, tile.tileWidth, tile.tileHeight, spriteFile),
+  );
 
   return true;
+}
+
+// Viewer-facing storyboard: sparse frames for scrubber hover previews, cut from
+// the presentation master.
+export async function generateStoryboard(
+  derivDir: string,
+  duration: number,
+  inputPath?: string,
+): Promise<boolean> {
+  const params = computeStoryboardParams(duration);
+  if (!params) return false;
+  return renderStoryboard({
+    derivDir,
+    inputPath: inputPath ?? join(derivDir, "source.mp4"),
+    params,
+    basename: "storyboard",
+    tileWidth: TILE_WIDTH,
+  });
+}
+
+// Editor storyboard: dense frames for the editing timeline, cut from the
+// pristine source because that's what the editor plays.
+export async function generateEditorStoryboard(
+  derivDir: string,
+  duration: number,
+  inputPath?: string,
+): Promise<boolean> {
+  const params = computeEditorStoryboardParams(duration);
+  if (!params) return false;
+  return renderStoryboard({
+    derivDir,
+    inputPath: inputPath ?? join(derivDir, "source.mp4"),
+    params,
+    basename: "editor-storyboard",
+    tileWidth: EDITOR_TILE_WIDTH,
+  });
 }
 
 // Probe the sprite sheet dimensions and compute per-tile size from the grid.
 async function probeTileDimensions(
   spritePath: string,
   params: StoryboardParams,
+  tileWidth: number,
 ): Promise<{ tileWidth: number; tileHeight: number }> {
-  const ffprobePath = Bun.which("ffprobe");
-  if (!ffprobePath) {
-    // Fallback: estimate from the configured tile width and 16:9 assumption.
-    return { tileWidth: TILE_WIDTH, tileHeight: Math.round(TILE_WIDTH * (9 / 16)) };
-  }
+  // Fallback assumes 16:9 at the width we asked the scale filter for. It takes
+  // the caller's width rather than a constant, because the editor sprite's tiles
+  // are narrower than the viewer's.
+  const fallback = { tileWidth, tileHeight: Math.round(tileWidth * (9 / 16)) };
 
-  try {
-    const proc = Bun.spawn(
-      [
-        ffprobePath,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_streams",
-        "-select_streams",
-        "v:0",
-        spritePath,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) throw new Error("ffprobe failed");
+  const data = (await probeJson([
+    "-v",
+    "quiet",
+    "-print_format",
+    "json",
+    "-show_streams",
+    "-select_streams",
+    "v:0",
+    spritePath,
+  ])) as { streams?: Array<{ width?: number; height?: number }> } | null;
 
-    const data = JSON.parse(stdout) as { streams?: Array<{ width?: number; height?: number }> };
-    const spriteWidth = data.streams?.[0]?.width;
-    const spriteHeight = data.streams?.[0]?.height;
+  const spriteWidth = data?.streams?.[0]?.width;
+  const spriteHeight = data?.streams?.[0]?.height;
+  if (!spriteWidth || !spriteHeight) return fallback;
 
-    if (spriteWidth && spriteHeight) {
-      return {
-        tileWidth: Math.floor(spriteWidth / params.cols),
-        tileHeight: Math.floor(spriteHeight / params.rows),
-      };
-    }
-  } catch {
-    // Fall through to default.
-  }
-
-  return { tileWidth: TILE_WIDTH, tileHeight: Math.round(TILE_WIDTH * (9 / 16)) };
+  return {
+    tileWidth: Math.floor(spriteWidth / params.cols),
+    tileHeight: Math.floor(spriteHeight / params.rows),
+  };
 }

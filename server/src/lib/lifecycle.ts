@@ -11,12 +11,14 @@ import { join } from "path";
 import { getDb } from "../db/client";
 import { slugRedirects, type Video, videoSegments, videos, videoTags } from "../db/schema";
 import { purgeGlobalFeeds } from "./cdn";
+import { ConflictError } from "./errors";
 import { logEvent } from "./events";
 import { getVideoDirSize } from "./files";
 import { nowIso } from "./format";
 import { DATA_DIR } from "./paths";
 import { inferStepsFromDisk } from "./processing/backfill";
 import { rollupFromSteps } from "./processing/reconcile";
+import { hasActiveRun } from "./processing/run-lock";
 import { getStepStates } from "./processing/steps-store";
 import { POST_FOOTAGE_STATUSES } from "./status";
 import {
@@ -37,6 +39,13 @@ export async function permanentlyDeleteVideo(id: string): Promise<void> {
   const video = await getVideo(id, { includeTrashed: true });
   if (!video) throw new Error(`Video ${id} not found`);
   if (!video.trashedAt) throw new Error(`Video ${id} is not trashed`);
+
+  // A processing run holds file handles into the directory about to be rm'd
+  // and would recreate parts of it after the delete. Refuse rather than race —
+  // retry once the run settles.
+  if (hasActiveRun(id)) {
+    throw new ConflictError("A processing run is in flight for this video — try again shortly");
+  }
 
   const originalStatus = video.status;
 

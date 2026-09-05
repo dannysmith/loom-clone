@@ -27,6 +27,7 @@ A cheatsheet for fast lookup. Each row maps an intent to the class/token to reac
 | Outline destructive | `.btn .btn--danger` |
 | Filled destructive | `.btn .btn--danger-solid` |
 | Square red icon-only delete | `.btn-icon-delete` |
+| Unstyled full-area clickable block | `.btn-plain` |
 | File-type icon colour | `--icon-{folder,video,segment,playlist,config,data,image,audio,text}` |
 | Dialog / video scrim | `--color-overlay` (0.5) or `--color-overlay-strong` (0.75) |
 | Form field | `.input` for the control, `.label` for its label |

@@ -49,6 +49,10 @@ export const ErrorCode = {
 
   // Slug conflict (409)
   SLUG_CONFLICT: "SLUG_CONFLICT",
+
+  // Generic conflict (409) — the api module's catch-all mapping for
+  // ConflictError thrown below the route layer.
+  CONFLICT: "CONFLICT",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

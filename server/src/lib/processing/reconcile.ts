@@ -36,8 +36,8 @@ export function rollupFromSteps(
 }
 
 export async function reconcile(videoId: string, opts: { running: boolean }): Promise<void> {
-  const video = await getVideo(videoId, { includeTrashed: true });
-  if (!video || video.trashedAt) return;
+  const video = await getVideo(videoId); // default lookup excludes trashed — nothing to settle there
+  if (!video) return;
   // reconcile settles its owned post-footage statuses plus `reprocessing` (a
   // staged rebuild, which it only ever promotes UP to `ready`).
   const isReprocessing = video.status === "reprocessing";

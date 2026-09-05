@@ -10,6 +10,11 @@ import { _drainInFlight } from "./lib/processing/pipeline";
 // the temp dir redirects every filesystem read/write the store and routes do
 // to an isolated sandbox. The database is a fresh in-memory SQLite instance
 // so state never leaks between tests.
+//
+// CONSTRAINT: process.chdir is process-global, so tests must not run
+// concurrently within the process. Bun's runner executes test files
+// sequentially by default — don't introduce `--concurrent` (or per-file
+// concurrency) without replacing this isolation strategy.
 
 export interface TestEnv {
   tempDir: string;

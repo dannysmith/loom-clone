@@ -5,7 +5,6 @@
 
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
-import { join } from "path";
 import { z } from "zod";
 import { purgeVideo } from "../../lib/cdn";
 import {
@@ -16,12 +15,11 @@ import {
 } from "../../lib/chapters";
 import { computeKeptSegments, type Edit } from "../../lib/edit-transcript";
 import { logEvent } from "../../lib/events";
-import { DATA_DIR } from "../../lib/paths";
+import { derivativesDir } from "../../lib/paths";
+import { readEditsLenient } from "../../lib/processing/edl";
 import { type AdminEnv, requireVideo } from "./helpers";
 
 const chapters = new Hono<AdminEnv>();
-
-type EditsFileLike = { edits?: unknown };
 
 // Reads the EDL (if any) and computes kept segments. Returns null when no
 // edits are applied — callers should treat that as "viewer timeline === source timeline".
@@ -29,16 +27,9 @@ async function loadEdlKeptSegments(
   videoId: string,
   sourceDuration: number,
 ): Promise<{ edits: Edit[]; keptSegments: { start: number; end: number }[] } | null> {
-  const file = Bun.file(join(DATA_DIR, videoId, "derivatives", "edits.json"));
-  if (!(await file.exists())) return null;
-  try {
-    const parsed = (await file.json()) as EditsFileLike;
-    if (!Array.isArray(parsed.edits) || parsed.edits.length === 0) return null;
-    const edits = parsed.edits as Edit[];
-    return { edits, keptSegments: computeKeptSegments(edits, sourceDuration) };
-  } catch {
-    return null;
-  }
+  const edits = await readEditsLenient(derivativesDir(videoId));
+  if (edits.length === 0) return null;
+  return { edits, keptSegments: computeKeptSegments(edits, sourceDuration) };
 }
 
 // --- Load chapters (viewer timeline) ---

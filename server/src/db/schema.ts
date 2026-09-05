@@ -57,6 +57,10 @@ export const videos = sqliteTable(
     fileBytes: integer("file_bytes"),
     cameraName: text("camera_name"),
     microphoneName: text("microphone_name"),
+    // Deliberately an open string, unlike the constrained neighbours: values
+    // are derived from the Mac's recording.json (e.g. "terminal_failure",
+    // "gpu_wobble" — see derivatives.ts) and a new health state must not
+    // require touching the schema.
     recordingHealth: text("recording_health"),
     source: text("source", { enum: ["recorded", "uploaded"] })
       .notNull()

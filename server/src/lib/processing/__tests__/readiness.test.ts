@@ -172,6 +172,7 @@ describe("computeReadiness — badge", () => {
     for (const k of [
       "presentation",
       "captions",
+      "storyboard",
       "thumbnail",
       "peaks",
       "editor_storyboard",
@@ -204,6 +205,7 @@ describe("computeReadiness — badge", () => {
     await markReady(video.id, "metadata");
     for (const k of [
       "presentation",
+      "storyboard",
       "thumbnail",
       "peaks",
       "editor_storyboard",

@@ -6,26 +6,48 @@ import { spawnFfmpeg } from "./ffmpeg";
 // Produces a single JPEG sprite and an accompanying VTT so Vidstack's
 // <media-slider-thumbnail> shows preview frames on hover.
 
-const MIN_DURATION = 60; // Skip for videos shorter than 60 seconds.
 const TILE_WIDTH = 240; // Scale each frame to 240px wide.
+
+// The mjpeg encoder only accepts full-range 4:2:0 and errors out on anything
+// else ("Non full-range YUV is non-standard"), so the sprite conversion is
+// pinned here rather than left to whatever chroma the input happens to carry.
+// A storyboard failure aborts the whole staged rebuild, so it must not depend
+// on the source's pixel format.
+const JPEG_PIX_FMT = "format=yuvj420p";
 
 export type StoryboardParams = {
   interval: number;
   expectedFrames: number;
   cols: number;
   rows: number;
+  // The video's length, so the last cue can stop where the video does rather
+  // than at the next interval boundary.
+  duration: number;
 };
 
 // Compute storyboard grid parameters from video duration.
+//
+// EVERY video gets a storyboard, however short. There used to be a 60-second
+// floor to save disk, but the sprite for a minute-long video is ~67 KB against a
+// 90 MB master, and the threshold had a sharper cost: it was the only thing in
+// the served set whose existence moved when a video was edited, so trimming a
+// 66s video to 55s silently orphaned its storyboard describing the uncut
+// timeline. Nothing viewer-facing appears or disappears with an edit now.
 export function computeStoryboardParams(duration: number): StoryboardParams | null {
-  if (duration < MIN_DURATION) return null;
+  if (duration <= 0) return null;
 
-  const interval = Math.max(5, Math.round(duration / 100));
-  const expectedFrames = Math.floor(duration / interval);
+  // The interval must fit inside the video: ffmpeg's `fps=1/N` emits nothing at
+  // all unless the input runs past N/2, so a 2-second video sampled every 5
+  // seconds yields an empty sprite and a failed rename. Clamping to the duration
+  // guarantees one frame; above 5 seconds this changes nothing.
+  const interval = Math.min(Math.max(5, Math.round(duration / 100)), duration);
+  // At least one tile: below the interval, `floor` yields zero frames, which
+  // would ask ffmpeg for a 0x0 tile and emit a VTT with no cues.
+  const expectedFrames = Math.max(1, Math.floor(duration / interval));
   const cols = Math.min(10, expectedFrames);
   const rows = Math.ceil(expectedFrames / cols);
 
-  return { interval, expectedFrames, cols, rows };
+  return { interval, expectedFrames, cols, rows, duration };
 }
 
 // Format seconds as HH:MM:SS.mmm for VTT cues.
@@ -49,7 +71,9 @@ export function generateVtt(
 
   for (let i = 0; i < params.expectedFrames; i++) {
     const startTime = i * params.interval;
-    const endTime = (i + 1) * params.interval;
+    // The final tile covers whatever is left rather than overrunning the video:
+    // frames are whole intervals, durations aren't.
+    const endTime = Math.min((i + 1) * params.interval, params.duration);
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
     const x = col * tileWidth;
@@ -94,7 +118,7 @@ export async function generateStoryboard(
     "-i",
     sourcePath,
     "-vf",
-    `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
+    `fps=1/${params.interval},scale=${TILE_WIDTH}:-2,tile=${params.cols}x${params.rows},${JPEG_PIX_FMT}`,
     "-qscale:v",
     "5",
     "-frames:v",
@@ -131,18 +155,20 @@ export type EditorStoryboardParams = {
   expectedFrames: number;
   cols: number;
   rows: number;
+  duration: number;
 };
 
-// 1 fps up to 10 minutes, 0.5 fps beyond.
+// 1 fps up to 10 minutes, 0.5 fps beyond. Keeps its 5-second floor: this one is
+// source-derived, so its applicability never moves when a video is edited.
 export function computeEditorStoryboardParams(duration: number): EditorStoryboardParams | null {
   if (duration < EDITOR_MIN_DURATION) return null;
 
   const interval = duration <= 600 ? 1 : 2;
-  const expectedFrames = Math.floor(duration / interval);
+  const expectedFrames = Math.max(1, Math.floor(duration / interval));
   const cols = Math.min(10, expectedFrames);
   const rows = Math.ceil(expectedFrames / cols);
 
-  return { interval, expectedFrames, cols, rows };
+  return { interval, expectedFrames, cols, rows, duration };
 }
 
 export function generateEditorVtt(
@@ -154,7 +180,7 @@ export function generateEditorVtt(
 
   for (let i = 0; i < params.expectedFrames; i++) {
     const startTime = i * params.interval;
-    const endTime = (i + 1) * params.interval;
+    const endTime = Math.min((i + 1) * params.interval, params.duration);
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
     const x = col * tileWidth;
@@ -196,7 +222,7 @@ export async function generateEditorStoryboard(
     "-i",
     sourcePath,
     "-vf",
-    `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows}`,
+    `fps=1/${params.interval},scale=${EDITOR_TILE_WIDTH}:-2,tile=${params.cols}x${params.rows},${JPEG_PIX_FMT}`,
     "-qscale:v",
     "5",
     "-frames:v",

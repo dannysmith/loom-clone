@@ -268,12 +268,47 @@ describe("presentation master", () => {
 
 describe("artifacts that stop applying are removed, not left stale", () => {
   test.skipIf(!ffmpegAvailable)(
-    "an edit below the storyboard threshold takes the old storyboard with it",
+    "a regenerate of a step that no longer applies clears what it left behind",
     async () => {
-      // A 70s source trimmed to 50s drops under the storyboard's 60s minimum, so
-      // the step stops applying entirely rather than running and skipping. What
-      // was on disk describes the uncut timeline — leaving it means a viewer
-      // scrubs against thumbnails for a video that no longer exists.
+      // The editor storyboard needs at least 5 seconds of source. Regenerating
+      // it for a 2-second video means the step no longer applies at all — it
+      // never runs, so it can't report "skipped". Whatever is on disk describes
+      // a video that no longer exists, and leaving it is worse than having none.
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeSource(dir, 2);
+      await Bun.write(
+        join(dir, "editor-storyboard.vtt"),
+        "WEBVTT\n\n00:00:00.000 --> 00:01:10.000\n",
+      );
+      await markStepReady(video.id, "editor_storyboard");
+      await markStepReady(video.id, "source");
+      await markStepReady(video.id, "metadata");
+      await getDb()
+        .update(videos)
+        .set({ status: "ready", width: 640, height: 360, durationSeconds: 2 })
+        .where(eq(videos.id, video.id));
+
+      scheduleReprocess(video.id, {
+        source: "recorded",
+        intent: "only",
+        kind: "editor_storyboard",
+      });
+      await _drainInFlight();
+
+      expect(await Bun.file(join(dir, "editor-storyboard.vtt")).exists()).toBe(false);
+      expect((await getStepStates(video.id)).get("editor_storyboard")?.state).toBe("skipped");
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "a short edit still gets a storyboard — there is no duration threshold",
+    async () => {
+      // The case that used to orphan one: a 70s video trimmed to 50s. With the
+      // threshold gone the storyboard is simply regenerated for the new
+      // timeline, so nothing viewer-facing appears or disappears with an edit.
       const video = await createVideo();
       const dir = join(DATA_DIR, video.id, "derivatives");
       await mkdir(dir, { recursive: true });
@@ -286,10 +321,6 @@ describe("artifacts that stop applying are removed, not left stale", () => {
           edits: [{ type: "trim", startTime: 0, endTime: 50 }],
         }),
       );
-      // A storyboard from before the edit, with its ledger row.
-      await Bun.write(join(dir, "storyboard.vtt"), "WEBVTT\n\n00:00:00.000 --> 00:01:10.000\n");
-      await Bun.write(join(dir, "storyboard.jpg"), "stub");
-      await markStepReady(video.id, "storyboard");
       await markStepReady(video.id, "source");
       await markStepReady(video.id, "metadata");
       await getDb()
@@ -300,9 +331,12 @@ describe("artifacts that stop applying are removed, not left stale", () => {
       scheduleEdit(video.id, "recorded");
       await _drainInFlight();
 
-      expect((await probeDuration(join(dir, `360p.mp4`))) ?? 0).toBeLessThan(55);
-      expect(await Bun.file(join(dir, "storyboard.vtt")).exists()).toBe(false);
-      expect((await getStepStates(video.id)).get("storyboard")?.state).toBe("skipped");
+      expect((await probeDuration(join(dir, "360p.mp4"))) ?? 0).toBeLessThan(55);
+      expect(await Bun.file(join(dir, "storyboard.vtt")).exists()).toBe(true);
+      expect((await getStepStates(video.id)).get("storyboard")?.state).toBe("ready");
+      // Cues describe the EDITED timeline, not the 70s original.
+      const vtt = await Bun.file(join(dir, "storyboard.vtt")).text();
+      expect(vtt).not.toContain("00:01:0");
     },
     90_000,
   );

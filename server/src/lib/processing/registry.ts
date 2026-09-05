@@ -304,7 +304,9 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "storyboard",
     tier: "expected",
     inputs: ["presentation"],
-    appliesTo: (ctx) => ctx.presentationDuration >= 60 && ctx.height > 0,
+    // Every video gets one — see computeStoryboardParams. The height gate is
+    // just "the master exists to cut it from".
+    appliesTo: (ctx) => ctx.height > 0,
     run: async (ctx) =>
       (await generateStoryboard(ctx.dir, ctx.presentationDuration, presentationPath(ctx)))
         ? "ready"

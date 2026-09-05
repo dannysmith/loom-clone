@@ -242,9 +242,8 @@ extension RecordingActor {
         // Camera frames cached during prepare and the countdown are
         // pre-recording content: their logical PTS is negative, so the
         // metronome would walk the FIFO discarding them a tick at a time
-        // before reaching anything emittable. Keep only the most recent —
-        // the frame the anchor came from in the camera-bearing modes, and
-        // the first one that should reach the output. `resume` drains the
+        // before reaching anything emittable. Keep only the newest, which is
+        // the first frame that should reach the output. `resume` drains the
         // same queue for the same reason.
         if cameraFrameQueue.count > 1 {
             cameraFrameQueue.removeFirst(cameraFrameQueue.count - 1)

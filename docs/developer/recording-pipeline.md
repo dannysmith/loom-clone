@@ -166,6 +166,7 @@ Pause is a first-class concept in the pipeline, not a stop-and-restart:
 - `cameraFrameQueue` drained — any frames captured during the pause are pre-discarded so the metronome doesn't walk through them one tick at a time post-resume.
 - `lastEmittedSourcePTS` bumped to `max(it, now)` so any *screen* frame captured during the pause (latestScreenFrame can be overwritten mid-pause) is treated as stale by the freshness gate. Without this bump the mid-pause screen frame would pass the freshness check but compute an encoder PTS behind `lastEmittedVideoPTS` and trip the monotonicity safety net.
 - `lastEmitHostTime` bumped to `now` so a long pause isn't misread as a static-source run by the keep-alive path.
+- `lastResumeHostTime` recorded. Capture delivery lags the hardware, so a sample captured just *before* the resume can arrive just after it — past the paused-check, but with the whole pause already folded into `pauseAccumulator`, so its logical PTS lands behind the last pre-pause sample. A writer handed a backward PTS rejects the sample and fails the input. Both the HLS audio path and the shared raw-writer retime path drop anything captured before this moment (`RecordingClock.predatesResume`); the window is one delivery latency wide, ~20-50ms for audio.
 - Metronome restarted (drift-corrected sleep resets from tick 0).
 - Next audio sample's PTS is retimed by subtracting the accumulated pause total.
 - Next video frame from the metronome uses the same accumulator in its elapsed-time calculation.

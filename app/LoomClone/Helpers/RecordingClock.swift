@@ -259,6 +259,23 @@ enum RecordingClock {
         )
     }
 
+    /// True when a sample captured before the recording resumed must be
+    /// dropped.
+    ///
+    /// Capture delivery lags the hardware, so a sample captured just before a
+    /// resume can arrive just after it — past the paused-check, but with the
+    /// whole pause already folded into `pauseAccumulator`. Its logical PTS
+    /// then lands *behind* the last pre-pause sample, and a writer handed a
+    /// backward PTS rejects the sample and fails the whole input. The window
+    /// is one delivery latency wide, ~20-50ms for audio.
+    ///
+    /// An invalid resume time means the recording has never been resumed, so
+    /// nothing can predate one.
+    static func predatesResume(capturePTS: CMTime, lastResumeHostTime: CMTime) -> Bool {
+        guard lastResumeHostTime.isValid else { return false }
+        return capturePTS < lastResumeHostTime
+    }
+
     // MARK: - Metronome scheduling
 
     /// Host-clock time tick `tickIdx` should fire at. Drift-corrected against

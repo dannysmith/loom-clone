@@ -445,6 +445,41 @@ final class RecordingClockTests: XCTestCase {
         XCTAssertFalse(resumed.lastEmitHostTime.isValid)
     }
 
+    func testSampleCapturedInsideACompletedPauseIsDropped() {
+        // Delivery lags capture, so a sample captured just before a resume can
+        // arrive just after it. By then the whole pause is in the accumulator,
+        // so its logical PTS lands behind the last pre-pause sample — and a
+        // writer handed a backward PTS fails the input outright.
+        let start = t(10)
+        let lastPrePause = RecordingClock.logicalPTS(
+            capturePTS: t(59.99),
+            start: start,
+            pauseAccumulator: .zero
+        )
+        let resumed = RecordingClock.resume(
+            now: t(70),
+            pauseStartHostTime: t(60),
+            pauseAccumulator: .zero,
+            lastEmittedSourcePTS: t(59.99),
+            lastEmitHostTime: t(59.99)
+        )
+        let straggler = RecordingClock.logicalPTS(
+            capturePTS: t(69.97),
+            start: start,
+            pauseAccumulator: resumed.pauseAccumulator
+        )
+        XCTAssertLessThan(straggler.seconds, lastPrePause.seconds)
+        XCTAssertTrue(RecordingClock.predatesResume(capturePTS: t(69.97), lastResumeHostTime: t(70)))
+    }
+
+    func testSampleCapturedAfterResumeIsKept() {
+        XCTAssertFalse(RecordingClock.predatesResume(capturePTS: t(70.01), lastResumeHostTime: t(70)))
+    }
+
+    func testNothingPredatesAResumeThatNeverHappened() {
+        XCTAssertFalse(RecordingClock.predatesResume(capturePTS: t(5), lastResumeHostTime: .invalid))
+    }
+
     func testResumeWithoutARecordedPauseStartIsANoOp() {
         let resumed = RecordingClock.resume(
             now: t(70),

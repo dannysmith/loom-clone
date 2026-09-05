@@ -307,6 +307,7 @@ extension RecordingActor {
         recordingStartTime = nil
         pauseAccumulator = .zero
         pauseStartHostTime = nil
+        lastResumeHostTime = .invalid
         lastEmittedVideoPTS = .invalid
         lastEmittedSourcePTS = .invalid
         lastEmitHostTime = .invalid

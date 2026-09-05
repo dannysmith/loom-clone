@@ -107,7 +107,7 @@ Preferences:
 - Prefer real filesystem + real `:memory:` SQLite over mocks (tests are fast and catch integration bugs).
 - Routes: integration-style tests using `app.request(path, init)`.
 - ffmpeg-dependent tests: gate on `Bun.which("ffmpeg") !== null` via `test.skipIf`.
-- The "processAudio (chain effects)" tests synthesise speech with macOS `say`, which silently produces an EMPTY file inside a bash sandbox (blocked speech-synthesis service) — the tests then fail with a cryptic loudnorm error. If they fail for you as an agent, run them unsandboxed before suspecting the audio chain.
+- The "(needs macOS say)" tests synthesise speech with macOS `say`, which silently produces an EMPTY file inside a bash sandbox (blocked speech-synthesis service) — the tests then fail with a cryptic loudnorm error. If they fail for you as an agent, run them unsandboxed before suspecting the audio chain. CI allowlists them by that "needs macOS say" suffix, so keep it in the name of any test that depends on `say`.
 - Test-only helpers go on the module they test, prefixed with `_` (e.g. `_setDbForTests`, `_inFlightPromise`).
 
 ## Style

@@ -75,15 +75,17 @@ jobs:
 
       # The media-pipeline tests skipIf ffmpeg is missing; a skip here means
       # the deploy gate isn't testing the code that guards footage.
-      # Exception: the "processAudio (chain effects)" tests also need macOS
-      # `say` to synthesise real speech, so they always skip on Linux.
+      # Exception: tests that synthesise real speech need macOS `say`, so they
+      # always skip on Linux. They declare that in their own name, and the
+      # allowlist matches on the reason rather than on the function under test —
+      # renaming the function shouldn't be able to break the deploy gate.
       # Bun 1.3 marks skips with "(skip)"; "»" is matched too in case a
       # future Bun changes the marker.
       - name: Fail on unexpected skipped tests
         run: |
-          unexpected=$(grep -E '^(\(skip\)|»)' /tmp/checks.txt | grep -v 'processAudio (chain effects)' | sort -u || true)
+          unexpected=$(grep -E '^(\(skip\)|»)' /tmp/checks.txt | grep -v 'needs macOS say' | sort -u || true)
           if [ -n "$unexpected" ]; then
-            echo "::error::Unexpected skipped tests — is ffmpeg missing on the runner?"
+            echo "::error::Unexpected skipped tests — ffmpeg missing on the runner, or a skip-allowlisted test was renamed"
             echo "$unexpected"
             exit 1
           fi

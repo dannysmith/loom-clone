@@ -28,7 +28,7 @@ The server has three compose files in `server/`:
 | --- | --- |
 | `docker-compose.yml` | Base: build context, container name, env vars, restart policy |
 | `docker-compose.override.yml` | Local dev: port mapping (`3000:3000`), bind mount to `./data` |
-| `docker-compose.prod.yml` | Production: joins `caddy-net`, mounts storage volume, sets `PUBLIC_URL` and `BUNNY_CDN_API_KEY` |
+| `docker-compose.prod.yml` | Production: joins `caddy-net`, mounts storage volume, sets `NODE_ENV` and `PUBLIC_URL` (secrets come from `server/.env` via `env_file`) |
 
 **Locally**, just `docker compose up --build` works — Docker Compose auto-loads the override file. This is useful for verifying the container builds and runs, but isn't needed for day-to-day development. Bare `bun run dev` is faster for iterating.
 
@@ -77,11 +77,11 @@ If the VPS dies or you need to recreate this setup:
    sudo mkdir -p /mnt/data/loom-clone
    sudo chown "$USER:$USER" /mnt/data/loom-clone
    ```
+   Ownership matters: the container runs as the image's `bun` user (uid 1000, same as `danny` on the VPS), so everything it writes here comes out danny-owned on the host — and it can only write at all because this chown makes uid 1000 the owner.
 
-5. **Create `server/.env`** on the VPS:
+5. **Create `server/.env`** on the VPS (`PUBLIC_URL` is *not* set here — it lives in `docker-compose.prod.yml`, and a `.env` value would be silently ignored because compose `environment:` entries win over `env_file`):
    ```bash
    cat > ~/loom-clone/server/.env <<'EOF'
-   PUBLIC_URL=https://v.danny.is
    ADMIN_USERNAME=<choose a username for the admin web panel>
    ADMIN_PASSWORD=<choose a long password and save it somewhere>
    SESSION_SECRET=<generate with: openssl rand -base64 48>

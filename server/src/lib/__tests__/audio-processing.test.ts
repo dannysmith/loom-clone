@@ -357,7 +357,7 @@ async function meanVolume(file: string, start: number, length: number): Promise<
   return Number.parseFloat(match[1]);
 }
 
-describe("applyAudioChain (chain effects)", () => {
+describe("applyAudioChain (chain effects, needs macOS say)", () => {
   test.skipIf(!ffmpegAvailable || !sayAvailable)(
     "gate floors the noise pad in silent regions",
     async () => {

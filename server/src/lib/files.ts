@@ -44,11 +44,9 @@ export async function listVideoFiles(videoId: string): Promise<FileEntry[]> {
   return entries;
 }
 
-// Returns total bytes of all files in a video's data directory.
-// Lightweight alternative to listVideoFiles — just sums sizes without
-// building the full FileEntry array. Returns 0 if the directory doesn't exist.
-export async function getVideoDirSize(videoId: string): Promise<number> {
-  const root = join(DATA_DIR, videoId);
+// Sums the sizes of all files under a directory, recursively. Returns 0 if
+// the directory doesn't exist.
+async function dirSize(root: string): Promise<number> {
   let total = 0;
 
   async function walk(dir: string): Promise<void> {
@@ -75,6 +73,20 @@ export async function getVideoDirSize(videoId: string): Promise<number> {
 
   await walk(root);
   return total;
+}
+
+// Returns total bytes of all files in a video's data directory.
+// Lightweight alternative to listVideoFiles — just sums sizes without
+// building the full FileEntry array.
+export async function getVideoDirSize(videoId: string): Promise<number> {
+  return dirSize(join(DATA_DIR, videoId));
+}
+
+// Total bytes of everything under DATA_DIR — per-video directories, the app
+// database (+ WAL), markers. The loom-clone disk footprint reported by the
+// self-check and shown on the admin settings page.
+export async function getDataDirSize(): Promise<number> {
+  return dirSize(DATA_DIR);
 }
 
 // Computes disk sizes for multiple videos in parallel.

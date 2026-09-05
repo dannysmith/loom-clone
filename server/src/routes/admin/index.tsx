@@ -17,6 +17,7 @@ import dashboard from "./dashboard";
 import editor from "./editor";
 import type { AdminEnv } from "./helpers";
 import media from "./media";
+import selfCheck from "./self-check";
 import settings from "./settings";
 import upload from "./upload";
 import videoRoutes from "./videos";
@@ -91,5 +92,6 @@ admin.route("/videos", cover);
 admin.route("/videos", chapters);
 admin.route("/upload", upload);
 admin.route("/settings", settings);
+admin.route("/self-check", selfCheck);
 
 export default admin;

@@ -536,6 +536,10 @@ Routes in `routes/admin/editor.ts`, mounted at `/admin/videos`. See [Admin Edito
 | POST | `/admin/settings/keys/admin` | Create admin token (`lca_`), form `name`; token shown once |
 | POST | `/admin/settings/keys/admin/:id/revoke` | Revoke admin token |
 
+### `GET /admin/self-check`
+
+Machine-readable health report (JSON): `200` with `{ healthy: true, checkedAt, failures: [], stats }` when everything passes, `503` with the failure strings when not. `stats` carries data-volume disk usage, the loom-clone data footprint, container memory (cgroup v2; `null` outside a container), and the last-successful-backup marker. Checks: stuck `processing`/`recording`/`healing` videos, any `processing_failed`/`incomplete` videos, disk headroom, and CDN-purge config in production. A host cron curls this daily and forwards the verdict to healthchecks.io — see [Operations & Alerting](operations.md) for wiring, thresholds, and the per-alert runbook.
+
 ## Content types
 
 | Extension | Content-Type                    | Used by                    |

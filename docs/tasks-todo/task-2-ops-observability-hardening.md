@@ -60,7 +60,7 @@ Pure server code, fully testable, no dependency on phase 1.
 - Add the missing idempotency guard on `/complete`'s healing branch in `routes/api/videos.ts` (its sibling `markFootageComplete` has one).
 - Tests for all three.
 
-### Phase 3: Self-check + alerting
+### Phase 3: Self-check + alerting — code DONE (2026-09-05); Danny's setup steps in `operations.md` §One-time setup still pending
 
 - Collector module in `lib/` gathering the table above plus the settings-page extras (volume total/free, loom-clone data footprint, container RAM from cgroup v2 files, last-backup marker).
 - Admin-authed endpoint (session or `lca_` bearer) serving it: 200 healthy / 503 + failures.

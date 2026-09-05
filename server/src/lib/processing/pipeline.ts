@@ -30,7 +30,6 @@ import { logEvent } from "../events";
 import { nowIso } from "../format";
 import { DATA_DIR, derivativesDir } from "../paths";
 import { getVideo, setVideoStatus, sumSegmentDuration } from "../store";
-import { keptSegmentsFor } from "./edl";
 import { reconcile } from "./reconcile";
 import {
   isServable,
@@ -387,6 +386,18 @@ async function runSteps(
           deferred.push({ step, result });
         } else {
           await runStep(videoId, step, ctx, produced);
+          // A staged run publishes `reprocessing` and owns putting the status
+          // back. In-place failures are normally absorbed by runStep, but a
+          // mandatory one means nothing downstream can run — and reconcile
+          // never demotes `reprocessing`, so the video would sit there
+          // permanently, in a state `canReprocess` refuses to retry. Throw so it
+          // reaches the recovery path with the previous outputs intact.
+          if (stageKinds.size > 0 && REQUIRED_KINDS.includes(step.kind)) {
+            const row = await getStep(videoId, step.kind);
+            if (row?.state === "failed") {
+              throw new Error(`${step.kind} failed: ${row.error ?? "unknown"}`);
+            }
+          }
         }
       } finally {
         ctx.dir = realDir;
@@ -604,15 +615,14 @@ async function isAlreadyDone(
 // Clearing it when the EDL is empty is what makes "remove every edit and commit"
 // a full revert.
 async function settleEditState(videoId: string, ctx: StepContext): Promise<void> {
+  // Only the presentation step knows what the master it just built contains, so
+  // there's nothing to settle unless it ran. Re-reading the EDL here would also
+  // rethrow a malformed one past the end of the run.
+  if (ctx.scratch.fullSpan === undefined) return;
   if (!(await Bun.file(presentationPath(ctx)).exists())) return;
 
-  const { fullSpan } =
-    ctx.scratch.fullSpan === undefined
-      ? await keptSegmentsFor(ctx.dir, ctx.sourceDuration)
-      : { fullSpan: ctx.scratch.fullSpan };
-
   const wasEdited = ctx.video.lastEditedAt != null;
-  const isEdited = !fullSpan;
+  const isEdited = !ctx.scratch.fullSpan;
   if (wasEdited === isEdited) return;
 
   await getDb()

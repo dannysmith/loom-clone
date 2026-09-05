@@ -371,6 +371,29 @@ describe("the master is validated against the EDL, not against itself", () => {
   );
 });
 
+describe("a corrupt EDL fails loudly rather than un-editing the video", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "a malformed edits.json keeps the previous master instead of replacing it",
+    async () => {
+      // Degrading to "no edits" would be the damaging outcome: the run would
+      // succeed and the swap would put an UNCUT master in front of viewers,
+      // quietly restoring whatever the user had trimmed out.
+      const { id, dir } = await readyEditable();
+      await Bun.write(join(dir, "1080p.mp4"), "PREVIOUS-EDITED-MASTER");
+      await markStepReady(id, "presentation");
+      await Bun.write(join(dir, "edits.json"), "{ this is not json");
+
+      scheduleEdit(id, "recorded");
+      await _drainInFlight();
+
+      // Previous master untouched, video still serving, status restored.
+      expect(await Bun.file(join(dir, "1080p.mp4")).text()).toBe("PREVIOUS-EDITED-MASTER");
+      expect((await getVideo(id))?.status).toBe("ready");
+    },
+    60_000,
+  );
+});
+
 describe("the audio chain is an enhancement, not a precondition", () => {
   test.skipIf(!ffmpegAvailable)(
     "a recording with no audio stream still gets a master",

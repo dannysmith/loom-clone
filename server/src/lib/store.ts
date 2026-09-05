@@ -358,7 +358,7 @@ export type DashboardFilters = {
   cursor?: string; // video ID of last item from previous page
   limit?: number;
   trashedOnly?: boolean; // true for the Trash Bin page
-  needsAttention?: boolean; // failed / incomplete / stalled-processing videos
+  needsAttention?: boolean; // failed / incomplete / healing / stalled-processing videos
 };
 
 // A `processing` video whose updatedAt is older than this is treated as stalled
@@ -394,15 +394,17 @@ export async function listVideosFiltered(filters: DashboardFilters = {}): Promis
   if (filters.status) conditions.push(eq(videos.status, filters.status));
 
   // "Needs attention": unrecoverable post-processing failures, abandoned
-  // recordings, and videos stuck in `processing` long past their last update
-  // (a pipeline that died mid-run, never reconciled).
+  // recordings, videos mid-heal (waiting on a Mac that may never come back —
+  // the daily sweep gives up after 48h, but they're visible here immediately),
+  // and videos stuck in `processing` long past their last update (a pipeline
+  // that died mid-run, never reconciled).
   if (filters.needsAttention) {
     const stalledCutoff = new Date(
       Date.now() - STALLED_PROCESSING_MINUTES * 60 * 1000,
     ).toISOString();
     conditions.push(
       or(
-        inArray(videos.status, ["processing_failed", "incomplete"]),
+        inArray(videos.status, ["processing_failed", "incomplete", "healing"]),
         and(eq(videos.status, "processing"), lt(videos.updatedAt, stalledCutoff)),
       )!,
     );

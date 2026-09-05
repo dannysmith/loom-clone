@@ -622,11 +622,13 @@ describe("listVideosFiltered", () => {
     expect(result.items.map((v) => v.id)).not.toContain(untagged.id);
   });
 
-  test("needsAttention surfaces failed/incomplete/stalled-processing, not healthy videos", async () => {
+  test("needsAttention surfaces failed/incomplete/healing/stalled-processing, not healthy videos", async () => {
     const failed = await createVideo();
     await setVideoStatus(failed.id, "processing_failed");
     const incomplete = await createVideo();
     await setVideoStatus(incomplete.id, "incomplete");
+    const healing = await createVideo();
+    await setVideoStatus(healing.id, "healing");
 
     const stalled = await createVideo();
     await setVideoStatus(stalled.id, "processing");
@@ -644,6 +646,7 @@ describe("listVideosFiltered", () => {
     const ids = result.items.map((v) => v.id);
     expect(ids).toContain(failed.id);
     expect(ids).toContain(incomplete.id);
+    expect(ids).toContain(healing.id);
     expect(ids).toContain(stalled.id);
     expect(ids).not.toContain(freshProcessing.id);
     expect(ids).not.toContain(ready.id);

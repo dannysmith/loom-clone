@@ -5,7 +5,7 @@ import { join } from "path";
 import { getDb } from "../../db/client";
 import { videos } from "../../db/schema";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../test-utils";
-import { cleanupStaleFiles, markStalledRecordingsIncomplete } from "../cleanup";
+import { cleanupStaleFiles, markStalledVideosIncomplete } from "../cleanup";
 import { DATA_DIR } from "../paths";
 import { markStepFailed, markStepReady } from "../processing/steps-store";
 import { addSegment, createVideo, getVideo } from "../store";
@@ -146,13 +146,14 @@ describe("cleanupStaleFiles", () => {
 });
 
 const FIVE_HOURS_AGO = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+const FIFTY_HOURS_AGO = new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString();
 
-describe("markStalledRecordingsIncomplete", () => {
+describe("markStalledVideosIncomplete — recordings", () => {
   test("marks a recording with no activity for >4h as incomplete", async () => {
     const video = await createVideo();
     await getDb().update(videos).set({ createdAt: FIVE_HOURS_AGO }).where(eq(videos.id, video.id));
 
-    await markStalledRecordingsIncomplete();
+    await markStalledVideosIncomplete();
 
     expect((await getVideo(video.id))?.status).toBe("incomplete");
   });
@@ -163,14 +164,14 @@ describe("markStalledRecordingsIncomplete", () => {
     // A segment uploaded just now → recent activity despite the old createdAt.
     await addSegment(video.id, "seg_000.m4s", 2);
 
-    await markStalledRecordingsIncomplete();
+    await markStalledVideosIncomplete();
 
     expect((await getVideo(video.id))?.status).toBe("recording");
   });
 
   test("leaves a freshly-created recording alone", async () => {
     const video = await createVideo();
-    await markStalledRecordingsIncomplete();
+    await markStalledVideosIncomplete();
     expect((await getVideo(video.id))?.status).toBe("recording");
   });
 
@@ -181,7 +182,7 @@ describe("markStalledRecordingsIncomplete", () => {
       .set({ status: "ready", createdAt: FIVE_HOURS_AGO })
       .where(eq(videos.id, video.id));
 
-    await markStalledRecordingsIncomplete();
+    await markStalledVideosIncomplete();
 
     expect((await getVideo(video.id))?.status).toBe("ready");
   });
@@ -193,8 +194,59 @@ describe("markStalledRecordingsIncomplete", () => {
       .set({ createdAt: FIVE_HOURS_AGO, trashedAt: new Date().toISOString() })
       .where(eq(videos.id, video.id));
 
-    await markStalledRecordingsIncomplete();
+    await markStalledVideosIncomplete();
 
     expect((await getVideo(video.id, { includeTrashed: true }))?.status).toBe("recording");
+  });
+});
+
+describe("markStalledVideosIncomplete — healing", () => {
+  // Put a video into `healing` as of a given moment. Set directly rather than
+  // via setVideoStatus, which stamps updatedAt = now.
+  async function makeHealingVideo(updatedAt: string): Promise<string> {
+    const video = await createVideo();
+    await getDb()
+      .update(videos)
+      .set({ status: "healing", updatedAt })
+      .where(eq(videos.id, video.id));
+    return video.id;
+  }
+
+  test("marks a healing video with no activity for >48h as incomplete", async () => {
+    const id = await makeHealingVideo(FIFTY_HOURS_AGO);
+
+    await markStalledVideosIncomplete();
+
+    expect((await getVideo(id))?.status).toBe("incomplete");
+  });
+
+  test("leaves a healing video with a recent segment upload alone (heal in progress)", async () => {
+    const id = await makeHealingVideo(FIFTY_HOURS_AGO);
+    await addSegment(id, "seg_000.m4s", 2);
+
+    await markStalledVideosIncomplete();
+
+    expect((await getVideo(id))?.status).toBe("healing");
+  });
+
+  test("uses the 48h healing window, not the 4h recording one", async () => {
+    // 5 hours into a heal — stale by recording standards, fine for healing.
+    const id = await makeHealingVideo(FIVE_HOURS_AGO);
+
+    await markStalledVideosIncomplete();
+
+    expect((await getVideo(id))?.status).toBe("healing");
+  });
+
+  test("ignores trashed healing videos", async () => {
+    const id = await makeHealingVideo(FIFTY_HOURS_AGO);
+    await getDb()
+      .update(videos)
+      .set({ trashedAt: new Date().toISOString() })
+      .where(eq(videos.id, id));
+
+    await markStalledVideosIncomplete();
+
+    expect((await getVideo(id, { includeTrashed: true }))?.status).toBe("healing");
   });
 });

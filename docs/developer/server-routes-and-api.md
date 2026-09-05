@@ -176,7 +176,7 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 
 `url` is the absolute URL for the clipboard. `path` is the path-only form. `title` and `visibility` reflect the video's current metadata (used by the macOS app's post-recording editor). `missing` is empty when the server has all segments.
 
-When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate — MP4 serving waits for the presentation master, which lands shortly after); otherwise it moves to `"healing"`. There is no `"complete"` status.
+When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate — MP4 serving waits for the presentation master, which lands shortly after); otherwise it moves to `"healing"`. Both branches are idempotent: a video already in `processing`/`ready`/`reprocessing` is never demoted (in particular, a replayed `/complete` after the 10-day HLS cleanup — where every segment reads as missing — leaves a `ready` video alone). There is no `"complete"` status.
 
 **Errors**: `400` `VALIDATION_ERROR` (unparseable `application/json` body) | `404` `VIDEO_NOT_FOUND`
 

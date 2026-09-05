@@ -51,7 +51,7 @@ Full findings in `docs/tasks-todo/temporary/vps-audit-2026-09-05.md`. Summary:
 - Already fine, no work needed: Docker log rotation exists at the daemon level (json-file, 10m × 3 — verify `/etc/docker/daemon.json` and document, no compose change); unattended-upgrades healthy; weekly host-level `docker system prune` cron exists; journald 71 MB.
 - Disk: `/mnt/data` is 20 GiB with 12 GiB free → the < 5 GiB threshold in the table above.
 
-### Phase 2: Close the healing hole
+### Phase 2: Close the healing hole — DONE (2026-09-05)
 
 Pure server code, fully testable, no dependency on phase 1.
 

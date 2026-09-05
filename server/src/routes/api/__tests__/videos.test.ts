@@ -405,6 +405,25 @@ describe("POST /:id/complete", () => {
     expect((await getVideo(id))?.status).toBe("healing");
   });
 
+  test("a replayed /complete with missing segments does NOT demote a ready video", async () => {
+    // After the 10-day HLS cleanup, every segment in the timeline reads as
+    // "missing" — a stray re-/complete must not yank the video back into a
+    // heal it can never finish.
+    const { id } = await createVideoViaApi();
+    await setVideoStatus(id, "ready");
+
+    const res = await videos.request(`/${id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        timeline: { segments: [{ filename: "seg_000.m4s" }] },
+      }),
+    });
+    const body = await res.json();
+    expect(body.missing.sort()).toEqual(["init.mp4", "seg_000.m4s"]);
+    expect((await getVideo(id))?.status).toBe("ready");
+  });
+
   // A heal can change the HLS segments after a video already stitched source.mp4
   // (reached `ready`). The resumable pipeline would otherwise skip the
   // already-`ready` source step; the /complete handler forces a full re-run when

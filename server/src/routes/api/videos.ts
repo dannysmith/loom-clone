@@ -259,8 +259,22 @@ videos.post("/:id/complete", async (c) => {
   // validate. Footage still missing → `healing` (the Mac re-uploads and
   // re-`/complete`s). The pipeline is re-entrant, so a heal re-hitting
   // /complete resumes from where it left off.
+  //
+  // The healing branch mirrors markFootageComplete's idempotency guard: a
+  // stray /complete must not demote a video already in (or past) the
+  // post-footage lifecycle. After the 10-day HLS cleanup every segment reads
+  // as "missing", so without the guard a replayed /complete would yank a
+  // `ready` video into a heal it can never finish.
   const footageWhole = missing.length === 0;
-  const video = footageWhole ? await markFootageComplete(id) : await setVideoStatus(id, "healing");
+  const inPostFootageLifecycle =
+    existing.status === "processing" ||
+    existing.status === "ready" ||
+    existing.status === "reprocessing";
+  const video = footageWhole
+    ? await markFootageComplete(id)
+    : inPostFootageLifecycle
+      ? existing
+      : await setVideoStatus(id, "healing");
 
   const playlist = await buildPlaylist(video);
   await writePlaylist(id, playlist);

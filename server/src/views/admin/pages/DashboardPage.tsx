@@ -197,7 +197,7 @@ export function DashboardPage({
             ))}
           </div>
 
-          {/* Needs attention (failed / incomplete / stalled processing) */}
+          {/* Needs attention (failed / incomplete / healing / stalled processing) */}
           <div class="filter-group">
             <span class="filter-group-label">Attention</span>
             <label class="filter-pill filter-pill--attention">

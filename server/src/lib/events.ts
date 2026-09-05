@@ -29,7 +29,7 @@ export type EventType =
   | "processing_complete" // post-processing run finished (summary for the activity feed)
   | "reprocess_requested" // admin manually re-ran the post-processing pipeline
   | "edits_reset" // a rebuild found an empty EDL, so the presentation is back to the full source
-  | "marked_incomplete" // a recording with no segment activity for hours was given up on
+  | "marked_incomplete" // a recording or heal with no segment activity for too long was given up on (data.from = prior status)
   | "transcript_uploaded"
   | "words_uploaded"
   | "title_suggested"

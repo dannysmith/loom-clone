@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 import { initDb } from "./db/client";
 import { getAdminConfig } from "./lib/admin-auth";
-import { cleanupStaleFiles, markStalledRecordingsIncomplete } from "./lib/cleanup";
+import { cleanupStaleFiles, markStalledVideosIncomplete } from "./lib/cleanup";
 import { recoverStrandedReprocessing } from "./lib/processing/reconcile";
 
 await initDb();
@@ -32,12 +32,13 @@ const hostname = Bun.env.HOST ?? "127.0.0.1";
 console.log(`[server] listening on http://${hostname}:${port}`);
 
 // Daily maintenance: remove HLS segments/thumbnail candidates for videos that
-// have been `ready` for >10 days, and mark recordings with no segment activity
-// for >4h as `incomplete`. First run 60s after startup (avoids competing with
-// in-flight derivative generation), then every 24h.
+// have been `ready` for >10 days, and mark stalled videos `incomplete`
+// (recordings with no segment activity for >4h, heals with none for >48h).
+// First run 60s after startup (avoids competing with in-flight derivative
+// generation), then every 24h.
 const runMaintenance = async () => {
   await cleanupStaleFiles().catch((err) => console.error("[cleanup] failed:", err));
-  await markStalledRecordingsIncomplete().catch((err) =>
+  await markStalledVideosIncomplete().catch((err) =>
     console.error("[cleanup] incomplete sweep failed:", err),
   );
 };

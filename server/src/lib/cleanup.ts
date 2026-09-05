@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { getDb } from "../db/client";
@@ -17,6 +17,14 @@ const STALE_DAYS = 10;
 // purpose: a user may legitimately pause a recording for a long time, and a
 // paused recording produces no segments.
 const STALE_RECORDING_HOURS = 4;
+
+// A `healing` video is waiting for the Mac to re-upload missing segments,
+// which can legitimately take days (a laptop closed over a weekend) — so this
+// window is far more generous than the recording one. Marking `incomplete` is
+// reversible: /complete accepts a re-complete from `incomplete` and schedules
+// an intake reprocess, so a Mac that comes back after the sweep fired still
+// heals cleanly.
+const STALE_HEALING_HOURS = 48;
 
 // Deletes HLS segments for videos that have been `ready` for longer than
 // STALE_DAYS. Once the segments are gone the MP4s are all that's left, so this
@@ -102,49 +110,62 @@ export async function cleanupStaleFiles(): Promise<void> {
   }
 }
 
-// Marks `recording` videos that never received a valid /complete and have had
-// no segment activity for STALE_RECORDING_HOURS as `incomplete`. Detection is
-// activity-based (latest segment upload, or creation time when no segments
-// arrived), not a heartbeat. An `incomplete` video still serves whatever
-// partial HLS it has. Runs alongside the daily cleanup timer.
-export async function markStalledRecordingsIncomplete(): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_RECORDING_HOURS * 60 * 60 * 1000).toISOString();
+// Marks stalled `recording` and `healing` videos as `incomplete`. Detection is
+// activity-based (latest segment upload, falling back to a per-status
+// baseline), not a heartbeat:
+//   - `recording`: no valid /complete and no segment for STALE_RECORDING_HOURS.
+//     Baseline is creation time (the row predates every segment).
+//   - `healing`: no segment for STALE_HEALING_HOURS. Baseline is updatedAt —
+//     the moment /complete moved it into `healing`. Without this sweep, a
+//     video whose Mac died mid-heal and never came back stays `healing`
+//     forever, invisible to every safety net.
+// An `incomplete` video still serves whatever partial HLS it has. Runs
+// alongside the daily cleanup timer.
+export async function markStalledVideosIncomplete(): Promise<void> {
+  const cutoffs = {
+    recording: new Date(Date.now() - STALE_RECORDING_HOURS * 60 * 60 * 1000).toISOString(),
+    healing: new Date(Date.now() - STALE_HEALING_HOURS * 60 * 60 * 1000).toISOString(),
+  };
 
-  // Per recording video, the most recent activity timestamp: the latest
-  // segment upload, falling back to the video's creation time.
   const rows = await getDb()
     .select({
       id: videos.id,
+      status: videos.status,
       createdAt: videos.createdAt,
+      updatedAt: videos.updatedAt,
       lastSegmentAt: sql<string | null>`MAX(${videoSegments.uploadedAt})`,
     })
     .from(videos)
     .leftJoin(videoSegments, eq(videoSegments.videoId, videos.id))
-    .where(and(eq(videos.status, "recording"), isNull(videos.trashedAt)))
+    .where(and(inArray(videos.status, ["recording", "healing"]), isNull(videos.trashedAt)))
     .groupBy(videos.id);
 
   let marked = 0;
   for (const row of rows) {
+    const status = row.status as "recording" | "healing"; // the WHERE clause guarantees it
+    const baseline = status === "recording" ? row.createdAt : row.updatedAt;
     const lastActivity =
-      row.lastSegmentAt && row.lastSegmentAt > row.createdAt ? row.lastSegmentAt : row.createdAt;
-    if (lastActivity >= cutoff) continue; // still within the window
+      row.lastSegmentAt && row.lastSegmentAt > baseline ? row.lastSegmentAt : baseline;
+    if (lastActivity >= cutoffs[status]) continue; // still within the window
 
-    // Guard on status === "recording": a /complete may have arrived between the
-    // scan and now, so only mark videos still recording (and never clobber a
-    // concurrent transition).
+    // Guard on the scanned status: a /complete may have arrived between the
+    // scan and now, so only mark videos still in that state (and never clobber
+    // a concurrent transition).
     const [updated] = await getDb()
       .update(videos)
       .set({ status: "incomplete", updatedAt: new Date().toISOString() })
-      .where(and(eq(videos.id, row.id), eq(videos.status, "recording")))
+      .where(and(eq(videos.id, row.id), eq(videos.status, status)))
       .returning({ id: videos.id });
     if (!updated) continue;
 
-    await logEvent(row.id, "marked_incomplete", { lastActivity });
+    await logEvent(row.id, "marked_incomplete", { lastActivity, from: status });
     marked++;
-    console.log(`[cleanup] ${row.id}: marked incomplete (last activity ${lastActivity})`);
+    console.log(
+      `[cleanup] ${row.id}: marked incomplete (was ${status}, last activity ${lastActivity})`,
+    );
   }
 
   if (marked > 0) {
-    console.log(`[cleanup] marked ${marked} stalled recording(s) incomplete`);
+    console.log(`[cleanup] marked ${marked} stalled video(s) incomplete`);
   }
 }

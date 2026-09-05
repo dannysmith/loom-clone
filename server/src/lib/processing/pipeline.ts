@@ -275,7 +275,7 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
   console.log(`[pipeline] ${videoId} done (${totalMs}ms, produced=[${produced.join(", ")}])`);
   // Final summary event for the activity feed (additive — per-step events above
   // are the durable record).
-  await logEvent(videoId, "processing_complete", { produced, durationMs: totalMs });
+  await recordEvent(videoId, "processing_complete", { produced, durationMs: totalMs });
 }
 
 // How long source.mp4 SHOULD be, measured independently of the file itself so
@@ -632,7 +632,7 @@ async function settleEditState(videoId: string, ctx: StepContext): Promise<void>
 
   const video = await getVideo(videoId);
   if (video) purgeVideo(video.slug);
-  await logEvent(videoId, isEdited ? "edits_committed" : "edits_reset", {
+  await recordEvent(videoId, isEdited ? "edits_committed" : "edits_reset", {
     presentationDuration: ctx.presentationDuration,
   });
 }
@@ -656,11 +656,32 @@ async function maybeDeleteUpload(videoId: string): Promise<void> {
   }
 }
 
+// Per-step entries on the video's activity feed. This is TELEMETRY, unlike the
+// ledger rows beside it, which are state — so a failure to write one must never
+// take down the run that produced it. The swap has already moved files by the
+// time the post-swap entries are written; letting a full disk or a locked
+// database throw here would abandon the remaining ledger marks and leave a
+// perfectly good master unservable until someone re-ran the backfill.
 async function logStep(
   videoId: string,
   kind: string,
   state: string,
   error?: string,
 ): Promise<void> {
-  await logEvent(videoId, "processing_step", error ? { kind, state, error } : { kind, state });
+  await recordEvent(videoId, "processing_step", error ? { kind, state, error } : { kind, state });
+}
+
+async function recordEvent(
+  videoId: string,
+  type: Parameters<typeof logEvent>[1],
+  data: Parameters<typeof logEvent>[2],
+): Promise<void> {
+  try {
+    await logEvent(videoId, type, data);
+  } catch (err) {
+    console.error(
+      `[pipeline] ${videoId} could not record ${type} on the activity feed:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 }

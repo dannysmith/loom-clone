@@ -34,6 +34,7 @@ import {
   profileNoiseFloorFor,
   remuxCopy,
   setPresentationMetadata,
+  setSourcePristine,
   VARIANTS,
 } from "../derivatives";
 import { renderEditedOutput } from "../edit-render";
@@ -257,6 +258,14 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     run: async (ctx) => {
       if (ctx.source === "uploaded") await generateSourceFromUpload(ctx.videoId, ctx.dir);
       else await generateSourceFromHls(ctx.videoId, ctx.dir);
+      // A freshly stitched source IS pristine, by definition — the segments the
+      // Mac uploaded have never been through the audio chain. This is what makes
+      // "Rebuild from HLS" the recovery path for a video migrated from before the
+      // restructure: re-stitching restores a true original, and the presentation
+      // step then applies the chain to the master instead of finding it already
+      // baked in.
+      await setSourcePristine(ctx.videoId, true);
+      ctx.video = { ...ctx.video, sourcePristine: true };
       return "ready";
     },
     validate: (ctx) =>

@@ -24,6 +24,7 @@
     "db:studio": "drizzle-kit studio",
     "videos:backfill-metadata": "bun scripts/backfill-metadata.ts",
     "videos:backfill-processing-steps": "bun scripts/backfill-processing-steps.ts",
+    "videos:migrate-presentation": "bun scripts/migrate-presentation-masters.ts",
     "audio:bench": "bun scripts/audio-bench.ts",
     "keys:create": "bun scripts/keys.ts create",
     "keys:list": "bun scripts/keys.ts list",

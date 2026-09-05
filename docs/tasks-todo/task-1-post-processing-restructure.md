@@ -192,19 +192,22 @@ Deliberately split in two, along the line of "what can run automatically" versus
 2. **Derive `source_pristine`** from the existing ledger: an `audio` row in state `ready` → false; `skipped`, absent, or an uploaded video → true. Deliberately conservative — `inferStepsFromDisk` marks `audio` ready merely because the source has an audio stream, so a video that never actually got loudnormed may be marked non-pristine. The only cost of that is a future audio reprocess leaving its audio alone.
 3. **Re-key the ledger**: `edited_output` → `presentation`, then delete the `audio` rows.
 
-**After deploy — a one-shot script** (`scripts/migrate-presentation-masters.ts`), run over SSH, per video:
+**After deploy — a one-shot script** (`bun run videos:migrate-presentation`), run over SSH, per video:
 
-1. **Re-stitch where the HLS survives.** If `stream.m3u8` and its segments are still on disk, re-stitch `source.mp4` from them — that recovers a genuinely pristine original, and `source_pristine` becomes true. Only applies to videos under ~10 days old, so in practice one or two.
-2. **Materialise the master.** Unedited videos: `source.mp4` → `<H>p.mp4` (`-c copy`, no audio chain — the audio is already baked in). Already-edited videos: `<H>p.mp4` exists and *is* the master, so there's nothing to produce; step 3 of the drizzle migration already re-keyed its ledger row.
-3. **Seed `captions.original.srt`** — copy from `captions.srt` for unedited videos; for edited ones re-derive both from `words.json` where present, else leave the existing file and mark the step ready.
-4. **Re-run `inferStepsFromDisk`** so the new kinds get rows, then `reconcile` each video.
-5. Report per video: pristine y/n, master materialised or already present, bytes added, final status.
+1. **Materialise the master.** Unedited videos: copy `source.mp4` → `<H>p.mp4` (no audio chain — the audio is already baked in). Already-edited videos: `<H>p.mp4` exists and *is* the master, so there's nothing to produce; the drizzle migration already re-keyed its ledger row.
+2. **Seed `captions.original.srt`** by copying the served `captions.srt`, which used to be the only copy of the transcript.
+3. **Re-run `inferStepsFromDisk`** so the new kinds get rows, then `reconcile` each video.
+4. Report per video: master created or already present, captions seeded, bytes added.
+
+**Re-stitching moved out of the script.** The plan had it re-stitch `source.mp4` from surviving HLS segments to recover a genuinely pristine original. That turned out to be both the riskiest step — the only one that rewrites the irreplaceable file — and wrong on its own: a re-stitched source has *unprocessed* audio, so copying it as the master would produce a worse video than the one being replaced. Getting it right would mean running the audio chain inside the migration script, duplicating the pipeline.
+
+Instead, the `source` step now sets `source_pristine = true` whenever it stitches, because a freshly stitched source is pristine by definition. That makes **"Rebuild from HLS" in the admin** the recovery path: it re-stitches through the real pipeline, flips the flag, and rebuilds the presentation with the chain applied properly. No special-casing, no duplicated logic, and the migration script keeps the property that it can't damage anything.
 
 ### Data-safety properties
 
 These are requirements on the script, not nice-to-haves — the production data is the one irreplaceable thing in this system.
 
-- **It never deletes a video file.** It only creates `<H>p.mp4` and `captions.original.srt`. `source.mp4`, the HLS segments and the thumbnails are read-only to it. Nothing in this task removes footage.
+- **It never deletes OR REWRITES a video file.** It only creates `<H>p.mp4` and `captions.original.srt`. `source.mp4`, the HLS segments and the thumbnails are read-only to it. Nothing in this task removes footage.
 - **Dry-run is the default.** It prints the full per-video plan (including projected bytes) and writes nothing without `--apply`.
 - **Idempotent and resumable.** Re-running skips any video that already has a valid master, so an interrupted run is fixed by running it again.
 - **Every produced file is validated before it counts.** Masters go through `isProbablyPlayable` and are written tmp→rename, exactly like the pipeline's own steps.

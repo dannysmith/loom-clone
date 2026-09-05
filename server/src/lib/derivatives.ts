@@ -250,6 +250,14 @@ export async function extractMetadata(
   return true;
 }
 
+// Record whether source.mp4 is a true original. Set true whenever the source is
+// (re-)stitched from the HLS segments or an upload; set false by the migration
+// for videos whose source already had the audio chain written into it in place,
+// before the presentation master existed.
+export async function setSourcePristine(videoId: string, pristine: boolean): Promise<void> {
+  await getDb().update(videos).set({ sourcePristine: pristine }).where(eq(videos.id, videoId));
+}
+
 // Cache the size and duration of the presentation master — the properties that
 // describe what a viewer actually gets, and the only two that differ between the
 // pristine source and the served file (an edited master is shorter; any master

@@ -115,7 +115,7 @@ Single video by id.
   "url": "https://loom.example.com/a1b2c3d4",
   "urls": {
     "page": "/a1b2c3d4",
-    "raw": "/a1b2c3d4/raw/source.mp4",
+    "raw": "/a1b2c3d4/raw/video.mp4",
     "hls": "/a1b2c3d4/stream/stream.m3u8",
     "poster": "/a1b2c3d4/poster.jpg"
   }
@@ -176,7 +176,7 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 
 `url` is the absolute URL for the clipboard. `path` is the path-only form. `title` and `visibility` reflect the video's current metadata (used by the macOS app's post-recording editor). `missing` is empty when the server has all segments.
 
-When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate); otherwise it moves to `"healing"`. There is no `"complete"` status.
+When `missing` is empty the video moves to `status: "processing"` and the post-processing pipeline is scheduled (it reaches `ready` once `source.mp4` + metadata validate — MP4 serving waits for the presentation master, which lands shortly after); otherwise it moves to `"healing"`. There is no `"complete"` status.
 
 **Errors**: `400` `VALIDATION_ERROR` (unparseable `application/json` body) | `404` `VIDEO_NOT_FOUND`
 
@@ -192,7 +192,7 @@ Upload a transcript (SRT or VTT). Idempotent — re-uploading replaces the file 
 
 **Errors**: `400` `VALIDATION_ERROR` (empty body) | `404` `VIDEO_NOT_FOUND`
 
-**Side effects**: writes `data/<id>/derivatives/captions.srt` (or `.vtt`), parses to plain text, upserts into `video_transcripts` table + FTS index, logs `transcript_uploaded` event.
+**Side effects**: writes `data/<id>/derivatives/captions.original.srt` (or `.vtt`) — the transcript verbatim, never modified — parses to plain text, upserts into `video_transcripts` + FTS, logs `transcript_uploaded`, and schedules a `captions` run. The *served* `captions.srt` is produced by that step, not written here: on an edited video the transcript describes the uncut timeline, so writing it straight through would silently desync a viewer's subtitles. An upload in the other format supersedes the stored original rather than sitting alongside it.
 
 ### `PUT /api/videos/:id/words`
 
@@ -268,7 +268,7 @@ All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonica
 
 ### `/:slug`
 
-HTML video page. Prefers the MP4 derivative (`/:slug/raw/<active file>`) when the `source` (or active-file) processing step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted MP4 never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses the self-hosted Vidstack player — a committed bundle served from `/static/player/*`, with hashed filenames resolved via the Vite manifest in `src/lib/vite-manifest.ts`.
+HTML video page. Prefers the presentation master (`/:slug/raw/<N>p.mp4`) when the `presentation` step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted master never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses the self-hosted Vidstack player — a committed bundle served from `/static/player/*`, with hashed filenames resolved via the Vite manifest in `src/lib/vite-manifest.ts`.
 
 Includes below the player: title (if set), formatted duration + date, description, and attribution link.
 
@@ -286,7 +286,9 @@ Chromeless player for iframe embeds. Same MP4-vs-HLS selection, no page chrome. 
 
 MP4 video variants with HTTP Range support. Serves from `data/<id>/derivatives/<file>`.
 
-**Filename allowlist**: `source.mp4`, `<N>p.mp4` (e.g. `720p.mp4`, `1080p.mp4`).
+**Filename allowlist**: `<N>p.mp4` (e.g. `720p.mp4`, `1080p.mp4`), plus `upload.mp4` for an uploaded video whose post-processing failed.
+
+`video.mp4` and `source.mp4` are handled before the allowlist: both **302** to the presentation master, so published links survive a re-encode and links made before the restructure keep working. `source.mp4` is deliberately not servable — handing out the pristine original would mean un-processed audio and, later, no watermark. Both return **404** when the video has no master yet.
 
 ### `/:slug/stream/:file`
 
@@ -302,7 +304,7 @@ Video thumbnail. Serves `data/<id>/derivatives/thumbnail.jpg`. Returns 404 until
 
 ### `/:slug/storyboard.jpg`
 
-Sprite sheet for scrubber hover previews. Serves `data/<id>/derivatives/storyboard.jpg`. Only generated for videos ≥ 60s. Returns 404 for shorter videos.
+Sprite sheet for scrubber hover previews. Serves `data/<id>/derivatives/storyboard.jpg`. Every video gets one, however short — a duration threshold used to save a little disk, but it was the only viewer-facing artifact whose existence moved when a video was edited, which is how a trim once orphaned a storyboard describing the uncut timeline.
 
 ### `/:slug/storyboard.vtt`
 
@@ -334,7 +336,7 @@ Per-tag JSON Feed 1.1 with `info_for_llms` top-level key. Served as `application
 
 ### `/:slug.mp4`
 
-Convenience redirect. **302** to the "active" raw MP4 — `source.mp4` for unedited videos, or the resolution-named edited file (e.g. `1080p.mp4`) when edits have been applied. Uses `activeRawFilename()` from `lib/url.ts`. 302 (not 301) because the target changes when edits are committed or reverted.
+Convenience redirect. **302** straight to the presentation master (e.g. `/:slug/raw/1440p.mp4`) — one hop, not via `video.mp4`. Uses `activeRawFilename()` from `lib/url.ts`. 302 (not 301) because the target moves if a video is ever rebuilt at a different resolution. **404** when there's no master yet.
 
 ### `/:slug.json`
 
@@ -355,7 +357,7 @@ JSON metadata for programmatic/LLM consumption. All URLs are absolute. Video-onl
 }
 ```
 
-`urls.captions` is null when no transcript exists; `urls.storyboard` and `urls.storyboardImage` are null for videos under 60s.
+`urls.captions` is null when no transcript exists. Every video gets a storyboard, however short.
 
 ### `/:slug.md`
 
@@ -508,8 +510,8 @@ Routes in `routes/admin/editor.ts`, mounted at `/admin/videos`. See [Admin Edito
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/admin/videos/:id/reprocess` | Re-run the post-processing pipeline (resumable — steps that already succeeded are skipped). Form `rebuild=hls` forces a full from-HLS re-stitch. 302 → `/admin/videos/:id?tab=processing&reprocessed=<started\|queued\|skipped>`. 400 if the status can't be reprocessed, or `rebuild=hls` when the HLS segments are gone. Logs `reprocess_requested` |
-| POST | `/admin/videos/:id/reprocess/:kind` | Regenerate a single derivative (`kind` must be in `REGENERABLE_KINDS`). Same 302. 400 on bad status, non-regenerable kind, or missing/invalid `source.mp4` |
+| POST | `/admin/videos/:id/reprocess` | Rebuild the presentation set from the preserved source, honouring whatever EDL is on disk — so reprocessing an edited video regenerates the same cut rather than discarding it. Form `rebuild=hls` re-stitches the source first, which also restores `source_pristine`. 302 → `/admin/videos/:id?tab=processing&reprocessed=<started\|queued\|skipped>`. 400 if the status can't be reprocessed, or `rebuild=hls` when the HLS segments are gone. Logs `reprocess_requested` |
+| POST | `/admin/videos/:id/reprocess/:kind` | Regenerate a single artifact from whatever it declares as its input (`kind` must be in `REGENERABLE_KINDS` — everything except `source` and `presentation`, the two with dependents). Same 302. 400 on bad status, non-regenerable kind, or missing/invalid `source.mp4` |
 
 ### Admin media (session-gated, serves by video ID regardless of visibility)
 
@@ -577,26 +579,30 @@ The Range-aware file serving logic lives in `src/lib/file-serve.ts`.
 
 See `.env.example` for documentation and defaults.
 
-## Edited video file resolution
+## File resolution
 
-When a video has been edited via the admin editor, the "active" raw MP4 is a resolution-named file (e.g. `1080p.mp4` for a 1080p source) rather than `source.mp4`. This is tracked by the `lastEditedAt` timestamp on the video record.
+Every video serves a **presentation master** named for its source height — `1440p.mp4` for a 1440p recording — whether or not it has been edited. `source.mp4` is the pristine original: never modified, never served publicly, and the input everything else is regenerated from. See [Derivatives](streaming-and-healing.md#derivatives) for the two artifact groups this creates.
 
-**File layout after editing a 1080p source:**
+**File layout for an edited 1440p recording:**
 ```
 derivatives/
-  source.mp4          # untouched original — never modified, used by the editor
-  edits.json          # the edit decision list (trim/cut instructions)
-  1080p.mp4           # edited output at source resolution
-  720p.mp4            # downscaled from the edited output
-  words.json          # word-level timestamps (from original transcription)
-  peaks.json          # audio peaks from source.mp4 (for the editor waveform)
-  editor-storyboard.* # dense thumbnails from source.mp4 (for the editor timeline)
-  storyboard.*        # viewer-facing thumbnails (regenerated from edited output)
-  captions.srt        # edited captions (words in cut regions removed)
+  source.mp4             # pristine original — never modified, what the editor plays
+  edits.json             # the EDL (trim/cut instructions); absent or empty = unedited
+  1440p.mp4              # the presentation master: audio chain + EDL applied
+  1080p.mp4              # downscaled from the master
+  720p.mp4               # downscaled from the master
+  words.json             # word-level timestamps from transcription
+  peaks.json             # audio peaks from the source (editor waveform)
+  editor-storyboard.*    # dense thumbnails from the source (editor timeline)
+  storyboard.*           # viewer-facing thumbnails, from the master
+  captions.original.srt  # the transcript exactly as the Mac produced it
+  captions.srt           # served captions, mapped onto the presentation timeline
 ```
 
-**URL resolution rule:** `activeRawFilename(video)` in `lib/url.ts` returns `source.mp4` when `lastEditedAt` is null, or `{height}p.mp4` when the video has been edited. This single function is used by all URL builders — `urlsForVideo()`, `handleMp4Redirect()`, feeds, sitemap, API responses, admin views, and download links.
+**URL resolution rule:** `activeRawFilename(video)` in `lib/url.ts` returns `{height}p.mp4`, or **null** when the video has no cached height — meaning no master can exist yet, because metadata hasn't run or it failed. Callers must handle that null rather than substituting `source.mp4`: doing so once made `/raw/source.mp4` redirect to itself in a loop.
 
-**Why not always generate a resolution-named file:** Most videos are never edited. For an unedited 1080p video, creating `1080p.mp4` as an exact copy of `source.mp4` would waste disk space. The resolution file at the source's own height is only created when edits are committed — its existence on disk is a consequence of editing, not a prerequisite.
+**What we publish is `video.mp4`.** `/:slug/raw/video.mp4` is a 302 to whatever the best rendition currently is, and it's what the JSON, Markdown, feeds, `llms.txt`, sitemap, JSON-LD and download links all name. Asking for the video gets you the best rendition without knowing its height; asking for a smaller one stays explicit (`/:slug/raw/720p.mp4`). The player is the exception — it gets concrete per-rendition URLs, because it follows them on every load and shouldn't pay for a redirect.
 
-**Editor-specific files are never regenerated during editing:** `peaks.json` and `editor-storyboard.*` always reflect `source.mp4` because the editor always plays the original. Viewer-facing derivatives (storyboard, captions, resolution variants) are regenerated from the edited output.
+**Why always generate a resolution-named file.** This reverses an earlier decision, which was that creating `1080p.mp4` as a copy of `source.mp4` wasted disk on the majority of videos that are never edited. Two things outweigh that. The audio chain used to be written into `source.mp4` in place, so the original audio was destroyed and an improved chain could never be applied retroactively; and "edited" was a special case threaded through the whole pipeline. Giving every video a master makes the original permanently reprocessable and collapses the special case — committing an edit and pressing reprocess became the same operation. The cost is roughly 2× disk per video.
+
+**Editor-facing files never move when you edit:** `peaks.json` and `editor-storyboard.*` are cut from the source, because the editor always plays the original and edits against its timeline.

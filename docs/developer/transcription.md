@@ -15,7 +15,8 @@ macOS app (after recording stops)
         6. Writes .transcribed sidecar on success
 
 Server (on receipt)
-  └── Writes derivatives/captions.srt atomically
+  └── Writes derivatives/captions.original.srt; the captions step
+      derives the served captions.srt from it
   └── Parses SRT → plain text
   └── Upserts into video_transcripts table + FTS index
 ```
@@ -66,20 +67,28 @@ At app launch, `TranscribeAgent.runStartupScan()` walks the recordings directory
 
 ## Server-side handling
 
+There are two caption files, and the distinction matters:
+
+- **`captions.original.srt`** (or `.vtt`) — the transcript exactly as the Mac produced it. A source-group artifact: never modified, and the input everything else derives from.
+- **`captions.srt`** — what viewers get: the original mapped onto the presentation timeline. A presentation-group artifact, produced by the pipeline's `captions` step.
+
+With no edits that mapping is the identity, so the served file is a verbatim copy and the Mac's own cue segmentation survives intact. With edits it's re-derived from `words.json`, dropping cut words and shifting what follows — the only way to keep subtitles in sync with a cut.
+
 The `PUT /api/videos/:id/transcript` endpoint (bearer-authed, 5 MB limit):
 
 1. Detects format from Content-Type header or `WEBVTT` prefix (supports both SRT and VTT).
-2. Writes to `data/<id>/derivatives/captions.srt` (or `.vtt`) atomically via `.tmp` → rename.
-3. Parses the SRT/VTT into plain text.
-4. Upserts into `video_transcripts(video_id, format, plain_text, word_count, created_at)`.
-5. Updates the FTS index (integrated with the existing admin search that indexes title/description/slug).
-6. Logs a `transcript_uploaded` event.
+2. Writes `data/<id>/derivatives/captions.original.<ext>` atomically via `.tmp` → rename, and removes any stored original in the other format — there is only ever one.
+3. Parses into plain text, upserts into `video_transcripts(video_id, format, plain_text, word_count, created_at)`, and updates the FTS index.
+4. Logs a `transcript_uploaded` event.
+5. Schedules a `captions` run to produce the served file.
 
-Re-uploading replaces the file and re-indexes — fully idempotent.
+It deliberately does **not** write `captions.srt` itself. The transcript arrives long after post-processing has finished, so on an already-edited video it describes the uncut timeline — writing it straight through used to silently desync a viewer's subtitles.
+
+Re-uploading replaces the original and re-indexes — fully idempotent.
 
 ## Viewer integration
 
-When `derivatives/captions.srt` exists, the viewer page at `/:slug` includes a `<track>` element. Vidstack parses SRT natively — no VTT conversion needed. Captions are served at `/:slug/captions.srt` (and `/:slug/captions.vtt` if that format was uploaded).
+When the served `derivatives/captions.srt` exists, the viewer page at `/:slug` includes a `<track>` element. Vidstack parses SRT natively — no VTT conversion needed. Captions are served at `/:slug/captions.srt` (and `/:slug/captions.vtt` if that format was uploaded).
 
 The metadata routes (`/:slug.json`, `/:slug.md`) include the transcript plain text when available. See [Server Routes & API](server-routes-and-api.md#viewer-routes-slug) for the full route reference.
 

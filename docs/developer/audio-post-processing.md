@@ -1,19 +1,24 @@
 # Audio Post-Processing
 
-How the server processes audio in recorded and uploaded videos. Runs as part of the [derivatives pipeline](streaming-and-healing.md#derivatives) after `source.mp4` is stitched, before thumbnails and metadata extraction.
+How the server processes audio in recorded videos. The chain runs as part of the `presentation` step in the [derivatives pipeline](streaming-and-healing.md#derivatives), producing the `<H>p.mp4` presentation master from the pristine `source.mp4`.
+
+**The chain never writes to `source.mp4`.** It used to, in place, which meant the original audio was destroyed the moment processing ran — and once the HLS segments were cleaned up ten days later, an improved chain could never be applied retroactively. Now the source is preserved untouched and the chain output goes to the master, so "reprocess the whole library with a better chain" stays possible indefinitely.
 
 ## The chain
 
 ```
 highpass=f=80
   → arnndn=m=cb.rnnn
+  → aformat=s16 → fltp          (NaN guard — see below)
   → afftdn=nf=<profiled>:nr=12
   → agate=threshold=0.0056:ratio=10:attack=5:release=300:knee=2.5
   → dynaudnorm=f=500:g=11:m=10:p=0.95
   → loudnorm=I=-14:TP=-1.5:LRA=11      (two-pass, linear=true on pass 2)
 ```
 
-Six filters in series. Video track is copied untouched; only the audio is re-encoded (AAC, 160 kbps, 48 kHz).
+Six filters in series, plus a guard. The video track is copied untouched; only the audio is re-encoded (AAC, 160 kbps, 48 kHz).
+
+**On an edited video the cut is rendered first, then the chain runs over the result.** That order is deliberate: the video is encoded exactly once (the chain copies it), and loudnorm measures the audio a viewer will actually hear rather than material that gets discarded. The noise floor is still profiled from the *source*, because silence timestamps are in source coordinates.
 
 Order is part of the design:
 
@@ -88,7 +93,7 @@ Two-pass is meaningfully more accurate than single-pass for speech:
 
 `afftdn`'s `nf` parameter — the dB threshold below which spectral content is treated as noise — is estimated per recording before pass 1 runs.
 
-The pipeline already detects silent regions for [suggested edits](admin-editor.md). `processAudio()` reuses that result:
+The pipeline already detects silent regions for [suggested edits](admin-editor.md). The presentation step reuses that result, always profiling from the SOURCE — even when the chain itself is about to run over an edited cut, because silence timestamps are in source coordinates:
 
 1. From the silences passed in, pick the longest one ≥ 1 s.
 2. Spawn ffmpeg with `-ss <start> -t <min(2.0, length)>` and `-af volumedetect`.
@@ -103,11 +108,28 @@ Falls back to `nf=-50` if:
 
 The profile pass adds one short ffmpeg call (~100 ms typical) before pass 1.
 
-## Skip conditions
+## When the chain doesn't run
 
-Audio processing is silently skipped when:
-- The source has no audio track (video-only uploads, test fixtures).
-- The `cb.rnnn` model file is missing (logged as a clear error, not a silent fallback).
+Skipped, with the master produced by remuxing instead:
+
+- **Uploads.** They aren't mic recordings, so denoise and loudnorm shouldn't be imposed on them.
+- **`source_pristine` is false.** The video predates the restructure and its `source.mp4` already has the chain written into it. Running it again would process the audio twice. The flag is set false by the migration for any video whose old `audio` step had run, and back to true whenever the source is re-stitched from HLS — segments off the Mac have never been through the chain, which is what makes "Rebuild from HLS" the way to recover a true original.
+- **No audio track** (a screen recording with the mic off, test fixtures).
+- **The `cb.rnnn` model file is missing** — logged as a clear error, not a silent fallback.
+
+## When the chain fails
+
+It is an enhancement, not a precondition. If ffmpeg errors, the master is still produced by remuxing the video with its original audio, the failure is logged to the video's activity feed, and a later reprocess retries the chain. A video with un-enhanced audio is worth far more than no video at all.
+
+That path exists because it gets used. ffmpeg's `arnndn` can emit a frame of NaN samples when it flushes at end-of-stream — non-deterministically, roughly three runs in four on one real recording — which the AAC encoder then refuses, failing the whole encode. The chain carries a guard for it (see below), but the fallback is what stops a filter bug from costing a video its master.
+
+### The arnndn NaN guard
+
+`aformat=sample_fmts=s16,aformat=sample_fmts=fltp` sits immediately after `arnndn`. It is a workaround for an ffmpeg bug, not a tuning choice.
+
+Round-tripping through 16-bit integer turns any non-finite sample into a finite one. Measured on a real 66-second recording: 10 of 10 runs clean with the guard, where a mono downmix (7 of 10 still affected), per-channel `arnndn` instances (10 of 10 affected) and `-filter_threads 1` all failed to help. The affected samples are always in the final 480-sample frame, 384 of which are end-of-stream padding rather than real audio — the signature of uninitialised memory in the flush path. Related: [ffmpeg #10863](https://fftrac-bg.ffmpeg.org/ticket/10863).
+
+It sits after `arnndn` rather than at the end of the chain so a single bad sample can't reach `afftdn`, whose FFT would smear it across a whole window. The 16-bit floor is ~96 dB below full scale under a chain that ends in a 160 kbps AAC encode, so the quantisation is inaudible here. Remove it once `arnndn` is fixed upstream.
 
 ## Performance
 
@@ -134,7 +156,9 @@ Outputs land in a `bench-<basename>/` directory next to the input — one `out-<
 
 ## Silence detection (suggested edits)
 
-The derivatives pipeline runs ffmpeg's `silencedetect` filter against the raw `source.mp4` **before** audio processing and writes `derivatives/suggested-edits.json` if any silences ≥ 3 s are found. Running on the raw audio is critical — after the chain runs, the gate has driven non-speech regions below the silence threshold and the dynamic range is compressed, making silence indistinguishable from quiet speech. Pre-processing, true silence is -50 dB or lower, so the -30 dB threshold cleanly separates pauses from speech. These pre-populate the editor with trim/cut suggestions the first time a video is opened.
+The derivatives pipeline runs ffmpeg's `silencedetect` against `source.mp4` and writes `derivatives/suggested-edits.json` if any silences ≥ 3 s are found. Running on the pristine source is what makes this work — after the chain, the gate has driven non-speech regions below the silence threshold and the dynamic range is compressed, making silence indistinguishable from quiet speech. Untouched, true silence is -50 dB or lower, so the -30 dB threshold cleanly separates pauses from speech.
+
+There's no longer an ordering hazard here: since the source is never loudnormed, whether the audio has been processed is a property of the file rather than of when you look at it. (A legacy `source_pristine: false` video is the exception — its source *is* already loudnormed, so its silences are less distinct. Inherent, and limited to videos recorded before the restructure.) These pre-populate the editor with trim/cut suggestions the first time a video is opened.
 
 The same `silencedetect` result also feeds the `afftdn` noise-floor profile (see [Profiled noise floor](#profiled-noise-floor)). One detection pass, two consumers.
 

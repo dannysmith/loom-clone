@@ -337,6 +337,9 @@ async function runSteps(
   // the swap, so without this every step downstream of the presentation master
   // would find its input unsatisfied and silently never run.
   const stagedKinds = new Set<ProcessingStepKind>();
+  // Steps whose existing artifact this run has invalidated. Applied after the
+  // swap, so an aborted staged run leaves the live directory as it found it.
+  const staleAfterSwap: ProcessingStep[] = [];
 
   await refreshSourceProbe(ctx, [join(realDir, "source.mp4")]);
 
@@ -357,10 +360,12 @@ async function runSteps(
           // an edit takes a 66s video down to 55s, the storyboard's >=60s
           // threshold stops applying, and the old sprite sheet is left behind
           // describing the uncut timeline.
-          if (forceSet.has(step.kind)) {
-            await dropStaleArtifact(videoId, step, withRealDir(ctx, realDir), {
-              onlyIfPresent: true,
-            });
+          if (forceSet.has(step.kind) && !pathBelongsToAnotherStep(step, ctx, runSet)) {
+            // A staged run promises the previous outputs survive a failure, and
+            // this deletes from the LIVE directory — so hold it until the swap
+            // has committed. In-place runs make no such promise and apply it now.
+            if (stageKinds.size > 0) staleAfterSwap.push(step);
+            else await dropStaleArtifact(videoId, step, ctx, { onlyIfPresent: true });
           }
           continue;
         }
@@ -411,6 +416,9 @@ async function runSteps(
 
     if (stageKinds.size > 0) {
       await swapStagedFiles(videoId, stagingDir, realDir);
+      for (const step of staleAfterSwap) {
+        await dropStaleArtifact(videoId, step, ctx, { onlyIfPresent: true });
+      }
       for (const { step, result } of deferred) {
         await markStagedStep(videoId, step, ctx, result, produced);
       }
@@ -465,6 +473,30 @@ async function refreshSourceProbe(ctx: StepContext, candidates: string[]): Promi
   ctx.sourceDuration = ctx.expectedSourceDuration ?? 0;
 }
 
+// Whether another step in this run legitimately owns the file this one would
+// invalidate.
+//
+// A step that doesn't apply has no artifact — but `artifact()` still returns a
+// path, and the paths overlap: for a 1080p source `variant_1080` never applies
+// (it needs height > 1080) yet names `1080p.mp4`, which is exactly where the
+// presentation master lives. Invalidating on that basis deletes the master the
+// run just produced.
+function pathBelongsToAnotherStep(
+  step: ProcessingStep,
+  ctx: StepContext,
+  runSet: Set<ProcessingStepKind>,
+): boolean {
+  const path = step.artifact?.(ctx);
+  if (!path) return false;
+  return RUNNABLE_STEPS.some(
+    (other) =>
+      other.kind !== step.kind &&
+      runSet.has(other.kind) &&
+      other.appliesTo(ctx) &&
+      other.artifact?.(ctx) === path,
+  );
+}
+
 // A context view whose `dir` is the real derivatives dir, for the checks that
 // ask about what's already on disk rather than about where this step writes.
 function withRealDir(ctx: StepContext, realDir: string): StepContext {
@@ -512,7 +544,12 @@ async function dropStaleArtifact(
   const path = step.artifact?.(ctx);
   const present = path ? await Bun.file(path).exists() : false;
   if (opts.onlyIfPresent && !present) return;
-  if (path && present) await rm(path, { force: true }).catch(() => {});
+  // Deliberately unguarded: `force` already makes "not there" a no-op, so a
+  // throw here is a real failure to delete. Marking the step skipped anyway
+  // would record that the stale artifact is gone when it isn't — and the
+  // storyboard route serves its file on bare presence, with no ledger gate, so
+  // the thing we just declared stale would carry on being served.
+  if (path && present) await rm(path, { force: true });
   await markStepSkipped(videoId, step.kind);
   await logStep(videoId, step.kind, "skipped");
 }

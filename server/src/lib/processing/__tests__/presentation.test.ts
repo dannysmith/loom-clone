@@ -305,6 +305,34 @@ describe("artifacts that stop applying are removed, not left stale", () => {
   );
 
   test.skipIf(!ffmpegAvailable)(
+    "a staged run that fails leaves an invalidated artifact alone",
+    async () => {
+      // Invalidation deletes from the LIVE directory. A staged run promises the
+      // previous outputs survive a failure, so it has to wait for the swap —
+      // otherwise a rebuild that aborts still takes the file with it.
+      const { id, dir } = await readyEditable();
+      await Bun.write(join(dir, "suggested-edits.json"), '{"version":1,"edits":[]}');
+      await markStepReady(id, "suggested_edits");
+      // An edited video: suggested_edits stops applying, so an intake (which
+      // forces every step) would invalidate it. Make the run fail after that
+      // point by removing the HLS it needs to re-stitch.
+      await getDb()
+        .update(videos)
+        .set({ lastEditedAt: new Date().toISOString() })
+        .where(eq(videos.id, id));
+
+      scheduleReprocess(id, { source: "recorded", intent: "intake" });
+      await _drainInFlight();
+
+      // The run failed (no segments to stitch), so the file it had invalidated
+      // is still there — as the "previous outputs kept" message claims.
+      expect(await Bun.file(join(dir, "suggested-edits.json")).exists()).toBe(true);
+      expect((await getVideo(id))?.status).toBe("ready");
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable)(
     "a short edit still gets a storyboard — there is no duration threshold",
     async () => {
       // The case that used to orphan one: a 70s video trimmed to 50s. With the
@@ -338,6 +366,31 @@ describe("artifacts that stop applying are removed, not left stale", () => {
       // Cues describe the EDITED timeline, not the 70s original.
       const vtt = await Bun.file(join(dir, "storyboard.vtt")).text();
       expect(vtt).not.toContain("00:01:0");
+    },
+    90_000,
+  );
+});
+
+describe("invalidation never takes a file another step owns", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "a 1080p source keeps its master, which shares a name with the 1080p variant",
+    async () => {
+      // variant_1080 needs height > 1080, so on a 1080p source it never applies
+      // — but its artifact path is `1080p.mp4`, exactly where the master lives.
+      // Treating that as a stale artifact deletes the master the run just built.
+      const { id, dir } = await readyEditable();
+
+      scheduleEdit(id, "recorded");
+      await _drainInFlight();
+      expect(await Bun.file(join(dir, "1080p.mp4")).exists()).toBe(true);
+
+      // Second run: this is where it bit, because the master now exists when the
+      // non-applicable variant step looks for "its" stale file.
+      scheduleReprocess(id, { source: "recorded", intent: "present" });
+      await _drainInFlight();
+
+      expect(await Bun.file(join(dir, "1080p.mp4")).exists()).toBe(true);
+      expect((await getStepStates(id)).get("presentation")?.state).toBe("ready");
     },
     90_000,
   );

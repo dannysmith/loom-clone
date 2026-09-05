@@ -340,7 +340,20 @@ async function runSteps(
       // servable checks always resolve against the real dir.
       if (toStaging) ctx.dir = stagingDir;
       try {
-        if (!step.appliesTo(ctx)) continue;
+        if (!step.appliesTo(ctx)) {
+          // This run was responsible for producing the step (it's in the force
+          // set) and the step no longer applies — so anything already on disk
+          // describes a presentation that no longer exists. The case that bites:
+          // an edit takes a 66s video down to 55s, the storyboard's >=60s
+          // threshold stops applying, and the old sprite sheet is left behind
+          // describing the uncut timeline.
+          if (forceSet.has(step.kind)) {
+            await dropStaleArtifact(videoId, step, withRealDir(ctx, realDir), {
+              onlyIfPresent: true,
+            });
+          }
+          continue;
+        }
         if (!(await inputsSatisfied(videoId, step, withRealDir(ctx, realDir), stagedKinds))) {
           continue;
         }
@@ -454,22 +467,30 @@ async function markStagedStep(
   produced.push(step.kind);
 }
 
-// A presentation-group step that produced nothing this run leaves whatever was
-// there describing the PREVIOUS presentation — a storyboard for a timeline the
-// edit just shortened, captions for words that were cut. Those are worse than
-// nothing (a viewer gets silently desynced scrubbing or subtitles), so the old
-// artifact goes with the step's own output.
+// A step that this run was responsible for producing but didn't leaves whatever
+// was there describing the PREVIOUS presentation — a storyboard for a timeline
+// the edit just shortened, captions for words that were cut. Those are worse
+// than nothing (a viewer gets silently desynced scrubbing or subtitles), so the
+// old artifact goes with the step's own output.
 //
-// This is the general form of a rule the edit path used to hand-code for the
-// one case it had noticed: "if the edited cut fell below the storyboard
-// threshold, delete the storyboard".
+// Two ways a step produces nothing: it ran and returned "skipped", or it stopped
+// applying at all. `onlyIfPresent` is for the second — a step can be permanently
+// inapplicable (no 1080p variant for a 720p source), and that shouldn't write a
+// ledger row for an artifact that never existed.
+//
+// This is the general form of a rule the edit path used to hand-code for the one
+// case it had noticed: "if the edited cut fell below the storyboard threshold,
+// delete the storyboard".
 async function dropStaleArtifact(
   videoId: string,
   step: ProcessingStep,
   ctx: StepContext,
+  opts: { onlyIfPresent?: boolean } = {},
 ): Promise<void> {
   const path = step.artifact?.(ctx);
-  if (path) await rm(path, { force: true }).catch(() => {});
+  const present = path ? await Bun.file(path).exists() : false;
+  if (opts.onlyIfPresent && !present) return;
+  if (path && present) await rm(path, { force: true }).catch(() => {});
   await markStepSkipped(videoId, step.kind);
   await logStep(videoId, step.kind, "skipped");
 }

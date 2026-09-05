@@ -62,6 +62,42 @@ async function write1080pSource(dir: string): Promise<void> {
   if (code !== 0) throw new Error(`source fixture failed: ${stderr}`);
 }
 
+// A silent source of arbitrary length and size, for threshold cases where the
+// content doesn't matter but the duration does.
+async function writeSource(dir: string, seconds: number): Promise<void> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      `testsrc=duration=${seconds}:size=640x360:rate=10`,
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=440:duration=${seconds}:sample_rate=48000`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-c:a",
+      "aac",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      join(dir, "source.mp4"),
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) throw new Error(`source fixture failed: ${stderr}`);
+}
+
 const TRIM_EDL = JSON.stringify({
   version: 1,
   source: "source.mp4",
@@ -227,6 +263,48 @@ describe("presentation master", () => {
       expect(await Bun.file(join(dir, "1080p.mp4")).text()).toBe("PRIOR-PRESENTATION");
     },
     60_000,
+  );
+});
+
+describe("artifacts that stop applying are removed, not left stale", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "an edit below the storyboard threshold takes the old storyboard with it",
+    async () => {
+      // A 70s source trimmed to 50s drops under the storyboard's 60s minimum, so
+      // the step stops applying entirely rather than running and skipping. What
+      // was on disk describes the uncut timeline — leaving it means a viewer
+      // scrubs against thumbnails for a video that no longer exists.
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeSource(dir, 70);
+      await Bun.write(
+        join(dir, "edits.json"),
+        JSON.stringify({
+          version: 1,
+          source: "source.mp4",
+          edits: [{ type: "trim", startTime: 0, endTime: 50 }],
+        }),
+      );
+      // A storyboard from before the edit, with its ledger row.
+      await Bun.write(join(dir, "storyboard.vtt"), "WEBVTT\n\n00:00:00.000 --> 00:01:10.000\n");
+      await Bun.write(join(dir, "storyboard.jpg"), "stub");
+      await markStepReady(video.id, "storyboard");
+      await markStepReady(video.id, "source");
+      await markStepReady(video.id, "metadata");
+      await getDb()
+        .update(videos)
+        .set({ status: "ready", width: 640, height: 360, durationSeconds: 70 })
+        .where(eq(videos.id, video.id));
+
+      scheduleEdit(video.id, "recorded");
+      await _drainInFlight();
+
+      expect((await probeDuration(join(dir, `360p.mp4`))) ?? 0).toBeLessThan(55);
+      expect(await Bun.file(join(dir, "storyboard.vtt")).exists()).toBe(false);
+      expect((await getStepStates(video.id)).get("storyboard")?.state).toBe("skipped");
+    },
+    90_000,
   );
 });
 

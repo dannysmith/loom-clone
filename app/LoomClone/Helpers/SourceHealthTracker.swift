@@ -58,6 +58,10 @@ struct SourceHealthTracker {
         case wentStale(Source, staleSeconds: Double)
         /// Source delivered again after having been reported stale.
         case recovered(Source)
+        /// A hard failure the system reported as over — an interruption
+        /// ending. Distinct from `recovered` because it takes down a
+        /// different warning.
+        case failureEnded(Source)
     }
 
     /// Host-clock seconds at the last delivery from each source. A source
@@ -100,6 +104,28 @@ struct SourceHealthTracker {
     mutating func markFailed(_ source: Source) -> Bool {
         activeWarnings.remove(source.staleWarning)
         return activeWarnings.insert(source.failedWarning).inserted
+    }
+
+    /// Record that a hard failure has ended, at host-clock `now`. Returns
+    /// `.failureEnded` only when a failure warning was actually standing.
+    ///
+    /// Notification-driven rather than inferred from a frame arriving: a
+    /// source can deliver a stray buffer while still broken, and a recovery
+    /// reported on that basis puts the camera back into the composite when
+    /// it isn't fit to be there. This only applies to interruptions — an
+    /// `SCStream` that stopped with an error really is dead, and its warning
+    /// is correctly sticky.
+    ///
+    /// The stall clock is re-armed from the recovery moment rather than the
+    /// last frame before the interruption, so a source that resumes promptly
+    /// doesn't flicker straight from the failure pill to a staleness one. If
+    /// frames don't actually resume, the staleness check fires on its own a
+    /// threshold later with the honest message.
+    @discardableResult
+    mutating func markFailureEnded(_ source: Source, now: Double) -> Transition? {
+        guard activeWarnings.remove(source.failedWarning) != nil else { return nil }
+        lastSeen[source] = now
+        return .failureEnded(source)
     }
 
     // MARK: - Evaluate

@@ -69,6 +69,10 @@ extension RecordingActor {
             timeline.recordSourceRecovered(source: source.rawValue, t: logicalElapsedSeconds())
             Log.health.log("\(source.rawValue) recovered")
             clearWarning(source.staleWarning)
+        case let .failureEnded(source):
+            timeline.recordSourceRecovered(source: source.rawValue, t: logicalElapsedSeconds())
+            Log.health.log("\(source.rawValue) interruption ended")
+            clearWarning(source.failedWarning)
         }
     }
 
@@ -141,6 +145,32 @@ extension RecordingActor {
             reason: "session interrupted",
             message: "Microphone interrupted"
         )
+    }
+
+    /// Called when the system reports a session's interruption has ended.
+    /// Takes the failure warning down so the source can be used again —
+    /// `cameraIsUnusable` gates both the PiP composite and, in
+    /// `screenAndCamera`, whether the camera drives output timing at all, so
+    /// leaving it standing costs the recording the camera for good.
+    ///
+    /// Audio routing is deliberately not restored: if the camera session's
+    /// death moved HLS audio onto the standalone mic, it stays there. That
+    /// mic is working, and a second routing switch mid-recording buys
+    /// nothing.
+    func handleCameraSessionInterruptionEnded() {
+        recordSourceRecovery(.camera)
+    }
+
+    func handleMicSessionInterruptionEnded() {
+        recordSourceRecovery(.audio)
+    }
+
+    /// Shared body of the two interruption-ended handlers.
+    private func recordSourceRecovery(_ source: SourceHealthTracker.Source) {
+        guard isRecording, !isStopping else { return }
+        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        guard let transition = sourceHealth.markFailureEnded(source, now: now) else { return }
+        dispatch(transition)
     }
 
     /// Shared body of the five capture-failure handlers: record it on the

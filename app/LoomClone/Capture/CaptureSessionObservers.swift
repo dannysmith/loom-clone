@@ -15,7 +15,8 @@ enum CaptureSessionObservers {
         on session: AVCaptureSession,
         log: LoomLogger,
         onError: @escaping @Sendable (Error) -> Void,
-        onInterrupted: @escaping @Sendable () -> Void
+        onInterrupted: @escaping @Sendable () -> Void,
+        onInterruptionEnded: @escaping @Sendable () -> Void
     ) -> [NSObjectProtocol] {
         let center = NotificationCenter.default
         let errorObserver = center.addObserver(
@@ -43,7 +44,19 @@ enum CaptureSessionObservers {
             log.log("Session interrupted: \(notification.userInfo ?? [:])")
             onInterrupted()
         }
-        return [errorObserver, interruptionObserver]
+        // Without this, an interruption is permanent as far as the app is
+        // concerned: the failure warning it raises is never taken down, and a
+        // camera stays out of the composite for the rest of the recording even
+        // once the system hands the session back.
+        let interruptionEndedObserver = center.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: nil
+        ) { _ in
+            log.log("Session interruption ended")
+            onInterruptionEnded()
+        }
+        return [errorObserver, interruptionObserver, interruptionEndedObserver]
     }
 
     static func remove(_ observers: [NSObjectProtocol]) {

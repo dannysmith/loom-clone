@@ -22,21 +22,20 @@ export function publicVideoPath(slug: string): string {
   return `/${slug}/raw/${PUBLIC_VIDEO_FILENAME}`;
 }
 
-// The filename of the "active" raw MP4 for a video — the file viewers should
-// see. Always the presentation master, named for the source's height (e.g.
-// 1440p.mp4), whether or not the video has been edited: it's the file carrying
-// the audio chain and any committed cut. source.mp4 is the pristine original and
-// is never served publicly.
+// The filename of the presentation master — the file viewers are served, named
+// for the source's height (e.g. 1440p.mp4), whether or not the video has been
+// edited. It carries the audio chain and any committed cut. source.mp4 is the
+// pristine original and is never served publicly.
 //
-// Falls back to source.mp4 only when the height isn't cached yet — a video that
-// hasn't reached the metadata step, where nothing is servable anyway (the
-// serving gate keys on the `presentation` step, so this fallback never becomes a
-// URL a viewer follows).
+// NULL when the video has no cached height, which means no master can exist yet:
+// metadata hasn't run, or it failed. Callers must handle that rather than
+// substituting source.mp4 — this used to fall back to it, and the redirect
+// handler then sent /raw/source.mp4 to itself in an infinite loop.
 export function activeRawFilename(video: {
   lastEditedAt: string | null;
   height: number | null;
-}): string {
-  return video.height ? `${video.height}p.mp4` : "source.mp4";
+}): string | null {
+  return video.height ? `${video.height}p.mp4` : null;
 }
 
 // Build viewer-facing URLs for a video. `raw` is the redirecting `video.mp4`

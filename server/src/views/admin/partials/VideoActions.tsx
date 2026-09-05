@@ -62,13 +62,15 @@ export function VideoActions({
         </a>
       )}
 
-      <a
-        href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
-        download
-        class="btn btn--sm"
-      >
-        <IconDownload size={14} /> Download
-      </a>
+      {activeRawFilename(video) && (
+        <a
+          href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
+          download
+          class="btn btn--sm"
+        >
+          <IconDownload size={14} /> Download
+        </a>
+      )}
 
       <form method="post" action={`/admin/videos/${video.id}/duplicate`}>
         <button type="submit" class="btn btn--sm">

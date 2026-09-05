@@ -106,7 +106,7 @@ describe("migration planning", () => {
     expect(plan.projectedBytes).toBe(0);
   });
 
-  test("planning writes nothing", async () => {
+  test.skipIf(!ffmpegAvailable)("planning writes nothing", async () => {
     const { id, dir } = await legacyVideo();
     await planMigration();
     const entries = await Array.fromAsync(new Bun.Glob("*").scan({ cwd: dir }));
@@ -191,20 +191,23 @@ describe("migration application", () => {
     30_000,
   );
 
-  test("an unplayable source is reported, not turned into a broken master", async () => {
-    const video = await createVideo();
-    const dir = join(DATA_DIR, video.id, "derivatives");
-    await mkdir(dir, { recursive: true });
-    await Bun.write(join(dir, "source.mp4"), "definitely not an mp4");
-    await getDb()
-      .update(videos)
-      .set({ status: "ready", width: 640, height: 360 })
-      .where(eq(videos.id, video.id));
+  test.skipIf(!ffmpegAvailable)(
+    "an unplayable source is reported, not turned into a broken master",
+    async () => {
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await Bun.write(join(dir, "source.mp4"), "definitely not an mp4");
+      await getDb()
+        .update(videos)
+        .set({ status: "ready", width: 640, height: 360 })
+        .where(eq(videos.id, video.id));
 
-    const result = await migrateVideo(await planFor(video.id));
-    expect(result.error).toContain("playability");
-    // Nothing half-written left where the serving gate looks for a master.
-    expect(await Bun.file(join(dir, "360p.mp4")).exists()).toBe(false);
-    expect(await Bun.file(join(dir, "360p.mp4.migrating")).exists()).toBe(false);
-  });
+      const result = await migrateVideo(await planFor(video.id));
+      expect(result.error).toContain("playability");
+      // Nothing half-written left where the serving gate looks for a master.
+      expect(await Bun.file(join(dir, "360p.mp4")).exists()).toBe(false);
+      expect(await Bun.file(join(dir, "360p.mp4.migrating")).exists()).toBe(false);
+    },
+  );
 });

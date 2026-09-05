@@ -31,6 +31,11 @@ export function servedCaptionsPath(derivDir: string, format: CaptionFormat): str
 // Store an incoming transcript as the pristine original (atomic tmp→rename).
 // Producing the served captions from it is a separate concern — the `captions`
 // pipeline step — because it depends on the EDL.
+//
+// A transcript in the other format is dropped, because there is only ever ONE
+// original: findOriginalCaptions prefers SRT, so an SRT left behind by an
+// earlier upload would shadow a VTT sent later and the video would keep serving
+// captions from a transcript that has been replaced.
 export async function writeOriginalCaptions(
   derivDir: string,
   format: CaptionFormat,
@@ -40,6 +45,8 @@ export async function writeOriginalCaptions(
   const tmp = `${final}.tmp`;
   await Bun.write(tmp, body);
   await rename(tmp, final);
+  const superseded: CaptionFormat = format === "srt" ? "vtt" : "srt";
+  await rm(originalCaptionsPath(derivDir, superseded), { force: true }).catch(() => {});
 }
 
 // The stored original, if there is one. SRT wins when both exist — it's what the

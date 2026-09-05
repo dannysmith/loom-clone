@@ -30,7 +30,8 @@ async function listSources(video: Video): Promise<SourceEntry[]> {
   if (!width || !height) return [];
   const dir = join(DATA_DIR, video.id, "derivatives");
   const aspect = aspectRatio ?? width / height;
-  const activeFile = activeRawFilename(video);
+  // Guarded by the `!width || !height` check above, so a master name exists.
+  const activeFile = activeRawFilename(video) ?? `${height}p.mp4`;
 
   const downscaleHeights = DOWNSCALE_HEIGHTS.filter((h) => h < height);
   const [activeExists, ...downscaleExists] = await Promise.all([

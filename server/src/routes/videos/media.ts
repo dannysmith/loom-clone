@@ -8,6 +8,7 @@ import {
   readChapters,
   viewerDurationFromEdits,
 } from "../../lib/chapters";
+import { probeDuration } from "../../lib/derivatives";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/paths";
 import { srtToVtt } from "../../lib/srt";
@@ -38,6 +39,26 @@ async function resolveForMedia(slug: string) {
   return resolved?.video ?? null;
 }
 
+// How long source.mp4 is, which is the timeline the EDL is expressed against.
+// `durationSeconds` describes the presentation MASTER, so feeding it to the
+// remap on an edited video truncates the kept segments and drops chapters near
+// the end.
+//
+// Recordings have the segment-duration sum, which is exact and outlives the HLS
+// cleanup. Uploads have no segments, so an edited one has to be probed — the
+// only record of the original length is the file itself. Unedited videos skip
+// the probe: with no cuts the master IS the source length.
+async function sourceDurationFor(
+  video: { id: string; durationSeconds: number | null },
+  edited: boolean,
+): Promise<number> {
+  const segmentSum = await sumSegmentDuration(video.id);
+  if (segmentSum > 0) return segmentSum;
+  if (!edited) return video.durationSeconds ?? 0;
+  const probed = await probeDuration(join(DATA_DIR, video.id, "derivatives", "source.mp4"));
+  return probed ?? video.durationSeconds ?? 0;
+}
+
 const media = new Hono();
 
 media.get("/:slug/raw/:file", async (c) => {
@@ -53,8 +74,13 @@ media.get("/:slug/raw/:file", async (c) => {
   if (file === PUBLIC_VIDEO_FILENAME || file === "source.mp4") {
     const video = await resolveForMedia(slug);
     if (!video) return c.text("Not found", 404);
+    const master = activeRawFilename(video);
+    // No master yet (metadata hasn't run, or failed). There is nothing to hand
+    // out — the video page still serves HLS — and redirecting to source.mp4
+    // would land right back here.
+    if (!master) return c.text("Not found", 404);
     c.header("Cache-Control", agentTextCacheControl(video.visibility));
-    return c.redirect(`/${video.slug}/raw/${activeRawFilename(video)}`, 302);
+    return c.redirect(`/${video.slug}/raw/${master}`, 302);
   }
 
   if (!RAW_FILENAME.test(file)) return c.text("Not found", 404);
@@ -157,12 +183,6 @@ media.get("/:slug/chapters.vtt", async (c) => {
   // Remap recording-timeline timestamps through the EDL (if any) so the
   // VTT reflects the viewer-facing timeline. Chapters that fall inside
   // cuts are dropped from the rendered VTT but stay in chapters.json.
-  //
-  // The EDL is expressed against the SOURCE, so the remap needs the source's own
-  // length — the segment-duration sum. `durationSeconds` describes the
-  // presentation master, which for an edited video is shorter, and feeding that
-  // in truncates the kept segments so chapters near the end get dropped.
-  const sourceDuration = (await sumSegmentDuration(video.id)) || (video.durationSeconds ?? 0);
   let edits: unknown[] = [];
   const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
   if (await editsFile.exists()) {
@@ -173,6 +193,7 @@ media.get("/:slug/chapters.vtt", async (c) => {
       // Malformed edits.json — fall back to no edits.
     }
   }
+  const sourceDuration = await sourceDurationFor(video, edits.length > 0);
   // Belt-and-braces: even past the JSON parse, malformed edit entries
   // (wrong types, missing fields) could surface as arithmetic errors
   // inside chaptersForViewer. Treat that the same as "no edits".
@@ -200,7 +221,9 @@ media.get("/:slug/chapters.vtt", async (c) => {
 export async function handleMp4Redirect(c: Context, slug: string): Promise<Response> {
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
-  return c.redirect(`/${video.slug}/raw/${activeRawFilename(video)}`, 302);
+  const master = activeRawFilename(video);
+  if (!master) return c.text("Not found", 404);
+  return c.redirect(`/${video.slug}/raw/${master}`, 302);
 }
 
 export default media;

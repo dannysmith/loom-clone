@@ -68,6 +68,28 @@ describe("PUT /:id/transcript", () => {
     expect(await original.text()).toBe(SAMPLE_SRT);
   });
 
+  test("a later upload in another format replaces the stored original", async () => {
+    // findOriginalCaptions prefers SRT, so an SRT left behind by an earlier
+    // upload would shadow a VTT sent afterwards and the video would keep serving
+    // captions from a transcript that had been replaced.
+    const { id } = await createVideoViaApi();
+    await videos.request(`/${id}/transcript`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-subrip" },
+      body: SAMPLE_SRT,
+    });
+    const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nreplaced.\n";
+    await videos.request(`/${id}/transcript`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/vtt" },
+      body: vtt,
+    });
+
+    const dir = join(DATA_DIR, id, "derivatives");
+    expect(await Bun.file(join(dir, "captions.original.srt")).exists()).toBe(false);
+    expect(await Bun.file(join(dir, "captions.original.vtt")).text()).toBe(vtt);
+  });
+
   test("detects VTT format from content-type", async () => {
     const { id } = await createVideoViaApi();
     const vtt = `WEBVTT

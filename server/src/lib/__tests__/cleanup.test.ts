@@ -131,27 +131,13 @@ describe("cleanupStaleFiles", () => {
     expect(await Bun.file(candidate).exists()).toBe(true);
   });
 
-  test("removes HLS once both the source and the presentation master are validated", async () => {
+  test("does NOT remove HLS when the presentation step failed", async () => {
+    // The master file is on disk but validation rejected it, so resolve.ts
+    // refuses to serve it. The HLS is the viewer's only remaining path and must
+    // outlive a master that doesn't work.
     const { id, hls } = await makeStaleReadyVideo();
     await markStepReady(id, "source");
-    await getDb().update(videos).set({ height: 1080 }).where(eq(videos.id, id));
-    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // served master
-    await markStepReady(id, "presentation"); // validated, the bar resolve.ts serves on
-
-    await cleanupStaleFiles();
-
-    for (const f of hls) expect(await Bun.file(f).exists()).toBe(false);
-  });
-
-  test("does NOT remove HLS when the master is on disk but has no validated row", async () => {
-    // A video migrated from before the presentation master, or one whose step
-    // rows were lost: the file is there but nothing validated it, so resolve.ts
-    // won't serve the MP4 until the backfill runs. Keep the HLS fallback rather
-    // than stranding the viewer.
-    const { id, hls } = await makeStaleReadyVideo();
-    await markStepReady(id, "source");
-    await getDb().update(videos).set({ height: 1080 }).where(eq(videos.id, id));
-    await Bun.write(join(DATA_DIR, id, "derivatives", "1080p.mp4"), "stub"); // present, no row
+    await markStepFailed(id, "presentation", "isProbablyPlayable failed");
 
     await cleanupStaleFiles();
 

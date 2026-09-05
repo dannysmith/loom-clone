@@ -101,10 +101,11 @@ function ReadinessRow({
 }) {
   // Offer a per-artifact regenerate when the step is regenerable, source is
   // valid (encoded in item.regenerable), the video is reprocessable, and it
-  // isn't already mid-generation. Shown for edited videos too: the regen is
-  // edit-aware — variants/storyboard/metadata rebuild from the edited cut, the
-  // source-based artifacts (thumbnail, peaks) from the preserved source.mp4,
-  // presentation-based ones (variants, storyboard, captions) from the master.
+  // isn't already mid-generation. Shown for edited videos too, because each step
+  // regenerates from whatever it declares as its input: the source-group ones
+  // (metadata, thumbnail, peaks, editor storyboard) from the preserved
+  // source.mp4, the presentation-group ones (variants, storyboard, captions)
+  // from the master — which for an edited video is the cut.
   const showRegen = reprocessable && item.regenerable && item.icon !== "pending";
   return (
     <tr class={`readiness-row readiness-row--${item.icon}`}>

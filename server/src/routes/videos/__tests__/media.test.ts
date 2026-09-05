@@ -33,6 +33,38 @@ async function writeVideoFile(videoId: string, relPath: string, content: string 
   await Bun.write(full, content);
 }
 
+const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
+
+// A real MP4 of a given length, for the cases that need a probe-able source.
+async function writeSource(dir: string, seconds: number): Promise<void> {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      `testsrc=duration=${seconds}:size=640x360:rate=10`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      join(dir, "source.mp4"),
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  if ((await proc.exited) !== 0) throw new Error("source fixture failed");
+}
+
 // The presentation master is named for the video's height, so the raw routes
 // need one cached.
 async function setHeight(videoId: string, height: number): Promise<void> {
@@ -94,6 +126,18 @@ describe("GET /:slug/raw/:file", () => {
     expect(await res.text()).toBe("raw-upload");
   });
 
+  test("a video with no master 404s rather than redirecting to itself", async () => {
+    // No cached height means no presentation master exists yet — metadata hasn't
+    // run, or it failed. Resolving the redirect to source.mp4 would send the
+    // request straight back into this same handler, forever.
+    const video = await createVideo();
+    const res = await media.request(`/${video.slug}/raw/source.mp4`);
+    expect(res.status).toBe(404);
+
+    const viaVideoMp4 = await media.request(`/${video.slug}/raw/video.mp4`);
+    expect(viaVideoMp4.status).toBe(404);
+  });
+
   test("returns 404 for missing file on disk", async () => {
     const video = await createVideo();
     const res = await media.request(`/${video.slug}/raw/1080p.mp4`);
@@ -124,6 +168,46 @@ describe("GET /:slug/raw/:file", () => {
     expect(res.headers.get("content-range")).toBe("bytes 2-5/10");
     expect(await res.text()).toBe("2345");
   });
+});
+
+describe("GET /:slug/chapters.vtt", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "an edited UPLOAD remaps chapters against the source, not the shorter master",
+    async () => {
+      // An upload has no segment rows, so the source length can only come from
+      // the file. Using durationSeconds (the edited master's length) would
+      // truncate the kept segments and silently drop chapters near the end.
+      const video = await createVideo();
+      const dir = join(DATA_DIR, video.id, "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeSource(dir, 20);
+      await getDb()
+        .update(videosTable)
+        .set({ source: "uploaded", height: 360, durationSeconds: 10 })
+        .where(eq(videosTable.id, video.id));
+      await writeChapters(video.id, [
+        { id: "c1", t: 1, title: "start", createdDuringRecording: true },
+        { id: "c2", t: 18, title: "near the end", createdDuringRecording: true },
+      ]);
+      // Trim to the first 10s of a 20s source — durationSeconds is now 10.
+      await Bun.write(
+        join(dir, "edits.json"),
+        JSON.stringify({
+          version: 1,
+          source: "source.mp4",
+          edits: [{ type: "cut", startTime: 2, endTime: 12 }],
+        }),
+      );
+
+      const res = await media.request(`/${video.slug}/chapters.vtt`);
+      expect(res.status).toBe(200);
+      const vtt = await res.text();
+      // The 18s chapter survives the cut (it lands at 8s in the edited
+      // timeline); truncating at 10s would have dropped it entirely.
+      expect(vtt).toContain("near the end");
+    },
+    30_000,
+  );
 });
 
 describe("GET /:slug/stream/:file", () => {

@@ -32,6 +32,9 @@ function migrateThrough(db: Database, through: string): void {
     runMigration(db, tag);
     if (tag === through) return;
   }
+  // Without this a renamed migration would silently apply every one of them,
+  // building a fixture in the wrong state and testing nothing.
+  throw new Error(`migration ${through} not found in the journal`);
 }
 
 let db: Database;

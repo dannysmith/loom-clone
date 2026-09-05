@@ -261,7 +261,7 @@ Not a sweep for stale sentences — a rewrite where the mental model changed. Th
 - `backup-and-restore.md` — a restored video needs a presentation rebuild before it serves.
 - `AGENTS.md` — the project-structure block and anything describing the pipeline.
 
-### Phase 5 — Codebase review
+### Phase 5 — Codebase review [✅ DONE]
 
 The standard end-of-large-change pass, before the PR goes up:
 

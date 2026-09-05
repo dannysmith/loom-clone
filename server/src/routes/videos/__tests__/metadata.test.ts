@@ -91,6 +91,26 @@ describe("GET /:slug.json", () => {
     expect(body.aspectRatio).toBeCloseTo(1.7778, 3);
   });
 
+  test("a short video's storyboard URLs are published", async () => {
+    // These used to be gated on a 60-second duration, which went stale when
+    // every video started getting a storyboard.
+    const video = await createVideo();
+    await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 11 });
+    await writeDerivative(video, "storyboard.vtt");
+
+    const body = await (await videos.request(`/${video.slug}.json`)).json();
+    expect(body.urls.storyboard).toContain("/storyboard.vtt");
+    expect(body.urls.storyboardImage).toContain("/storyboard.jpg");
+  });
+
+  test("no storyboard URLs when the file isn't there", async () => {
+    const video = await createVideo();
+    await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 120 });
+
+    const body = await (await videos.request(`/${video.slug}.json`)).json();
+    expect(body.urls.storyboard).toBeNull();
+  });
+
   test("sources lists the master + downscales, highest first (1080p)", async () => {
     const video = await createVideo();
     await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 120 });
@@ -158,9 +178,10 @@ describe("GET /:slug.json", () => {
     expect(body.transcript).toBeNull();
   });
 
-  test("urls.storyboard and storyboardImage are absolute URLs when duration ≥ 60s", async () => {
+  test("urls.storyboard and storyboardImage are absolute URLs", async () => {
     const video = await createVideo();
     await setMeta(video.id, { width: 1920, height: 1080, durationSeconds: 120 });
+    await writeDerivative(video, "storyboard.vtt");
     const res = await videos.request(`/${video.slug}.json`);
     const body = await res.json();
     expect(body.urls.storyboard).toMatch(/^https?:\/\//);

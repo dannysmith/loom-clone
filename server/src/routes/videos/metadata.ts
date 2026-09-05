@@ -72,7 +72,11 @@ export async function handleJsonMetadata(c: Context, slug: string): Promise<Resp
   const urls = urlsForVideo(video);
   const transcript = await getTranscript(video.id);
   const sources = await listSources(video);
-  const hasStoryboard = (video.durationSeconds ?? 0) >= 60;
+  // Gated on the file, not a duration threshold — every video gets a storyboard
+  // now, however short.
+  const hasStoryboard = await Bun.file(
+    join(DATA_DIR, video.id, "derivatives", "storyboard.vtt"),
+  ).exists();
   c.header("Cache-Control", agentTextCacheControl(video.visibility));
   return c.json({
     id: video.id,

@@ -3,7 +3,7 @@ import { rename, rm } from "fs/promises";
 import { join, resolve } from "path";
 import { getDb } from "../db/client";
 import { type ProcessingStepKind, videos } from "../db/schema";
-import { spawnFfmpeg } from "./ffmpeg";
+import { ffmpegPath, requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 import { hasAudioStream, probeJson } from "./ffprobe";
 import { DATA_DIR, derivativesDir } from "./paths";
 import { isProbablyPlayable } from "./processing/playable";
@@ -19,21 +19,8 @@ const ARNNDN_MODEL = resolve(import.meta.dir, "../../assets/audio-models/cb.rnnn
 // reconciliation) lives in ./processing/pipeline.ts; this module only knows
 // how to produce individual files.
 
-// Cache the ffmpeg PATH lookup — no need to scan on every invocation.
-let ffmpegPath: string | null | undefined; // undefined = not checked yet
-
 async function runFfmpeg(args: string[]): Promise<void> {
-  if (ffmpegPath === undefined) {
-    ffmpegPath = Bun.which("ffmpeg");
-    if (!ffmpegPath) {
-      console.warn("[derivatives] ffmpeg not found on PATH — derivative generation will fail");
-    }
-  }
-  if (!ffmpegPath) {
-    throw new Error("ffmpeg not found on PATH");
-  }
-
-  const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+  const { exitCode, stderr } = await spawnFfmpeg(requireFfmpeg(), [
     "-y",
     "-hide_banner",
     "-loglevel",
@@ -46,10 +33,11 @@ async function runFfmpeg(args: string[]): Promise<void> {
 }
 
 // Run the stitch ffmpeg, then validate the tmp BEFORE renaming over any
-// existing source.mp4 (mirrors processAudio): a forced re-stitch that produces
-// an unplayable file must not clobber the previous good source, and a failed
-// ffmpeg must not leave an orphan .tmp behind. Structural check only (no
-// expectedDuration) — the registry's `source` step re-checks duration after.
+// existing source.mp4: a re-stitch that produces an unplayable file must not
+// clobber the pristine original, which is the one file here that can't be
+// rebuilt. A failed ffmpeg must not leave an orphan .tmp behind either.
+// Structural check only (no expectedDuration) — the registry's `source` step
+// re-checks the duration afterwards, against the segment ledger.
 async function stitchSource(args: string[], tmp: string, final: string): Promise<void> {
   try {
     await runFfmpeg(args);
@@ -388,7 +376,7 @@ async function profileNoiseFloor(
   }
   if (!longest) return DEFAULT_NOISE_FLOOR_DB;
 
-  const fp = Bun.which("ffmpeg");
+  const fp = ffmpegPath();
   if (!fp) return DEFAULT_NOISE_FLOOR_DB;
 
   // Sample at most 2 s — enough for a stable mean, fast.
@@ -485,8 +473,7 @@ export async function applyAudioChain(
   if (!(await hasAudioStream(inputPath))) return false;
   if (!(await checkAudioModel())) return false;
 
-  const fp = Bun.which("ffmpeg");
-  if (!fp) throw new Error("ffmpeg not found on PATH");
+  const fp = requireFfmpeg();
 
   const sourcePath = inputPath;
   const noiseFloorDb = opts.noiseFloorDb ?? DEFAULT_NOISE_FLOOR_DB;
@@ -601,8 +588,8 @@ export const VARIANTS: ReadonlyArray<{ kind: ProcessingStepKind; height: number;
 //
 // `-fps_mode passthrough` is load-bearing. Our HLS-origin source.mp4 is
 // genuinely variable-frame-rate (the recorder's metronome emits at the
-// sources' real delivery cadence, not a fixed grid — see the cadence rework
-// in task 21) and carries no SPS VUI timing, so ffmpeg can only *guess* an
+// sources' real delivery cadence rather than onto a fixed grid) and carries no
+// SPS VUI timing, so ffmpeg can only *guess* an
 // `r_frame_rate` for it. That guess is frequently wrong and frequently *below*
 // the real frame density (e.g. the HLS demuxer's 25 fps fallback on a 27 fps
 // recording, or 30 declared on a ~53 fps recording). Without passthrough,
@@ -665,8 +652,7 @@ export async function generateVariant(
   const finalPath = join(dir, outFile);
   const started = Date.now();
 
-  const fp = Bun.which("ffmpeg");
-  if (!fp) throw new Error("ffmpeg not found on PATH");
+  const fp = requireFfmpeg();
 
   const { exitCode, stderr } = await spawnFfmpeg(
     fp,

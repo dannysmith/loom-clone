@@ -14,7 +14,7 @@
 
 import { rename } from "fs/promises";
 import { join } from "path";
-import { spawnFfmpeg } from "./ffmpeg";
+import { requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 
 // Silences shorter than this don't pre-populate the editor.
 const SILENCE_MIN_SECONDS = 3;
@@ -143,8 +143,7 @@ export function suggestionsFromSilences(silences: Silence[], duration: number): 
 // ranges parsed from stderr. Exported so the derivatives pipeline can
 // call this on the raw source before audio processing.
 export async function runSilenceDetect(sourcePath: string, duration: number): Promise<Silence[]> {
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
+  const ffmpeg = requireFfmpeg();
 
   // Full-decode pass over the whole source. silencedetect logs at "info"
   // (keep the level) and -nostats drops the progress line. The silence markers
@@ -152,7 +151,7 @@ export async function runSilenceDetect(sourcePath: string, duration: number): Pr
   // lines as they arrive — memory is bounded by the silence count with no risk
   // of a rolling tail dropping the early ones.
   const { exitCode, stderr } = await spawnFfmpeg(
-    ffmpegPath,
+    ffmpeg,
     [
       "-y",
       "-hide_banner",

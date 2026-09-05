@@ -11,6 +11,7 @@ import {
 import { probeDuration } from "../../lib/derivatives";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/paths";
+import { HLS_SERVABLE } from "../../lib/playlist";
 import { srtToVtt } from "../../lib/srt";
 import { resolveSlug, sumSegmentDuration } from "../../lib/store";
 import { activeRawFilename, PUBLIC_VIDEO_FILENAME } from "../../lib/url";
@@ -32,7 +33,6 @@ type EditsFileLike = { edits?: unknown };
 // un-processed (later, un-watermarked) video. Requests for it redirect to the
 // presentation master instead, so links made before the restructure still work.
 const RAW_FILENAME = /^(\d+p|upload)\.mp4$/;
-const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
 
 async function resolveForMedia(slug: string) {
   const resolved = await resolveSlug(slug);
@@ -97,7 +97,7 @@ media.get("/:slug/raw/:file", async (c) => {
 
 media.get("/:slug/stream/:file", async (c) => {
   const { slug, file } = c.req.param();
-  if (!STREAM_FILENAME.test(file)) return c.text("Not found", 404);
+  if (!HLS_SERVABLE.test(file)) return c.text("Not found", 404);
   const video = await resolveForMedia(slug);
   if (!video) return c.text("Not found", 404);
   const path = join(DATA_DIR, video.id, file);

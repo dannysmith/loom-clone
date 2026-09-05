@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { join } from "path";
 import { agentTextCacheControl } from "../../lib/cache-control";
+import { VARIANTS } from "../../lib/derivatives";
 import { formatDate, formatDuration } from "../../lib/format";
 import { DATA_DIR } from "../../lib/paths";
 import { getTranscript, resolveSlug, type Video } from "../../lib/store";
@@ -10,9 +11,10 @@ import { absoluteUrl, activeRawFilename, urlsForVideo } from "../../lib/url";
 // consumption. Shapes are designed to be stable — add fields freely,
 // don't remove or rename.
 
-// Downscale heights we ever generate, in highest-first order. Mirrors
-// VARIANT_HEIGHTS in resolve.ts and VARIANTS in lib/derivatives.ts.
-const DOWNSCALE_HEIGHTS = [1080, 720] as const;
+// Downscale heights we ever generate, highest-first — read from the canonical
+// VARIANTS list rather than restated, so a new rendition can't be added in one
+// place and forgotten here.
+const DOWNSCALE_HEIGHTS = VARIANTS.map((v) => v.height);
 
 type SourceEntry = {
   height: number;
@@ -21,10 +23,10 @@ type SourceEntry = {
   url: string;
 };
 
-// Builds the public `sources` array: the active raw (source.mp4 for unedited
-// videos, e.g. 1080p.mp4 for edited videos) at the source resolution, plus
-// any downscale variants that exist on disk and are smaller than the source.
-// Ordered highest-resolution first.
+// Builds the public `sources` array: the presentation master at the source's own
+// resolution, plus any downscale variants that exist on disk and are smaller.
+// Ordered highest-resolution first. These are concrete per-rendition URLs — the
+// redirecting video.mp4 is what `urls.raw` carries.
 async function listSources(video: Video): Promise<SourceEntry[]> {
   const { width, height, slug, aspectRatio } = video;
   if (!width || !height) return [];

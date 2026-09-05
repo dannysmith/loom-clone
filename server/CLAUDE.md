@@ -120,6 +120,6 @@ Preferences:
 
 - **Module-level `await`** in `index.ts` calls `initDb()` at import. The `createApp()` factory in `src/app.ts` is the side-effect-free entry — import that from tests, not `index.ts`.
 - **`DATA_DIR = "data"`** lives in `src/lib/paths.ts` and is relative. Tests depend on this. In production the Docker bind-mount maps it to `/mnt/data/loom-clone` — don't hard-code absolute paths.
-- **Segment filename allowlist** in `routes/api/videos.ts` (`/^(init\.mp4|seg_\d+\.m4s)$/`) is the real path-traversal defense. Don't weaken it without understanding why it exists. Similar allowlists exist in `routes/videos/media.ts` for raw and stream routes.
+- **Segment filename allowlist** — `SEGMENT_UPLOAD` in `lib/playlist.ts`, used by the upload route in `routes/api/videos.ts`, is the real path-traversal defense. Don't weaken it without understanding why it exists. The sibling patterns there (`HLS_SERVABLE`, `MEDIA_SEGMENT`) cover serving and cleanup; they differ on purpose.
 - **Derivatives are fire-and-forget.** `scheduleDerivatives(id)` returns immediately; the `/complete` response never waits on ffmpeg. Tests use `_inFlightPromise(id)` to await completion.
 - **Default queries hide trashed videos.** `getVideo` / `getVideoBySlug` / `resolveSlug` / `listVideos` all accept `{ includeTrashed: true }` to opt in. Admin-side code needs the opt-in; public routes should never use it.

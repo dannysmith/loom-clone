@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readdir, rename, rm } from "fs/promises";
 import { join } from "path";
+import { ffmpegPath, requireFfmpeg } from "./ffmpeg";
 import { DATA_DIR } from "./paths";
 
 // Thumbnail candidate extraction and selection. Replaces the old single-frame
@@ -69,8 +70,7 @@ export async function extractAndPromoteThumbnails(
   duration: number,
   inputPath?: string,
 ): Promise<void> {
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
+  const ffmpeg = requireFfmpeg();
 
   const source = inputPath ?? join(derivDir, "source.mp4");
   const candDir = join(derivDir, CANDIDATES_DIR);
@@ -86,7 +86,7 @@ export async function extractAndPromoteThumbnails(
     const t = timestamps[i]!;
     const filename = `auto-${String(i).padStart(2, "0")}.jpg`;
     const outPath = join(candDir, filename);
-    await runFfmpegExtract(ffmpegPath, source, t, outPath);
+    await runFfmpegExtract(ffmpeg, source, t, outPath);
   }
 
   // Step 2: score candidates by luminance variance.
@@ -97,14 +97,14 @@ export async function extractAndPromoteThumbnails(
 }
 
 async function runFfmpegExtract(
-  ffmpegPath: string,
+  ffmpeg: string,
   source: string,
   timestamp: number,
   outPath: string,
 ): Promise<void> {
   const proc = Bun.spawn(
     [
-      ffmpegPath,
+      ffmpeg,
       "-y",
       "-hide_banner",
       "-loglevel",
@@ -154,13 +154,13 @@ async function scoreCandidates(candDir: string): Promise<ScoredCandidate[]> {
 
 // Use ffmpeg signalstats to measure luminance variance of a single frame.
 async function measureVariance(imagePath: string): Promise<number> {
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) return fallbackVariance(imagePath);
+  const ffmpeg = ffmpegPath();
+  if (!ffmpeg) return fallbackVariance(imagePath);
 
   try {
     const proc = Bun.spawn(
       [
-        ffmpegPath,
+        ffmpeg,
         "-y",
         "-hide_banner",
         "-i",
@@ -380,8 +380,7 @@ export async function saveCustomThumbnail(
   videoId: string,
   imageData: ArrayBuffer,
 ): Promise<string> {
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
+  const ffmpeg = requireFfmpeg();
 
   const derivDir = join(DATA_DIR, videoId, "derivatives");
   const candDir = join(derivDir, CANDIDATES_DIR);
@@ -403,7 +402,7 @@ export async function saveCustomThumbnail(
   try {
     const proc = Bun.spawn(
       [
-        ffmpegPath,
+        ffmpeg,
         "-y",
         "-hide_banner",
         "-loglevel",

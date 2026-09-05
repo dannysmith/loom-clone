@@ -9,6 +9,7 @@ import {
 import type { Edit } from "../../lib/edit-transcript";
 import { serveFileWithRange } from "../../lib/file-serve";
 import { DATA_DIR } from "../../lib/paths";
+import { HLS_SERVABLE } from "../../lib/playlist";
 import { type AdminEnv, requireVideo } from "./helpers";
 
 type EditsFileLike = { edits?: unknown };
@@ -16,7 +17,6 @@ type EditsFileLike = { edits?: unknown };
 const media = new Hono<AdminEnv>();
 
 const RAW_FILENAME = /^(source|\d+p)\.mp4$/;
-const STREAM_FILENAME = /^(stream\.m3u8|init\.mp4|seg_\d+\.m4s)$/;
 
 media.get("/:id/media/raw/:file", async (c) => {
   const file = c.req.param("file");
@@ -33,7 +33,7 @@ media.get("/:id/media/raw/:file", async (c) => {
 
 media.get("/:id/media/stream/:file", async (c) => {
   const file = c.req.param("file");
-  if (!STREAM_FILENAME.test(file)) return c.text("Not found", 404);
+  if (!HLS_SERVABLE.test(file)) return c.text("Not found", 404);
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
   const contentType = file.endsWith(".m3u8")

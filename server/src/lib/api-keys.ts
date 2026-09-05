@@ -32,8 +32,8 @@ export function hashToken(token: string): string {
 // rather than fetching all rows and constant-time-comparing. With 256 bits
 // of entropy per token the info an attacker can extract from byte-level
 // comparison timing is negligible in practice — they'd need vastly more
-// queries than any rate-limit would allow. If Phase 5 ever adds auth
-// rate-limiting we should revisit, but at single-user scale this is fine.
+// queries than any rate-limit would allow. Worth revisiting if auth ever gains
+// rate-limiting, but at single-user scale this is fine.
 
 // Returns the plaintext token exactly once. The caller (CLI script) prints
 // it to stdout; we never store it. The DB only ever sees the hash.

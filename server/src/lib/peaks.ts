@@ -1,6 +1,6 @@
 import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
-import { spawnFfmpeg } from "./ffmpeg";
+import { requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 import { hasAudioStream } from "./ffprobe";
 
 // Generates peaks.json for wavesurfer.js from source.mp4.
@@ -22,8 +22,7 @@ export async function generatePeaks(
 ): Promise<boolean> {
   if (duration < 1) return false;
 
-  const ffmpegPath = Bun.which("ffmpeg");
-  if (!ffmpegPath) throw new Error("ffmpeg not found on PATH");
+  const ffmpeg = requireFfmpeg();
 
   const sourcePath = inputPath ?? join(derivDir, "source.mp4");
   // A screen recording with no microphone has no waveform to draw. That's a
@@ -38,7 +37,7 @@ export async function generatePeaks(
 
   try {
     // Extract mono audio as raw 16-bit signed PCM at 8kHz (enough for peak visualization).
-    const { exitCode, stderr } = await spawnFfmpeg(ffmpegPath, [
+    const { exitCode, stderr } = await spawnFfmpeg(ffmpeg, [
       "-y",
       "-hide_banner",
       "-loglevel",

@@ -249,7 +249,7 @@ The drizzle migration, the `migrate-presentation-masters.ts` script with `--appl
 
 I can't validate this against real videos from here, so the script must be legible enough to review by reading, and its dry-run output detailed enough to check by eye on the box before `--apply`.
 
-### Phase 4 — Documentation
+### Phase 4 — Documentation [✅ DONE]
 
 Not a sweep for stale sentences — a rewrite where the mental model changed. The source/presentation split and the two artifact groups are the organising idea a future reader needs; several docs currently teach the opposite.
 

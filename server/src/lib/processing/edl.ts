@@ -54,6 +54,12 @@ export async function keptSegmentsFor(
   return { kept, fullSpan: isFullSpan(kept, sourceDuration) };
 }
 
+// How long a render of `kept` should come out. Independent of the rendered file,
+// which is the point: it's what the presentation master gets validated against.
+export function keptDuration(kept: Segment[]): number {
+  return kept.reduce((total, seg) => total + (seg.end - seg.start), 0);
+}
+
 export function isFullSpan(kept: Segment[], sourceDuration: number): boolean {
   if (kept.length !== 1) return false;
   const only = kept[0]!;

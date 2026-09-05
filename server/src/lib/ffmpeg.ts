@@ -78,32 +78,31 @@ export async function spawnFfmpeg(
 
 // Drain a byte stream keeping only its last `maxBytes`. Peak retained memory is
 // ~maxBytes + one chunk, regardless of total stream length.
+//
+// Iterated rather than read through an explicit reader: `releaseLock()` in a
+// `finally` throws ERR_INVALID_STATE when the reader has already been released,
+// which turns a perfectly successful ffmpeg run into a failed step — and inside
+// a staged rebuild, aborts the whole run. Async iteration owns the lock itself,
+// so there is no state to get wrong.
 async function readStreamTail(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number,
 ): Promise<string> {
-  const reader = stream.getReader();
   let buf = new Uint8Array(0);
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.byteLength === 0) continue;
+  for await (const value of stream) {
+    if (!value || value.byteLength === 0) continue;
 
-      // A single chunk larger than the cap: keep just its tail.
-      if (value.byteLength >= maxBytes) {
-        buf = value.slice(value.byteLength - maxBytes);
-        continue;
-      }
-
-      const combinedLen = buf.byteLength + value.byteLength;
-      const combined = new Uint8Array(combinedLen);
-      combined.set(buf, 0);
-      combined.set(value, buf.byteLength);
-      buf = combinedLen > maxBytes ? combined.slice(combinedLen - maxBytes) : combined;
+    // A single chunk larger than the cap: keep just its tail.
+    if (value.byteLength >= maxBytes) {
+      buf = value.slice(value.byteLength - maxBytes);
+      continue;
     }
-  } finally {
-    reader.releaseLock();
+
+    const combinedLen = buf.byteLength + value.byteLength;
+    const combined = new Uint8Array(combinedLen);
+    combined.set(buf, 0);
+    combined.set(value, buf.byteLength);
+    buf = combinedLen > maxBytes ? combined.slice(combinedLen - maxBytes) : combined;
   }
   // ASCII-only for our parse targets; a split multibyte char at the tail
   // boundary just yields a replacement char, which never affects parsing.
@@ -117,28 +116,21 @@ async function collectMatchingLines(
   stream: ReadableStream<Uint8Array>,
   pattern: RegExp,
 ): Promise<string> {
-  const reader = stream.getReader();
   const decoder = new TextDecoder();
   const kept: string[] = [];
   let partial = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.byteLength === 0) continue;
-      partial += decoder.decode(value, { stream: true });
-      let nl = partial.indexOf("\n");
-      while (nl !== -1) {
-        const line = partial.slice(0, nl);
-        if (pattern.test(line)) kept.push(line);
-        partial = partial.slice(nl + 1);
-        nl = partial.indexOf("\n");
-      }
+  for await (const value of stream) {
+    if (!value || value.byteLength === 0) continue;
+    partial += decoder.decode(value, { stream: true });
+    let nl = partial.indexOf("\n");
+    while (nl !== -1) {
+      const line = partial.slice(0, nl);
+      if (pattern.test(line)) kept.push(line);
+      partial = partial.slice(nl + 1);
+      nl = partial.indexOf("\n");
     }
-    partial += decoder.decode();
-    if (partial && pattern.test(partial)) kept.push(partial);
-  } finally {
-    reader.releaseLock();
   }
+  partial += decoder.decode();
+  if (partial && pattern.test(partial)) kept.push(partial);
   return kept.join("\n");
 }

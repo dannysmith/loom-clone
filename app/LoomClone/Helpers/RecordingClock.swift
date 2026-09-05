@@ -124,29 +124,41 @@ enum RecordingClock {
 
     // MARK: - Freshness gate
 
-    /// True when a source frame can't produce an emittable output frame:
-    /// either it predates the recording anchor, or it isn't strictly newer
-    /// than the frame behind the last real emit. Compositing it would only
-    /// produce a frame the encoder rejects downstream.
+    /// True when a source frame can't produce an emittable output frame — it
+    /// predates the recording anchor, it wouldn't advance the PTS already
+    /// handed to the encoder, or it isn't strictly newer than the frame
+    /// behind the last real emit. Compositing it would only produce a frame
+    /// the encoder rejects downstream.
     ///
-    /// This is the primary defence against non-monotonic video PTS; the
-    /// encoder-level checks are safety nets behind it. An invalid watermark
-    /// means nothing has been emitted yet, so only the anchor test applies.
+    /// This is the primary defence against non-monotonic video PTS, and it
+    /// has to answer the whole emittability question: a tick that fails here
+    /// falls through to the keep-alive path, whereas one rejected further
+    /// down emits nothing at all and re-composites the same doomed frame on
+    /// every subsequent tick. The encoder-level checks behind it are safety
+    /// nets that should never fire. Invalid watermarks mean nothing has been
+    /// emitted yet, so those tests pass and only the anchor test applies.
     ///
-    /// The anchor test is what covers a recording that starts on a source
-    /// which isn't changing. A static display hands the metronome a cached
-    /// frame captured seconds before commit, whose logical PTS is negative
-    /// and stays negative until the display next changes. Failing it here
-    /// rather than after composition is what lets the keep-alive path hold
-    /// that frame, instead of every tick paying for a composite that can
-    /// never be emitted.
+    /// The anchor test covers a recording that starts on a source which isn't
+    /// changing. A static display hands the metronome a cached frame captured
+    /// seconds before commit, whose logical PTS is negative and stays
+    /// negative until the display next changes.
+    ///
+    /// The `lastEmittedVideoPTS` test covers the other end of a static run.
+    /// Keep-alives stamp output with host time while deliberately leaving
+    /// `lastEmittedSourcePTS` alone, so the frame that ends the run is newer
+    /// than the source watermark but can still land behind the last
+    /// keep-alive — by up to one capture lag, whenever the content changed
+    /// just before a keep-alive fired and arrived just after.
     static func isStaleSource(
         capturePTS: CMTime,
         lastEmittedSourcePTS: CMTime,
+        lastEmittedVideoPTS: CMTime,
         start: CMTime,
         pauseAccumulator: CMTime
     ) -> Bool {
-        if logicalPTS(capturePTS: capturePTS, start: start, pauseAccumulator: pauseAccumulator) < .zero {
+        let logical = logicalPTS(capturePTS: capturePTS, start: start, pauseAccumulator: pauseAccumulator)
+        if logical < .zero { return true }
+        if breaksMonotonicity(pts: encoderPTS(logical: logical), lastEmittedVideoPTS: lastEmittedVideoPTS) {
             return true
         }
         guard lastEmittedSourcePTS.isValid else { return false }

@@ -149,12 +149,13 @@ final class RecordingClockTests: XCTestCase {
 
     // MARK: - Freshness gate
 
-    /// `isStaleSource` with an anchor at zero, for the cases that are only
-    /// about the freshness watermark.
+    /// `isStaleSource` with an anchor at zero and nothing yet handed to the
+    /// encoder, for the cases that are only about the freshness watermark.
     private func isStale(_ capturePTS: CMTime, watermark: CMTime) -> Bool {
         RecordingClock.isStaleSource(
             capturePTS: capturePTS,
             lastEmittedSourcePTS: watermark,
+            lastEmittedVideoPTS: .invalid,
             start: .zero,
             pauseAccumulator: .zero
         )
@@ -186,6 +187,7 @@ final class RecordingClockTests: XCTestCase {
         XCTAssertTrue(RecordingClock.isStaleSource(
             capturePTS: t(98.4),
             lastEmittedSourcePTS: .invalid,
+            lastEmittedVideoPTS: .invalid,
             start: t(100),
             pauseAccumulator: .zero
         ))
@@ -198,6 +200,7 @@ final class RecordingClockTests: XCTestCase {
         XCTAssertFalse(RecordingClock.isStaleSource(
             capturePTS: t(100),
             lastEmittedSourcePTS: .invalid,
+            lastEmittedVideoPTS: .invalid,
             start: t(100),
             pauseAccumulator: .zero
         ))
@@ -210,8 +213,37 @@ final class RecordingClockTests: XCTestCase {
         XCTAssertTrue(RecordingClock.isStaleSource(
             capturePTS: t(105),
             lastEmittedSourcePTS: .invalid,
+            lastEmittedVideoPTS: .invalid,
             start: t(100),
             pauseAccumulator: t(10)
+        ))
+    }
+
+    func testFrameCapturedBehindAKeepAliveIsStale() {
+        // The frame that ends a static run is newer than the source watermark
+        // — which keep-alives deliberately leave alone — but was captured just
+        // before the last keep-alive stamped output with host time. The gate
+        // has to catch it: rejected further down, the tick emits nothing and
+        // re-composites the same doomed frame until the next keep-alive is due.
+        XCTAssertTrue(RecordingClock.isStaleSource(
+            capturePTS: t(104.98),
+            lastEmittedSourcePTS: t(103),
+            lastEmittedVideoPTS: RecordingClock.encoderPTS(logical: t(5)),
+            start: t(100),
+            pauseAccumulator: .zero
+        ))
+    }
+
+    func testFrameCapturedAfterAKeepAliveIsFresh() {
+        // The common case at the end of a static run: the content changed
+        // after the last keep-alive, so it advances the timeline and must not
+        // be held back.
+        XCTAssertFalse(RecordingClock.isStaleSource(
+            capturePTS: t(105.02),
+            lastEmittedSourcePTS: t(103),
+            lastEmittedVideoPTS: RecordingClock.encoderPTS(logical: t(5)),
+            start: t(100),
+            pauseAccumulator: .zero
         ))
     }
 
@@ -374,6 +406,7 @@ final class RecordingClockTests: XCTestCase {
         XCTAssertTrue(RecordingClock.isStaleSource(
             capturePTS: t(65),
             lastEmittedSourcePTS: resumed.lastEmittedSourcePTS,
+            lastEmittedVideoPTS: RecordingClock.encoderPTS(logical: t(49)),
             start: t(10),
             pauseAccumulator: resumed.pauseAccumulator
         ))

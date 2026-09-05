@@ -98,7 +98,9 @@ Two bootstrap details make this reachable from the very first tick, which is wha
 
 Keep-alive PTS uses the same formula real frames use — `primingOffset + (host_now - start) - pauseAccumulator` — substituting `host_now` for the source capture time. The wall-clock anchor is what keeps audio and video aligned across the static period: audio PTS also advances at wall-clock rate, so a 10s static run produces 10 keep-alives whose PTS spans 10 seconds, matching audio exactly.
 
-Keep-alive intentionally does NOT update `lastEmittedSourcePTS`. When fresh source content eventually arrives, the freshness gate still accepts it — its `capturePTS` will be at least 1s past the keep-alive PTS, comfortably beyond capture-lag noise. This is what prevents the keep-alive from re-introducing the pre-task-21 host-clock-PTS bug.
+Keep-alive intentionally does NOT update `lastEmittedSourcePTS`, so the fresh frame that ends a static run still passes the source-watermark half of the gate. This is what prevents the keep-alive from re-introducing the pre-task-21 host-clock-PTS bug.
+
+That frame can still land *behind* the last keep-alive, though, by up to one capture lag — whenever the content changed just before a keep-alive fired and was delivered just after. The gate's `lastEmittedVideoPTS` test catches it and routes the tick to the keep-alive path, which holds the (now-current) cached content until the frame after it advances the timeline. Without that test the tick emits nothing and re-composites the same doomed frame every tick until the next keep-alive falls due.
 
 One `keepalive.emitted` timeline event fires per static run (debounced); subsequent keep-alives in the same run are silent on the timeline.
 

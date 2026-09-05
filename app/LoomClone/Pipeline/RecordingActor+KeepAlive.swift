@@ -27,7 +27,9 @@ extension RecordingActor {
     /// We deliberately do NOT update `lastEmittedSourcePTS` — when a
     /// fresh source frame eventually arrives, its capturePTS should still
     /// be strictly newer than the pre-stale-run real emit, so the
-    /// freshness check accepts it.
+    /// freshness check accepts it. The synthetic PTS this emit does hand
+    /// the encoder is covered by the gate's `lastEmittedVideoPTS` test,
+    /// which catches a frame captured just before this keep-alive fired.
     func tryEmitKeepAlive(
         iterIdx: Int64,
         start: CMTime,
@@ -100,7 +102,7 @@ extension RecordingActor {
 
         lastEmittedVideoPTS = pts
         lastEmitHostTime = nowHost
-        // NOTE: lastEmittedSourcePTS deliberately unchanged.
+        // NOTE: lastEmittedSourcePTS deliberately unchanged — see above.
         diagnostics.keepAliveEmits += 1
 
         // One timeline event per static run.

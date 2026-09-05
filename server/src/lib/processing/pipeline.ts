@@ -296,7 +296,8 @@ async function expectedSourceDuration(
   }
   const upload = join(DATA_DIR, videoId, "upload.mp4");
   if (!(await Bun.file(upload).exists())) return undefined;
-  return (await probeMetadata(upload))?.duration;
+  // Video-derived, because that's what the check measures.
+  return (await probeMetadata(upload))?.videoDuration;
 }
 
 // One runner for every intent. Each step writes either into the real

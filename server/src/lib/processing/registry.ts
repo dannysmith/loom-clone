@@ -45,7 +45,7 @@ import { upsertTranscript } from "../store";
 import { generateEditorStoryboard, generateStoryboard } from "../storyboard";
 import { generateSuggestedEdits, runSilenceDetect, type Silence } from "../suggested-edits";
 import { extractAndPromoteThumbnails } from "../thumbnails";
-import { keptSegmentsFor } from "./edl";
+import { keptDuration, keptSegmentsFor } from "./edl";
 import { isProbablyPlayable } from "./playable";
 
 export type StepTier = "required" | "expected" | "external";
@@ -102,6 +102,9 @@ export type StepContext = {
     // reused by captions so both describe the same cut.
     kept?: Segment[];
     fullSpan?: boolean;
+    // How long the master should be, from the EDL's kept segments. The check on
+    // the produced file compares against this rather than against itself.
+    expectedPresentationDuration?: number;
     // Set when the audio chain failed and the master was built without it, so
     // the run can surface that on the activity feed rather than leaving a
     // silently-unenhanced video looking identical to a processed one.
@@ -201,6 +204,9 @@ async function buildPresentation(ctx: StepContext): Promise<void> {
   if (kept.length === 0) throw new Error("presentation: all content removed by edits");
   ctx.scratch.kept = kept;
   ctx.scratch.fullSpan = fullSpan;
+  // What the render SHOULD come out at, computed from the EDL rather than from
+  // the file itself — see the validate below.
+  ctx.scratch.expectedPresentationDuration = keptDuration(kept);
 
   // Uploads aren't mic recordings, and a legacy source already carries the chain
   // — re-running it would process the audio twice.
@@ -302,8 +308,14 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
       await setPresentationMetadata(ctx.videoId, probe);
       return "ready";
     },
+    // Validated against the EDL's kept-segment sum, NOT against a probe of the
+    // file just written. Comparing a file to a measurement of itself can only
+    // ever pass, which meant a truncated render — ten seconds where the EDL said
+    // fifty — would validate, land, and serve.
     validate: (ctx) =>
-      isProbablyPlayable(presentationPath(ctx), { expectedDuration: ctx.presentationDuration }),
+      isProbablyPlayable(presentationPath(ctx), {
+        expectedDuration: ctx.scratch.expectedPresentationDuration,
+      }),
     artifact: (ctx) => presentationPath(ctx),
   },
   // Downscaled variants, generated from the canonical VARIANTS list (highest

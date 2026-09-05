@@ -13,6 +13,7 @@ import { probeDuration } from "../../derivatives";
 import { DATA_DIR } from "../../paths";
 import { createVideo, getTranscript, getVideo, upsertTranscript } from "../../store";
 import { _drainInFlight, scheduleEdit, scheduleReprocess } from "../pipeline";
+import { type StepContext, stepByKind } from "../registry";
 import { getStepStates, markStepReady } from "../steps-store";
 
 const ffmpegAvailable = Bun.which("ffmpeg") !== null && Bun.which("ffprobe") !== null;
@@ -339,6 +340,34 @@ describe("artifacts that stop applying are removed, not left stale", () => {
       expect(vtt).not.toContain("00:01:0");
     },
     90_000,
+  );
+});
+
+describe("the master is validated against the EDL, not against itself", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "a master that came out the wrong length fails validation",
+    async () => {
+      // The expectation used to be a probe of the file being validated, so the
+      // comparison could only ever pass — a render that produced a fraction of
+      // what the EDL asked for would validate, land, and serve. It now comes
+      // from the kept-segment sum, which is computed from the EDL.
+      const dir = join(DATA_DIR, "validate-check", "derivatives");
+      await mkdir(dir, { recursive: true });
+      await writeSource(dir, 3);
+      // Stand the 3-second fixture in as the "master" and check it against what
+      // a 20-second cut would have expected.
+      await Bun.write(join(dir, "1080p.mp4"), await Bun.file(join(dir, "source.mp4")).bytes());
+
+      const step = stepByKind("presentation")!;
+      const ctx = { dir, height: 1080, scratch: {} } as unknown as StepContext;
+
+      ctx.scratch.expectedPresentationDuration = 20;
+      expect(await step.validate!(ctx)).toBe(false);
+
+      ctx.scratch.expectedPresentationDuration = 3;
+      expect(await step.validate!(ctx)).toBe(true);
+    },
+    60_000,
   );
 });
 

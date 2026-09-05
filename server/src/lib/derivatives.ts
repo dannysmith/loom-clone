@@ -133,7 +133,14 @@ export type ProbeMetadata = {
   width: number;
   height: number;
   fileBytes: number;
+  // Container duration — how long the file plays, following whichever stream
+  // runs longest. This is what a viewer experiences, so it's what gets cached as
+  // durationSeconds and what the EDL is expressed against.
   duration: number;
+  // The video stream's own duration, which is usually a little shorter. Used for
+  // validation, where the expectation is video-derived and comparing it against
+  // the container would measure the wrong thing.
+  videoDuration: number;
 };
 
 export async function probeMetadata(filePath: string): Promise<ProbeMetadata | null> {
@@ -148,7 +155,7 @@ export async function probeMetadata(filePath: string): Promise<ProbeMetadata | n
     "v:0",
     filePath,
   ])) as {
-    streams?: Array<{ width?: number; height?: number }>;
+    streams?: Array<{ width?: number; height?: number; duration?: string }>;
     format?: { size?: string; duration?: string };
   } | null;
   if (!data) return null;
@@ -158,9 +165,16 @@ export async function probeMetadata(filePath: string): Promise<ProbeMetadata | n
   const h = stream?.height;
   const size = Number.parseInt(data.format?.size ?? "", 10);
   const duration = Number.parseFloat(data.format?.duration ?? "");
+  const streamDuration = Number.parseFloat(stream?.duration ?? "");
 
   if (!w || !h || !Number.isFinite(size) || !Number.isFinite(duration)) return null;
-  return { width: w, height: h, fileBytes: size, duration };
+  return {
+    width: w,
+    height: h,
+    fileBytes: size,
+    duration,
+    videoDuration: Number.isFinite(streamDuration) ? streamDuration : duration,
+  };
 }
 
 // Read recording.json sidecar for camera/mic names and recording health.

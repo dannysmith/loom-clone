@@ -111,11 +111,7 @@ extension RecordingActor {
         guard let frontmost else { return }
 
         switch exclusion.focusChanged(to: frontmost.bundleID) {
-        case let .warn(_, replacingPrevious):
-            // Focus moved between two hidden apps: clear first so the UI
-            // re-renders with the new app's name rather than keeping the old
-            // warning's text under the same warning id.
-            if replacingPrevious { clearWarning(.focusedWindowHidden) }
+        case .warn:
             fireWarning(.init(
                 id: .focusedWindowHidden,
                 severity: .warning,

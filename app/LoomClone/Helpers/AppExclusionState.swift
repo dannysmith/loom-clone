@@ -65,11 +65,11 @@ struct AppExclusionState {
 
     /// What the focused-window watcher should do this tick.
     enum FocusChange: Equatable {
-        /// Warn that the focused app is hidden from the recording. When
-        /// `replacingPrevious` is true a warning is already on screen for a
-        /// different app, so the caller clears it first to force a re-render
-        /// with the new name.
-        case warn(bundleID: String, replacingPrevious: Bool)
+        /// Warn that the focused app is hidden from the recording. Fires
+        /// again with a new bundle ID when focus moves between two hidden
+        /// apps; the caller re-fires the same warning id and the coordinator
+        /// replaces the standing one in place.
+        case warn(bundleID: String)
         /// Take the standing warning down — focus moved to a visible app, or
         /// there is nothing excluded any more.
         case clear
@@ -87,9 +87,8 @@ struct AppExclusionState {
         guard !excludedBundleIDs.isEmpty else { return clearIfWarning() }
         guard let bundleID, excludedBundleIDs.contains(bundleID) else { return clearIfWarning() }
         guard warnedBundleID != bundleID else { return .none }
-        let replacingPrevious = warnedBundleID != nil
         warnedBundleID = bundleID
-        return .warn(bundleID: bundleID, replacingPrevious: replacingPrevious)
+        return .warn(bundleID: bundleID)
     }
 
     private mutating func clearIfWarning() -> FocusChange {

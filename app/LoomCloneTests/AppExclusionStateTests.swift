@@ -30,12 +30,12 @@ final class AppExclusionStateTests: XCTestCase {
     func testConfigureClearsPerRecordingBookkeeping() {
         var state = AppExclusionState()
         state.configure(excludedBundleIDs: ["com.example.a"], hideDesktopIcons: true)
-        XCTAssertEqual(state.focusChanged(to: "com.example.a"), .warn(bundleID: "com.example.a", replacingPrevious: false))
+        XCTAssertEqual(state.focusChanged(to: "com.example.a"), .warn(bundleID: "com.example.a"))
         _ = state.shouldRefreshFilter()
 
         // A fresh recording starts with no standing warning and a reset throttle.
         state.configure(excludedBundleIDs: ["com.example.a"], hideDesktopIcons: true)
-        XCTAssertEqual(state.focusChanged(to: "com.example.a"), .warn(bundleID: "com.example.a", replacingPrevious: false))
+        XCTAssertEqual(state.focusChanged(to: "com.example.a"), .warn(bundleID: "com.example.a"))
         for _ in 1 ..< AppExclusionState.filterRefreshTickInterval {
             XCTAssertFalse(state.shouldRefreshFilter())
         }
@@ -78,23 +78,21 @@ final class AppExclusionStateTests: XCTestCase {
         state.configure(excludedBundleIDs: ["com.example.hidden"], hideDesktopIcons: false)
         XCTAssertEqual(
             state.focusChanged(to: "com.example.hidden"),
-            .warn(bundleID: "com.example.hidden", replacingPrevious: false)
+            .warn(bundleID: "com.example.hidden")
         )
         // Idempotent while focus stays put — the health task calls this at 2 Hz.
         XCTAssertEqual(state.focusChanged(to: "com.example.hidden"), .none)
         XCTAssertEqual(state.focusChanged(to: "com.example.hidden"), .none)
     }
 
-    func testFocusMovingBetweenHiddenAppsReplacesTheWarning() {
-        // Same warning id, different app name — the caller has to clear first
-        // to force the UI to re-render the message.
+    func testFocusMovingBetweenHiddenAppsWarnsForTheNewApp() {
+        // Same warning id, different app name. The caller just re-fires and the
+        // coordinator replaces the standing warning in place — clearing first
+        // raced the re-fire and could leave the pill down for good.
         var state = AppExclusionState()
         state.configure(excludedBundleIDs: ["com.example.a", "com.example.b"], hideDesktopIcons: false)
         _ = state.focusChanged(to: "com.example.a")
-        XCTAssertEqual(
-            state.focusChanged(to: "com.example.b"),
-            .warn(bundleID: "com.example.b", replacingPrevious: true)
-        )
+        XCTAssertEqual(state.focusChanged(to: "com.example.b"), .warn(bundleID: "com.example.b"))
     }
 
     func testFocusMovingToAVisibleAppClearsTheWarning() {
@@ -128,7 +126,7 @@ final class AppExclusionStateTests: XCTestCase {
         XCTAssertEqual(state.focusChanged(to: "com.example.visible"), .clear)
         XCTAssertEqual(
             state.focusChanged(to: "com.example.hidden"),
-            .warn(bundleID: "com.example.hidden", replacingPrevious: false)
+            .warn(bundleID: "com.example.hidden")
         )
     }
 }

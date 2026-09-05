@@ -2,6 +2,7 @@ import { mkdir, rename, rm } from "fs/promises";
 import { join } from "path";
 import { requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 import { probeJson } from "./ffprobe";
+import { formatVttTimestamp } from "./format";
 
 // Storyboard sprite sheet + WebVTT generation for scrubber thumbnail previews.
 // Produces a single JPEG sprite and an accompanying VTT so Vidstack's
@@ -51,16 +52,6 @@ export function computeStoryboardParams(duration: number): StoryboardParams | nu
   return { interval, expectedFrames, cols, rows, duration };
 }
 
-// Format seconds as HH:MM:SS.mmm for VTT cues.
-function formatVttTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const whole = Math.floor(s);
-  const ms = Math.round((s - whole) * 1000);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(whole).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
-}
-
 // Generate the VTT content for a storyboard sprite sheet. `tileWidth`/
 // `tileHeight` are the actual pixel dimensions of each tile in the sprite, and
 // `spriteFile` is what the cues point at.
@@ -83,7 +74,7 @@ export function generateVtt(
     const col = i % params.cols;
     const row = Math.floor(i / params.cols);
 
-    lines.push(`${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`);
+    lines.push(`${formatVttTimestamp(startTime)} --> ${formatVttTimestamp(endTime)}`);
     lines.push(
       `${spriteFile}#xywh=${col * tileWidth},${row * tileHeight},${tileWidth},${tileHeight}`,
     );
@@ -98,7 +89,9 @@ export function generateVtt(
 // --- Editor storyboard (dense frames for the editing timeline) ---
 
 const EDITOR_TILE_WIDTH = 200;
-const EDITOR_MIN_DURATION = 5;
+// Exported so the step registry's appliesTo gate can't drift from the
+// generator's own floor.
+export const EDITOR_MIN_DURATION = 5;
 
 // 1 fps up to 10 minutes, 0.5 fps beyond. Keeps its 5-second floor: this one is
 // source-derived, so its applicability never moves when a video is edited.

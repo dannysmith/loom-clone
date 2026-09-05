@@ -903,7 +903,9 @@ export async function upsertTranscript(
     .values({ videoId, format, plainText, wordCount, createdAt: now })
     .onConflictDoUpdate({
       target: videoTranscripts.videoId,
-      set: { format, plainText, wordCount, createdAt: now },
+      // createdAt deliberately absent: an upsert of an existing transcript
+      // keeps the original timestamp instead of quietly becoming an updatedAt.
+      set: { format, plainText, wordCount },
     });
   updateFtsTranscript(videoId, plainText);
 }

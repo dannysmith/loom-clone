@@ -28,7 +28,7 @@ export function ThumbnailPicker({ video, candidates }: Props) {
           <div class={`thumbnail-candidate ${c.promoted ? "thumbnail-candidate--promoted" : ""}`}>
             <button
               type="button"
-              class="thumbnail-candidate__promote"
+              class="btn-plain"
               hx-post={`/admin/videos/${video.id}/thumbnail/promote`}
               hx-vals={JSON.stringify({ candidateId: c.id })}
               hx-target="#thumbnail-picker"

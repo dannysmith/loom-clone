@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { Hono } from "hono";
 import { resolve } from "path";
-import { ConflictError, ValidationError } from "../../lib/errors";
+import { apiError, ConflictError, ErrorCode, ValidationError } from "../../lib/errors";
 import videos from "./videos";
 
 // Read version once at import time. resolve() from this file's directory
@@ -29,10 +29,10 @@ api.route("/videos", videos);
 // gets structured errors instead of generic 500s.
 api.onError((err, c) => {
   if (err instanceof ValidationError) {
-    return c.json({ error: err.message, code: "VALIDATION_ERROR" }, 400);
+    return apiError(c, 400, err.message, ErrorCode.VALIDATION_ERROR);
   }
   if (err instanceof ConflictError) {
-    return c.json({ error: err.message, code: "CONFLICT" }, 409);
+    return apiError(c, 409, err.message, ErrorCode.CONFLICT);
   }
   throw err;
 });

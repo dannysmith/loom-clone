@@ -44,6 +44,22 @@ export async function readEdl(derivDir: string): Promise<Edl | null> {
   return parsed;
 }
 
+// Lenient sibling of readEdl for serving paths (chapters VTT, admin previews):
+// returns the edits array, or [] when the file is missing or malformed.
+// Serving must degrade to "no edits" rather than 500 on a bad file — the
+// strict readEdl above is for the pipeline, where degrading would silently
+// replace an edited master with an uncut one.
+export async function readEditsLenient(derivDir: string): Promise<Edit[]> {
+  const file = Bun.file(join(derivDir, "edits.json"));
+  if (!(await file.exists())) return [];
+  try {
+    const parsed = (await file.json()) as { edits?: unknown };
+    return Array.isArray(parsed.edits) ? (parsed.edits as Edit[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 // Kept segments for a source of `sourceDuration` seconds. An absent, empty or
 // fully-cleared EDL yields one full-span segment — which is what makes "delete
 // every edit and commit" the revert path.

@@ -31,6 +31,7 @@ SQLite via `bun:sqlite` + Drizzle ORM. Schema in `src/db/schema.ts`, migrations 
 - **Foreign keys**: `PRAGMA foreign_keys = ON` is set per-connection in `createDb()`. Without it, SQLite silently ignores `ON DELETE CASCADE`.
 - **Tests**: `setupTestEnv()` creates a fresh `:memory:` DB per test with migrations applied. No shared state.
 - **Migration discipline**: never rename or renumber a migration file once it has been applied to any database (yours, anyone else's, CI). Drizzle tracks applied migrations by hash + tag in `__drizzle_migrations`; rewriting a tag leaves local DBs in an unfixable state ("table already exists" on the rerun). If you need to change something, add a new migration. Local `data/app.db` is expendable — `rm -f data/app.db` to recover from any historical mess.
+- **FTS is a second, self-managed migration path**: `setupFts()` in `src/lib/search.ts` creates the `videos_fts` virtual table and its sync triggers on every startup, outside `drizzle/` (FTS5 DDL doesn't fit drizzle-kit's model). It drop-and-recreates when expected columns are missing (FTS5 can't ALTER TABLE) — safe because the index is derived data, rebuilt from the videos table.
 
 ## Auth
 

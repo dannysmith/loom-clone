@@ -6,13 +6,11 @@ import {
   readChapters,
   viewerDurationFromEdits,
 } from "../../lib/chapters";
-import type { Edit } from "../../lib/edit-transcript";
 import { serveFileWithRange } from "../../lib/file-serve";
-import { DATA_DIR } from "../../lib/paths";
+import { DATA_DIR, derivativesDir } from "../../lib/paths";
 import { HLS_SERVABLE } from "../../lib/playlist";
+import { readEditsLenient } from "../../lib/processing/edl";
 import { type AdminEnv, requireVideo } from "./helpers";
-
-type EditsFileLike = { edits?: unknown };
 
 const media = new Hono<AdminEnv>();
 
@@ -64,16 +62,7 @@ media.get("/:id/media/chapters.vtt", async (c) => {
   if (!data || data.chapters.length === 0) return c.text("Not found", 404);
 
   const sourceDuration = video.durationSeconds ?? 0;
-  let edits: Edit[] = [];
-  const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
-  if (await editsFile.exists()) {
-    try {
-      const parsed = (await editsFile.json()) as EditsFileLike;
-      if (Array.isArray(parsed.edits)) edits = parsed.edits as Edit[];
-    } catch {
-      // Malformed edits.json — fall back to no edits.
-    }
-  }
+  const edits = await readEditsLenient(derivativesDir(video.id));
   // Defensive: malformed edit entries past the JSON parse (wrong types,
   // missing fields) could surface as arithmetic errors inside
   // chaptersForViewer. Treat that the same as "no edits".

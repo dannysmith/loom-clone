@@ -1,6 +1,7 @@
 // Inlined Lucide icons (ISC) used by the public viewer pages.
-// Kept separate from admin/components/Icons.tsx so the viewer doesn't
-// pull in the larger admin icon set.
+// Kept separate from admin/components/Icons.tsx on purpose: the viewer
+// surface stays a small, self-contained module with no imports from the
+// admin tree, so admin churn can never touch public pages.
 
 type IconProps = {
   size?: number;

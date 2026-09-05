@@ -15,7 +15,12 @@ services:
     environment:
       - NODE_ENV=production
       - PUBLIC_URL=https://v.danny.is
-      - BUNNY_CDN_API_KEY=${BUNNY_CDN_API_KEY}
+      # BUNNY_CDN_API_KEY deliberately NOT set here. It reaches the container
+      # via env_file (server/.env) in the base compose file. The old
+      # `${BUNNY_CDN_API_KEY}` interpolation form was a trap: when compose
+      # couldn't resolve it, the variable silently became empty and disabled
+      # all CDN purging with no signal. The self-check now watches for that
+      # from inside the container too.
     networks:
       - caddy-net
 

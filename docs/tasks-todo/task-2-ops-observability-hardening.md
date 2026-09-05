@@ -74,7 +74,7 @@ Pure server code, fully testable, no dependency on phase 1.
 
 Render the collector's data in the admin settings page: volume disk usage, loom-clone's own footprint, container RAM vs limit, last successful backup. Read-only display, no new data gathering beyond phase 3's collector.
 
-### Phase 5: Docker/compose hardening
+### Phase 5: Docker/compose hardening — DONE (2026-09-05); host chown must run BEFORE the merge deploys (see PR #78 checklist)
 
 - `HEALTHCHECK` in the Dockerfile against `/api/health` (via `bun -e "fetch(...)"` — no curl in the image).
 - Container log rotation: already handled by daemon-level defaults (json-file, 10m × 3 — phase 1). Verify `/etc/docker/daemon.json`, document it in the danny-vps-infra README, no compose change.

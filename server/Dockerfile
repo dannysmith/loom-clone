@@ -47,6 +47,21 @@ COPY . .
 # Bring in the built admin-client assets.
 COPY --from=admin-client-build /build/public/admin-client ./public/admin-client
 
+# Run as the image's non-root `bun` user — uid 1000, deliberately matching
+# `danny` on the VPS, so files on the /app/data bind mount come out
+# danny-owned on the host (backup and manual admin both read them as danny).
+# /app/data must exist and be bun-writable before the drop: in production the
+# bind mount replaces it; without one (plain `docker compose up`) the server
+# writes here directly.
+RUN mkdir -p /app/data && chown bun:bun /app/data
+USER bun
+
 EXPOSE 3000
+
+# Docker-level liveness: a crash-looping or wedged server shows as "unhealthy"
+# in `docker ps` instead of a healthy-looking "Up". Uses bun itself — the
+# image has no curl.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["bun", "-e", "fetch(`http://localhost:${process.env.PORT ?? 3000}/api/health`).then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 
 CMD ["bun", "run", "src/index.ts"]

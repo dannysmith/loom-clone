@@ -10,6 +10,7 @@ Per video, only the files that can't be regenerated from another backed-up file:
 | --- | --- |
 | `derivatives/source.mp4` | The pristine original, and the only thing here that can't be rebuilt. The HLS segments it was stitched from are cleaned up after 10 days. |
 | `recording.json` | Timeline and composition metadata. Irreplaceable. |
+| `chapters.json` | User-edited chapter titles (video root, not `derivatives/`). The only user-authored file outside the database — simply gone after a restore without it. |
 | `derivatives/thumbnail.jpg` | Promoted thumbnail. Tiny (~60 KB) and not worth distinguishing auto vs uploaded. |
 | `derivatives/edits.json` | The EDL. Irreplaceable, and the input that makes a rebuilt master reproduce the same cut. |
 | `derivatives/words.json` | Word-level transcript timestamps from WhisperKit. Not regenerable server-side. |
@@ -32,8 +33,10 @@ VPS host (cron, 03:30 UTC daily)
   └── ~/loom-clone/server/scripts/backup.sh
         1. sqlite3 .backup  →  /mnt/data/loom-clone/app.db.bak
         2. restic backup     →  sftp:hetzner-backup:loom-clone
+           (+ writes the .last-backup marker the admin settings page shows)
         3. rm app.db.bak
-        4. restic forget --prune (7 daily, 4 weekly, 12 monthly)
+        4. restic forget --prune --group-by host (7 daily, 4 weekly, 12 monthly)
+        5. healthchecks.io ping — the dead-man's switch (operations.md)
 
 Hetzner Storage Box BX11
   └── /loom-clone/  (restic repository, client-side encrypted)
@@ -167,30 +170,21 @@ restic -r sftp:hetzner-backup:loom-clone --password-file ~/.config/restic-passwo
 crontab -e
 ```
 
-Add these lines:
+Add these lines. Stdout goes to `/dev/null` because both scripts log themselves to `~/logs/` — a crontab redirect on top would write every line twice:
 
 ```cron
-# loom-clone: daily backup at 03:30 UTC (HOME expands to the user's crontab home)
-30 3 * * * $HOME/loom-clone/server/scripts/backup.sh >> $HOME/logs/backup.log 2>&1
+# loom-clone: daily backup at 03:30 UTC (logs to ~/logs/backup.log)
+30 3 * * * $HOME/loom-clone/server/scripts/backup.sh > /dev/null 2>&1
 
-# loom-clone: weekly restic integrity check (Sundays 04:30 UTC)
-30 4 * * 0 RESTIC_REPOSITORY="sftp:hetzner-backup:loom-clone" RESTIC_PASSWORD_FILE="$HOME/.config/restic-password" restic check >> $HOME/logs/backup-check.log 2>&1
+# loom-clone: weekly restic integrity check, Sundays 04:30 UTC (logs to ~/logs/backup-check.log)
+30 4 * * 0 $HOME/loom-clone/server/scripts/restic-check.sh > /dev/null 2>&1
 ```
 
-The daily backup runs at 03:30 UTC. The weekly integrity check runs an hour later on Sundays to avoid overlapping.
+The weekly integrity check runs an hour after the backup on Sundays so the two never overlap. The full crontab (including the daily self-check) is in [Operations & Alerting](operations.md).
 
-### 10. (Optional) Healthchecks.io alerting
+### 10. Healthchecks.io alerting (required)
 
-For push-based failure alerts instead of manually reviewing logs:
-
-1. Create a free check at [healthchecks.io](https://healthchecks.io).
-2. Add a curl ping at the end of the backup crontab line:
-
-```cron
-30 3 * * * $HOME/loom-clone/server/scripts/backup.sh >> $HOME/logs/backup.log 2>&1 && curl -fsS -m 10 --retry 5 https://hc-ping.com/YOUR-UUID-HERE > /dev/null
-```
-
-Healthchecks.io will alert you if the ping doesn't arrive within the expected window.
+Backup failure alerting is the single highest-value piece of ops configuration this system has — without it, a backup that starts failing is discovered whenever someone next reads a log file (which happened: see the task-2 VPS audit). Both scripts ping their healthchecks.io checks on success, reading the ping URLs from `~/.config/loom-clone-ops.env`; healthchecks emails when a ping *doesn't* arrive. Creating the checks and the env file is part of [Operations & Alerting → One-time setup](operations.md#one-time-setup) — do it as part of this setup, not later.
 
 ## Restore procedure
 
@@ -223,19 +217,26 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml down
 cp /tmp/restore/mnt/data/loom-clone/app.db.bak /mnt/data/loom-clone/app.db
 
 # Restore per-video files
-# Copies every backed-up per-video file (recording.json plus derivatives/
-# source.mp4, thumbnail.jpg, edits.json, words.json, captions.original.*) back
-# into each video's directory, creating directories as needed.
+# Copies every backed-up per-video file (recording.json and chapters.json at
+# the video root, plus derivatives/ source.mp4, thumbnail.jpg, edits.json,
+# words.json, captions.original.*) back into each video's directory, creating
+# directories as needed.
 cd /tmp/restore/mnt/data/loom-clone
 for dir in */; do
   vid_id=$(basename "$dir")
   [[ "$vid_id" =~ ^[0-9a-f-]{36}$ ]] || continue
   mkdir -p "/mnt/data/loom-clone/$vid_id/derivatives"
-  cp -v "$dir"recording.json "/mnt/data/loom-clone/$vid_id/" 2>/dev/null || true
+  for f in recording.json chapters.json; do
+    cp -v "$dir$f" "/mnt/data/loom-clone/$vid_id/" 2>/dev/null || true
+  done
   for f in source.mp4 thumbnail.jpg edits.json words.json captions.original.srt captions.original.vtt; do
     cp -v "$dir"derivatives/"$f" "/mnt/data/loom-clone/$vid_id/derivatives/" 2>/dev/null || true
   done
 done
+
+# The container runs as uid 1000 — make sure everything restored is owned by
+# danny (uid 1000) or the server can't write to it:
+sudo chown -R danny:danny /mnt/data/loom-clone
 
 # Start the server
 cd ~/loom-clone/server
@@ -292,21 +293,9 @@ sftp hetzner-backup <<< "df -h"
 
 ## Troubleshooting
 
-### `app.db.bak already exists`
+### `WARNING: stale app.db.bak found` in the log
 
-A previous backup run crashed between the SQLite snapshot and the cleanup step. Investigate:
-
-```bash
-ls -la /mnt/data/loom-clone/app.db.bak
-tail -100 ~/logs/backup.log
-```
-
-If the .bak file looks valid and the last backup log shows a failure after the SQLite step, it's safe to delete and re-run:
-
-```bash
-rm -f /mnt/data/loom-clone/app.db.bak
-~/loom-clone/server/scripts/backup.sh
-```
+A previous backup run failed between the SQLite snapshot and the cleanup step (most often: the Storage Box was briefly unreachable during restic). The script handles this itself — the stale snapshot is disposable, so it's replaced and the run continues. The warning is just breadcrumbs: check the log around the previous run's timestamps for what actually failed. If runs keep failing, the missed healthchecks ping is what alerts you (see [Operations & Alerting](operations.md)).
 
 ### `ssh: connect to host ... port 23: Connection refused`
 

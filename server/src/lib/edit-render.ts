@@ -35,12 +35,20 @@ export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segm
       // frames onto the bogus constant grid and silently drops the surplus.
       "-fps_mode",
       "passthrough",
+      // Pin the output format the way the variant encode does. Without it x264
+      // inherits the source's chroma, and a 4:4:4 source yields a High 4:4:4
+      // Predictive master — a profile Safari and iOS refuse to decode, and which
+      // the mjpeg encoder behind the storyboard can't read either.
+      "-pix_fmt",
+      "yuv420p",
       "-c:v",
       "libx264",
       "-preset",
       "fast",
       "-crf",
       "18",
+      "-profile:v",
+      "high",
       "-c:a",
       "aac",
       "-b:a",
@@ -82,12 +90,16 @@ export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segm
     "[aout]",
     "-fps_mode",
     "passthrough",
+    "-pix_fmt",
+    "yuv420p",
     "-c:v",
     "libx264",
     "-preset",
     "fast",
     "-crf",
     "18",
+    "-profile:v",
+    "high",
     "-c:a",
     "aac",
     "-b:a",

@@ -19,15 +19,28 @@ afterEach(async () => {
 // --- computeStoryboardParams (pure logic) ---
 
 describe("computeStoryboardParams", () => {
-  test("returns null for videos shorter than 60 seconds", () => {
-    expect(computeStoryboardParams(30)).toBeNull();
-    expect(computeStoryboardParams(59)).toBeNull();
-    expect(computeStoryboardParams(0)).toBeNull();
+  test("every video gets a storyboard, however short", () => {
+    // No duration floor: the storyboard was the only viewer-facing artifact
+    // whose existence moved when a video was edited, which is how a trim once
+    // orphaned one describing the uncut timeline.
+    expect(computeStoryboardParams(30)).not.toBeNull();
+    expect(computeStoryboardParams(59)).not.toBeNull();
+    expect(computeStoryboardParams(60)).not.toBeNull();
   });
 
-  test("60 seconds is the minimum", () => {
-    const result = computeStoryboardParams(60);
-    expect(result).not.toBeNull();
+  test("a video shorter than one interval still gets a single tile", () => {
+    // floor(3/5) is zero frames — a 0x0 tile and a VTT with no cues.
+    expect(computeStoryboardParams(3)).toEqual({
+      interval: 3,
+      expectedFrames: 1,
+      cols: 1,
+      rows: 1,
+      duration: 3,
+    });
+  });
+
+  test("returns null only when there is no video to sample", () => {
+    expect(computeStoryboardParams(0)).toBeNull();
   });
 
   test("2 min video: 5s interval, 24 frames, 10x3 grid", () => {
@@ -37,6 +50,7 @@ describe("computeStoryboardParams", () => {
       expectedFrames: 24,
       cols: 10,
       rows: 3,
+      duration: 120,
     });
   });
 
@@ -47,6 +61,7 @@ describe("computeStoryboardParams", () => {
       expectedFrames: 60,
       cols: 10,
       rows: 6,
+      duration: 300,
     });
   });
 
@@ -57,6 +72,7 @@ describe("computeStoryboardParams", () => {
       expectedFrames: 100,
       cols: 10,
       rows: 10,
+      duration: 600,
     });
   });
 
@@ -67,6 +83,7 @@ describe("computeStoryboardParams", () => {
       expectedFrames: 100,
       cols: 10,
       rows: 10,
+      duration: 3600,
     });
   });
 });
@@ -174,15 +191,40 @@ async function generateTestSource(dir: string, durationSec: number): Promise<voi
 
 describe("generateStoryboard (end-to-end)", () => {
   test.skipIf(!ffmpegAvailable)(
-    "skips generation for short videos (< 60s)",
+    "generates for a short video, with the last cue stopping at the video end",
     async () => {
       const dir = join("data", "test-storyboard-short");
       await generateTestSource(dir, 10);
 
       const result = await generateStoryboard(dir, 10);
-      expect(result).toBe(false);
-      expect(await Bun.file(join(dir, "storyboard.jpg")).exists()).toBe(false);
-      expect(await Bun.file(join(dir, "storyboard.vtt")).exists()).toBe(false);
+      expect(result).toBe(true);
+      expect(await Bun.file(join(dir, "storyboard.jpg")).exists()).toBe(true);
+
+      // Two 5s tiles for a 10s video, and the final cue ends at 10s rather than
+      // overrunning to the next interval boundary.
+      const vtt = await Bun.file(join(dir, "storyboard.vtt")).text();
+      expect(vtt.match(/ --> /g)?.length).toBe(2);
+      expect(vtt).toContain("00:00:05.000 --> 00:00:10.000");
+    },
+    60_000,
+  );
+
+  test.skipIf(!ffmpegAvailable)(
+    "a video shorter than one interval produces a single usable tile",
+    async () => {
+      // The degenerate end of removing the duration floor: ffmpeg is asked for a
+      // 1x1 tile from a 3-second source.
+      const dir = join("data", "test-storyboard-tiny");
+      await generateTestSource(dir, 3);
+
+      expect(await generateStoryboard(dir, 3)).toBe(true);
+      expect(Bun.file(join(dir, "storyboard.jpg")).size).toBeGreaterThan(0);
+      const vtt = await Bun.file(join(dir, "storyboard.vtt")).text();
+      expect(vtt.match(/ --> /g)?.length).toBe(1);
+      expect(vtt).toContain("00:00:00.000 --> 00:00:03.000");
+      // The sampling interval shrank to fit — `fps=1/5` would have emitted no
+      // frame at all for a clip this short.
+      expect(computeStoryboardParams(3)?.interval).toBe(3);
     },
     60_000,
   );

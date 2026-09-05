@@ -268,7 +268,13 @@ final class RecordingCoordinator {
     /// Called from RecordingActor's warning callback (via MainActor hop).
     func handleWarningChanged(_ warning: RecordingWarning, isActive: Bool) {
         if isActive {
-            if !activeWarnings.contains(where: { $0.id == warning.id }) {
+            // Replace in place rather than ignoring a re-fire: a warning can
+            // change its message while keeping its id (the focused-window pill
+            // naming a different app), and the caller must not have to clear
+            // it first to get the new text on screen.
+            if let index = activeWarnings.firstIndex(where: { $0.id == warning.id }) {
+                activeWarnings[index] = warning
+            } else {
                 activeWarnings.append(warning)
             }
         } else {

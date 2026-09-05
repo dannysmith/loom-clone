@@ -45,8 +45,11 @@ export async function writeOriginalCaptions(
   const tmp = `${final}.tmp`;
   await Bun.write(tmp, body);
   await rename(tmp, final);
+  // `force` already makes "it wasn't there" a no-op, so anything left is a real
+  // failure — and swallowing it would leave the superseded original in place to
+  // shadow this one, which is the bug this removal exists to prevent.
   const superseded: CaptionFormat = format === "srt" ? "vtt" : "srt";
-  await rm(originalCaptionsPath(derivDir, superseded), { force: true }).catch(() => {});
+  await rm(originalCaptionsPath(derivDir, superseded), { force: true });
 }
 
 // The stored original, if there is one. SRT wins when both exist — it's what the

@@ -28,17 +28,20 @@ export type KeptResult = {
 // trade worth making.
 const FULL_SPAN_TOLERANCE = 0.05;
 
+// Null means there is genuinely no EDL. A malformed one THROWS rather than
+// degrading to "unedited", because degrading is the more damaging outcome: the
+// run would succeed, the staged swap would replace an edited master with an
+// uncut one, and whatever the user had trimmed out would quietly go back on the
+// public page. Throwing fails the step, keeps the previous master serving, and
+// puts the problem on the readiness checklist where it can be seen.
 export async function readEdl(derivDir: string): Promise<Edl | null> {
   const file = Bun.file(join(derivDir, "edits.json"));
   if (!(await file.exists())) return null;
-  try {
-    const parsed = (await file.json()) as Edl;
-    return Array.isArray(parsed?.edits) ? parsed : null;
-  } catch {
-    // A malformed EDL is treated as no EDL rather than failing the run: the
-    // video still has a valid source, and an unedited master is recoverable.
-    return null;
+  const parsed = (await file.json()) as Edl;
+  if (!Array.isArray(parsed?.edits)) {
+    throw new Error("edits.json is present but has no edits array");
   }
+  return parsed;
 }
 
 // Kept segments for a source of `sourceDuration` seconds. An absent, empty or

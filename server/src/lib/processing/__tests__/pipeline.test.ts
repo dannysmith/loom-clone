@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import { getDb } from "../../../db/client";
+import { videos } from "../../../db/schema";
 import { resolveForViewer } from "../../../routes/videos/resolve";
 import { setupTestEnv, type TestEnv, teardownTestEnv } from "../../../test-utils";
 import { DATA_DIR } from "../../paths";
@@ -169,6 +172,36 @@ describe("post-processing pipeline (end-to-end)", () => {
       expect(after.get("source")?.producedAt).toBe(sourceAt ?? null); // source not re-stitched
       expect(after.get("thumbnail")?.state).toBe("ready");
       expect(Bun.file(thumbPath).size).toBeGreaterThan(0); // thumbnail actually regenerated
+    },
+    30_000,
+  );
+});
+
+describe("a staged rebuild that can't complete restores the status it interrupted", () => {
+  test.skipIf(!ffmpegAvailable)(
+    "a failed re-stitch during an intake leaves the video ready, not stuck reprocessing",
+    async () => {
+      // "Rebuild from HLS" on a ready video stages the presentation set and
+      // publishes `reprocessing` while it works. If the re-stitch fails, nothing
+      // else can run — and reconcile deliberately never demotes `reprocessing`,
+      // so without the recovery path the video sticks there. `canReprocess`
+      // excludes `reprocessing`, so the admin couldn't even retry it.
+      const video = await createVideo();
+      const videoDir = join(DATA_DIR, video.id);
+      await mkdir(join(videoDir, "derivatives"), { recursive: true });
+      // A playlist referencing a segment that isn't there — the stitch fails.
+      await Bun.write(
+        join(videoDir, "stream.m3u8"),
+        '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:1.0,\nseg_000.m4s\n#EXT-X-ENDLIST\n',
+      );
+      await getDb()
+        .update(videos)
+        .set({ status: "ready", width: 640, height: 360, durationSeconds: 2 })
+        .where(eq(videos.id, video.id));
+
+      await runPipeline(video.id, { source: "recorded", intent: "intake" });
+
+      expect((await getVideo(video.id))?.status).toBe("ready");
     },
     30_000,
   );

@@ -12,6 +12,7 @@
 import { mkdir, rename } from "fs/promises";
 import { join } from "path";
 import { computeKeptSegments, type Edit, type Segment } from "./edit-transcript";
+import { formatVttTimestamp } from "./format";
 import { DATA_DIR } from "./paths";
 
 export type Chapter = {
@@ -163,37 +164,6 @@ export function viewerDurationFromEdits(edits: Edit[] | undefined, sourceDuratio
 }
 
 // --- VTT generation ---
-
-function formatVttTimestamp(t: number): string {
-  const clamped = Math.max(0, t);
-  const hours = Math.floor(clamped / 3600);
-  const minutes = Math.floor((clamped % 3600) / 60);
-  const seconds = clamped - hours * 3600 - minutes * 60;
-  const wholeSeconds = Math.floor(seconds);
-  const ms = Math.round((seconds - wholeSeconds) * 1000);
-  // Carry milliseconds rounding up cleanly (e.g. 999.6 -> next second).
-  let s = wholeSeconds;
-  let m = minutes;
-  let h = hours;
-  let mms = ms;
-  if (mms === 1000) {
-    mms = 0;
-    s += 1;
-    if (s === 60) {
-      s = 0;
-      m += 1;
-      if (m === 60) {
-        m = 0;
-        h += 1;
-      }
-    }
-  }
-  const hh = String(h).padStart(2, "0");
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  const msStr = String(mms).padStart(3, "0");
-  return `${hh}:${mm}:${ss}.${msStr}`;
-}
 
 // Generates a WebVTT chapters track. Each cue spans from a chapter's start
 // to the next chapter's start (or the video end for the last one).

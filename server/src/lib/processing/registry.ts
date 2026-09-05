@@ -42,7 +42,7 @@ import type { Segment } from "../edit-transcript";
 import { derivativesDir } from "../paths";
 import { generatePeaks } from "../peaks";
 import { upsertTranscript } from "../store";
-import { generateEditorStoryboard, generateStoryboard } from "../storyboard";
+import { EDITOR_MIN_DURATION, generateEditorStoryboard, generateStoryboard } from "../storyboard";
 import { generateSuggestedEdits, runSilenceDetect, type Silence } from "../suggested-edits";
 import { extractAndPromoteThumbnails } from "../thumbnails";
 import { keptDuration, keptSegmentsFor } from "./edl";
@@ -394,7 +394,7 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     kind: "editor_storyboard",
     tier: "expected",
     inputs: ["source"],
-    appliesTo: (ctx) => ctx.sourceDuration >= 5,
+    appliesTo: (ctx) => ctx.sourceDuration >= EDITOR_MIN_DURATION,
     run: async (ctx) =>
       (await generateEditorStoryboard(ctx.dir, ctx.sourceDuration, ctx.sourceFile))
         ? "ready"

@@ -97,6 +97,13 @@ export async function spawnFfmpeg(
     proc.exited,
   ]);
 
+  // One place that records the exact argv of any failed invocation — error
+  // messages carry stderr but not the command, and reconstructing filter
+  // graphs from memory while debugging is miserable.
+  if (exitCode !== 0) {
+    console.warn(`[ffmpeg] exit ${exitCode}: ${bin} ${args.join(" ")}`);
+  }
+
   return { exitCode, stderr, stdout };
 }
 

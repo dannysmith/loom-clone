@@ -10,15 +10,15 @@ import {
 } from "../../lib/chapters";
 import { probeDuration } from "../../lib/derivatives";
 import { type CacheHint, serveFileWithRange } from "../../lib/file-serve";
-import { DATA_DIR } from "../../lib/paths";
+import { DATA_DIR, derivativesDir } from "../../lib/paths";
 import { HLS_SERVABLE } from "../../lib/playlist";
+import { readEditsLenient } from "../../lib/processing/edl";
 import { srtToVtt } from "../../lib/srt";
 import { resolveSlug, sumSegmentDuration } from "../../lib/store";
 import { activeRawFilename, PUBLIC_VIDEO_FILENAME } from "../../lib/url";
 
 // Loose-typed EDL shape — we only need the edits array. Avoids pulling an
 // edit module into the media route just for a type.
-type EditsFileLike = { edits?: unknown };
 
 // Allowlists constrain which on-disk files each route can serve, preventing
 // traversal and keeping the public surface focused. `upload.mp4` is the
@@ -183,16 +183,7 @@ media.get("/:slug/chapters.vtt", async (c) => {
   // Remap recording-timeline timestamps through the EDL (if any) so the
   // VTT reflects the viewer-facing timeline. Chapters that fall inside
   // cuts are dropped from the rendered VTT but stay in chapters.json.
-  let edits: unknown[] = [];
-  const editsFile = Bun.file(join(DATA_DIR, video.id, "derivatives", "edits.json"));
-  if (await editsFile.exists()) {
-    try {
-      const parsed = (await editsFile.json()) as EditsFileLike;
-      if (Array.isArray(parsed.edits)) edits = parsed.edits;
-    } catch {
-      // Malformed edits.json — fall back to no edits.
-    }
-  }
+  const edits = await readEditsLenient(derivativesDir(video.id));
   const sourceDuration = await sourceDurationFor(video, edits.length > 0);
   // Belt-and-braces: even past the JSON parse, malformed edit entries
   // (wrong types, missing fields) could surface as arithmetic errors

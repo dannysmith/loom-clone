@@ -1,7 +1,7 @@
 import { raw } from "hono/html";
 import type { Child, PropsWithChildren } from "hono/jsx";
 import { staticUrl } from "../../lib/static-assets";
-import { IconDashboard, IconSettings, IconTrash } from "../admin/components/Icons";
+import { IconDashboard, IconLogOut, IconSettings, IconTrash } from "../admin/components/Icons";
 import { FaviconLinks } from "./FaviconLinks";
 
 type ActivePage = "dashboard" | "settings" | "trash";
@@ -43,6 +43,9 @@ export function AdminLayout({ title, activePage, head, children }: Props) {
           <title>{title} · Admin</title>
           <FaviconLinks />
           <link rel="stylesheet" href={staticUrl("styles/app.css")} />
+          {/* Deliberately unversioned: admin.css is in static-assets' CDN_BYPASS
+              set (a BunnyCDN Edge Rule skips cache for it), so a ?v= hash would
+              add nothing. */}
           <link rel="stylesheet" href="/static/styles/admin.css" />
           {head}
         </head>
@@ -65,22 +68,7 @@ export function AdminLayout({ title, activePage, head, children }: Props) {
             </nav>
             <form method="post" action="/admin/logout" class="admin-sidebar-footer">
               <button type="submit" class="admin-nav-link admin-logout-btn" title="Log out">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" x2="9" y1="12" y2="12" />
-                </svg>
+                <IconLogOut size={20} />
               </button>
             </form>
           </aside>

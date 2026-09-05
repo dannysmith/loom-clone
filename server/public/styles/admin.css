@@ -956,7 +956,7 @@ select.input {
 }
 
 .btn--danger-solid {
-	color: var(--brand-white);
+	color: var(--color-danger-fg);
 	background-color: var(--color-danger);
 	border-color: var(--color-danger);
 
@@ -1973,7 +1973,10 @@ select.input {
 	}
 }
 
-.thumbnail-candidate__promote {
+/* Generic unstyled full-area clickable block — a <button> stripped back to
+   its content (same spirit as .btn-icon-delete replacing a one-off BEM class:
+   reusable, not per-component). */
+.btn-plain {
 	display: block;
 	inline-size: 100%;
 	padding: 0;
@@ -1983,13 +1986,13 @@ select.input {
 	font: inherit;
 	text-align: inherit;
 	cursor: pointer;
+}
 
-	& img {
-		display: block;
-		inline-size: 100%;
-		aspect-ratio: 16 / 9;
-		object-fit: cover;
-	}
+.thumbnail-candidate .btn-plain img {
+	display: block;
+	inline-size: 100%;
+	aspect-ratio: 16 / 9;
+	object-fit: cover;
 }
 
 /* Square icon-only "delete" affordance — filled danger fill, white icon.
@@ -2004,7 +2007,7 @@ select.input {
 	border: 0;
 	border-radius: var(--radius-sm);
 	background-color: var(--color-danger);
-	color: var(--brand-white);
+	color: var(--color-danger-fg);
 	cursor: pointer;
 	transition: background-color var(--transition-fast);
 

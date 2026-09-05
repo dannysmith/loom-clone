@@ -7,6 +7,7 @@ import { logEvent } from "./events";
 import { DATA_DIR } from "./paths";
 import { MEDIA_SEGMENT } from "./playlist";
 import { applicabilityContext, isServable, stepByKind } from "./processing/registry";
+import { hasActiveRun } from "./processing/run-lock";
 import { getStep } from "./processing/steps-store";
 import { getVideo } from "./store";
 
@@ -54,6 +55,11 @@ export async function cleanupStaleFiles(): Promise<void> {
 
     const video = await getVideo(id, { includeTrashed: true });
     if (!video) continue;
+
+    // An in-flight run may be reading these segments (an admin-triggered
+    // rebuild-from-HLS); skip and let tomorrow's sweep retry.
+    if (hasActiveRun(id)) continue;
+
     const ctx = applicabilityContext(video);
     let keep = false;
 

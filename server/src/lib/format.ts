@@ -5,6 +5,41 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Formats seconds as "HH:MM:SS.mmm" for WebVTT cues (chapters, storyboards).
+ * Carries a millisecond round-up cleanly (e.g. 59.9996 → "00:01:00.000",
+ * never the invalid "00:00:59.1000").
+ */
+export function formatVttTimestamp(t: number): string {
+  const clamped = Math.max(0, t);
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const seconds = clamped - hours * 3600 - minutes * 60;
+  const wholeSeconds = Math.floor(seconds);
+  const ms = Math.round((seconds - wholeSeconds) * 1000);
+  let s = wholeSeconds;
+  let m = minutes;
+  let h = hours;
+  let mms = ms;
+  if (mms === 1000) {
+    mms = 0;
+    s += 1;
+    if (s === 60) {
+      s = 0;
+      m += 1;
+      if (m === 60) {
+        m = 0;
+        h += 1;
+      }
+    }
+  }
+  const hh = String(h).padStart(2, "0");
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  const msStr = String(mms).padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${msStr}`;
+}
+
 /** Formats seconds as "Xm Ys" or "Xs" for short videos. */
 export function formatDuration(seconds: number | null | undefined): string | null {
   if (seconds == null || seconds <= 0) return null;

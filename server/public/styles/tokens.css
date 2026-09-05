@@ -192,6 +192,8 @@
   --color-danger: light-dark(var(--brand-red-600), var(--brand-red-500));
   --color-danger-bg: light-dark(var(--brand-red-400), var(--brand-red-800));
   --color-danger-border: light-dark(var(--brand-red-500), var(--brand-red-700));
+  /* Text/icon on a --color-danger fill — white in both schemes. */
+  --color-danger-fg: var(--brand-white);
 
   /* Warning — orange family */
   --color-warning: light-dark(var(--brand-orange-600), var(--brand-orange-500));

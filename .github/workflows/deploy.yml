@@ -23,15 +23,20 @@ jobs:
           persist-credentials: false
 
       # ffmpeg so the media-pipeline tests run instead of skipIf-ing. The
-      # version assertion mirrors the guard in server/Dockerfile.
+      # version assertion mirrors the guard in server/Dockerfile. shellcheck
+      # covers the ops scripts (backup.sh is the only thing standing between a
+      # disk failure and data loss, and nothing else exercises it).
       - name: Install system deps
         run: |
-          apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg shellcheck
           ffmpeg -version | head -1
           ffmpeg -version | head -1 | grep -q "ffmpeg version 7\." || {
             echo "::error::ffmpeg major version drifted from the pinned 7.x — keep in sync with server/Dockerfile"
             exit 1
           }
+
+      - name: Shellcheck ops scripts
+        run: shellcheck server/scripts/*.sh
 
       # The admin-client and player sub-packages need their own installs:
       # check:all typechecks both, and the build/verify steps below compile

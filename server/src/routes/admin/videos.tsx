@@ -434,28 +434,37 @@ async function probeImageWidth(videoId: string, imageData: ArrayBuffer): Promise
   }
 }
 
+// Shared validation for the two thumbnail-upload routes (the JSON
+// add-candidate and the auto-promoting HTMX upload). Returns the image bytes,
+// or an error message for the caller to wrap in its own response format.
+async function validateThumbnailUpload(
+  videoId: string,
+  body: Record<string, string | File>,
+): Promise<{ imageData: ArrayBuffer } | { error: string }> {
+  const file = body.thumbnail;
+  if (!(file instanceof File)) return { error: "No file uploaded" };
+  if (file.size > MAX_UPLOAD_SIZE) return { error: "File too large (max 5 MB)" };
+  if (!file.type.startsWith("image/jpeg") && !file.type.startsWith("image/png")) {
+    return { error: "Only JPEG and PNG uploads accepted" };
+  }
+  const imageData = await file.arrayBuffer();
+  const width = await probeImageWidth(videoId, imageData);
+  if (width !== null && width > MAX_UPLOAD_WIDTH) {
+    return { error: `Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)` };
+  }
+  return { imageData };
+}
+
 // Save a thumbnail JPEG as a candidate without promoting it.
 videoRoutes.post("/:id/thumbnail/add-candidate", async (c) => {
   const id = c.req.param("id");
   const result = await requireVideo(c);
   if (result instanceof Response) return result;
 
-  const body = await c.req.parseBody();
-  const file = body.thumbnail;
-  if (!(file instanceof File)) return c.json({ error: "No file uploaded" }, 400);
-  if (file.size > MAX_UPLOAD_SIZE) return c.json({ error: "File too large (max 5 MB)" }, 400);
-  if (!file.type.startsWith("image/jpeg") && !file.type.startsWith("image/png")) {
-    return c.json({ error: "Only JPEG and PNG uploads accepted" }, 400);
-  }
+  const upload = await validateThumbnailUpload(id, await c.req.parseBody());
+  if ("error" in upload) return c.json({ error: upload.error }, 400);
 
-  const imageData = await file.arrayBuffer();
-
-  const width = await probeImageWidth(id, imageData);
-  if (width !== null && width > MAX_UPLOAD_WIDTH) {
-    return c.json({ error: `Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)` }, 400);
-  }
-
-  const candidateId = await saveCustomThumbnail(id, imageData);
+  const candidateId = await saveCustomThumbnail(id, upload.imageData);
   await logEvent(id, "thumbnail_uploaded", { candidateId, source: "cover-generator" });
 
   return c.json({ ok: true, candidateId });
@@ -463,22 +472,10 @@ videoRoutes.post("/:id/thumbnail/add-candidate", async (c) => {
 
 videoRoutes.post("/:id/thumbnail/upload", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.parseBody();
-  const file = body.thumbnail;
-  if (!(file instanceof File)) return c.text("No file uploaded", 400);
-  if (file.size > MAX_UPLOAD_SIZE) return c.text("File too large (max 5 MB)", 400);
-  if (!file.type.startsWith("image/jpeg") && !file.type.startsWith("image/png")) {
-    return c.text("Only JPEG and PNG uploads accepted", 400);
-  }
+  const upload = await validateThumbnailUpload(id, await c.req.parseBody());
+  if ("error" in upload) return c.text(upload.error, 400);
 
-  const imageData = await file.arrayBuffer();
-
-  const width = await probeImageWidth(id, imageData);
-  if (width !== null && width > MAX_UPLOAD_WIDTH) {
-    return c.text(`Image too wide (${width}px, max ${MAX_UPLOAD_WIDTH}px)`, 400);
-  }
-
-  const candidateId = await saveCustomThumbnail(id, imageData);
+  const candidateId = await saveCustomThumbnail(id, upload.imageData);
   await logEvent(id, "thumbnail_uploaded", { candidateId });
 
   // Auto-promote the newly uploaded custom thumbnail.
@@ -508,7 +505,12 @@ videoRoutes.post("/:id/untrash", async (c) => {
 });
 
 videoRoutes.post("/:id/delete-permanently", async (c) => {
-  await permanentlyDeleteVideo(c.req.param("id"));
+  try {
+    await permanentlyDeleteVideo(c.req.param("id"));
+  } catch (err) {
+    if (err instanceof ConflictError) return c.text(err.message, 409);
+    throw err;
+  }
   return c.redirect("/admin/trash");
 });
 

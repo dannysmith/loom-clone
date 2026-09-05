@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, rename, rm } from "fs/promises";
 import { join } from "path";
-import { ffmpegPath, requireFfmpeg } from "./ffmpeg";
+import { ffmpegPath, requireFfmpeg, spawnFfmpeg } from "./ffmpeg";
 import { DATA_DIR } from "./paths";
 
 // Thumbnail candidate extraction and selection. Replaces the old single-frame
@@ -102,30 +102,25 @@ async function runFfmpegExtract(
   timestamp: number,
   outPath: string,
 ): Promise<void> {
-  const proc = Bun.spawn(
-    [
-      ffmpeg,
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-ss",
-      timestamp.toFixed(3),
-      "-i",
-      source,
-      "-vframes",
-      "1",
-      "-vf",
-      "scale=1280:-2",
-      "-qscale:v",
-      "5",
-      "-f",
-      "image2",
-      outPath,
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  const { exitCode, stderr } = await spawnFfmpeg(ffmpeg, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-ss",
+    timestamp.toFixed(3),
+    "-i",
+    source,
+    "-vframes",
+    "1",
+    "-vf",
+    "scale=1280:-2",
+    "-qscale:v",
+    "5",
+    "-f",
+    "image2",
+    outPath,
+  ]);
   if (exitCode !== 0) {
     throw new Error(`ffmpeg thumbnail extract failed (t=${timestamp}): ${stderr.trim()}`);
   }
@@ -158,9 +153,9 @@ async function measureVariance(imagePath: string): Promise<number> {
   if (!ffmpeg) return fallbackVariance(imagePath);
 
   try {
-    const proc = Bun.spawn(
+    const { stdout, stderr, exitCode } = await spawnFfmpeg(
+      ffmpeg,
       [
-        ffmpeg,
         "-y",
         "-hide_banner",
         "-i",
@@ -171,13 +166,8 @@ async function measureVariance(imagePath: string): Promise<number> {
         "null",
         "-",
       ],
-      { stdout: "pipe", stderr: "pipe" },
+      { captureStdout: true },
     );
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
     if (exitCode !== 0) return fallbackVariance(imagePath);
 
     // Parse signalstats output from both stdout and stderr.
@@ -400,26 +390,21 @@ export async function saveCustomThumbnail(
   await Bun.write(tmpInput, imageData);
 
   try {
-    const proc = Bun.spawn(
-      [
-        ffmpeg,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        tmpInput,
-        "-vf",
-        "scale='min(1280,iw)':-2",
-        "-qscale:v",
-        "5",
-        "-f",
-        "image2",
-        outPath,
-      ],
-      { stderr: "pipe", stdout: "pipe" },
-    );
-    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    const { exitCode, stderr } = await spawnFfmpeg(ffmpeg, [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      tmpInput,
+      "-vf",
+      "scale='min(1280,iw)':-2",
+      "-qscale:v",
+      "5",
+      "-f",
+      "image2",
+      outPath,
+    ]);
     if (exitCode !== 0) {
       throw new Error(`ffmpeg custom thumbnail resize failed: ${stderr.trim()}`);
     }

@@ -5,13 +5,11 @@ import { AdminLayout } from "../../layouts/AdminLayout";
 import {
   IconArrowDown,
   IconArrowUp,
-  IconEyeOff,
-  IconGlobe,
   IconGrid,
-  IconLink,
   IconList,
   IconTag,
   IconUpload,
+  visibilityIcon,
 } from "../components/Icons";
 import { VideoList } from "../partials/VideoList";
 
@@ -58,19 +56,6 @@ const HX = {
   "hx-include": "[data-filter]",
   "hx-replace-url": "/admin",
 } as const;
-
-function visibilityIcon(v: string, size: number) {
-  switch (v) {
-    case "public":
-      return <IconGlobe size={size} />;
-    case "unlisted":
-      return <IconLink size={size} />;
-    case "private":
-      return <IconEyeOff size={size} />;
-    default:
-      return null;
-  }
-}
 
 export function DashboardPage({
   videos,

@@ -47,7 +47,7 @@ Backup age is *not* a self-check item: the backup's own healthchecks schedule co
 3. **Write the ops env file** on the VPS at `~/.config/loom-clone-ops.env` (chmod 600):
 
    ```sh
-   LOOM_ADMIN_TOKEN=lca_...
+   LOOMCLONE_ADMIN_TOKEN=lca_...
    HC_BACKUP_URL=https://hc-ping.com/<uuid-1>
    HC_RESTIC_CHECK_URL=https://hc-ping.com/<uuid-2>
    HC_SELFCHECK_URL=https://hc-ping.com/<uuid-3>

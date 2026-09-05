@@ -13,7 +13,7 @@
 #   host dead       → this cron never fires, no ping arrives, healthchecks
 #                     alerts on the silence. That's the dead-man's switch.
 #
-# Needs LOOM_ADMIN_TOKEN (an lca_ admin token, created in the admin panel
+# Needs LOOMCLONE_ADMIN_TOKEN (an lca_ admin token, created in the admin panel
 # under Settings → API Keys) and HC_SELFCHECK_URL in
 # ~/.config/loom-clone-ops.env. See docs/developer/operations.md.
 
@@ -26,7 +26,7 @@ if [[ ! -f "$OPS_ENV" ]]; then
 fi
 # shellcheck disable=SC1090
 source "$OPS_ENV"
-: "${LOOM_ADMIN_TOKEN:?LOOM_ADMIN_TOKEN missing from $OPS_ENV}"
+: "${LOOMCLONE_ADMIN_TOKEN:?LOOMCLONE_ADMIN_TOKEN missing from $OPS_ENV}"
 : "${HC_SELFCHECK_URL:?HC_SELFCHECK_URL missing from $OPS_ENV}"
 
 SELF_CHECK_URL="${SELF_CHECK_URL:-https://origin.v.danny.is/admin/self-check}"
@@ -35,7 +35,7 @@ body_file=$(mktemp)
 trap 'rm -f "$body_file"' EXIT
 
 http_code=$(curl -sS -m 30 \
-  -H "Authorization: Bearer $LOOM_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $LOOMCLONE_ADMIN_TOKEN" \
   -o "$body_file" -w '%{http_code}' \
   "$SELF_CHECK_URL" || true)
 

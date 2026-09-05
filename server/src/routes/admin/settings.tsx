@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createAdminToken, listAdminTokens, revokeAdminToken } from "../../lib/admin-tokens";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../lib/api-keys";
 import { ConflictError, ValidationError } from "../../lib/errors";
+import { runSelfCheck } from "../../lib/self-check";
 import { createTag, deleteTag, getTag, listTags, updateTag } from "../../lib/tags";
 import { GeneralPane, SettingsPage } from "../../views/admin/pages/SettingsPage";
 import { ApiKeysPane } from "../../views/admin/partials/ApiKeysPane";
@@ -10,10 +11,10 @@ import type { AdminEnv } from "./helpers";
 
 const settings = new Hono<AdminEnv>();
 
-settings.get("/", (c) =>
+settings.get("/", async (c) =>
   c.html(
     <SettingsPage activeTab="general">
-      <GeneralPane />
+      <GeneralPane report={await runSelfCheck()} />
     </SettingsPage>,
   ),
 );

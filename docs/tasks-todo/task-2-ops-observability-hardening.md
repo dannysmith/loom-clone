@@ -70,7 +70,7 @@ Pure server code, fully testable, no dependency on phase 1.
 - Danny creates the three checks at healthchecks.io and stores the ping URLs + token on the host.
 - Start `docs/developer/operations.md`: what each alert means and what to look at when it fires (finished in phase 7).
 
-### Phase 4: Admin settings stats
+### Phase 4: Admin settings stats — DONE (2026-09-05)
 
 Render the collector's data in the admin settings page: volume disk usage, loom-clone's own footprint, container RAM vs limit, last successful backup. Read-only display, no new data gathering beyond phase 3's collector.
 

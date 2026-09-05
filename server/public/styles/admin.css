@@ -1141,6 +1141,72 @@ select.input {
 
 /* ------- API Keys pane ------- */
 
+/* ------- System pane (Settings → General) ------- */
+
+.system-section {
+	margin-block-end: var(--space-6);
+}
+
+/* Same heading treatment as .keys-section-title. */
+.system-section-title {
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-fg-muted);
+	margin-block-end: var(--space-2);
+}
+
+.system-health-ok {
+	font-size: var(--font-size-sm);
+	color: var(--color-success);
+}
+
+.system-failures {
+	margin: 0;
+	padding-inline-start: var(--space-4);
+	font-size: var(--font-size-sm);
+	color: var(--color-danger);
+
+	& li {
+		margin-block-end: var(--space-1);
+	}
+}
+
+.system-stats {
+	margin: 0;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+}
+
+.system-stat {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--font-size-sm);
+	border-block-end: 1px solid var(--color-border);
+
+	&:last-child {
+		border-block-end: none;
+	}
+
+	& dt {
+		color: var(--color-fg-muted);
+	}
+
+	& dd {
+		margin: 0;
+	}
+}
+
+.system-note {
+	margin-block-start: var(--space-3);
+	font-size: var(--font-size-xs);
+	color: var(--color-fg-muted);
+}
+
+/* ------- API keys pane ------- */
+
 .keys-section {
 	margin-block-end: var(--space-6);
 }

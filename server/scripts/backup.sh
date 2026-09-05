@@ -56,9 +56,14 @@ log "=== backup started ==="
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 
+# A leftover snapshot means a previous run failed after the sqlite step (e.g.
+# the storage box was unreachable during restic). It's disposable — a fresh
+# one is taken below — so replace it and carry on: refusing to run would turn
+# one transient failure into an indefinite backup outage, and the missed
+# healthchecks ping is the alarm bell, not this check.
 if [[ -f "$DATA_DIR/app.db.bak" ]]; then
-  log "ERROR: $DATA_DIR/app.db.bak already exists — previous run may have crashed. Investigate before re-running."
-  exit 1
+  log "WARNING: stale app.db.bak found (a previous run likely failed) — replacing it and continuing"
+  rm -f "$DATA_DIR/app.db.bak"
 fi
 
 for cmd in restic sqlite3; do
@@ -132,6 +137,11 @@ restic backup \
 
 log "restic backup complete"
 
+# Record the last successful backup where the server can see it: the admin
+# settings page and the self-check read this marker from inside the container
+# (display only — backup *alerting* is the healthchecks ping below).
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DATA_DIR/.last-backup"
+
 # ---------------------------------------------------------------------------
 # Step 4: Clean up SQLite snapshot
 # ---------------------------------------------------------------------------
@@ -151,3 +161,24 @@ restic forget --prune \
   2>&1 | tee -a "$LOG_FILE"
 
 log "=== backup finished ==="
+
+# ---------------------------------------------------------------------------
+# Step 6: Dead-man's-switch ping
+# ---------------------------------------------------------------------------
+# Alerting is absence-based: healthchecks.io emails when this ping does NOT
+# arrive on schedule. Any failure above aborts the script (set -e) before this
+# line, so a failed backup = no ping = an alert. See
+# docs/developer/operations.md for setup.
+
+OPS_ENV="$HOME/.config/loom-clone-ops.env"
+if [[ -f "$OPS_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$OPS_ENV"
+fi
+if [[ -n "${HC_BACKUP_URL:-}" ]]; then
+  curl -fsS -m 10 --retry 5 "$HC_BACKUP_URL" > /dev/null \
+    && log "healthchecks ping sent" \
+    || log "WARNING: healthchecks ping failed"
+else
+  log "WARNING: HC_BACKUP_URL not set in $OPS_ENV — backup failure alerting is not armed"
+fi

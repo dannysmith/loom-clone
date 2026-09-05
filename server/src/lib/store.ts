@@ -362,8 +362,9 @@ export type DashboardFilters = {
 };
 
 // A `processing` video whose updatedAt is older than this is treated as stalled
-// (the pipeline died mid-run) and surfaced by the "needs attention" filter.
-const STALLED_PROCESSING_MINUTES = 30;
+// (the pipeline died mid-run) and surfaced by the "needs attention" filter and
+// the self-check.
+export const STALLED_PROCESSING_MINUTES = 30;
 
 export async function listVideosFiltered(filters: DashboardFilters = {}): Promise<{
   items: Video[];

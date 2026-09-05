@@ -89,8 +89,9 @@ export async function runSelfCheck(opts?: {
     );
   }
 
-  // Stalled recordings/heals the daily sweep hasn't reached yet (it runs every
-  // 24h; this endpoint is polled daily too, so both alarms can fire first).
+  // Stalled recordings/heals. The daily sweep marks these `incomplete`
+  // eventually; checking directly too means whichever of the two runs first
+  // surfaces the problem.
   const stalled = await findStalledVideos();
   const stalledRecordings = stalled.filter((v) => v.status === "recording");
   const stalledHeals = stalled.filter((v) => v.status === "healing");
@@ -105,8 +106,8 @@ export async function runSelfCheck(opts?: {
     );
   }
 
-  // Videos already given up on. These alert until dealt with — the way to
-  // silence the alert is to fix or trash the video (task-2 decision 5).
+  // Videos already given up on. These alert until dealt with, deliberately —
+  // the way to silence the alert is to fix or trash the video.
   const attention = await db
     .select({ slug: videos.slug, status: videos.status })
     .from(videos)

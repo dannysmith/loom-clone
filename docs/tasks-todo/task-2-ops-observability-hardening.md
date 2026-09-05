@@ -90,7 +90,7 @@ Render the collector's data in the admin settings page: volume disk usage, loom-
 - Fix `backup.log`: kill the double logging (crontab redirect + script `tee` both append to the same file) and cap its size — it's at 86 MB. Simplest: drop the crontab redirect, keep the script's own logging, and trim in-script or via a logrotate.d entry.
 - Update `backup-and-restore.md`: the what-gets-backed-up list, the restore loop, the crontab examples, and promote the healthchecks.io step from "(Optional)" to required, pointing at the phase 3 setup.
 
-### Phase 7: Review & docs
+### Phase 7: Review & docs — review + docs sweep DONE (2026-09-05); remaining: the live alert test (PR #78 checklist step 5) and closing #61, both after Danny's deploy steps
 
 - Walk every change against the original #61 phases and review §3/§4; confirm each item landed or was consciously dropped (this doc's decisions list is the checklist).
 - Deliberately break something safe (e.g. stop the container, or point the self-check cron at a dead URL) and confirm the alert email actually arrives — the whole task is worthless if the wiring was never tested end to end.

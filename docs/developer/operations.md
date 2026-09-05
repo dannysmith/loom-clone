@@ -20,7 +20,7 @@ The backup and restic-check pings live at the end of their scripts (`server/scri
 
 ## The self-check endpoint
 
-`GET /admin/self-check` — admin-authed (session or `lca_` bearer), JSON. Returns **200** with `{ healthy: true, ... }` when everything passes, **503** with the failure list when not. The collector lives in `server/src/lib/self-check.ts`; the admin settings page renders the same stats for humans.
+`GET /admin/self-check` — admin-authed (session or `lca_` bearer), JSON. Returns **200** with `{ healthy: true, ... }` when everything passes, **503** with the failure list when not. The collector lives in `server/src/lib/self-check.ts`; the admin panel renders the same report for humans under Settings → General.
 
 The cron curls it via `https://origin.v.danny.is` (not the CDN hostname — cached responses would mask an origin outage), so one request exercises Caddy, TLS, the container, and the app together.
 

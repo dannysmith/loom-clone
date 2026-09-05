@@ -5,10 +5,12 @@
 #
 # What gets backed up:
 #   - data/app.db.bak  (point-in-time SQLite snapshot, deleted after run)
-#   - Per-video: recording.json, derivatives/source.mp4 (the pristine original),
-#     derivatives/thumbnail.jpg, derivatives/edits.json (edit decisions),
-#     derivatives/words.json (word timestamps), derivatives/captions.original.*
-#     (the transcript exactly as the Mac produced it)
+#   - Per-video: recording.json, chapters.json (user-edited chapter titles —
+#     the only user-authored file outside the DB), derivatives/source.mp4 (the
+#     pristine original), derivatives/thumbnail.jpg, derivatives/edits.json
+#     (edit decisions), derivatives/words.json (word timestamps),
+#     derivatives/captions.original.* (the transcript exactly as the Mac
+#     produced it)
 #
 # What does NOT get backed up — everything here is regenerable from the files
 # above by re-running post-processing:
@@ -45,6 +47,13 @@ LOG_FILE="$LOG_DIR/backup.log"
 # ---------------------------------------------------------------------------
 
 mkdir -p "$LOG_DIR"
+
+# Cap the log: nothing rotates it, and it once reached 86 MB (restic --verbose
+# output, doubled by a since-removed crontab redirect). Trim to the most
+# recent ~1 MB whenever it exceeds 5 MB.
+if [[ -f "$LOG_FILE" && $(wc -c < "$LOG_FILE") -gt 5242880 ]]; then
+  tail -c 1048576 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$LOG_FILE"
@@ -110,6 +119,7 @@ for dir in "$DATA_DIR"/*/; do
 
   for f in \
     "$dir/recording.json" \
+    "$dir/chapters.json" \
     "$dir/derivatives/source.mp4" \
     "$dir/derivatives/thumbnail.jpg" \
     "$dir/derivatives/edits.json" \
@@ -131,9 +141,11 @@ log "file list built: $file_count files"
 # ---------------------------------------------------------------------------
 
 log "running restic backup..."
+# No --verbose: it logs every file on every run (the main reason the log once
+# hit 86 MB); the end-of-run summary restic prints anyway is what matters.
 restic backup \
   --files-from "$FILELIST" \
-  --verbose 2>&1 | tee -a "$LOG_FILE"
+  2>&1 | tee -a "$LOG_FILE"
 
 log "restic backup complete"
 
@@ -154,7 +166,13 @@ log "SQLite snapshot removed"
 # ---------------------------------------------------------------------------
 
 log "pruning old snapshots..."
+# --group-by host matters: restic's default grouping is host AND path set, and
+# --files-from produces a different path set whenever a video is added — so
+# each superseded group stopped receiving snapshots and kept its last ~7
+# dailies forever (April dailies were still in the repo five months on).
+# Grouping by host alone applies the retention policy to one shared timeline.
 restic forget --prune \
+  --group-by host \
   --keep-daily 7 \
   --keep-weekly 4 \
   --keep-monthly 12 \

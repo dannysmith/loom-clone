@@ -83,7 +83,7 @@ Render the collector's data in the admin settings page: volume disk usage, loom-
 - Resolve the `PUBLIC_URL` duplication: it stays in `docker-compose.prod.yml`; fix `deployment.md`'s inert instruction to also set it in `.env`.
 - danny-vps-infra README: document non-root + uid-1000 ownership as part of the "Adding a new service" convention.
 
-### Phase 6: Backup edges
+### Phase 6: Backup edges — DONE (2026-09-05); post-deploy retention check in PR #78 step 5
 
 - Add `chapters.json` (video root, not `derivatives/`) to `backup.sh`'s file list.
 - Fix retention: add `--group-by host` to the `restic forget` command — the default host+paths grouping strands each superseded path-set group with its last ~7 dailies kept forever (April dailies still in the repo), so the repo grows without bound. After deploying, run one manual forget/prune and confirm the old snapshots actually thin out.

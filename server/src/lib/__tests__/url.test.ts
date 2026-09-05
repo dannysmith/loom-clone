@@ -12,10 +12,14 @@ describe("activeRawFilename", () => {
     );
   });
 
-  test("falls back to source.mp4 when the height isn't cached yet", () => {
-    expect(activeRawFilename({ lastEditedAt: "2026-04-30T12:00:00Z", height: null })).toBe(
-      "source.mp4",
-    );
+  test("is null when the height isn't cached — no master can exist yet", () => {
+    // It used to answer source.mp4 here, which sent the redirect handler for
+    // /raw/source.mp4 straight back to itself.
+    expect(activeRawFilename({ lastEditedAt: "2026-04-30T12:00:00Z", height: null })).toBeNull();
+  });
+
+  test("is null for an unedited video with no height either", () => {
+    expect(activeRawFilename({ lastEditedAt: null, height: null })).toBeNull();
   });
 
   test("returns correct filename for different resolutions", () => {

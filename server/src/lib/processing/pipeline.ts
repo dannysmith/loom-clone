@@ -240,9 +240,19 @@ export async function runPipeline(videoId: string, opts: RunOpts): Promise<void>
     await runSteps(videoId, ctx, { runSet, forceSet, stageKinds }, produced);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[pipeline] ${videoId} staged ${opts.intent} failed (outputs kept):`, msg);
-    await logStep(videoId, "presentation", "failed", `staged ${opts.intent}: ${msg}`);
-    await setVideoStatus(videoId, "ready");
+    const what = staged ? `staged ${opts.intent} (outputs kept)` : opts.intent;
+    console.error(`[pipeline] ${videoId} ${what} failed:`, msg);
+    await logStep(videoId, "presentation", "failed", `${what}: ${msg}`);
+    if (staged) {
+      // A staged run publishes `reprocessing` up front and owns restoring the
+      // status it interrupted; the previous set is still on disk and serving.
+      await setVideoStatus(videoId, "ready");
+    } else {
+      // An in-place run never claimed `ready`, and forcing it here would publish
+      // a video whose mandatory steps may never have validated. Let reconcile
+      // read the ledger and settle it honestly.
+      await reconcile(videoId, { running: false });
+    }
     return;
   }
 

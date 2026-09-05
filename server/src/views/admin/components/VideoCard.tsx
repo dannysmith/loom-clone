@@ -144,13 +144,15 @@ export function VideoCard({ video, mode = "default", diskSize, tags }: Props) {
                 </button>
               </>
             )}
-            <a
-              href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
-              download
-              class="popover-item"
-            >
-              <IconDownload size={14} /> Download
-            </a>
+            {activeRawFilename(video) && (
+              <a
+                href={`/admin/videos/${video.id}/media/raw/${activeRawFilename(video)}`}
+                download
+                class="popover-item"
+              >
+                <IconDownload size={14} /> Download
+              </a>
+            )}
             <form method="post" action={`/admin/videos/${video.id}/duplicate`}>
               <button type="submit" class="popover-item">
                 <IconDuplicate size={14} /> Duplicate

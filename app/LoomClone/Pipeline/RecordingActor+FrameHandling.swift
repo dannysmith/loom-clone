@@ -85,6 +85,13 @@ extension RecordingActor {
         let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard originalPTS.isValid else { return }
         guard (originalPTS - startTime) >= .zero else { return }
+        // Captured during a pause that has since ended: its logical PTS would
+        // land behind the last pre-pause sample now the pause is folded into
+        // the accumulator, and a backward PTS fails the writer input outright.
+        guard !RecordingClock.predatesResume(
+            capturePTS: originalPTS,
+            lastResumeHostTime: lastResumeHostTime
+        ) else { return }
 
         let duration = CMSampleBufferGetDuration(sampleBuffer)
         let logicalPTS = RecordingClock.logicalPTS(
@@ -118,8 +125,8 @@ extension RecordingActor {
 
     /// Retime a sample buffer onto the recording's logical timeline so it
     /// can be appended to a raw writer. Returns nil if the recording isn't
-    /// committed yet, the recording is paused, or the sample's PTS is
-    /// before the recording start anchor.
+    /// committed yet, the recording is paused, or the sample was captured
+    /// before the recording start anchor or the most recent resume.
     ///
     /// Raw writers get the logical PTS with no priming offset — priming is an
     /// HLS-only concern.
@@ -130,6 +137,10 @@ extension RecordingActor {
 
         let originalPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard originalPTS.isValid else { return nil }
+        guard !RecordingClock.predatesResume(
+            capturePTS: originalPTS,
+            lastResumeHostTime: lastResumeHostTime
+        ) else { return nil }
 
         let relPTS = RecordingClock.logicalPTS(
             capturePTS: originalPTS,

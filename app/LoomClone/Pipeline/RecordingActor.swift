@@ -219,6 +219,11 @@ actor RecordingActor {
     /// Host clock time when the current pause started. Used by `resume()`.
     var pauseStartHostTime: CMTime?
 
+    /// Host clock time of the most recent resume, invalid until the recording
+    /// has been resumed at least once. Samples captured before it are dropped
+    /// — see `RecordingClock.predatesResume`.
+    var lastResumeHostTime: CMTime = .invalid
+
     /// Strictly-monotonic guard for video PTS. Prevents same-PTS appends
     /// across pause/resume edge cases (which AVAssetWriter rejects). Post
     /// task-21 this is a safety net — the source-PTS freshness check below
@@ -386,6 +391,7 @@ actor RecordingActor {
         pauseAccumulator = resumed.pauseAccumulator
         lastEmittedSourcePTS = resumed.lastEmittedSourcePTS
         lastEmitHostTime = resumed.lastEmitHostTime
+        lastResumeHostTime = now
         pauseStartHostTime = nil
         keepAliveEventFiredForCurrentStaleRun = false
 

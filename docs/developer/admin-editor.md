@@ -21,7 +21,7 @@ Browser (React editor)              Server (Hono + Bun)
   │  POST /:id/editor/commit           │  trigger ffmpeg processing pipeline
   │                                    │
   │                                    │  → sets status to "reprocessing"
-  │                                    │  → stages edited output + variants +
+  │                                    │  → stages the master + variants +
   │                                    │    storyboard + captions, validates,
   │                                    │    then swaps the set in atomically
   │                                    │  → updates DB metadata, purges CDN
@@ -106,7 +106,7 @@ Generated server-side from ffmpeg's `silencedetect` filter (run after audio post
 
 ## Editor components
 
-**Video preview:** Standard `<video>` element playing `source.mp4` (always the original, never the edited output). During playback, the `useVideoPlayback` hook uses `requestAnimationFrame` to skip over cut regions and stop at the trim end.
+**Video preview:** Standard `<video>` element playing `source.mp4` — always the pristine original, because the EDL is expressed against its timeline. That also means the editor plays *un-processed* audio: the chain is applied to the presentation master, not the source, so a quiet recording sounds quiet here. During playback, the `useVideoPlayback` hook uses `requestAnimationFrame` to skip over cut regions and stop at the trim end.
 
 **Waveform:** wavesurfer.js v7 with the Regions plugin. Loaded from pre-computed `peaks.json` (generated during the derivatives pipeline from source.mp4). Trim boundaries appear as draggable handles. Cut regions appear as red overlays that can be dragged and resized. Double-click to add a new cut.
 
@@ -137,31 +137,31 @@ Small amber flag markers render on the storyboard thumbnail strip at each chapte
 
 ## Processing pipeline
 
-When the user clicks Commit, the server runs an `edit`-mode pass of the unified processing pipeline (`scheduleEdit` in `lib/processing/pipeline.ts`; the ffmpeg render itself lives in `lib/edit-render.ts`). It regenerates a **multi-file set** (the edited output + variants + storyboard + captions), so it builds the whole set in a staging directory and swaps it in atomically — this is why edits get their own `reprocessing` status (see [Status model](streaming-and-healing.md#status-model)):
+Commit is not a special mode. `edits.json` is an input to the presentation master, so committing an edit and pressing "Re-run post-processing" are the same run — a `present` intent (`scheduleEdit` in `lib/processing/pipeline.ts`; the ffmpeg render itself lives in `lib/edit-render.ts`). It regenerates the whole presentation group, so it builds into a staging directory and swaps atomically, which is why it gets its own `reprocessing` status (see [Status model](streaming-and-healing.md#status-model)):
 
 1. Sets video status to `"reprocessing"` (prevents concurrent edits)
-2. Reads `edits.json` and probes `source.mp4`
-3. Computes kept segments (the inverse of the cuts/trims)
-4. Builds the full regenerated set into `derivatives/.edit-staging/` (nothing in `derivatives/` is touched yet):
-   - The edited `{height}p.mp4` (e.g. `1080p.mp4`) from `source.mp4` — full re-encode with `-preset fast -crf 18`, `-fps_mode passthrough`, a 30ms audio crossfade at cut joins; `-ss`/`-to` for simple trims, `trim`/`atrim` + `concat` for cuts
-   - Downscaled variants (720p, etc.) cut from the staged edited output
-   - Viewer-facing storyboard (≥60s) from the staged edited output
-   - Edited captions, derived from the unchanged `words.json` by dropping removed words and shifting timestamps
-5. Validates every staged video file with `isProbablyPlayable`
-6. **Swaps** the validated set into `derivatives/` in one fast pass of per-file renames
-7. Updates DB: edited transcript, `durationSeconds`, `fileBytes`, `lastEditedAt`, `status` → `"ready"`
-8. Purges CDN cache for the slug
-9. Logs `edits_committed` event
+2. Reads `edits.json` and computes kept segments — the inverse of the cuts and trims
+3. Builds the presentation group into `derivatives/.staging/` (nothing in `derivatives/` is touched yet):
+   - The master `{height}p.mp4` from `source.mp4`. The cut is rendered first (`-preset fast -crf 18`, `-pix_fmt yuv420p`, `-fps_mode passthrough`, a 30ms audio crossfade at joins; `-ss`/`-to` for a simple trim, `trim`/`atrim` + `concat` for cuts), then the audio chain runs over the result — so loudness is measured on the audio a viewer will actually hear, and the video is encoded exactly once
+   - Downscaled variants cut from the staged master
+   - Storyboard from the staged master
+   - Captions, remapped from `captions.original.srt` through `words.json`
+4. Validates every staged video file with `isProbablyPlayable`
+5. **Swaps** the validated set into `derivatives/` in one fast pass of per-file renames
+6. Updates the DB: transcript, `durationSeconds`, `fileBytes`, `lastEditedAt`, `status` → `"ready"`
+7. Purges CDN cache for the slug and logs `edits_committed`
 
-If anything fails before the swap, the staging dir is discarded and status is restored to `"ready"` — the previous outputs are left byte-for-byte untouched, so an interrupted edit never leaves a new `{height}p.mp4` beside a stale variant or half-rewritten VTT. Editor-specific files (`peaks.json`, `editor-storyboard.*`) are NOT regenerated — they always reflect `source.mp4`.
+If anything fails before the swap, the staging dir is discarded and status is restored to `"ready"` — the previous outputs are left byte-for-byte untouched, so an interrupted commit never leaves a new master beside a stale variant. Only the presentation group is staged; source-group files (`peaks.json`, `editor-storyboard.*`, thumbnails) write in place and don't move when you edit.
 
-## File layout after editing
+**Reverting.** Clearing every edit and committing is the revert path, and it needs no separate action: an empty EDL means one full-span kept segment, so the master is rebuilt from the whole source, `lastEditedAt` is cleared, and the captions go back to a verbatim copy of the original. Because every rebuild starts from the pristine source rather than the previous master, edit → revert is a true round trip — repeated processing can't accumulate.
 
-See the "Edited video file resolution" section in [Server Routes & API](server-routes-and-api.md) for the full file layout and URL resolution rules.
+## File layout
+
+See [File resolution](server-routes-and-api.md#file-resolution) in Server Routes & API for the full layout and URL rules.
 
 Key points:
-- `source.mp4` is never modified — it's the sacred original
-- The edited output is named by resolution (e.g. `1080p.mp4`)
-- `activeRawFilename(video)` in `lib/url.ts` is the single source of truth for which file viewers should see
-- Editor-specific files (`peaks.json`, `editor-storyboard.*`) always reflect `source.mp4`, never the edited output
-- Viewer-facing files (storyboard, captions, variants) are regenerated from the edited output
+- `source.mp4` is never modified — it's the pristine original, and the only thing the editor plays
+- The presentation master is named by resolution (e.g. `1080p.mp4`) whether or not the video is edited
+- `activeRawFilename(video)` in `lib/url.ts` is the single source of truth for which file viewers get
+- Editor-facing files (`peaks.json`, `editor-storyboard.*`) always reflect `source.mp4`
+- Viewer-facing files (master, variants, storyboard, captions) are regenerated together from the master

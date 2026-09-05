@@ -8,11 +8,14 @@ Per video, only the files that can't be regenerated from another backed-up file:
 
 | File | Why |
 | --- | --- |
-| `derivatives/source.mp4` | Post-processed master. HLS segments (its source) are cleaned up after 10 days. |
+| `derivatives/source.mp4` | The pristine original, and the only thing here that can't be rebuilt. The HLS segments it was stitched from are cleaned up after 10 days. |
 | `recording.json` | Timeline and composition metadata. Irreplaceable. |
 | `derivatives/thumbnail.jpg` | Promoted thumbnail. Tiny (~60 KB) and not worth distinguishing auto vs uploaded. |
-| `derivatives/edits.json` | User's edit decisions (EDL). Irreplaceable. |
+| `derivatives/edits.json` | The EDL. Irreplaceable, and the input that makes a rebuilt master reproduce the same cut. |
 | `derivatives/words.json` | Word-level transcript timestamps from WhisperKit. Not regenerable server-side. |
+| `derivatives/captions.original.*` | The transcript exactly as the Mac produced it. The served `captions.srt` is derived from it, but this one isn't regenerable. |
+
+Everything else — the `<H>p.mp4` presentation master, its downscaled variants, storyboards, peaks, thumbnail candidates, the served captions — is a derivative of the files above and is rebuilt by a reprocess.
 
 Plus the database:
 
@@ -220,16 +223,16 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml down
 cp /tmp/restore/mnt/data/loom-clone/app.db.bak /mnt/data/loom-clone/app.db
 
 # Restore per-video files
-# This copies all five backed-up per-video files (recording.json plus
-# derivatives/source.mp4, thumbnail.jpg, edits.json, words.json) back into
-# each video's directory, creating directories as needed.
+# Copies every backed-up per-video file (recording.json plus derivatives/
+# source.mp4, thumbnail.jpg, edits.json, words.json, captions.original.*) back
+# into each video's directory, creating directories as needed.
 cd /tmp/restore/mnt/data/loom-clone
 for dir in */; do
   vid_id=$(basename "$dir")
   [[ "$vid_id" =~ ^[0-9a-f-]{36}$ ]] || continue
   mkdir -p "/mnt/data/loom-clone/$vid_id/derivatives"
   cp -v "$dir"recording.json "/mnt/data/loom-clone/$vid_id/" 2>/dev/null || true
-  for f in source.mp4 thumbnail.jpg edits.json words.json; do
+  for f in source.mp4 thumbnail.jpg edits.json words.json captions.original.srt captions.original.vtt; do
     cp -v "$dir"derivatives/"$f" "/mnt/data/loom-clone/$vid_id/derivatives/" 2>/dev/null || true
   done
 done
@@ -241,7 +244,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ### Regenerate derivatives
 
-Videos are viewable immediately after restore: serving is table-gated with per-file disk checks, so the restored `source.mp4` serves directly and missing variants/storyboards degrade gracefully rather than 404. To regenerate the missing files (variants, storyboards, captions, peaks), trigger a reprocess per video — a plain (non-forced) reprocess is resumable, so it skips steps whose artifacts survived and re-runs only the ones whose files are gone:
+**A restored video does not serve until it has been reprocessed.** This changed with the presentation-master restructure and it's the one thing to know about restoring: the file viewers are served is `<H>p.mp4`, which is a derivative and therefore isn't in the backup. Until it's rebuilt, a restored video falls back to HLS — and for anything older than ten days those segments are long gone, so the page has nothing to play. The pristine `source.mp4` is safe in the backup; it just isn't what gets served.
+
+So reprocessing isn't an optional tidy-up here, it's the last step of the restore. A reprocess rebuilds the master, its variants, the storyboard and the captions from the restored source and EDL:
 
 ```bash
 # One video, via the admin panel: video page → Processing tab → Reprocess.

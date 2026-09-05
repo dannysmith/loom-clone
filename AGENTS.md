@@ -33,7 +33,7 @@ These are the real-world situations this tool needs to serve:
 Three components exist today:
 
 - **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
-- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, generates MP4 derivatives via ffmpeg after recording completes, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). Public feeds (RSS, JSON Feed, llms.txt) are served by the site module. `server/data/` holds per-video directories.
+- **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, stitches them into a pristine `source.mp4` and builds an `<H>p.mp4` presentation master (plus downscaled variants) from it via ffmpeg, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). Public feeds (RSS, JSON Feed, llms.txt) are served by the site module. `server/data/` holds per-video directories.
 - **CDN Layer** — BunnyCDN pull zone in front of the Hetzner origin. `v.danny.is` CNAMEs to BunnyCDN; `origin.v.danny.is` is the direct-to-Hetzner hostname used as the pull zone origin. BunnyCDN caches all viewer-facing routes (video pages, media files, feeds) and bypasses cache for `/api/*` and `/admin/*`. Cache purging on video state changes is handled by `server/src/lib/cdn.ts` via the BunnyCDN purge API. See `docs/tasks-todo/task-1-view-layer.md` for the full setup.
 
 ## Developer Docs
@@ -41,11 +41,11 @@ Three components exist today:
 - `docs/developer/recording-pipeline.md` — how the macOS app captures, composites, encodes, and streams video. Actors, timing, mode switching, pause/resume, GPU recovery. Read before touching anything in `RecordingActor`, `CompositionActor`, `WriterActor`, or `UploadActor`.
 - `docs/developer/streaming-and-healing.md` — how segments flow client → server, what gets written where, and how the post-stop / startup healing works. Read before touching anything in `UploadActor`, `HealAgent`, or `server/src/routes/api/videos.ts`.
 - `docs/developer/server-routes-and-api.md` — complete reference for every server route: paths, request/response shapes, error codes, auth rules, content types. The "what does endpoint X do?" doc.
-- `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm). Model choice, skip conditions, performance. Read before changing anything in the audio processing step in `derivatives.ts`.
+- `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm), which produces the presentation master from the pristine source. Model choice, skip conditions, the arnndn NaN guard, performance. Read before changing anything in the audio chain in `derivatives.ts`.
 - `docs/developer/transcription.md` — how subtitles are generated (WhisperKit on Mac, TranscribeAgent lifecycle, model management, server-side indexing). Read before touching `TranscribeAgent`, `TranscriptionModelStatus`, or the transcript endpoint.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
 - `docs/developer/admin-client.md` — the admin's React package (`server/admin-client/`): layout, build and dev workflow, the Vite-manifest seam, the cover-image generator, why the player is a separate package, and the public-vs-admin dependency policy. Read before touching anything in `server/admin-client/`, `lib/vite-manifest.ts`, or the editor/cover admin routes.
-- `docs/developer/admin-editor.md` — the web-based video editor itself: React app architecture, EDL format, ffmpeg edit pipeline, file layout after editing, keyboard shortcuts. Read before touching anything in `server/admin-client/src/editor/`, `edit-render.ts`, `edit-transcript.ts`, or the edit-mode paths in `lib/processing/`.
+- `docs/developer/admin-editor.md` — the web-based video editor itself: React app architecture, EDL format, how a commit is just a presentation rebuild, file layout, keyboard shortcuts. Read before touching anything in `server/admin-client/src/editor/`, `edit-render.ts`, `edit-transcript.ts`, or the EDL paths in `lib/processing/`.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
 - `docs/archive/` — incident records, completed research audits, and the original requirements doc. Notable: `m2-pro-video-pipeline-failures.md` documents GPU hang failures on M2 Pro and their resolution.
 
@@ -105,8 +105,8 @@ Direct commands (for reference or when you need different flags):
 │       ├── index.ts                      #   entry — initDb() + boots createApp()
 │       ├── app.ts                        #   side-effect-free createApp() factory (use this in tests)
 │       ├── test-utils.ts                 #   temp-dir test isolation helpers
-│       ├── lib/                          #   paths, store, lifecycle, playlist, derivatives, errors, url, file-serve, site-config — co-located __tests__/
-│       │   └── processing/               #     post-processing: step registry, reconcile(), steps table, isProbablyPlayable, backfill
+│       ├── lib/                          #   paths, store, lifecycle, playlist, derivatives, captions, errors, url, file-serve, site-config — co-located __tests__/
+│       │   └── processing/               #     post-processing: step registry, reconcile(), steps table, EDL, isProbablyPlayable, backfill
 │       ├── views/                        #   hono/jsx components: layouts/, viewer/, admin/
 │       └── routes/                       #   four modules, each with co-located __tests__/
 │           ├── api/                      #     /api/* — bearer-authed JSON API (health, videos CRUD)
@@ -115,7 +115,7 @@ Direct commands (for reference or when you need different flags):
 │           └── videos/                   #     /:slug viewer surface (page, embed, media, metadata)
 ├── docs/
 │   ├── developer/                        # living developer docs
-│   │   ├── streaming-and-healing.md      #   segment flow, healing, derivatives
+│   │   ├── streaming-and-healing.md      #   segment flow, healing, the source/presentation split
 │   │   ├── server-routes-and-api.md      #   full route + API reference
 │   │   ├── admin-client.md               #   admin React package, build seam, dependency policy
 │   │   └── auth.md                       #   API keys + admin auth (sessions, bearer tokens)

@@ -54,7 +54,19 @@ export async function readEditsLenient(derivDir: string): Promise<Edit[]> {
   if (!(await file.exists())) return [];
   try {
     const parsed = (await file.json()) as { edits?: unknown };
-    return Array.isArray(parsed.edits) ? (parsed.edits as Edit[]) : [];
+    if (!Array.isArray(parsed.edits)) return [];
+    // Entry-level validation, not just array shape: serving paths feed this
+    // straight into kept-segment arithmetic, so a null entry or a NaN time
+    // must degrade to "no edits" here rather than throw downstream.
+    const valid = parsed.edits.every(
+      (e): e is Edit =>
+        typeof e === "object" &&
+        e !== null &&
+        ((e as Edit).type === "cut" || (e as Edit).type === "trim") &&
+        Number.isFinite((e as Edit).startTime) &&
+        Number.isFinite((e as Edit).endTime),
+    );
+    return valid ? (parsed.edits as Edit[]) : [];
   } catch {
     return [];
   }

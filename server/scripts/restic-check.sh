@@ -32,9 +32,11 @@ if [[ -f "$OPS_ENV" ]]; then
   source "$OPS_ENV"
 fi
 if [[ -n "${HC_RESTIC_CHECK_URL:-}" ]]; then
-  curl -fsS -m 10 --retry 5 "$HC_RESTIC_CHECK_URL" > /dev/null \
-    && log "healthchecks ping sent" \
-    || log "WARNING: healthchecks ping failed"
+  if curl -fsS -m 10 --retry 5 "$HC_RESTIC_CHECK_URL" > /dev/null; then
+    log "healthchecks ping sent"
+  else
+    log "WARNING: healthchecks ping failed"
+  fi
 else
   log "WARNING: HC_RESTIC_CHECK_URL not set in $OPS_ENV — integrity-check alerting is not armed"
 fi

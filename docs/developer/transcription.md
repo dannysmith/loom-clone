@@ -55,15 +55,17 @@ At app launch, `TranscribeAgent.runStartupScan()` walks the recordings directory
 
 1. Check `.transcribed` sidecar — skip if present.
 2. Check `audio.m4a` exists — skip if absent (video-only recording, no mic).
-3. Load or reuse the WhisperKit pipeline (lazy-initialised on first call).
-4. Run inference → `[TranscriptionResult]`.
-5. Build SRT string from segments (strip Whisper special tokens, format timestamps).
-6. Write `captions.srt` to the local recording directory (backup).
-7. PUT SRT bytes to `/api/videos/:id/transcript` with `Content-Type: application/x-subrip`.
-8. On 404 → write `.orphaned` sidecar, stop (server record was deleted).
-9. On other failure → log, exit (retries at next startup scan).
-10. On success → suggest a title and description via Apple Intelligence in parallel (see below). After they finish, if any chapter markers exist in `recording.json`, suggest titles for each chapter sequentially. All AI failures are logged and swallowed.
-11. Write `.transcribed` sidecar with timestamp.
+3. Skip recordings shorter than `minTranscriptionDuration` (5 s) — too short to transcribe usefully.
+4. Load or reuse the WhisperKit pipeline (lazy-initialised on first call).
+5. Run inference → `[TranscriptionResult]`.
+6. Build SRT string from segments (strip Whisper special tokens, format timestamps).
+7. Write `captions.srt` to the local recording directory (backup).
+8. PUT SRT bytes to `/api/videos/:id/transcript` with `Content-Type: application/x-subrip`.
+9. Build `words.json` (word-level timestamps), write it locally alongside the SRT, and PUT it to `/api/videos/:id/words` — the server-side editor and caption remapping depend on it.
+10. On 404 → write `.orphaned` sidecar, stop (server record was deleted).
+11. On other failure → log, exit (retries at next startup scan).
+12. On success → suggest a title and description via Apple Intelligence in parallel (see below). After they finish, if any chapter markers exist in `recording.json`, suggest titles for each chapter sequentially. All AI failures are logged and swallowed.
+13. Write `.transcribed` sidecar with timestamp.
 
 ## Server-side handling
 
@@ -118,7 +120,7 @@ Same philosophy as transcription itself: failures are silent and non-blocking. N
 
 ## AI description suggestion
 
-After title suggestion, `TranscribeAgent` runs a second Foundation Models pass to generate a short description. The description flows into `video.description` on the server, which is already consumed by every viewer surface (the admin editor, the viewer page, OpenGraph `og:description`, `.json` and `.md` metadata, RSS, JSON Feed, and `llms.txt`).
+Concurrently with title suggestion (`async let` — description does not wait for the title), `TranscribeAgent` runs a second Foundation Models pass to generate a short description. The description flows into `video.description` on the server, which is already consumed by every viewer surface (the admin editor, the viewer page, OpenGraph `og:description`, `.json` and `.md` metadata, RSS, JSON Feed, and `llms.txt`).
 
 ### How it works
 
@@ -126,7 +128,7 @@ Mirrors the title flow but with three differences:
 
 1. The transcript is truncated to ~800 words (descriptions need more context to land than titles).
 2. The `@Generable` struct's instructions ask for **a single declarative sentence, 15–25 words**, no marketing fluff, and no filler openings ("In this video", "A walkthrough of", "An overview of", etc.).
-3. The locally-generated title — when available — is passed in the prompt as a topical hint (`Suggested title: <title>`).
+3. The generator supports a title hint in its prompt (`Suggested title: <title>`), but because the two passes run concurrently nothing ever supplies one — the prompt always reads `Suggested title: (unknown)`.
 
 Validation: non-empty, 4+ words, ≤280 characters, not a refusal, and a runtime regex drops any output that begins with one of the banned filler phrases (belt-and-braces — Apple's small on-device model occasionally slips through despite the instructions).
 
@@ -134,7 +136,7 @@ Validation: non-empty, 4+ words, ≤280 characters, not a refusal, and a runtime
 
 ### Independence
 
-Title and description are independent. If title generation fails, description still runs (with no title hint). If description fails, the title is unaffected. Both failures are silent.
+Title and description are fully independent — they run concurrently and neither sees the other's output. If either fails, the other is unaffected. Both failures are silent.
 
 ## AI chapter title suggestion
 

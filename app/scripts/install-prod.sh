@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install-prod.sh — Build a Release version of LoomClone and install to ~/Applications.
+# install-prod.sh — Build a Release version of LoomClone and install to /Applications.
 #
 # Sets the production server URL in UserDefaults on first run. The API key
 # persists in the Keychain across rebuilds — set it once via Settings.

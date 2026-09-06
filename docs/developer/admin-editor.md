@@ -91,11 +91,11 @@ The EDL is always a complete description applied to `source.mp4` from scratch. I
 
 A separate `derivatives/suggested-edits.json` file pre-populates the editor with auto-detected trim and cut suggestions on the very first time you open the editor for a new video. Same shape as `edits.json` so accepted suggestions merge straight in.
 
-Generated server-side from ffmpeg's `silencedetect` filter (run after audio post-processing in the derivatives pipeline). Silences ≥3 seconds at the start/end of the video become a single trim suggestion; interior silences become cut suggestions. See `server/src/lib/suggested-edits.ts` for the thresholds.
+Generated server-side from ffmpeg's `silencedetect` filter, run against the pristine `source.mp4` — deliberately *not* the post-audio-chain master, so the detector never sees denoised/normalised audio (see `audio-post-processing.md`). Silences ≥3 seconds at the start/end of the video become a single trim suggestion; interior silences become cut suggestions. See `server/src/lib/suggested-edits.ts` for the thresholds.
 
 **Lifecycle:**
 - Generated once during initial post-processing if `lastEditedAt` is null and no suggestions file already exists (idempotent — healing reruns of the derivatives pipeline don't regenerate).
-- Deleted on the first successful commit (`finalizeEdit` in `lib/processing/pipeline.ts`), so suggestions never reappear once the user has committed any edit.
+- Not deleted by a commit: the file survives (a commit is a `present` run, and `suggested_edits` isn't in its force set). Once `lastEditedAt` is set the step no longer applies, so a later `intake` re-run drops the stale file — but day to day it's the UI suppression below that keeps committed-past suggestions out of sight.
 - Suppressed in the editor UI if `edits.json` already contains user edits (e.g. an in-progress saved-but-not-committed edit), to avoid noise on a returning visit.
 
 **UI:**
@@ -142,7 +142,7 @@ Commit is not a special mode. `edits.json` is an input to the presentation maste
 1. Sets video status to `"reprocessing"` (prevents concurrent edits)
 2. Reads `edits.json` and computes kept segments — the inverse of the cuts and trims
 3. Builds the presentation group into `derivatives/.staging/` (nothing in `derivatives/` is touched yet):
-   - The master `{height}p.mp4` from `source.mp4`. The cut is rendered first (`-preset fast -crf 18`, `-pix_fmt yuv420p`, `-fps_mode passthrough`, a 30ms audio crossfade at joins; `-ss`/`-to` for a simple trim, `trim`/`atrim` + `concat` for cuts), then the audio chain runs over the result — so loudness is measured on the audio a viewer will actually hear, and the video is encoded exactly once
+   - The master `{height}p.mp4` from `source.mp4`. The cut is rendered first (`-preset fast -crf 18`, `-pix_fmt yuv420p`, `-fps_mode passthrough`, a single 30ms audio fade-in on the output; `-ss`/`-to` for a simple trim, `trim`/`atrim` + `concat` for cuts), then the audio chain runs over the result — so loudness is measured on the audio a viewer will actually hear, and the video is encoded exactly once
    - Downscaled variants cut from the staged master
    - Storyboard from the staged master
    - Captions, remapped from `captions.original.srt` through `words.json`

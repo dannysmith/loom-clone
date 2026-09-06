@@ -31,8 +31,8 @@ const hostname = Bun.env.HOST ?? "127.0.0.1";
 
 console.log(`[server] listening on http://${hostname}:${port}`);
 
-// Daily maintenance: remove HLS segments/thumbnail candidates for videos that
-// have been `ready` for >10 days, and mark stalled videos `incomplete`
+// Daily maintenance: remove HLS segments for videos that have been `ready`
+// for >10 days, and mark stalled videos `incomplete`
 // (recordings with no segment activity for >4h, heals with none for >48h).
 // First run 60s after startup (avoids competing with in-flight derivative
 // generation), then every 24h.

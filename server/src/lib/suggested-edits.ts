@@ -4,9 +4,10 @@
 // silence, plus any number of suggested interior cuts).
 //
 // The file is written once at post-processing for new videos (when
-// lastEditedAt is null and no suggestions file exists yet) and deleted
-// when the user commits their first edit, so suggestions only appear
-// the first time the editor is opened. Healing reruns derivatives
+// lastEditedAt is null and no suggestions file exists yet). A commit does
+// NOT delete it — the editor UI suppresses suggestions once user edits
+// exist, and an intake re-run drops the file as a stale artifact (the step
+// stops applying once lastEditedAt is set). Healing reruns derivatives
 // idempotently — see the skip conditions below.
 //
 // On disk shape mirrors edits.json so the editor can merge accepted

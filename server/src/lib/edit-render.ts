@@ -16,7 +16,8 @@ export type Edl = {
 
 // ffmpeg args to produce the edited output from `sourcePath` into `outputPath`,
 // keeping only `kept` segments. A single kept segment is a simple trim; multiple
-// segments are concatenated with a short audio fade at each join to avoid clicks.
+// segments are concatenated, with one short audio fade-in on the output to
+// soften the start (joins themselves are hard cuts).
 export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segment[]): string[] {
   if (kept.length === 0) {
     throw new Error("buildEditArgs: kept must contain at least one segment");
@@ -61,7 +62,7 @@ export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segm
     ];
   }
 
-  const CROSSFADE_MS = 0.03; // 30ms audio fade-in to prevent clicks at joins.
+  const AUDIO_FADE_IN_S = 0.03; // one 30ms fade-in on the concatenated output, softening its start
   const vSelects: string[] = [];
   const aSelects: string[] = [];
   for (let i = 0; i < kept.length; i++) {
@@ -76,7 +77,7 @@ export function buildEditArgs(sourcePath: string, outputPath: string, kept: Segm
     ...aSelects,
     `${vInputs}concat=n=${kept.length}:v=1:a=0[vout]`,
     `${aInputs}concat=n=${kept.length}:v=0:a=1[apre]`,
-    `[apre]afade=t=in:d=${CROSSFADE_MS}[aout]`,
+    `[apre]afade=t=in:d=${AUDIO_FADE_IN_S}[aout]`,
   ].join(";");
 
   return [

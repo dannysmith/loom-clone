@@ -28,7 +28,7 @@ The server has three compose files in `server/`:
 | --- | --- |
 | `docker-compose.yml` | Base: build context, container name, env vars, restart policy |
 | `docker-compose.override.yml` | Local dev: port mapping (`3000:3000`), bind mount to `./data` |
-| `docker-compose.prod.yml` | Production: joins `caddy-net`, mounts storage volume, sets `NODE_ENV` and `PUBLIC_URL` (secrets come from `server/.env` via `env_file`) |
+| `docker-compose.prod.yml` | Production: joins `caddy-net`, mounts storage volume, sets `NODE_ENV` and `PUBLIC_URL` (secrets come from `server/.env` via `env_file`), and carries the container resource limits (`mem_limit` 5g, `memswap_limit` 6g, `mem_reservation` 1g, `pids_limit` 500 — see #39) |
 
 **Locally**, just `docker compose up --build` works — Docker Compose auto-loads the override file. This is useful for verifying the container builds and runs, but isn't needed for day-to-day development. Bare `bun run dev` is faster for iterating.
 
@@ -40,10 +40,10 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` runs on every push to `main` that touches `server/**`:
+`.github/workflows/deploy.yml` triggers on pushes to `main` touching `server/**` or the workflow file itself, on pull requests (test job only), and manually via `workflow_dispatch`:
 
-1. **Test job**: installs deps, runs `bun run check` (lint + format), `bun run typecheck`, and `bun test`
-2. **Deploy job** (only if tests pass): SSHs into the VPS as the configured deploy user, pulls latest, rebuilds and restarts the container
+1. **Test job**: runs inside the same digest-pinned `oven/bun` image the Dockerfile builds from, installs ffmpeg (with a major-version guard) + shellcheck, shellchecks `server/scripts/*.sh`, installs server + admin-client + player deps, runs `bun run check:all`, builds the admin client, verifies the committed player bundle matches its source, and fails on any unexpected skipped test.
+2. **Deploy job** (pushes only, after a green test job): SSHs into the VPS as the configured deploy user, pulls latest, rebuilds and restarts the container
 
 The whole pipeline takes ~40 seconds.
 
@@ -110,6 +110,6 @@ If the VPS dies or you need to recreate this setup:
 
 9. **Set up CI/CD**: generate a deploy SSH key (`ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/loom-clone-deploy`), add the public key to `~/.ssh/authorized_keys` of the deploy user on the VPS, then add three GitHub repo secrets: `VPS_HOST` (the VPS IP), `VPS_SSH_USER` (the deploy user), and `VPS_SSH_KEY` (the private key).
 
-10. **Set up BunnyCDN** pull zone with origin `https://origin.v.danny.is`, enable "Optimize for large object delivery" and "Serve stale while origin offline", add Edge Rules to bypass cache for `/api/*` and `/admin/*`, add `v.danny.is` as a custom hostname, and activate SSL. See `docs/tasks-todo/task-1-view-layer.md` for the full setup details.
+10. **Set up BunnyCDN** pull zone with origin `https://origin.v.danny.is`, enable "Optimize for large object delivery" and "Serve stale while origin offline", add Edge Rules to bypass cache for `/api/*` and `/admin/*`, add `v.danny.is` as a custom hostname, and activate SSL. (This sentence is the full record of the pull-zone setup; the rest lives in the BunnyCDN dashboard.)
 
 11. **Verify**: `curl https://v.danny.is/api/health` and `curl -I https://v.danny.is/<any-slug>` (should show BunnyCDN headers).

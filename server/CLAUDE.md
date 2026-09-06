@@ -86,16 +86,16 @@ public/
 - **JSX config**: `tsconfig` sets `jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`. Route files that return JSX must be `.tsx`.
 - **DOCTYPE**: `RootLayout` emits `<!DOCTYPE html>` via `raw()` from `hono/html`. Don't repeat it elsewhere.
 - **`head` slot**: layouts accept an optional `head` prop for page-specific `<link>`/`<script>` tags. Use this for stylesheets that only one page needs (e.g. Vidstack on `VideoPage`).
-- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path is resolved absolutely in `src/app.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module.
+- **Static assets**: `server/public/` served at `/static/*` by `serveStatic` from `hono/bun`. The root path (`PUBLIC_ROOT`) is resolved absolutely in `src/lib/static-assets.ts` so it survives test chdirs. Per-video media is served under `/:slug/raw/*` and `/:slug/stream/*` by the videos module.
 
 **CSS**: full reference in [`docs/developer/design.md`](../docs/developer/design.md). Read it before touching the admin or viewer UI.
 
 - Three entry points, one per surface, so admin styles never reach public visitors:
-  - `public/styles/app.css` — admin (linked by `RootLayout` by default). Imports reset + tokens + base + components.
+  - `public/styles/app.css` — admin (`RootLayout`'s default stylesheet; `AdminLayout` emits its own shell and links it directly). Imports reset + tokens + base + components.
   - `public/styles/viewer-app.css` — public viewer/tag pages (linked by `ViewerLayout`). Imports reset + tokens + base + viewer + player.
   - `public/styles/embed-app.css` — embed page. Imports reset + tokens + base + embed + player.
   - `RootLayout` accepts a `stylesheet` prop; `ViewerLayout` and `EmbedPage` set it.
-- `public/styles/admin.css` is linked separately by `AdminLayout`'s head slot — it ships only on admin pages.
+- `public/styles/admin.css` is linked directly by `AdminLayout` (deliberately unversioned — it's CDN-bypassed) — it ships only on admin pages.
 - `tokens.css` is the single source of truth for design tokens (OKLCH brand palette, semantic mappings via `light-dark()`, type/spacing scales, motion). Change values here; everything downstream uses `var(--…)`.
 - Admin client pages (`server/admin-client/`) consume the same tokens — their `:root` sets `color-scheme: dark` and aliases shared vars onto the local `--bg`/`--panel-bg`/`--text`/`--accent` names.
 - Use modern CSS freely: nesting, `:has()`, container queries, `light-dark()`, `color-mix(in oklch, …)`, `oklch(from <c> …)`, native `<dialog>`/`popover`. All Baseline.

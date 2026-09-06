@@ -23,7 +23,7 @@ A cheatsheet for fast lookup. Each row maps an intent to the class/token to reac
 | Default action button | `.btn` |
 | Primary CTA | `.btn .btn--primary` |
 | Quiet / hover-revealed action | `.btn .btn--ghost` |
-| Compact button | append `.btn--sm` |
+| Compact button | append `.btn--sm` (or `.btn--xs` for the smallest) |
 | Outline destructive | `.btn .btn--danger` |
 | Filled destructive | `.btn .btn--danger-solid` |
 | Square red icon-only delete | `.btn-icon-delete` |
@@ -50,7 +50,7 @@ This separation is load-bearing. Changing one brand hue shifts dependent semanti
 
 | Surface | Entry | Composes |
 | --- | --- | --- |
-| Admin pages | `app.css` linked by `RootLayout` + `admin.css` linked by `AdminLayout`'s head slot | reset + tokens + base + admin |
+| Admin pages | `AdminLayout` emits its own `<html>` shell and links `app.css` (versioned via `staticUrl()`) + `admin.css` (deliberately unversioned — CDN-bypassed) directly | reset + tokens + base + admin |
 | Public viewer (`/:slug`, `/:tagslug`) | `viewer-app.css` (set via `ViewerLayout`'s `stylesheet` prop on `RootLayout`) | reset + tokens + base + viewer + player |
 | Embed (`/:slug/embed`) | `embed-app.css` | reset + tokens + base + embed + player |
 | Cover + video editors (Vite-bundled SPAs) | their own CSS + a `<link>` to `app.css` (so brand tokens resolve) | editor's own component styles |
@@ -193,8 +193,8 @@ Line heights: `--line-height-tight` (1.15), `--line-height-normal` (1.5), `--lin
 
 | Level | Treatment | Used for |
 | --- | --- | --- |
-| `h1` | `--font-size-xl` bold | Page title |
-| `h2` | `--font-size-lg` bold | Major section header |
+| `h1` | `--font-size-2xl` bold globally (`base.css`); admin page headers scope it down to `--font-size-xl` | Page title |
+| `h2` | `--font-size-xl` bold (`base.css`) | Major section header |
 | `h3` | `--font-size-sm` medium `--color-fg-muted` | Inline sub-section ("Description", "Tags", "Notes", "Recording API Keys") |
 
 ### Mono usage
@@ -264,6 +264,7 @@ All admin component classes live in `server/public/styles/admin.css`. Viewer-spe
 | `.btn--primary` | Filled coral |
 | `.btn--ghost` | Transparent, fg-muted → fg + `--color-surface-hover` on hover. Use for quiet affordances (hover-revealed edit triggers, hands-off toolbar buttons inside a bordered container) |
 | `.btn--sm` | Smaller padding, xs font |
+| `.btn--xs` | Smaller again |
 | `.btn--icon` | Square (aspect 1), no padding, muted icon → fg on hover. For toolbar icon buttons with their own border |
 | `.btn--danger` | Outline red |
 | `.btn--danger-solid` | Filled red |
@@ -277,7 +278,7 @@ Three families, deliberately distinct shapes:
 
 | Component | Shape | Role |
 | --- | --- | --- |
-| `.badge` | `--radius-full` pill | System-assigned state. Modifiers carry semantic colour: `--public`, `--unlisted`, `--private`, `--recording`, `--healing`, `--processing`, `--deleting`, `--failed`, `--edited`. No `--complete` modifier (complete is the boring default and shouldn't draw the eye) |
+| `.badge` | `--radius-full` pill | System-assigned state. Modifiers carry semantic colour: `--public`, `--unlisted`, `--private`, `--recording`, `--healing`, `--processing`, `--reprocessing`, `--processing_failed` (aliased by `--failed`), `--incomplete`, `--ready`, `--deleting`, `--edited` |
 | `.tag-chip` | `--radius-md` (squarer) | User-picked label. Always prefixed with the Lucide `tag` icon. Background + text colour come from `--tag-<hue>-bg`/`-fg`, set inline |
 | `.meta-pill` | No background by default, just icon + text + `tabular-nums` | Inline metadata items: duration, date, dimensions, file size, camera/mic name. Variants: `--warning` (uses `--color-warning`), `--id` (mono + half-opacity, click-to-copy) |
 
@@ -404,7 +405,7 @@ Examples of what *not* to do, with the right way alongside.
 | `background: light-dark(var(--brand-grey-400), var(--brand-grey-700))` | `background: var(--color-surface-hover)` | Hand-rolling the pattern duplicates token logic and drifts |
 | `color: #888` or `color: rgba(255,255,255,0.6)` | `color: var(--color-fg-muted)` | Hex/rgba in components bypasses the palette |
 | `background: var(--brand-red-500)` (in component CSS) | `background: var(--color-accent)` or `var(--color-danger)` | Primitives don't carry semantics; semantic tokens do |
-| `<span class="badge badge--complete">complete</span>` (always rendered) | Don't emit `badge--complete` at all — guard at the call site | Complete is the boring default; rendering a neutral badge for every video adds noise |
+| Rendering a status badge on every card regardless of state | Guard at the call site — surface only states that need the eye | The happy-path state is the boring default; a badge on everything adds noise |
 | `<span class="tag-chip">tag</span>` (no icon) | `<span class="tag-chip"><IconTag size={12} />tag</span>` | The icon is what distinguishes a tag chip from a badge at a glance |
 | `font-size: 0.7rem` for "a bit smaller than xs" | Use `--font-size-xs` (0.75rem) | The scale exists for a reason — break it deliberately if needed and add a comment |
 | `padding: 1px var(--space-2)` to make a chip shorter than a badge | Match badge proportions (`--space-1 --space-2`) | Tag chips and badges should line up at the same height |
@@ -420,7 +421,7 @@ Examples of what *not* to do, with the right way alongside.
 1. Extend the `status` enum in `server/src/db/schema.ts` (`videos.status`).
 2. Add a Drizzle migration: `bun run db:generate` (drizzle-kit will diff).
 3. Add `.badge--<status>` and `.filter-pill--<status>` modifiers in `admin.css`, pointing to whichever semantic family fits (most likely `--color-danger`, `--color-warning`, `--color-info`, `--color-success`, or `--color-restricted`).
-4. If the status should be hidden by default (like `complete`), guard the badge emission at the call site instead of defining a neutral modifier.
+4. If the status should be hidden by default, guard the badge emission at the call site instead of defining a neutral modifier.
 
 ### Add a new tag colour
 
@@ -461,8 +462,8 @@ Vanilla CSS only, no preprocessor. The following features are used freely:
 - **`color-mix(in oklch, …)`** for tints and alpha-blends derived from tokens.
 - **`oklch(from <c> l c h)`** to convert hex to OKLCH at parse time or derive a colour from another.
 - **CSS nesting** for component rules (no preprocessor).
-- **`:has()`** for parent-aware styling.
-- **Container queries** when component-level breakpoints make sense.
+- **`:has()`** for parent-aware styling (available — not currently used anywhere).
+- **Container queries** when component-level breakpoints make sense (available — not currently used).
 - **`field-sizing: content`** for textareas that grow with input.
 - **`interpolate-size: allow-keywords`** in reset, so `auto` heights animate.
 - **`text-wrap: balance`** in reset, on headings.

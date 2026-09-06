@@ -34,7 +34,7 @@ Three components exist today:
 
 - **macOS Desktop App** (`app/LoomClone/`) — Swift & SwiftUI menubar app. Captures screen (ScreenCaptureKit), camera (AVCaptureSession), and microphone. Composites frames via CIContext/Metal, encodes to HLS fMP4 segments via AVAssetWriter, streams segments to the server over HTTP during recording. Also writes raw masters (ProRes screen, H.264 camera, AAC audio) locally as a safety net. Actors: `RecordingActor` (orchestration + metronome), `CompositionActor` (Metal rendering), `WriterActor` (HLS encoding), `UploadActor` (segment streaming + healing).
 - **Server** (`server/`) — Hono + Bun. Receives HLS segments during recording, assembles playlists, stitches them into a pristine `source.mp4` and builds an `<H>p.mp4` presentation master (plus downscaled variants) from it via ffmpeg, and serves viewer pages + media at `/:slug`. Routes are split into four modules (api, admin, site, videos). Public feeds (RSS, JSON Feed, llms.txt) are served by the site module. `server/data/` holds per-video directories.
-- **CDN Layer** — BunnyCDN pull zone in front of the Hetzner origin. `v.danny.is` CNAMEs to BunnyCDN; `origin.v.danny.is` is the direct-to-Hetzner hostname used as the pull zone origin. BunnyCDN caches all viewer-facing routes (video pages, media files, feeds) and bypasses cache for `/api/*` and `/admin/*`. Cache purging on video state changes is handled by `server/src/lib/cdn.ts` via the BunnyCDN purge API. See `docs/tasks-todo/task-1-view-layer.md` for the full setup.
+- **CDN Layer** — BunnyCDN pull zone in front of the Hetzner origin. `v.danny.is` CNAMEs to BunnyCDN; `origin.v.danny.is` is the direct-to-Hetzner hostname used as the pull zone origin. BunnyCDN caches all viewer-facing routes (video pages, media files, feeds) and bypasses cache for `/api/*` and `/admin/*`. Cache purging on video state changes is handled by `server/src/lib/cdn.ts` via the BunnyCDN purge API. Pull-zone setup steps are in `docs/developer/deployment.md`.
 
 ## Developer Docs
 
@@ -44,7 +44,12 @@ Three components exist today:
 - `docs/developer/audio-post-processing.md` — the audio denoise + loudness normalisation chain (highpass → arnndn → two-pass loudnorm), which produces the presentation master from the pristine source. Model choice, skip conditions, the arnndn NaN guard, performance. Read before changing anything in the audio chain in `derivatives.ts`.
 - `docs/developer/transcription.md` — how subtitles are generated (WhisperKit on Mac, TranscribeAgent lifecycle, model management, server-side indexing). Read before touching `TranscribeAgent`, `TranscriptionModelStatus`, or the transcript endpoint.
 - `docs/developer/auth.md` — how authentication works end-to-end: API keys (`lck_`) for the macOS app, and admin auth (sessions + `lca_` tokens) for the web panel.
+- `docs/developer/design.md` — the CSS system: token layers, class inventory, per-surface bundles, recipes and anti-patterns. Read before touching admin or viewer UI.
+- `docs/developer/deployment.md` — VPS deployment: compose files, CI/CD pipeline, first-deploy runbook, CDN setup.
+- `docs/developer/backup-and-restore.md` — the restic backup: what's backed up and why, one-time setup, the restore procedure.
+- `docs/developer/build-configurations.md` — the macOS app's Debug/Release isolation (separate UserDefaults suites, Keychain services, recording dirs) and the install-prod flow.
 - `docs/developer/operations.md` — how the system reports its own health: the healthchecks.io dead-man's-switch model, the self-check endpoint, backup/cron wiring, and the per-alert runbook. The "an alert fired, what now?" doc.
+- `docs/developer/static-export-end-state.md` — the design constraint that keeps the public surface exportable to a static host at end-of-life. Read before adding anything dynamic to the viewer surface.
 - `docs/developer/admin-client.md` — the admin's React package (`server/admin-client/`): layout, build and dev workflow, the Vite-manifest seam, the cover-image generator, why the player is a separate package, and the public-vs-admin dependency policy. Read before touching anything in `server/admin-client/`, `lib/vite-manifest.ts`, or the editor/cover admin routes.
 - `docs/developer/admin-editor.md` — the web-based video editor itself: React app architecture, EDL format, how a commit is just a presentation rebuild, file layout, keyboard shortcuts. Read before touching anything in `server/admin-client/src/editor/`, `edit-render.ts`, `edit-transcript.ts`, or the EDL paths in `lib/processing/`.
 - `docs/research/` — initial research from the project's design phase (pre-prototype). Historical — unlikely to be needed now that the system is built and running.
@@ -98,7 +103,10 @@ Direct commands (for reference or when you need different flags):
 │   ├── admin-client/                     #   Vite + React apps served in the admin panel
 │   │   └── src/                          #     editor/ (video editor), cover/ (cover generator)
 │   ├── biome.jsonc                       #   lint + format config
-│   ├── public/                           #   static assets served at /static/* (CSS, future fonts/images)
+│   ├── public/                           #   static assets served at /static/* (also robots.txt, site.webmanifest)
+│   │   ├── admin-client/                 #     gitignored admin-client build output (built in Docker/CI)
+│   │   ├── images/                       #     favicons etc.
+│   │   ├── js/                           #     admin-page scripts
 │   │   ├── player/                       #     committed Vidstack player bundle (built from server/player/)
 │   │   └── styles/                       #     vanilla CSS with @layer + custom properties
 │   ├── player/                           #   Vite build for the self-hosted Vidstack player (pinned vidstack + hls.js)
@@ -115,11 +123,7 @@ Direct commands (for reference or when you need different flags):
 │           ├── site/                     #     root redirect, well-known files, feeds (RSS, JSON, llms.txt), oEmbed
 │           └── videos/                   #     /:slug viewer surface (page, embed, media, metadata)
 ├── docs/
-│   ├── developer/                        # living developer docs
-│   │   ├── streaming-and-healing.md      #   segment flow, healing, the source/presentation split
-│   │   ├── server-routes-and-api.md      #   full route + API reference
-│   │   ├── admin-client.md               #   admin React package, build seam, dependency policy
-│   │   └── auth.md                       #   API keys + admin auth (sessions, bearer tokens)
+│   ├── developer/                        # living developer docs — full annotated list in "Developer Docs" above
 │   ├── tasks-todo/                       # active/upcoming work
 │   ├── tasks-done/                       # completed task write-ups
 │   ├── research/                         # historical: initial research (pre-prototype)

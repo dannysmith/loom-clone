@@ -4,10 +4,10 @@ The macOS app uses `#if DEBUG` / `#else` compile-time branching to fully isolate
 
 ## What's separated
 
-| Concern | Debug (Xcode) | Release (~/Applications) |
+| Concern | Debug (Xcode) | Release (/Applications) |
 | --- | --- | --- |
 | Server URL default | `http://127.0.0.1:3000` | Empty — must be configured (or set by install script) |
-| UserDefaults suite | `is.danny.loomclone.debug` | `is.danny.loomclone` |
+| UserDefaults suite | `is.danny.loomclone.debug` | `is.danny.loomclone.settings` |
 | Keychain service | `is.danny.loomclone.debug.apikey` | `is.danny.loomclone.apikey` |
 | Local recordings | `~/Library/Application Support/LoomClone-Debug/recordings/` | `~/Library/Application Support/LoomClone/recordings/` |
 

@@ -54,7 +54,7 @@ Backup age is *not* a self-check item: the backup's own healthchecks schedule co
    ```
 
    The scripts read it at run time — nothing is hardcoded, and a rebuilt VPS only needs this file recreated (it's in the same category as `~/.config/restic-password`).
-4. **Install the crontab** (`crontab -e`). Stdout goes to `/dev/null` because the scripts already log themselves to `~/logs/` — a crontab redirect on top would double every line:
+4. **Install the crontab** (`crontab -e`). Output goes to `/dev/null`: the backup scripts log themselves to `~/logs/` (a crontab redirect on top would double every line), and the self-check script's record is healthchecks.io itself — its failure detail travels in the `/fail` POST, not a local log:
 
    ```cron
    # loom-clone: daily backup at 03:30 UTC (logs to ~/logs/backup.log)

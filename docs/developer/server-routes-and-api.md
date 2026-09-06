@@ -15,13 +15,13 @@ The server is split into four route modules, each with its own auth profile:
 
 Modules are mounted in the order above in `app.ts`, and the ordering matters: Hono does not prefer more specific routes across sub-router mounts, so `videos` must stay mounted last — mounted first, its `/:slug` catch-all swallows `/feed.xml`, `/robots.txt`, `/sitemap.xml`, etc. A test in `src/__tests__/app.test.ts` pins this.
 
-`/static/*` is served via `serveStatic` middleware directly in `app.ts` (not a route module). It serves `server/public/` — CSS, fonts, future client assets.
+`/static/*` is served by middleware directly in `app.ts` (not a route module), in two layers: a `/static/styles/*` handler serves the `@import`-rewritten CSS with `Cache-Control: public, max-age=31536000, immutable`, then `serveStatic` covers the rest of `server/public/` (its `onFound` hook gives the CDN-bypassed `admin.css`/`admin.js` `no-cache` instead).
 
 ## Response envelope
 
 **Success**: the resource directly (e.g. `{ id, slug, ... }`), or `{ ok: true }` for action endpoints with no meaningful return value.
 
-**Error**: always `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Error codes are defined in `src/lib/errors.ts` (except `CONFLICT`, which is emitted inline by the api module's `onError` handler in `routes/api/index.ts`); use the `apiError(c, status, message, code)` helper to build error responses.
+**Error**: always `{ error: "<human message>", code: "<MACHINE_CODE>" }`. Error codes are defined in `src/lib/errors.ts` (except `INVALID_ADMIN_TOKEN`, emitted inline by `requireAdmin()` in `lib/admin-auth.ts`); use the `apiError(c, status, message, code)` helper to build error responses.
 
 Error codes:
 
@@ -37,8 +37,9 @@ Error codes:
 | `VALIDATION_ERROR`         | 400    | Request body fails zod schema validation   |
 | `SLUG_CONFLICT`            | 409    | Slug already in use by another video/redirect |
 | `CONFLICT`                 | 409    | Store-level conflict (generic)             |
+| `INVALID_ADMIN_TOKEN`      | 401    | Unknown or revoked `lca_` admin bearer token |
 
-All 401 responses include `WWW-Authenticate: Bearer realm="loom-clone"`.
+API-key 401 responses include `WWW-Authenticate: Bearer realm="loom-clone"`; the admin bearer 401 does not set the header.
 
 ## Slug constraints
 
@@ -46,8 +47,8 @@ Slugs are the public identifier for videos. They appear in every viewer-facing U
 
 - **Regex**: `^[a-z0-9](-?[a-z0-9])*$` — lowercase alphanumeric with single dashes, no dots, no slashes, no leading/trailing/double dashes.
 - **Max length**: 200 characters.
-- **Reserved words**: `admin`, `api`, `static`, `data`, `v`, `robots`, `favicon`, `sitemap`, `humans`, `manifest`, `apple-touch-icon`, `health`, `login`, `logout`, `auth`, `signup`, `embed`, `raw`, `stream`, `poster`, `feed`, `rss`, `search`. Attempting to create or rename to a reserved slug returns 409.
-- **Globally unique**: a slug cannot match any current video's slug OR any entry in the `slug_redirects` table. Exception: a video can reclaim its own previous slug (the redirect pointing back to itself is removed). This ensures old URLs never silently resolve to the wrong video.
+- **Reserved words**: `admin`, `api`, `static`, `data`, `v`, `robots`, `favicon`, `sitemap`, `humans`, `manifest`, `apple-touch-icon`, `health`, `login`, `logout`, `auth`, `signup`, `embed`, `raw`, `stream`, `poster`, `feed`, `rss`, `search`, `oembed`. Attempting to create or rename to a reserved slug returns 400 `VALIDATION_ERROR` (409 is for uniqueness conflicts only).
+- **Globally unique across videos AND tags**: a slug cannot match any current video slug, any `slug_redirects` entry, any live tag slug, or any `tag_slug_redirects` entry — videos and tags share the top-level `/:slug` namespace. Exception: a video can reclaim its own previous slug (the redirect pointing back to itself is removed). This ensures old URLs never silently resolve to the wrong video.
 
 Validation happens at write time in `lib/store.ts` via `validateSlugFormat()`. Auto-generated slugs (3-word adjective-noun-verb from `human-id`, e.g. `calm-dogs-dream`) always satisfy these constraints.
 
@@ -89,7 +90,7 @@ Create a new video record. Called when the user hits Record.
 
 **Response** `200`:
 ```json
-{ "id": "uuid", "slug": "a1b2c3d4" }
+{ "id": "uuid", "slug": "calm-dogs-dream" }
 ```
 
 ### `GET /api/videos/:id`
@@ -100,7 +101,7 @@ Single video by id.
 ```json
 {
   "id": "uuid",
-  "slug": "a1b2c3d4",
+  "slug": "calm-dogs-dream",
   "status": "recording | healing | processing | ready | reprocessing | processing_failed | incomplete | deleting",
   "visibility": "public | unlisted | private",
   "title": "string | null",
@@ -112,12 +113,12 @@ Single video by id.
   "createdAt": "ISO",
   "updatedAt": "ISO",
   "completedAt": "ISO | null",
-  "url": "https://loom.example.com/a1b2c3d4",
+  "url": "https://loom.example.com/calm-dogs-dream",
   "urls": {
-    "page": "/a1b2c3d4",
-    "raw": "/a1b2c3d4/raw/video.mp4",
-    "hls": "/a1b2c3d4/stream/stream.m3u8",
-    "poster": "/a1b2c3d4/poster.jpg"
+    "page": "/calm-dogs-dream",
+    "raw": "/calm-dogs-dream/raw/video.mp4",
+    "hls": "/calm-dogs-dream/stream/stream.m3u8",
+    "poster": "/calm-dogs-dream/poster.jpg"
   }
 }
 ```
@@ -165,9 +166,9 @@ Finalise a recording. Idempotent — safe to call repeatedly as heal progresses.
 **Response** `200`:
 ```json
 {
-  "path": "/a1b2c3d4",
-  "url": "https://loom.example.com/a1b2c3d4",
-  "slug": "a1b2c3d4",
+  "path": "/calm-dogs-dream",
+  "url": "https://loom.example.com/calm-dogs-dream",
+  "slug": "calm-dogs-dream",
   "title": null,
   "visibility": "unlisted",
   "missing": ["seg_002.m4s", "seg_003.m4s"]
@@ -268,7 +269,7 @@ All viewer routes are open (no auth). Renamed slugs 301-redirect to the canonica
 
 ### `/:slug`
 
-HTML video page. Prefers the presentation master (`/:slug/raw/<N>p.mp4`) when the `presentation` step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted master never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when `captions.srt` exists. Uses the self-hosted Vidstack player — a committed bundle served from `/static/player/*`, with hashed filenames resolved via the Vite manifest in `src/lib/vite-manifest.ts`.
+HTML video page. Prefers the presentation master (`/:slug/raw/<N>p.mp4`) when the `presentation` step is validated `ready` **and** the file is present; otherwise falls back to HLS (`/:slug/stream/stream.m3u8`) — so a broken or deleted master never gets served. Poster set from `/:slug/poster.jpg` when available. Captions included via `<track>` element when either `captions.srt` or `captions.vtt` exists (the track always points at `/:slug/captions.vtt`). Uses the self-hosted Vidstack player — a committed bundle served from `/static/player/*`, with hashed filenames resolved via the Vite manifest in `src/lib/vite-manifest.ts`.
 
 Includes below the player: title (if set), formatted duration + date, description, and attribution link.
 
@@ -316,7 +317,7 @@ SRT transcript/subtitles. Serves `data/<id>/derivatives/captions.srt`. Returns 4
 
 ### `/:slug/captions.vtt`
 
-VTT variant of the transcript, if the original upload was VTT format. Same behaviour as the SRT route. `Content-Type: text/vtt`.
+VTT transcript: serves `captions.vtt` when present, otherwise converts `captions.srt` to VTT on the fly — so an SRT-only video still returns 200 here (the player's `<track>` relies on that). 404 only when neither file exists. `Content-Type: text/vtt`.
 
 ### `/:slug/chapters.vtt`
 
@@ -377,11 +378,11 @@ If the slug is not a video, `.md` falls back to a **tag** markdown page: a block
 | `/feed.xml`    | RSS 2.0 + Media RSS feed of all public, `ready`, non-trashed videos. Includes `<enclosure>`, `<media:content>`, `<media:thumbnail>` per item. |
 | `/rss`         | 301 redirect to `/feed.xml`                                                          |
 | `/feed.json`   | JSON Feed 1.1. Includes `info_for_llms` top-level key, truncated transcript excerpts (~200 words), per-video `_urls` map, media attachments. Served as `application/feed+json`. |
-| `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, and links to feeds/sitemap/author website. |
+| `/llms.txt`    | Dynamic markdown conforming to llmstxt.org. Includes endpoint documentation, public video list with titles/durations/dates/descriptions, a `## Tags` section listing public tags with their `.md`/feed sub-paths, and links to feeds/sitemap/author website. |
 | `/robots.txt`  | Served from the static file `public/robots.txt`. Content signals + disallows `/admin` and `/api` + `Sitemap:` directive. |
 | `/favicon.ico` | Real icon bytes from `public/images/favicon/favicon.ico`. 200, `image/x-icon`, `Cache-Control: public, max-age=604800`. |
 | `/site.webmanifest` | Web app manifest from `public/site.webmanifest`, served via a route (not `serveStatic`) so it gets `application/manifest+json`. `Cache-Control: public, max-age=604800`. |
-| `/sitemap.xml` | Video sitemap (public + `ready` + non-trashed only, with `<video:video>` extension) |
+| `/sitemap.xml` | Sitemap: public + `ready` + non-trashed videos (each with a `<video:video>` extension) plus a plain `<url>` entry per public tag that has a slug |
 
 `/feed.xml`, `/feed.json`, `/llms.txt`, `/sitemap.xml`, and `/robots.txt` are all sent with `Cache-Control: public, max-age=300, stale-while-revalidate=3600` (see `lib/cache-control.ts`). Without this BunnyCDN applies its 30-day default, so a newly published video could be missing from the index for weeks.
 
@@ -391,7 +392,7 @@ oEmbed discovery endpoint. Open, no auth. Services (Notion, WordPress, Slack) ca
 
 **Query params**:
 - `url` (required) — the video page URL (path-only or absolute)
-- `format` — only `json` is supported (default)
+- `format` — ignored; the response is always JSON (an explicit `?format=xml` is not rejected)
 - `maxwidth`, `maxheight` — clamp iframe dimensions (default 1280x720, maintains 16:9)
 
 **Response** `200`:
@@ -511,7 +512,7 @@ Routes in `routes/admin/editor.ts`, mounted at `/admin/videos`. See [Admin Edito
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/admin/videos/:id/reprocess` | Rebuild the presentation set from the preserved source, honouring whatever EDL is on disk — so reprocessing an edited video regenerates the same cut rather than discarding it. Form `rebuild=hls` re-stitches the source first, which also restores `source_pristine`. 302 → `/admin/videos/:id?tab=processing&reprocessed=<started\|queued\|skipped>`. 400 if the status can't be reprocessed, or `rebuild=hls` when the HLS segments are gone. Logs `reprocess_requested` |
-| POST | `/admin/videos/:id/reprocess/:kind` | Regenerate a single artifact from whatever it declares as its input (`kind` must be in `REGENERABLE_KINDS` — everything except `source` and `presentation`, the two with dependents). Same 302. 400 on bad status, non-regenerable kind, or missing/invalid `source.mp4` |
+| POST | `/admin/videos/:id/reprocess/:kind` | Regenerate a single artifact from whatever it declares as its input (`kind` must be in `REGENERABLE_KINDS` — the server-runnable steps minus `source` and `presentation`; the Mac-sent steps like `transcript`/`words` are excluded too, since the server can't regenerate them). Same 302. 400 on bad status, non-regenerable kind, or missing/invalid `source.mp4` |
 
 ### Admin media (session-gated, serves by video ID regardless of visibility)
 

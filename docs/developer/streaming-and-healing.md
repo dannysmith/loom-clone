@@ -43,7 +43,7 @@ The video record itself (id, slug, status, visibility, timestamps, cached durati
 | `derivatives/<H>p.mp4`      | Same pipeline                                    | The **presentation master** at the source's own height (`1440p.mp4` for a 1440p recording). Carries the audio chain and any committed edit. This is what viewers are served |
 | `derivatives/edits.json`    | On save in the admin editor                      | The EDL. Absent or empty means unedited; it's an input to the master, not a mode switch |
 | `derivatives/thumbnail.jpg` | Same pipeline                                    | Promoted from `thumbnail-candidates/` — the best auto-selected or admin-chosen frame. ~1280px wide JPEG |
-| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom. **Cleaned up 10 days post-`ready`** |
+| `derivatives/thumbnail-candidates/` | Same pipeline                             | Multiple JPEG frames sampled from the video, scored by luminance variance. Admin can pick or upload custom. Kept indefinitely — deliberately excluded from the stale-file sweep (#45) |
 | `derivatives/720p.mp4`      | Same pipeline (if source > 720p)                 | Downsampled variant cut from the master, libx264 CRF 23 |
 | `derivatives/1080p.mp4`     | Same pipeline (if source > 1080p)                | Downsampled variant cut from the master, libx264 CRF 20 |
 | `derivatives/captions.original.srt` | On `PUT /api/videos/:id/transcript`      | The transcript exactly as the Mac's TranscribeAgent produced it. Never modified — it's the input the served captions are derived from |
@@ -164,7 +164,7 @@ Properties worth keeping in mind:
 - **Failures are scoped.** A failed *expected* step (audio, thumbnail, …) is logged and the pipeline continues. A failed *mandatory* step (`source`/`metadata`) lands the video in `processing_failed` (HLS still plays). Failures never invalidate the m3u8.
 - **Serving is table-gated.** The viewer decides MP4-vs-HLS on the step table (`presentation` = `ready` AND the file present), not bare file presence — a broken or hand-deleted master falls back to HLS automatically (`src/routes/videos/resolve.ts`).
 - **The audio chain is an enhancement, not a precondition.** If it fails, the master is still produced without it and the failure goes on the activity feed. A video with un-enhanced audio beats no video; a later reprocess retries the chain.
-- **Stale file cleanup.** A daily timer removes HLS segments (`init.mp4`, `seg_*.m4s`, `stream.m3u8`) and `thumbnail-candidates/` from videos that have been `ready` for >10 days **and** whose `source` *and* `presentation` steps are both validated with their files present. Two gates because the two files have different jobs: the source is the archive that must outlive the segments, the master is what a viewer actually gets. Code: `src/lib/cleanup.ts`.
+- **Stale file cleanup.** A daily timer removes HLS segments (`init.mp4`, `seg_*.m4s`, `stream.m3u8`) from videos that have been `ready` for >10 days **and** whose `source` *and* `presentation` steps are both validated with their files present. Two gates because the two files have different jobs: the source is the archive that must outlive the segments, the master is what a viewer actually gets. Code: `src/lib/cleanup.ts`.
 
 ## Viewer
 

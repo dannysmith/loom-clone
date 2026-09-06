@@ -43,7 +43,7 @@ bun run keys:revoke <id>        # idempotent
 
 **Observable surface** (`app/LoomClone/Helpers/APIKeyStatus.swift`): `@Observable` singleton with `hasKey: Bool`. SwiftUI views bind to it; `refresh()` is called after any write/delete and when the popover opens. The Keychain has no notification mechanism, so this is a cache that must be refreshed on known-mutation boundaries.
 
-**Settings UI** (`app/LoomClone/UI/SettingsView.swift`): standard SwiftUI `Settings` scene (Cmd+,). Single field, Save, Clear. The popover also shows an "Open Settings" link when no key is configured, and the Record button is gated on both server reachability AND a stored key.
+**Settings UI** (`app/LoomClone/UI/SettingsView.swift`): the API Key tab of the four-tab Settings window (Cmd+,) — single field, Save, Clear. The popover also shows an "Open Settings" link when no key is configured, and the Record button is gated on both server reachability AND a stored key.
 
 ### Lifecycle
 

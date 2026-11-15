@@ -1,0 +1,57 @@
+name: Dependency Audit
+
+# Reports known vulnerabilities in the server, admin-client and player
+# dependencies. Kept separate from deploy.yml so it can never block a deploy.
+#
+# - Pull requests touching a manifest or lockfile: report only, never fails.
+#   Findings show as warning annotations and in the run summary.
+# - Weekly schedule and manual runs: fail on high/critical advisories, so
+#   GitHub's failed-workflow email is the alert. Advisories get published
+#   against code that hasn't changed, which a PR-only check would never see.
+#
+# GitHub's dependency graph reads package.json ranges but not bun.lock, so
+# Dependabot alerts don't cover these packages. This is what does.
+on:
+  pull_request:
+    paths:
+      - 'server/**/package.json'
+      - 'server/**/bun.lock'
+      - '.github/workflows/audit.yml'
+  schedule:
+    - cron: '0 7 * * 1' # Mondays 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # bun audit reads bun.lock directly, so there's no install step. A floating
+    # tag is fine: this job doesn't build anything that ships.
+    container: oven/bun:1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: bun audit
+        shell: bash
+        env:
+          FAIL_ON_HIGH: ${{ github.event_name != 'pull_request' }}
+        run: |
+          high=0
+          for dir in server server/admin-client server/player; do
+            echo "### \`$dir\`" >> "$GITHUB_STEP_SUMMARY"
+            if out=$(bun audit --cwd="$dir" 2>&1); then
+              echo "No vulnerabilities." >> "$GITHUB_STEP_SUMMARY"
+            else
+              summary=$(grep -E '^[0-9]+ vulnerabilit' <<< "$out" || echo "bun audit failed")
+              echo "::warning title=bun audit ($dir)::$summary"
+              printf '```\n%s\n```\n' "$out" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            bun audit --cwd="$dir" --audit-level=high > /dev/null 2>&1 || high=1
+          done
+          if [ "$high" = 1 ] && [ "$FAIL_ON_HIGH" = true ]; then
+            echo "::error::High or critical advisories found (details in the run summary). Fix with 'bun update' or 'bun audit fix' in the affected package."
+            exit 1
+          fi

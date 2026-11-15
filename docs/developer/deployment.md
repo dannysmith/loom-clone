@@ -47,6 +47,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 The whole pipeline takes ~40 seconds.
 
+`.github/workflows/audit.yml` runs `bun audit` over the server, admin-client and player lockfiles. It's a separate workflow so it can never block a deploy. On pull requests that touch a `package.json` or `bun.lock` it only reports, as warning annotations and in the run summary. A weekly scheduled run (Mondays 07:00 UTC) fails on high or critical advisories, so a failed-workflow email is the alert. It exists because GitHub's dependency graph doesn't read `bun.lock`, so Dependabot alerts don't cover these packages.
+
 ### GitHub Actions secrets
 
 | Secret | Value |

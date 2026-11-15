@@ -38,20 +38,40 @@ jobs:
         shell: bash
         env:
           FAIL_ON_HIGH: ${{ github.event_name != 'pull_request' }}
+        # bun audit exits 1 both for findings and for a failed run (eg. the
+        # registry is unreachable). Findings always print an "N vulnerabilities"
+        # line, which is how the two are told apart.
         run: |
           high=0
+          broken=0
           for dir in server server/admin-client server/player; do
             echo "### \`$dir\`" >> "$GITHUB_STEP_SUMMARY"
             if out=$(bun audit --cwd="$dir" 2>&1); then
               echo "No vulnerabilities." >> "$GITHUB_STEP_SUMMARY"
-            else
-              summary=$(grep -E '^[0-9]+ vulnerabilit' <<< "$out" || echo "bun audit failed")
-              echo "::warning title=bun audit ($dir)::$summary"
-              printf '```\n%s\n```\n' "$out" >> "$GITHUB_STEP_SUMMARY"
+              continue
             fi
-            bun audit --cwd="$dir" --audit-level=high > /dev/null 2>&1 || high=1
+            printf '```\n%s\n```\n' "$out" >> "$GITHUB_STEP_SUMMARY"
+            if ! summary=$(grep -E '^[0-9]+ vulnerabilit' <<< "$out"); then
+              echo "::warning title=bun audit ($dir)::bun audit failed to run (output in the run summary)"
+              broken=1
+              continue
+            fi
+            echo "::warning title=bun audit ($dir)::$summary"
+            if ! high_out=$(bun audit --cwd="$dir" --audit-level=high 2>&1); then
+              if grep -qE '^[0-9]+ vulnerabilit' <<< "$high_out"; then
+                high=1
+              else
+                printf 'Severity-filtered run failed:\n```\n%s\n```\n' "$high_out" >> "$GITHUB_STEP_SUMMARY"
+                broken=1
+              fi
+            fi
           done
-          if [ "$high" = 1 ] && [ "$FAIL_ON_HIGH" = true ]; then
-            echo "::error::High or critical advisories found (details in the run summary). Fix with 'bun update' or 'bun audit fix' in the affected package."
-            exit 1
+          if [ "$FAIL_ON_HIGH" = true ]; then
+            if [ "$high" = 1 ]; then
+              echo "::error::High or critical advisories found (details in the run summary). Fix with 'bun update' or 'bun audit fix' in the affected package."
+            fi
+            if [ "$broken" = 1 ]; then
+              echo "::error::bun audit couldn't complete for at least one package, so results are incomplete (output in the run summary)."
+            fi
+            if [ "$high" = 1 ] || [ "$broken" = 1 ]; then exit 1; fi
           fi

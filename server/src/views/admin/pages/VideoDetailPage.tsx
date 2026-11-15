@@ -182,13 +182,15 @@ export function VideoDetailPage({
               {video.recordingHealth.replace("_", " ")}
             </span>
           )}
-          <span
+          <button
+            type="button"
             class="meta-pill meta-pill--id"
             title="Click to copy ID"
+            aria-label={`Copy video ID ${video.id}`}
             onclick={`copyText('${video.id}');this.title='Copied!'`}
           >
             {video.id}
-          </span>
+          </button>
         </div>
 
         <div class="video-description">

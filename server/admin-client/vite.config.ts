@@ -13,10 +13,10 @@ export default defineConfig({
     outDir: "../public/admin-client",
     emptyOutDir: true,
     manifest: true,
-    rollupOptions: {
+    rolldownOptions: {
       input: {
-        editor: resolve(__dirname, "editor.html"),
-        cover: resolve(__dirname, "cover.html"),
+        editor: resolve(import.meta.dirname, "editor.html"),
+        cover: resolve(import.meta.dirname, "cover.html"),
       },
     },
   },

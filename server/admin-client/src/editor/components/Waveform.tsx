@@ -4,6 +4,10 @@ import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.j
 import { loadPeaks } from "../api";
 import type { Edit } from "../types";
 
+// wavesurfer v8 builds Regions with definePlugin and doesn't export the
+// instance type, so derive it from create().
+type Regions = ReturnType<typeof RegionsPlugin.create>;
+
 type Props = {
   videoId: string;
   duration: number;
@@ -36,7 +40,7 @@ export function Waveform({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
-  const regionsRef = useRef<RegionsPlugin | null>(null);
+  const regionsRef = useRef<Regions | null>(null);
   const [ready, setReady] = useState(false);
   // Use refs for edits/callbacks so we can call syncRegions from both
   // the ready handler and the effect without stale closures.
@@ -187,12 +191,15 @@ export function Waveform({
 
     wsRef.current = ws;
 
-    // Load peaks data.
+    // Load peaks data. `cancelled` stops a late response from loading into an
+    // instance the cleanup already destroyed (wavesurfer rejects that).
+    let cancelled = false;
     loadPeaks(videoId)
       .then((peaksData) => {
-        ws.load("", [peaksData.data], duration);
+        if (!cancelled) ws.load("", [peaksData.data], duration);
       })
       .catch(() => {
+        if (cancelled) return;
         const empty = Array.from({ length: Math.floor(duration * 50) }, () => 0.1);
         ws.load("", [empty], duration);
       });
@@ -238,6 +245,7 @@ export function Waveform({
     });
 
     return () => {
+      cancelled = true;
       ws.destroy();
       wsRef.current = null;
       regionsRef.current = null;

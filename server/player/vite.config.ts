@@ -14,9 +14,9 @@ export default defineConfig({
     // Vidstack ships native class private fields; without this Vite's
     // default browser targets would transpile them and bloat the bundle.
     target: "es2022",
-    rollupOptions: {
+    rolldownOptions: {
       input: {
-        player: resolve(__dirname, "src/player.ts"),
+        player: resolve(import.meta.dirname, "src/player.ts"),
       },
     },
   },

@@ -28,7 +28,7 @@ server/admin-client/
       preview/              #   the SVG canvas that gets exported
 ```
 
-Each app is self-contained: they share the build, the dependency set and the design tokens, and no code. Adding a third app means adding an entry `.html`, a `src/<name>/` directory, an entry in `rollupOptions.input`, and one line in `ADMIN_CLIENT_ENTRIES` in `server/src/lib/vite-manifest.ts`.
+Each app is self-contained: they share the build, the dependency set and the design tokens, and no code. Adding a third app means adding an entry `.html`, a `src/<name>/` directory, an entry in `rolldownOptions.input`, and one line in `ADMIN_CLIENT_ENTRIES` in `server/src/lib/vite-manifest.ts`.
 
 ## Build and dev workflow
 

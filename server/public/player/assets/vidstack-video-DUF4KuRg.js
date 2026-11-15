@@ -1,0 +1,1 @@
+export{t as VideoProvider}from"./vidstack-BZ7BOaXb-RwfT2sA4.js";

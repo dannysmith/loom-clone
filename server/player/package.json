@@ -7,11 +7,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hls.js": "1.6.16",
-    "vidstack": "1.15.6"
+    "hls.js": "1.7.4",
+    "vidstack": "1.15.7"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
-    "vite": "^6.4.6"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
   }
 }

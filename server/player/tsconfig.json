@@ -8,7 +8,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Vite's ambient module declarations — the Vidstack CSS side-effect imports.
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }
